@@ -5,8 +5,8 @@ import { newUnpackedPromise } from '../utils/utils'
 function createDatabase() {
 	return new Sequelize({
 		dialect: 'sqlite',
-		storage: path.join(process.cwd(), 'db.sqlite3'),
-		// storage: ':memory:',
+		// storage: path.join(process.cwd(), 'db.sqlite3'),
+		storage: ':memory:',
 		logging: false
 	})
 }
@@ -18,8 +18,13 @@ export const dbReady = promise
 
 export default defineNitroPlugin(async () => {
 	db = createDatabase()
+
 	await importModel(import('../models/collection'))
 	await importModel(import('../models/item'))
+	await importModel(import('../models/user'))
+	await importModel(import('../models/user-session'))
+	await import('../models/_associations').then(v => v.associate())
+
 	await db.sync()
 	resolve()
 })

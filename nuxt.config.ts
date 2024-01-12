@@ -1,5 +1,8 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
+	runtimeConfig: {
+		sessionCookieName: 'voltis_session'
+	},
 	modules: ['@nuxt/ui'],
 	srcDir: 'src',
 	devtools: { enabled: true },

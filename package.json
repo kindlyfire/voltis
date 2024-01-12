@@ -19,6 +19,7 @@
 	"devDependencies": {
 		"@nuxt/devtools": "^1.0.6",
 		"@nuxtjs/tailwindcss": "^6.10.4",
+		"@types/bcrypt": "^5.0.2",
 		"@types/fs-extra": "^11.0.4",
 		"nuxt": "^3.9.1",
 		"tsx": "^4.7.0",
@@ -30,6 +31,7 @@
 		"@tanstack/vue-query": "^5.17.9",
 		"@trpc/client": "^10.45.0",
 		"@trpc/server": "^10.45.0",
+		"bcrypt": "^5.1.1",
 		"consola": "^3.2.3",
 		"fs-extra": "^11.2.0",
 		"nanoid": "^5.0.4",
