@@ -9,6 +9,7 @@ you.
 ### To-do
 
 - [x] Extensible library scanning
+- [ ] Edit libraries from the UI
 - [ ] Add support for comics
   - [x] Comic page view, chapters list
   - [x] Scan for comics
@@ -19,6 +20,9 @@ you.
 - [ ] Add support for ebooks
   - [ ] ...
 - [ ] User accounts
+  - [x] Configurable guest access
+  - [x] Force admin account registration if none exist
+  - [x] Register/login
   - [ ] ...
 - [ ] OPDS support
 - [ ] Dark mode

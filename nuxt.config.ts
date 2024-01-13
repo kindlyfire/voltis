@@ -1,7 +1,9 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
 	runtimeConfig: {
-		sessionCookieName: 'voltis_session'
+		sessionCookieName: 'voltis_session',
+		registrationsEnabled: false,
+		guestAccess: false
 	},
 	modules: ['@nuxt/ui'],
 	srcDir: 'src',

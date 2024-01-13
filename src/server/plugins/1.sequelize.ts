@@ -5,8 +5,8 @@ import { newUnpackedPromise } from '../utils/utils'
 function createDatabase() {
 	return new Sequelize({
 		dialect: 'sqlite',
-		// storage: path.join(process.cwd(), 'db.sqlite3'),
-		storage: ':memory:',
+		storage: path.join(process.cwd(), 'db.sqlite3'),
+		// storage: ':memory:',
 		logging: false
 	})
 }

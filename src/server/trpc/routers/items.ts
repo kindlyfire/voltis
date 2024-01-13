@@ -1,20 +1,20 @@
 import { z } from 'zod'
-import { publicProcedure, router } from '../trpc.js'
+import { maybePublicProcedure, router } from '../trpc.js'
 import { Item } from '../../models/item'
 
-export const itemsRouter = router({
-	query: publicProcedure.input(z.object({})).query(async ({ input }) => {
+export const rItems = router({
+	query: maybePublicProcedure.input(z.object({})).query(async ({ input }) => {
 		const items = await Item.findAll()
 		return items.map(c => c.toJSON())
 	}),
 
-	get: publicProcedure
+	get: maybePublicProcedure
 		.input(z.object({ id: z.string() }))
 		.query(async ({ input }) => {
 			return Item.findByPk(input.id).then(c => c?.toJSON() ?? null)
 		}),
 
-	list: publicProcedure
+	list: maybePublicProcedure
 		.input(
 			z.object({
 				collectionId: z.string()
@@ -26,8 +26,6 @@ export const itemsRouter = router({
 					collectionId: input.collectionId
 				}
 			})
-
-			// console.log(items.map(i => i.toJSON()))
 
 			return items
 				.sort((a, b) => {

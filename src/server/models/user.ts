@@ -24,6 +24,7 @@ export class User extends Model<
 	declare username: string
 	declare email: string
 	declare password: CreationOptional<string>
+	declare roles: CreationOptional<string[]>
 	declare preferences: CreationOptional<UserPreferences>
 	declare createdAt: CreationOptional<Date>
 	declare updatedAt: CreationOptional<Date>
@@ -34,7 +35,7 @@ export class User extends Model<
 		sessions: Association<User, UserSession>
 	}
 
-	export(user: User) {
+	export(user?: User | undefined) {
 		return userVoter.run(this.toJSON(), {
 			user
 		})
@@ -57,6 +58,7 @@ const userVoter = createVoter<
 		id: true,
 		username: true,
 		createdAt: true,
+		roles: true,
 
 		email: false,
 		password: false,
@@ -97,6 +99,18 @@ export function init(sequelize: Sequelize) {
 				}
 			},
 			password: typeText(),
+			roles: {
+				type: DataTypes.JSON,
+				allowNull: false,
+				defaultValue: [],
+				validate: {
+					isArray2(value: any) {
+						if (!Array.isArray(value)) {
+							throw new Error('roles must be an array')
+						}
+					}
+				}
+			},
 			preferences: {
 				type: DataTypes.JSON,
 				allowNull: false,

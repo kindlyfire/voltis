@@ -3,6 +3,7 @@ import { publicProcedure, router, userProcedure } from '../trpc'
 import { User } from '../../models/user'
 import { Op } from 'sequelize'
 import { TRPCError } from '@trpc/server'
+import { areRegistrationsEnabled } from '../../utils/state'
 
 export const rAuth = router({
 	login: publicProcedure
@@ -52,5 +53,46 @@ export const rAuth = router({
 
 	me: userProcedure.query(async opts => {
 		return opts.ctx.user.export(opts.ctx.user)
-	})
+	}),
+
+	register: publicProcedure
+		.input(
+			z.object({
+				email: z.string().email(),
+				username: z.string().min(3),
+				password: z.string().min(8)
+			})
+		)
+		.mutation(async opts => {
+			const reg = await areRegistrationsEnabled(opts.ctx.event)
+			if (!reg.enabled) {
+				throw new TRPCError({
+					code: 'FORBIDDEN',
+					message: 'Registrations are not enabled.'
+				})
+			}
+
+			const user = User.build({
+				email: opts.input.email,
+				username: opts.input.username,
+				roles: reg.forced ? ['admin'] : []
+			})
+			await user.setPassword(opts.input.password)
+			await user.save()
+
+			const session = await user.createSession({
+				lastSeenAt: new Date()
+			})
+			const runtimeConfig = useRuntimeConfig(opts.ctx.event)
+			setCookie(
+				opts.ctx.event,
+				runtimeConfig.sessionCookieName,
+				session.token,
+				{
+					httpOnly: true
+				}
+			)
+
+			return user.export(user)
+		})
 })

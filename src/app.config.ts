@@ -1,5 +1,8 @@
 export default defineAppConfig({
 	ui: {
-		primary: 'purple'
+		primary: 'purple',
+		formGroup: {
+			error: 'mt-0'
+		}
 	}
 })
