@@ -1,7 +1,9 @@
-import consola from 'consola'
 import { Matcher, MatcherItem } from '.'
 import path from 'pathe'
 import slugify from 'slugify'
+import { Collection, CollectionMetadataSource } from '../models/collection'
+import { Mangadex, MangadexManga } from '../utils/api-wrappers/mangadex'
+import util from 'util'
 
 const COVER_FILENAMES = ['cover.jpg', 'cover.png', 'cover.jpeg']
 const CLEAN_FILENAME_RE = /((\[.+\])|(\(.+\))|(\{.+\})|\s)+$/g
@@ -27,9 +29,23 @@ export const comicsMatcher: Matcher = {
 	},
 
 	async updateCollection(col) {
-		const metadata = await fetchMetadataFromMD(col.name)
-		if (!metadata) return
-		col.metadata = metadata
+		let source = col.metadata.sources.find(s => s.name === 'mangadex')
+		if (!source) {
+			source = {
+				name: 'mangadex',
+				data: {},
+				updatedAt: null,
+				remoteId: null
+			}
+		}
+		source = await updateMangadexMetadata(col, source)
+		col.metadata = {
+			...col.metadata,
+			sources: [
+				source,
+				...col.metadata.sources.filter(s => s.name !== 'mangadex')
+			]
+		}
 	},
 
 	listItems(col, dirEntries) {
@@ -105,53 +121,52 @@ function formatNameData(data: ReturnType<typeof extractNameData>) {
 	return `Volume ${data.volume}, Chapter ${data.chapter}`
 }
 
-export interface Metadata {
-	mangadexId: string | null
-	description: string
-	authors: string[]
-	pubStatus: 'ongoing' | 'completed' | 'hiatus' | 'cancelled'
-	pubYear: number | null
-	altTitles: Array<{ [k: string]: string }>
-}
-async function fetchMetadataFromMD(name: string): Promise<Metadata | null> {
-	consola.log('Fetching metadata for', name)
-	const res = await fetch(
-		'https://api.mangadex.org/manga?' +
-			new URLSearchParams([
-				['title', name],
-				['order[relevance]', 'desc'],
-				['includes[]', 'author'],
-				['includes[]', 'artist']
-			]).toString()
-	)
-	if (!res.ok) {
-		consola.error('Failed to fetch metadata for', name)
-		return null
+async function updateMangadexMetadata(
+	col: Collection,
+	source_: CollectionMetadataSource
+): Promise<CollectionMetadataSource> {
+	const source: CollectionMetadataSource = {
+		...source_,
+		error: undefined
 	}
-
-	const json = await res.json()
-	if (json.data.length === 0) {
-		consola.error('No entries found on MD for', name)
-		return null
+	try {
+		let manga: MangadexManga | null
+		const id = source.overrideRemoteId || source.remoteId
+		if (id) {
+			manga = await Mangadex.fetchMangaById(id)
+		} else {
+			manga = await Mangadex.fetchMangaByName(col.name)
+		}
+		if (!manga) return source
+		source.remoteId = manga.id
+		source.data = {
+			description:
+				manga.attributes.description.en ??
+				Object.entries(manga.attributes.description)[0]?.[1],
+			authors: manga.relationships
+				.filter(r => r.type === 'author')
+				.map(r => r.attributes.name),
+			pubStatus: manga.attributes.status as any,
+			pubYear:
+				typeof manga.attributes.year === 'number' &&
+				manga.attributes.year.toString().length === 4
+					? manga.attributes.year
+					: null,
+			titles: [manga.attributes.title, ...manga.attributes.altTitles]
+		}
+	} catch (e: any) {
+		if (e instanceof Error) {
+			source.error = {
+				name: e.name,
+				message: e.message,
+				stack: e.stack
+			}
+		} else {
+			source.error = {
+				name: 'UnknownError',
+				message: util.inspect(e)
+			}
+		}
 	}
-
-	const data = json.data[0]
-
-	let authors = data.relationships
-		.filter((r: any) => r.type === 'author' || r.type === 'artist')
-		.map((r: any) => r.attributes.name as string)
-	authors = [...new Set(authors)]
-
-	return {
-		mangadexId: data.id,
-		description: data.attributes.description?.en ?? '',
-		authors,
-		pubStatus: data.attributes.status,
-		pubYear:
-			typeof data.attributes.year === 'number' &&
-			data.attributes.year.toString().length === 4
-				? data.attributes.year
-				: null,
-		altTitles: [data.attributes.title, ...data.attributes.altTitles]
-	}
+	return source
 }

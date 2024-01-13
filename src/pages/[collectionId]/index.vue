@@ -15,41 +15,39 @@
 					variant="subtle"
 				/>
 
-				<div class="flex flex-col" v-if="collection.metadata.pubStatus">
+				<div class="flex flex-col" v-if="metadata.pubStatus">
 					<div class="flex items-center gap-1 text-sm text-muted">
 						<UIcon name="ph:spinner-bold" dynamic class="scale-[1.2]" />
 						Publication
 					</div>
-					<div
-						:class="[
-							'-mt-1',
-							collection.metadata.pubYear === null && 'capitalize'
-						]"
-					>
+					<div :class="['-mt-1', metadata.pubYear == null && 'capitalize']">
 						{{
-							(collection.metadata.pubYear
-								? collection.metadata.pubYear + ', '
-								: '') + collection.metadata.pubStatus
+							(metadata.pubYear ? metadata.pubYear + ', ' : '') +
+							metadata.pubStatus
 						}}
 					</div>
 				</div>
-				<div class="flex flex-col" v-if="collection.metadata.authors?.length">
+				<div class="flex flex-col" v-if="metadata.authors?.length">
 					<div class="flex items-center gap-1 text-sm text-muted">
 						<UIcon name="ph:user-bold" dynamic class="scale-[1.2]" />
 						By
 					</div>
-					<div class="-mt-1">{{ collection.metadata.authors.join(', ') }}</div>
+					<div class="-mt-1">{{ metadata.authors.join(', ') }}</div>
 				</div>
-				<div class="flex flex-col" v-if="collection.metadata.authors?.length">
+				<div class="flex flex-col">
 					<div class="flex items-center gap-1 text-sm text-muted">
 						<UIcon name="ph:link-bold" dynamic class="scale-[1.2]" />
 						Links
 					</div>
 					<div class="-mt-1">
 						<NuxtLink
-							v-if="collection.metadata?.mangadexId"
+							v-if="
+								sourceMangadex &&
+								(sourceMangadex.overrideRemoteId || sourceMangadex.remoteId)
+							"
 							:to="
-								'https://mangadex.org/title/' + collection.metadata.mangadexId
+								'https://mangadex.org/title/' +
+								(sourceMangadex?.overrideRemoteId || sourceMangadex?.remoteId)
 							"
 							target="_blank"
 							class="text-primary hover:underline"
@@ -63,7 +61,7 @@
 						<UIcon name="ph:clock-bold" dynamic class="scale-[1.2]" />
 						Added
 					</div>
-					<div class="-mt-1">{{ formatDate(new Date()) }}</div>
+					<div class="-mt-1">{{ formatDate(collection.createdAt) }}</div>
 				</div>
 			</div>
 			<div class="flex flex-col gap-4 grow">
@@ -75,7 +73,7 @@
 					</UButton>
 				</div>
 				<div>
-					{{ collection.metadata?.description || 'No description.' }}
+					{{ metadata.description || 'No description.' }}
 				</div>
 				<div class="flex flex-col gap-1">
 					<NuxtLink
@@ -143,6 +141,10 @@ const qCollection = useQuery({
 	enabled: computed(() => !!collectionId.value)
 })
 const collection = qCollection.data
+const metadata = computed(() => collection.value?.metadata.merged ?? {})
+const sourceMangadex = computed(() => {
+	return collection.value?.metadata.sources.find(i => i.name === 'mangadex')
+})
 
 const qItems = useQuery({
 	queryKey: ['items', collectionId],
