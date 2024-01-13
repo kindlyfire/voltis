@@ -6,7 +6,7 @@
 
 <script lang="ts" setup>
 import { trpc } from './plugins/trpc'
-import { useUser } from './state/composables/use-user'
+import { useUser } from './state/composables/queries'
 
 const route = useRoute()
 const qMeta = trpc.meta.useQuery()
@@ -14,18 +14,29 @@ const qUser = useUser()
 await Promise.all([qMeta, qUser.suspense()])
 
 watch(
-	() => route.fullPath,
+	() => [route.fullPath, qUser.data.value],
 	() => {
 		const meta = qMeta.data.value!
+		const user = qUser.data.value
+		// Force user creation redirect
 		if (meta.forceUserCreation && route.path !== '/auth/register') {
 			navigateTo('/auth/register')
-		} else if (
+		}
+		// Guest access disabled + user not logged in redirect
+		else if (
 			!meta.guestAccess &&
-			!qUser.data.value &&
+			!user &&
 			route.path !== '/auth/login' &&
 			route.path !== '/auth/register'
 		) {
 			navigateTo('/auth/login')
+		}
+		// Admin dashboard not admin redirect
+		else if (
+			!user?.roles?.includes('admin') &&
+			route.path.startsWith('/admin')
+		) {
+			navigateTo('/')
 		}
 	},
 	{ immediate: true, deep: true }

@@ -94,5 +94,13 @@ export const rAuth = router({
 			)
 
 			return user.export(user)
+		}),
+
+	logout: publicProcedure.mutation(async opts => {
+		const runtimeConfig = useRuntimeConfig(opts.ctx.event)
+		deleteCookie(opts.ctx.event, runtimeConfig.sessionCookieName, {
+			httpOnly: true
 		})
+		return true
+	})
 })

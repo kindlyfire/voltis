@@ -16,12 +16,12 @@ export interface LibraryDefinition {
 }
 
 export const libraries: LibraryDefinition[] = [
-	{
-		id: 'comics',
-		name: 'Comics',
-		matcher: 'comic',
-		path: ''
-	}
+	// {
+	// 	id: 'comics',
+	// 	name: 'Comics',
+	// 	matcher: 'comic',
+	// 	path: ''
+	// }
 ]
 
 export default defineNitroPlugin(async () => {
@@ -41,6 +41,10 @@ async function scanCollections() {
 		const directories = await fs
 			.readdir(lib.path, { withFileTypes: true })
 			.then(entries => entries.filter(d => d.isDirectory()))
+			.catch(e => {
+				consola.warn('Failed to read directory', lib.path, e)
+				return []
+			})
 
 		const matchedCollections: (MatcherCollection & { path: string })[] = []
 		for (const dir of directories) {

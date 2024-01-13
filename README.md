@@ -9,7 +9,6 @@ you.
 ### To-do
 
 - [x] Extensible library scanning
-- [ ] Edit libraries from the UI
 - [ ] Add support for comics
   - [x] Comic page view, chapters list
   - [x] Scan for comics
@@ -24,5 +23,9 @@ you.
   - [x] Force admin account registration if none exist
   - [x] Register/login
   - [ ] ...
+- [ ] Admin dashboard
+  - [ ] Manage users
+  - [ ] Manage libraries
 - [ ] OPDS support
 - [ ] Dark mode
+- [ ] Mobile-friendly UI

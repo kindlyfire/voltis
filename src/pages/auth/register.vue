@@ -47,7 +47,7 @@
 <script lang="ts" setup>
 import { useMutation } from '@tanstack/vue-query'
 import { trpc } from '../../plugins/trpc'
-import { useUser } from '../../state/composables/use-user'
+import { useUser } from '../../state/composables/queries'
 import { queryClient } from '../../plugins/vue-query'
 import { z } from 'zod'
 

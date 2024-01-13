@@ -39,7 +39,7 @@ export function init(sequelize: Sequelize) {
 				type: DataTypes.TEXT,
 				allowNull: false,
 				primaryKey: true,
-				defaultValue: () => createId('i')
+				defaultValue: () => createId('s')
 			},
 			userId: typeText(),
 			token: {

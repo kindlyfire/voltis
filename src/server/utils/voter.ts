@@ -57,6 +57,8 @@ export function createVoter<
 	TObject extends Record<string, any>,
 	TContext extends {}
 >(options: VoterOptions<TObject, TContext>): Voter<TObject, TContext> {
+	const voteFns = Array.isArray(options.vote) ? options.vote : [options.vote]
+
 	return {
 		run(object, context) {
 			const keyStates = Object.fromEntries(
@@ -85,9 +87,6 @@ export function createVoter<
 				}
 			}
 
-			const voteFns = Array.isArray(options.vote)
-				? options.vote
-				: [options.vote]
 			for (const voteFn of voteFns) {
 				voteFn(cb)
 			}
@@ -99,7 +98,7 @@ export function createVoter<
 				}
 			}
 
-			// Apply key voters
+			// Create final object
 			const obj = {} as Partial<TObject>
 			for (const key in keyStates) {
 				if (keyStates[key] == 1) {

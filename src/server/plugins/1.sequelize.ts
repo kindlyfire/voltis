@@ -23,6 +23,7 @@ export default defineNitroPlugin(async () => {
 	await importModel(import('../models/item'))
 	await importModel(import('../models/user'))
 	await importModel(import('../models/user-session'))
+	await importModel(import('../models/library'))
 	await import('../models/_associations').then(v => v.associate())
 
 	await db.sync()

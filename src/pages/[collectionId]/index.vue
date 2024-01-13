@@ -5,8 +5,16 @@
 				<img
 					:src="'/api/cover?collection-id=' + collection.id"
 					alt=""
-					class="rounded shadow"
+					class="rounded-lg shadow"
 				/>
+
+				<UAlert
+					v-if="collection.missing"
+					title="The files for this collection were missing during the last scan and may be unavailable."
+					color="red"
+					variant="subtle"
+				/>
+
 				<div class="flex flex-col" v-if="collection.metadata.pubStatus">
 					<div class="flex items-center gap-1 text-sm text-muted">
 						<UIcon name="ph:spinner-bold" dynamic class="scale-[1.2]" />

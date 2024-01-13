@@ -13,3 +13,13 @@ export function useUser() {
 		}
 	})
 }
+
+export function useLibraries() {
+	return useQuery({
+		queryKey: ['libraries'],
+		async queryFn() {
+			return await trpc.libraries.query.query({})
+		},
+		enabled: process.client
+	})
+}
