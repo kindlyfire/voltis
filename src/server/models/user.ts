@@ -3,7 +3,8 @@ import {
 	Sequelize,
 	DataTypes,
 	Association,
-	HasManyCreateAssociationMixin
+	HasManyCreateAssociationMixin,
+	NonAttribute
 } from 'sequelize'
 import {
 	InferAttributes,
@@ -31,6 +32,7 @@ export class User extends Model<
 
 	declare createSession: HasManyCreateAssociationMixin<UserSession, 'userId'>
 
+	declare sessions?: NonAttribute<UserSession[]>
 	declare static associations: {
 		sessions: Association<User, UserSession>
 	}

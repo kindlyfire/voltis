@@ -12,6 +12,7 @@ import {
 	CreationOptional
 } from 'sequelize'
 import { User } from './user'
+import { Collection } from './collection'
 
 export class Library extends Model<
 	InferAttributes<Library>,
@@ -30,6 +31,11 @@ export class Library extends Model<
 		return libraryVoter.run(this.toJSON(), {
 			user
 		})
+	}
+
+	declare collections?: NonAttribute<Collection[]>
+	declare static associations: {
+		collections: Association<Library, Collection>
 	}
 }
 

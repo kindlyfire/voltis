@@ -16,6 +16,8 @@ you.
     - [ ] Allow overriding the MangaDex ID if search fails
   - [x] Parse volumes/chapter numbers, sort
   - [ ] Comic reader (╯°□°）╯︵ ┻━┻
+    - [ ] Basic reader
+    - [ ] Better reader
 - [ ] Add support for ebooks
   - [ ] ...
 - [ ] User accounts
@@ -25,7 +27,8 @@ you.
   - [ ] ...
 - [ ] Admin dashboard
   - [ ] Manage users
-  - [ ] Manage libraries
+  - [x] Manage libraries
+  - [x] Trigger library scans
 - [ ] OPDS support
 - [ ] Dark mode
 - [ ] Mobile-friendly UI

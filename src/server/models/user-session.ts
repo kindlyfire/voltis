@@ -26,7 +26,6 @@ export class UserSession extends Model<
 	declare updatedAt: CreationOptional<Date>
 
 	declare user?: NonAttribute<User>
-
 	declare static associations: {
 		user: Association<UserSession, User>
 	}

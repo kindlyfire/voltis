@@ -85,6 +85,14 @@
 					<UButton type="submit" :loading="mCreate.isPending.value">
 						{{ libraryId ? 'Save' : 'Create' }}
 					</UButton>
+					<UButton
+						v-if="libraryId"
+						@click.prevent.stop="mDelete.mutate()"
+						:loading="mDelete.isPending.value"
+						color="red"
+					>
+						Delete
+					</UButton>
 				</div>
 			</UForm>
 		</div>
@@ -170,12 +178,21 @@ const mCreate = useMutation({
 	}
 })
 const errorMessage = computed(() => {
-	const e = mCreate.error.value
+	const e = mCreate.error.value || mDelete.error.value
 	if (!e) return
 	if (e.name === 'TRPCError') {
 		return e.message
 	}
 	return `${e.name}: ${e.message}`
+})
+
+const mDelete = useMutation({
+	async mutationFn() {
+		if (!props.libraryId) return
+		await trpc.libraries.delete.mutate({ id: props.libraryId })
+		await qLibraries.refetch()
+		emit('update:modelValue', false)
+	}
 })
 </script>
 

@@ -14,7 +14,12 @@
 						/>
 						Add library
 					</UButton>
-					<UButton size="lg" color="gray">
+					<UButton
+						size="lg"
+						color="gray"
+						@click="mScanAll.mutate()"
+						:loading="mScanAll.isPending.value"
+					>
 						<UIcon
 							name="ph:arrows-clockwise-bold"
 							dynamic
@@ -72,15 +77,27 @@
 </template>
 
 <script lang="ts" setup>
+import { useMutation } from '@tanstack/vue-query'
 import AddLibraryModal from '../../components/admin/AddLibraryModal.vue'
 import AdminPagesSidebar from '../../components/admin/AdminPagesSidebar.vue'
 import { useLibraries } from '../../state/composables/queries'
+import { trpc } from '../../plugins/trpc'
 
 const qLibraries = useLibraries()
 const libraries = qLibraries.data
 
 const addEditModalOpen = ref(false)
 const addEditModalLibraryId = ref(null) as Ref<string | null>
+
+const mScanAll = useMutation({
+	async mutationFn() {
+		const libs = libraries.value ?? []
+		if (libs.length === 0) return
+		await trpc.scan.scanLibraries.mutate({
+			libraryIds: libs.map(lib => lib.id!)
+		})
+	}
+})
 </script>
 
 <style></style>

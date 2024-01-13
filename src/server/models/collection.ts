@@ -1,10 +1,19 @@
-import { Model, Sequelize, DataTypes } from 'sequelize'
+import {
+	Model,
+	Sequelize,
+	DataTypes,
+	ForeignKey,
+	Association,
+	NonAttribute
+} from 'sequelize'
 import {
 	InferAttributes,
 	InferCreationAttributes,
 	CreationOptional
 } from 'sequelize'
 import { Metadata } from '../matcher/comics'
+import { Library } from './library'
+import { Item } from './item'
 
 export class Collection extends Model<
 	InferAttributes<Collection>,
@@ -12,7 +21,7 @@ export class Collection extends Model<
 > {
 	declare id: CreationOptional<string>
 	declare contentId: string
-	declare libraryId: string
+	declare libraryId: ForeignKey<Library['id']>
 	declare kind: string
 	declare name: string
 	declare path: string
@@ -22,6 +31,13 @@ export class Collection extends Model<
 	declare metadata: CreationOptional<Partial<Metadata>>
 	declare createdAt: CreationOptional<Date>
 	declare updatedAt: CreationOptional<Date>
+
+	declare library?: NonAttribute<Library>
+	declare items?: NonAttribute<Item[]>
+	declare static associations: {
+		library: Association<Collection, Library>
+		items: Association<Collection, Item>
+	}
 }
 
 export function init(sequelize: Sequelize) {

@@ -1,9 +1,17 @@
-import { Model, Sequelize, DataTypes } from 'sequelize'
+import {
+	Model,
+	Sequelize,
+	DataTypes,
+	Association,
+	ForeignKey,
+	NonAttribute
+} from 'sequelize'
 import {
 	InferAttributes,
 	InferCreationAttributes,
 	CreationOptional
 } from 'sequelize'
+import { Collection } from './collection'
 
 export class Item extends Model<
 	InferAttributes<Item>,
@@ -11,7 +19,7 @@ export class Item extends Model<
 > {
 	declare id: CreationOptional<string>
 	declare contentId: string
-	declare collectionId: string
+	declare collectionId: ForeignKey<Collection['id']>
 	declare name: string
 	declare altNames: Array<string>
 	declare path: string
@@ -20,6 +28,11 @@ export class Item extends Model<
 	declare metadata: {}
 	declare createdAt: CreationOptional<Date>
 	declare updatedAt: CreationOptional<Date>
+
+	declare collection?: NonAttribute<Collection>
+	declare static associations: {
+		collection: Association<Item, Collection>
+	}
 }
 
 export function init(sequelize: Sequelize) {
