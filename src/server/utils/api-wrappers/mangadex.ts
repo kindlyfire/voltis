@@ -1,4 +1,5 @@
 import { ExternalRequestError, fetchJson } from '../fetch'
+import PQueue from 'p-queue'
 
 type LocalizedString = Record<string, string>
 
@@ -39,39 +40,54 @@ export interface MangadexManga {
 	}>
 }
 
+const queue = new PQueue({
+	concurrency: 5,
+	interval: 1100,
+	intervalCap: 5,
+	carryoverConcurrencyCount: true
+})
+
 export const Mangadex = {
 	fetchMangaById,
 	fetchMangaByName
 }
 
 async function fetchMangaById(id: string) {
-	const { json } = await fetchJson<{
-		result: 'ok'
-		data: MangadexManga
-	}>(
-		'https://api.mangadex.org/manga/' +
-			id +
-			'?' +
-			new URLSearchParams([
-				['includes[]', 'author'],
-				['includes[]', 'artist']
-			]).toString()
-	)
+	const json = await queue
+		.add(() =>
+			fetchJson<{
+				result: 'ok'
+				data: MangadexManga
+			}>(
+				'https://api.mangadex.org/manga/' +
+					id +
+					'?' +
+					new URLSearchParams([
+						['includes[]', 'author'],
+						['includes[]', 'artist']
+					]).toString()
+			)
+		)
+		.then(v => v!.json)
 	return json.data
 }
 
 async function fetchMangaByName(name: string): Promise<MangadexManga | null> {
-	const { json } = await fetchJson<{
-		result: 'ok'
-		data: MangadexManga[]
-	}>(
-		'https://api.mangadex.org/manga?' +
-			new URLSearchParams([
-				['title', name],
-				['order[relevance]', 'desc'],
-				['includes[]', 'author'],
-				['includes[]', 'artist']
-			]).toString()
-	)
+	const json = await queue
+		.add(() =>
+			fetchJson<{
+				result: 'ok'
+				data: MangadexManga[]
+			}>(
+				'https://api.mangadex.org/manga?' +
+					new URLSearchParams([
+						['title', name],
+						['order[relevance]', 'desc'],
+						['includes[]', 'author'],
+						['includes[]', 'artist']
+					]).toString()
+			)
+		)
+		.then(v => v!.json)
 	return json.data[0] ?? null
 }
