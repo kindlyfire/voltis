@@ -46,3 +46,19 @@ export function newUnpackedPromise<T = void>() {
 	})
 	return { promise, resolve, reject }
 }
+
+export async function promiseAllSettled2<T>(
+	promises: Promise<T>[]
+): Promise<[fulfilled: T[], rejected: any[]]> {
+	const settled = await Promise.allSettled(promises)
+	const fulfilled: T[] = []
+	const rejected: any[] = []
+	for (const p of settled) {
+		if (p.status === 'fulfilled') {
+			fulfilled.push(p.value)
+		} else {
+			rejected.push(p.reason)
+		}
+	}
+	return [fulfilled, rejected] as const
+}

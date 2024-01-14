@@ -22,7 +22,7 @@ export default defineNuxtConfig({
 	vite: {
 		build: {
 			rollupOptions: {
-				external: ['sqlite3', 'sequelize']
+				external: ['sqlite3', 'sequelize', 'sharp']
 			}
 		}
 	}

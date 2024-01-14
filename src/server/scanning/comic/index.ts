@@ -1,13 +1,13 @@
-import { Matcher, MatcherItem } from '.'
+import { Matcher, MatcherItem } from '..'
 import path from 'pathe'
 import slugify from 'slugify'
-import { Collection, CollectionMetadataSource } from '../models/collection'
-import { Mangadex, MangadexManga } from '../utils/api-wrappers/mangadex'
-import util from 'util'
+import { mangadexMetadataFn } from './metadata-mangadex'
 
 const COVER_FILENAMES = ['cover.jpg', 'cover.png', 'cover.jpeg']
 const CLEAN_FILENAME_RE = /((\[.+\])|(\(.+\))|(\{.+\})|\s)+$/g
-export const comicsMatcher: Matcher = {
+export const comicMatcher: Matcher = {
+	name: 'comic',
+
 	checkIsCollection(dir, dirEntries) {
 		const files = dirEntries
 			.filter(i => i.isFile())
@@ -29,23 +29,7 @@ export const comicsMatcher: Matcher = {
 	},
 
 	async updateCollection(col) {
-		let source = col.metadata.sources.find(s => s.name === 'mangadex')
-		if (!source) {
-			source = {
-				name: 'mangadex',
-				data: {},
-				updatedAt: null,
-				remoteId: null
-			}
-		}
-		source = await updateMangadexMetadata(col, source)
-		col.metadata = {
-			...col.metadata,
-			sources: [
-				source,
-				...col.metadata.sources.filter(s => s.name !== 'mangadex')
-			]
-		}
+		await col.applyMetadataSourceFn('mangadex', mangadexMetadataFn)
 	},
 
 	listItems(col, dirEntries) {
@@ -119,54 +103,4 @@ function formatNameData(data: ReturnType<typeof extractNameData>) {
 	if (data.chapter === null) return `Volume ${data.volume}`
 	if (data.volume === null) return `Chapter ${data.chapter}`
 	return `Volume ${data.volume}, Chapter ${data.chapter}`
-}
-
-async function updateMangadexMetadata(
-	col: Collection,
-	source_: CollectionMetadataSource
-): Promise<CollectionMetadataSource> {
-	const source: CollectionMetadataSource = {
-		...source_,
-		error: undefined
-	}
-	try {
-		let manga: MangadexManga | null
-		const id = source.overrideRemoteId || source.remoteId
-		if (id) {
-			manga = await Mangadex.fetchMangaById(id)
-		} else {
-			manga = await Mangadex.fetchMangaByName(col.name)
-		}
-		if (!manga) return source
-		source.remoteId = manga.id
-		source.data = {
-			description:
-				manga.attributes.description.en ??
-				Object.entries(manga.attributes.description)[0]?.[1],
-			authors: manga.relationships
-				.filter(r => r.type === 'author')
-				.map(r => r.attributes.name),
-			pubStatus: manga.attributes.status as any,
-			pubYear:
-				typeof manga.attributes.year === 'number' &&
-				manga.attributes.year.toString().length === 4
-					? manga.attributes.year
-					: null,
-			titles: [manga.attributes.title, ...manga.attributes.altTitles]
-		}
-	} catch (e: any) {
-		if (e instanceof Error) {
-			source.error = {
-				name: e.name,
-				message: e.message,
-				stack: e.stack
-			}
-		} else {
-			source.error = {
-				name: 'UnknownError',
-				message: util.inspect(e)
-			}
-		}
-	}
-	return source
 }

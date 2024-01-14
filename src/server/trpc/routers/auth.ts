@@ -44,7 +44,8 @@ export const rAuth = router({
 				runtimeConfig.sessionCookieName,
 				session.token,
 				{
-					httpOnly: true
+					httpOnly: true,
+					maxAge: 60 * 60 * 24 * 30 // 30 days
 				}
 			)
 
@@ -89,7 +90,8 @@ export const rAuth = router({
 				runtimeConfig.sessionCookieName,
 				session.token,
 				{
-					httpOnly: true
+					httpOnly: true,
+					maxAge: 60 * 60 * 24 * 30 // 30 days
 				}
 			)
 

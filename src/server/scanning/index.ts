@@ -17,6 +17,8 @@ export interface MatcherItem {
 }
 
 export interface Matcher {
+	name: string
+
 	/**
 	 * Returns a content ID for a given path if the files list indicates it is a
 	 * collection with items that this matcher can handle. Returns a default
@@ -48,3 +50,5 @@ export interface Matcher {
 	 */
 	updateItems(col: Collection, existingItems: Item[]): MaybePromise<any>
 }
+
+export const matchers: Matcher[] = []

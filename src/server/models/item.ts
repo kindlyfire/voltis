@@ -13,6 +13,23 @@ import {
 } from 'sequelize'
 import { Collection } from './collection'
 
+export interface ItemMetadataSource {
+	name: string
+	remoteId: string | null
+	overrideRemoteId?: string | null
+	updatedAt: string | null
+	customData?: Record<string, any>
+	error?: null | {
+		name: string
+		message: string
+		stack?: string
+	}
+}
+
+export interface ItemMetadata {
+	sources: ItemMetadataSource[]
+}
+
 export class Item extends Model<
 	InferAttributes<Item>,
 	InferCreationAttributes<Item>
@@ -25,13 +42,41 @@ export class Item extends Model<
 	declare path: string
 	declare coverPath: string
 	declare sortValue: Array<number>
-	declare metadata: {}
+	declare metadata: CreationOptional<ItemMetadata>
 	declare createdAt: CreationOptional<Date>
 	declare updatedAt: CreationOptional<Date>
 
 	declare collection?: NonAttribute<Collection>
 	declare static associations: {
 		collection: Association<Item, Collection>
+	}
+
+	async applyMetadataSourceFn(
+		name: string,
+		fn: (
+			col: Collection,
+			item: Item,
+			source_: ItemMetadataSource
+		) => Promise<ItemMetadataSource>
+	) {
+		const collection = await Collection.findByPk(this.collectionId)
+		if (!collection) {
+			throw new Error('Collection not found')
+		}
+
+		let source = this.metadata.sources.find(s => s.name === name)
+		if (!source) {
+			source = {
+				name,
+				updatedAt: null,
+				remoteId: null
+			}
+		}
+		source = await fn(collection, this, source)
+		this.metadata = {
+			...this.metadata,
+			sources: [source, ...this.metadata.sources.filter(s => s.name !== name)]
+		}
 	}
 }
 
@@ -59,7 +104,13 @@ export function init(sequelize: Sequelize) {
 			},
 			metadata: {
 				type: DataTypes.JSON,
-				allowNull: false
+				allowNull: false,
+				get(this: Item) {
+					return <ItemMetadata>{
+						sources: [],
+						...(this.getDataValue('metadata') as any)
+					}
+				}
 			},
 			createdAt: DataTypes.DATE,
 			updatedAt: DataTypes.DATE

@@ -18,7 +18,7 @@ export interface CollectionMetadataSource {
 	name: string
 	remoteId: string | null
 	overrideRemoteId?: string | null
-	updatedAt: Date | null
+	updatedAt: string | null
 	data: Partial<CollectionMetadataData>
 	customData?: Record<string, any>
 	error?: null | {
@@ -97,6 +97,29 @@ export class Collection extends Model<
 		this.metadata = {
 			...this.metadata,
 			merged: obj
+		}
+	}
+
+	async applyMetadataSourceFn(
+		name: string,
+		fn: (
+			col: Collection,
+			source_: CollectionMetadataSource
+		) => Promise<CollectionMetadataSource>
+	) {
+		let source = this.metadata.sources.find(s => s.name === name)
+		if (!source) {
+			source = {
+				name,
+				data: {},
+				updatedAt: null,
+				remoteId: null
+			}
+		}
+		source = await fn(this, source)
+		this.metadata = {
+			...this.metadata,
+			sources: [source, ...this.metadata.sources.filter(s => s.name !== name)]
 		}
 	}
 }

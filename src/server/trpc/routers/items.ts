@@ -1,6 +1,11 @@
 import { z } from 'zod'
 import { maybePublicProcedure, router } from '../trpc.js'
 import { Item } from '../../models/item'
+import { TRPCError } from '@trpc/server'
+import {
+	FileMetadataCustomData,
+	fileMetadataFn
+} from '../../scanning/comic/metadata-file'
 
 export const rItems = router({
 	query: maybePublicProcedure.input(z.object({})).query(async ({ input }) => {
@@ -39,5 +44,28 @@ export const rItems = router({
 					}
 				})
 				.map(c => c.toJSON())
+		}),
+
+	getReaderData: maybePublicProcedure
+		.input(z.object({ id: z.string() }))
+		.query(async ({ input }) => {
+			const item = await Item.findByPk(input.id)
+			if (!item) {
+				throw new TRPCError({ code: 'NOT_FOUND' })
+			}
+
+			let fileSource = item.metadata.sources.find(s => s.name === 'file')
+			if (!fileSource) {
+				await item.applyMetadataSourceFn('file', fileMetadataFn)
+				item.save()
+				fileSource = item.metadata.sources.find(s => s.name === 'file')
+			}
+			if (!fileSource) {
+				throw new TRPCError({ code: 'NOT_FOUND' })
+			}
+
+			return {
+				files: fileSource.customData!.files as FileMetadataCustomData['files']
+			}
 		})
 })

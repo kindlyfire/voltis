@@ -1,12 +1,12 @@
 import consola from 'consola'
 import { Library } from '../models/library'
 import fs from 'fs-extra'
-import { MatcherCollection } from '../matcher'
-import { comicsMatcher } from '../matcher/comics'
 import path from 'pathe'
 import { Collection } from '../models/collection'
 import { Item } from '../models/item'
 import { Op } from 'sequelize'
+import { comicMatcher } from '../scanning/comic'
+import { MatcherCollection } from '../scanning'
 
 export async function scanLibrary(lib: Library) {
 	consola.log('Scanning', lib.name)
@@ -23,7 +23,7 @@ export async function scanLibrary(lib: Library) {
 				})
 
 			for (const dir of directories) {
-				const matchedCollection = await comicsMatcher.checkIsCollection(
+				const matchedCollection = await comicMatcher.checkIsCollection(
 					path.join(libPath, dir.name),
 					await fs.readdir(libPath + '/' + dir.name, { withFileTypes: true })
 				)
@@ -84,7 +84,7 @@ export async function scanLibrary(lib: Library) {
 		}
 	})
 	for (const col of collections.filter(c => !c.missing)) {
-		const itemContentIds = await comicsMatcher.listItems(
+		const itemContentIds = await comicMatcher.listItems(
 			col,
 			await fs.readdir(col.path, { withFileTypes: true })
 		)
@@ -128,12 +128,12 @@ export async function scanLibrary(lib: Library) {
 		}
 
 		consola.log('Updating collection', col.name)
-		await comicsMatcher.updateCollection(col)
+		await comicMatcher.updateCollection(col)
 		await col.save()
 
 		consola.log('Updating items', col.name)
 		const _items = items.filter(i => i.collectionId === col.id)
-		await comicsMatcher.updateItems(col, _items)
+		await comicMatcher.updateItems(col, _items)
 		await Promise.all(_items.map(i => i.save()))
 	}
 }

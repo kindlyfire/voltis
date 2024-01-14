@@ -3,7 +3,7 @@ import { adminProcedure, router } from '../trpc'
 import { Op } from 'sequelize'
 import { Library } from '../../models/library'
 import { TRPCError } from '@trpc/server'
-import { scanLibrary } from '../../utils/scanner'
+import { scanLibrary } from '../../scanning/scanner'
 
 export const rScan = router({
 	scanLibraries: adminProcedure
