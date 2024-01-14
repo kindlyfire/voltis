@@ -4,7 +4,7 @@
 			class="grid grid-cols-2 min-[400px]:grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8 gap-2"
 		>
 			<NuxtLink
-				:to="'/' + slugify(i.name) + '-' + i.id"
+				:to="'/' + slugify(i.name) + ':' + i.id"
 				v-for="i in items.data.value"
 				class="card p-0 overflow-hidden"
 				:title="i.name"

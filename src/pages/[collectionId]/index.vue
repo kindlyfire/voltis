@@ -73,7 +73,7 @@
 					</UButton>
 				</div>
 				<div>
-					{{ metadata.description || 'No description.' }}
+					<Description :text="metadata.description || 'No description.'" />
 				</div>
 				<div class="flex flex-col gap-1">
 					<NuxtLink
@@ -118,11 +118,12 @@
 import { trpc } from '../../plugins/trpc'
 import { useQuery } from '@tanstack/vue-query'
 import { formatDate } from '../../utils'
+import Description from '../../components/[collectionId]/Description.vue'
 
 const route = useRoute()
 const collectionId = computed(() =>
 	typeof route.params.collectionId === 'string'
-		? route.params.collectionId.slice(-13)
+		? route.params.collectionId.split(':').at(-1) || ''
 		: ''
 )
 const page = ref(1)

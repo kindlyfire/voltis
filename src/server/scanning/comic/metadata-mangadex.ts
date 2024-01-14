@@ -15,7 +15,7 @@ export const mangadexMetadataFn = async (
 		if (id) {
 			manga = await Mangadex.fetchMangaById(id)
 		} else {
-			manga = await Mangadex.fetchMangaByName(col.name)
+			manga = await Mangadex.fetchMangaByName(col.nameOverride || col.name)
 		}
 		if (!manga) return source
 		source.remoteId = manga.id

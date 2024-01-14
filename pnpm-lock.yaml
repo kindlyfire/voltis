@@ -32,12 +32,18 @@ dependencies:
   consola:
     specifier: ^3.2.3
     version: 3.2.3
+  dompurify:
+    specifier: ^3.0.8
+    version: 3.0.8
   fflate:
     specifier: ^0.8.1
     version: 0.8.1
   fs-extra:
     specifier: ^11.2.0
     version: 11.2.0
+  marked:
+    specifier: ^11.1.1
+    version: 11.1.1
   nanoid:
     specifier: ^5.0.4
     version: 5.0.4
@@ -82,9 +88,15 @@ devDependencies:
   '@nuxtjs/tailwindcss':
     specifier: ^6.10.4
     version: 6.10.4
+  '@orama/orama':
+    specifier: 2.0.0-beta.12
+    version: 2.0.0-beta.12
   '@types/bcrypt':
     specifier: ^5.0.2
     version: 5.0.2
+  '@types/dompurify':
+    specifier: ^3.0.5
+    version: 3.0.5
   '@types/fs-extra':
     specifier: ^11.0.4
     version: 11.0.4
@@ -1444,6 +1456,11 @@ packages:
       - supports-color
       - ts-node
 
+  /@orama/orama@2.0.0-beta.12:
+    resolution: {integrity: sha512-svPT72gxR1zyF7bMz+itmZBdZB1ndI97YdzArCqo5esIfWy1u5Ht/K8EEYJ/EuC35Di3j9czjCzhL1e/zVEARQ==}
+    engines: {node: '>= 16.0.0'}
+    dev: true
+
   /@parcel/watcher-android-arm64@2.3.0:
     resolution: {integrity: sha512-f4o9eA3dgk0XRT3XhB0UWpWpLnKgrh1IwNJKJ7UJek7eTYccQ8LR7XUWFKqw6aEq5KUNlCcGvSzKqSX/vtWVVA==}
     engines: {node: '>= 10.0.0'}
@@ -1977,6 +1994,12 @@ packages:
       '@types/ms': 0.7.34
     dev: false
 
+  /@types/dompurify@3.0.5:
+    resolution: {integrity: sha512-1Wg0g3BtQF7sSb27fJQAKck1HECM6zV1EB66j8JH9i3LCjYabJa0FSdiSgsD5K/RbrsR0SiraKacLB+T8ZVYAg==}
+    dependencies:
+      '@types/trusted-types': 2.0.7
+    dev: true
+
   /@types/estree@1.0.5:
     resolution: {integrity: sha512-/kYRxGDLWzHOB7q+wtSUQlFrtcdUccpfy+X+9iMBpHK8QLLhx2wIPYuS5DYtR9Wa/YlZAbIovy7qVdB1Aq6Lyw==}
 
@@ -2009,6 +2032,10 @@ packages:
 
   /@types/resolve@1.20.2:
     resolution: {integrity: sha512-60BCwRFOZCQhDncwQdxxeOEEkbc5dIMccYLwbxsS4TUNeVECQ/pBJ0j09mrHOl/JJvpRPGwO9SvE4nR2Nb/a4Q==}
+
+  /@types/trusted-types@2.0.7:
+    resolution: {integrity: sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw==}
+    dev: true
 
   /@types/validator@13.11.8:
     resolution: {integrity: sha512-c/hzNDBh7eRF+KbCf+OoZxKbnkpaK/cKp9iLQWqB7muXtM+MtL9SUUH8vCFcLn6dH1Qm05jiexK0ofWY7TfOhQ==}
@@ -3193,6 +3220,10 @@ packages:
     dependencies:
       domelementtype: 2.3.0
 
+  /dompurify@3.0.8:
+    resolution: {integrity: sha512-b7uwreMYL2eZhrSCRC4ahLTeZcPZxSmYfmcQGXGkXiZSNW1X85v+SDM5KsWcpivIiUBH47Ji7NtyUdpLeF5JZQ==}
+    dev: false
+
   /domutils@3.1.0:
     resolution: {integrity: sha512-H78uMmQtI2AhgDJjWeQmHwJJ2bLPD3GMmO7Zja/ZZh84wkm+4ut+IUnUdRa8uCGX88DiVx1j6FRe1XfxEgjEZA==}
     dependencies:
@@ -4375,6 +4406,12 @@ packages:
       - supports-color
     dev: false
     optional: true
+
+  /marked@11.1.1:
+    resolution: {integrity: sha512-EgxRjgK9axsQuUa/oKMx5DEY8oXpKJfk61rT5iY3aRlgU6QJtUcxU5OAymdhCvWvhYcd9FKmO5eQoX8m9VGJXg==}
+    engines: {node: '>= 18'}
+    hasBin: true
+    dev: false
 
   /mdn-data@2.0.28:
     resolution: {integrity: sha512-aylIc7Z9y4yzHYAJNuESG3hfhC+0Ibp/MAMiaOZgNv4pmEdFyfZhhhny4MNiAfWdBQ1RQ2mfDWmM1x8SvGyp8g==}

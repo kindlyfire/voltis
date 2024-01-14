@@ -5,12 +5,27 @@
 			<div class="ml-auto"></div>
 
 			<template v-if="user">
+				<UButton color="gray" @click="searchModalOpen = true">
+					<UIcon name="ph:magnifying-glass-bold" dynamic class="scale-[1.2]" />
+					Search
+				</UButton>
+
 				<UButton color="gray" to="/user/account">
 					<UIcon name="ph:user-bold" dynamic class="scale-[1.2]" />
 					{{ user.username }}
 				</UButton>
 
 				<ClientOnly>
+					<template #fallback>
+						<UButton color="gray">
+							<UIcon
+								name="ph:caret-down-bold"
+								dynamic
+								class="scale-[1.2] h-5"
+							/>
+						</UButton>
+					</template>
+
 					<UPopover :popper="{ placement: 'bottom-end', offsetDistance: 4 }">
 						<UButton color="gray">
 							<UIcon
@@ -56,6 +71,8 @@
 				>
 			</template>
 		</div>
+
+		<SearchModal v-model="searchModalOpen" />
 	</div>
 
 	<slot />
@@ -71,6 +88,7 @@ import { useMutation } from '@tanstack/vue-query'
 const qMeta = await trpc.meta.useQuery()
 const qUser = useUser()
 const user = qUser.data
+const searchModalOpen = ref(false)
 
 const mLogout = useMutation({
 	async mutationFn() {

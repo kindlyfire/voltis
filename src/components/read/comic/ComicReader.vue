@@ -8,7 +8,7 @@
 				:to="
 					'/' +
 					slugify(store.collection.value.name) +
-					'-' +
+					':' +
 					store.collection.value.id
 				"
 				class="text-primary hover:underline"

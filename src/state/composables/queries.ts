@@ -1,5 +1,7 @@
 import { useQuery } from '@tanstack/vue-query'
 import { trpc } from '../../plugins/trpc'
+import type { inferProcedureInput } from '@trpc/server'
+import type { AppRouter } from '../../server/trpc/routers'
 
 export function useUser() {
 	return useQuery({
@@ -50,5 +52,16 @@ export function useReaderData(id: MaybeRef<string | null>) {
 			return trpc.items.getReaderData.query({ id: unref(id)! })
 		},
 		enabled: computed(() => unref(id) != null)
+	})
+}
+
+export function useCollectionQuery(
+	q: MaybeRef<inferProcedureInput<AppRouter['items']['query']>>
+) {
+	return useQuery({
+		queryKey: ['collection-query', computed(() => JSON.stringify(unref(q)))],
+		async queryFn() {
+			return trpc.collections.query.query(unref(q))
+		}
 	})
 }
