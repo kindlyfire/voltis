@@ -64,8 +64,6 @@ export const rItems = router({
 				throw new TRPCError({ code: 'NOT_FOUND' })
 			}
 
-			return {
-				files: fileSource.customData!.files as FileMetadataCustomData['files']
-			}
+			return fileSource.customData! as FileMetadataCustomData
 		})
 })

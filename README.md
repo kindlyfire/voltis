@@ -16,7 +16,7 @@ you.
     - [ ] Allow overriding the MangaDex ID if search fails
   - [x] Parse volumes/chapter numbers, sort
   - [ ] Comic reader (╯°□°）╯︵ ┻━┻
-    - [ ] Basic reader
+    - [x] Basic reader with manga/comic and webtoon modes
     - [ ] Better reader
 - [ ] Add support for ebooks
   - [ ] ...
@@ -24,7 +24,9 @@ you.
   - [x] Configurable guest access
   - [x] Force admin account registration if none exist
   - [x] Register/login
-  - [ ] ...
+  - [ ] Custom lists
+  - [ ] Ratings
+  - [ ] Reading history
 - [ ] Admin dashboard
   - [ ] Manage users
   - [x] Manage libraries

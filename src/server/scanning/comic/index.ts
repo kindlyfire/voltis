@@ -5,6 +5,7 @@ import { mangadexMetadataFn } from './metadata-mangadex'
 
 const COVER_FILENAMES = ['cover.jpg', 'cover.png', 'cover.jpeg']
 const CLEAN_FILENAME_RE = /((\[.+\])|(\(.+\))|(\{.+\})|\s)+$/g
+const COMIC_EXTENSIONS = ['.cbz', '.zip']
 export const comicMatcher: Matcher = {
 	name: 'comic',
 
@@ -12,7 +13,9 @@ export const comicMatcher: Matcher = {
 		const files = dirEntries
 			.filter(i => i.isFile())
 			.map(i => i.name.toLowerCase())
-		const hasComic = files.some(f => f.endsWith('.cbz'))
+		const hasComic = files.some(f =>
+			COMIC_EXTENSIONS.includes(path.extname(f).toLowerCase())
+		)
 		const cover = files.find(f => COVER_FILENAMES.includes(f))
 		if (!hasComic) return null
 		const cleanedName = path

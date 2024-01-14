@@ -5,7 +5,7 @@ export default defineNuxtConfig({
 		registrationsEnabled: false,
 		guestAccess: false
 	},
-	modules: ['@nuxt/ui'],
+	modules: ['@nuxt/ui', '@pinia/nuxt'],
 	srcDir: 'src',
 	devtools: { enabled: true },
 	typescript: {

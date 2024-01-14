@@ -19,7 +19,36 @@ export function useLibraries() {
 		queryKey: ['libraries'],
 		async queryFn() {
 			return await trpc.libraries.query.query({})
+		}
+	})
+}
+
+export function useItem(id: MaybeRef<string | null>) {
+	return useQuery({
+		queryKey: ['item', id],
+		async queryFn() {
+			return trpc.items.get.query({ id: unref(id)! })
 		},
-		enabled: process.client
+		enabled: computed(() => unref(id) != null)
+	})
+}
+
+export function useCollection(id: MaybeRef<string | null>) {
+	return useQuery({
+		queryKey: ['collection', id],
+		async queryFn() {
+			return trpc.collections.get.query({ id: unref(id)! })
+		},
+		enabled: computed(() => unref(id) != null)
+	})
+}
+
+export function useReaderData(id: MaybeRef<string | null>) {
+	return useQuery({
+		queryKey: ['reader-data', id],
+		async queryFn() {
+			return trpc.items.getReaderData.query({ id: unref(id)! })
+		},
+		enabled: computed(() => unref(id) != null)
 	})
 }
