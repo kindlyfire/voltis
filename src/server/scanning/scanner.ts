@@ -105,7 +105,9 @@ export async function scanLibrary(lib: Library) {
 			await item.destroy()
 		}
 		for (const matched of otherItems) {
-			const item = items.find(i => i.contentId === matched.contentId)
+			const item = items.find(
+				i => i.collectionId === col.id && i.contentId === matched.contentId
+			)
 			if (item) {
 				await item.update({
 					path: matched.path,
@@ -120,7 +122,9 @@ export async function scanLibrary(lib: Library) {
 						path: matched.path,
 						coverPath: matched.coverPath ?? '',
 						altNames: [],
-						metadata: {},
+						metadata: {
+							sources: []
+						},
 						sortValue: []
 					})
 				)

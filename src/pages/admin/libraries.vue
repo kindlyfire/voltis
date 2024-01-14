@@ -17,8 +17,8 @@
 					<UButton
 						size="lg"
 						color="gray"
-						@click="mScanAll.mutate()"
-						:loading="mScanAll.isPending.value"
+						@click="mScanLibraries.mutate(libraries?.map(l => l.id!) ?? [])"
+						:loading="mScanLibraries.isPending.value"
 					>
 						<UIcon
 							name="ph:arrows-clockwise-bold"
@@ -33,13 +33,26 @@
 				<div v-else-if="!libraries?.length">
 					No libraries set up yet. Add one to get started!
 				</div>
-				<div v-else class="grid grid-cols-2">
+				<div v-else class="grid grid-cols-2 gap-4">
 					<div
 						v-for="lib in libraries"
 						class="card rounded-md flex items-center"
 					>
 						{{ lib.name }}
 						<div class="ml-auto">
+							<UButton
+								color="gray"
+								variant="ghost"
+								@click="mScanLibraries.mutate([lib.id!])"
+								:loading="mScanLibraries.isPending.value && mScanLibraries.variables.value?.includes(lib.id!)"
+							>
+								<UIcon
+									name="ph:arrows-clockwise-bold"
+									dynamic
+									square
+									class="scale-[1.4]"
+								/>
+							</UButton>
 							<UButton
 								color="gray"
 								variant="ghost"
@@ -89,12 +102,11 @@ const libraries = qLibraries.data
 const addEditModalOpen = ref(false)
 const addEditModalLibraryId = ref(null) as Ref<string | null>
 
-const mScanAll = useMutation({
-	async mutationFn() {
-		const libs = libraries.value ?? []
-		if (libs.length === 0) return
+const mScanLibraries = useMutation({
+	async mutationFn(ids: string[]) {
+		if (ids.length === 0) return
 		await trpc.scan.scanLibraries.mutate({
-			libraryIds: libs.map(lib => lib.id!)
+			libraryIds: ids
 		})
 	}
 })
