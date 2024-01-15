@@ -118,6 +118,7 @@ import { trpc } from '../../plugins/trpc'
 import { useQuery } from '@tanstack/vue-query'
 import { formatDate } from '../../utils'
 import Description from '../../components/[collectionId]/Description.vue'
+import { useItems } from '../../state/composables/queries'
 
 const route = useRoute()
 const collectionId = computed(() =>
@@ -147,13 +148,11 @@ const sourceMangadex = computed(() => {
 	return collection.value?.metadata.sources.find(i => i.name === 'mangadex')
 })
 
-const qItems = useQuery({
-	queryKey: ['items', collectionId],
-	async queryFn() {
-		return await trpc.items.list.query({ collectionId: collectionId.value })
-	},
-	enabled: computed(() => !!collectionId.value)
-})
+const qItems = useItems(
+	computed(() =>
+		collection.value ? { collectionId: collection.value.id } : null
+	)
+)
 const items = qItems.data
 
 useHead({

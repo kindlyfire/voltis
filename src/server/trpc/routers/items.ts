@@ -8,18 +8,7 @@ import {
 } from '../../scanning/comic/metadata-file'
 
 export const rItems = router({
-	query: maybePublicProcedure.input(z.object({})).query(async ({ input }) => {
-		const items = await Item.findAll()
-		return items.map(c => c.toJSON())
-	}),
-
-	get: maybePublicProcedure
-		.input(z.object({ id: z.string() }))
-		.query(async ({ input }) => {
-			return Item.findByPk(input.id).then(c => c?.toJSON() ?? null)
-		}),
-
-	list: maybePublicProcedure
+	query: maybePublicProcedure
 		.input(
 			z.object({
 				collectionId: z.string()
@@ -44,6 +33,12 @@ export const rItems = router({
 					}
 				})
 				.map(c => c.toJSON())
+		}),
+
+	get: maybePublicProcedure
+		.input(z.object({ id: z.string() }))
+		.query(async ({ input }) => {
+			return Item.findByPk(input.id).then(c => c?.toJSON() ?? null)
 		}),
 
 	getReaderData: maybePublicProcedure

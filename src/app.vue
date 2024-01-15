@@ -6,6 +6,7 @@
 			</ClientOnly>
 		</NuxtLayout>
 	</Suspense>
+	<UNotifications />
 </template>
 
 <script lang="ts" setup>

@@ -1,12 +1,25 @@
+import slugify from 'slugify'
 import { type FileMetadataCustomData } from '../../../server/scanning/comic/metadata-file'
 import {
 	useCollection,
 	useItem,
+	useItems,
 	useReaderData
 } from '../../../state/composables/queries'
 
-const PREFETCH_COUNT = 2
+interface ReaderState {
+	pageIndex: number
+	mode: 'pages' | 'longstrip' | null
+	pages: Array<ReturnType<typeof createPageState>>
+}
+
+// Cache the reader modes per collection so that switching between chapters
+// doesn't change the mode
+const collectionReaderModes = reactive(new Map<string, ReaderState['mode']>())
+
+const PREFETCH_COUNT = 3
 export const useComicReaderStore = () => {
+	const toast = useToast()
 	const itemId = ref(null as string | null)
 
 	const qItem = useItem(itemId)
@@ -15,20 +28,38 @@ export const useComicReaderStore = () => {
 	const qCollection = useCollection(computed(() => item.value?.collectionId))
 	const collection = computed(() => qCollection.data.value)
 
+	const qItems = useItems(
+		computed(() =>
+			collection.value ? { collectionId: collection.value.id } : null
+		)
+	)
+	const items = computed(() => qItems.data.value)
+
 	const qReaderData = useReaderData(itemId)
 	const readerData = computed(() => qReaderData.data.value)
-	watch(
-		() => readerData.value,
-		rd => {
-			if (rd) readerState.mode = rd.suggestedMode ?? 'pages'
-		}
-	)
 
 	const readerState = reactive({
 		pageIndex: 0,
-		mode: null as 'pages' | 'longstrip' | null,
-		pages: [] as Array<ReturnType<typeof createPageState>>
-	})
+		mode: null,
+		pages: []
+	}) as ReaderState
+
+	watch(
+		() => [readerData.value, collection.value] as const,
+		([rd, collection]) => {
+			const cachedMode = collection
+				? collectionReaderModes.get(collection.id)
+				: null
+			if (readerState.mode) return
+			readerState.mode = cachedMode ?? rd?.suggestedMode ?? 'pages'
+		}
+	)
+	watch(
+		() => [readerState.mode, collection.value] as const,
+		([mode, collection]) => {
+			if (mode && collection) collectionReaderModes.set(collection.id, mode)
+		}
+	)
 	watch(
 		() => readerData.value,
 		() => {
@@ -39,47 +70,47 @@ export const useComicReaderStore = () => {
 		},
 		{ immediate: true }
 	)
-	watch(
-		() => [readerState.pageIndex, readerState.pages.map(p => p.blobUrl)],
-		() => {
-			const pages = readerState.pages
-			if (pages.length === 0) return
-			const p = pages[readerState.pageIndex]
-			p.fetch()
+	setupAutoPageFetch(readerState)
 
-			if (!p.blobUrl) return
-			if (readerState.pageIndex > 0) pages[readerState.pageIndex - 1].fetch()
-			for (
-				let i = readerState.pageIndex + 1;
-				i < readerState.pageIndex + 1 + PREFETCH_COUNT && i < pages.length;
-				i++
-			) {
-				pages[i].fetch()
-			}
-		}
-	)
-
-	const readerPages = computed(() => {
-		const pages = readerState.pages
-		if (pages.length === 0) return []
-
-		if (readerState.mode === 'pages') {
-			const p = pages[readerState.pageIndex]
-			p.fetch()
-			return [p]
-		} else if (readerState.mode === 'longstrip') {
-			return pages.slice(0, readerState.pageIndex + 2)
-		}
-	})
+	const readerPages = usePagesToRender(readerState)
 
 	function switchPage(offset: 1 | -1) {
-		readerState.pageIndex = Math.max(
-			0,
-			Math.min(readerState.pageIndex + offset, readerState.pages.length - 1)
-		)
+		const newIndex = readerState.pageIndex + offset
+		if (newIndex < 0 || newIndex >= readerState.pages.length) {
+			switchChapter(offset)
+			return
+		}
+		readerState.pageIndex = newIndex
 	}
 	function switchMode() {
 		readerState.mode = readerState.mode === 'pages' ? 'longstrip' : 'pages'
+	}
+	function switchChapter(offset: 1 | -1) {
+		const currentIndex =
+			items.value?.findIndex(i => i.id === itemId.value!) ?? -1
+		if (currentIndex === -1) {
+			return
+		}
+		const nextIndex = currentIndex + offset * -1 // items list is sorted in reverse
+		if (nextIndex < 0 || nextIndex >= items.value!.length) {
+			if (collection.value) {
+				navigateTo(
+					'/' + slugify(collection.value.name) + ':' + collection.value.id
+				)
+				if (nextIndex < 0)
+					toast.add({
+						title: 'No more chapters',
+						timeout: 2000
+					})
+			}
+			return
+		}
+		const nextItem = items.value![nextIndex]
+		navigateTo('/read/' + nextItem.id)
+		toast.add({
+			title: 'Reading ' + nextItem.name,
+			timeout: 2000
+		})
 	}
 
 	return {
@@ -95,6 +126,7 @@ export const useComicReaderStore = () => {
 		readerPages,
 		switchPage,
 		switchMode,
+		switchChapter,
 
 		error: computed(() => qItem.error.value || qReaderData.error.value),
 		loading: computed(
@@ -120,6 +152,8 @@ function createPageState(
 		}
 		const blob = await res.blob()
 		state.blobUrl = URL.createObjectURL(blob)
+		state.error = null
+		fetchPromise = null
 	}
 
 	const state = reactive({
@@ -127,7 +161,7 @@ function createPageState(
 		error: null as string | null,
 		blobUrl: null as string | null,
 		fetch() {
-			if (fetchPromise) return
+			if (fetchPromise || state.blobUrl) return
 			fetchPromise = doFetch().catch(e => {
 				state.error = e.message ?? '' + e
 			})
@@ -135,4 +169,43 @@ function createPageState(
 	})
 
 	return state
+}
+
+function setupAutoPageFetch(readerState: ReaderState) {
+	watch(
+		() => [readerState.pageIndex, readerState.pages.map(p => p.blobUrl)],
+		() => {
+			const pages = readerState.pages
+			if (pages.length === 0) return
+			const p = pages[readerState.pageIndex]
+			p.fetch()
+
+			if (!p.blobUrl) return
+			if (readerState.pageIndex > 0) pages[readerState.pageIndex - 1].fetch()
+			for (
+				let i = readerState.pageIndex + 1;
+				i < readerState.pageIndex + 1 + PREFETCH_COUNT && i < pages.length;
+				i++
+			) {
+				pages[i].fetch()
+			}
+		}
+	)
+}
+
+function usePagesToRender(readerState: ReaderState) {
+	return computed(() => {
+		const pages = readerState.pages
+		if (pages.length === 0) return []
+
+		if (readerState.mode === 'pages') {
+			const p = pages[readerState.pageIndex]
+			p.fetch()
+			return [p]
+		} else if (readerState.mode === 'longstrip') {
+			return pages.slice(0, readerState.pageIndex + 2)
+		} else {
+			return []
+		}
+	})
 }
