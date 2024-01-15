@@ -8,27 +8,37 @@ export const rCollections = router({
 	query: maybePublicProcedure
 		.input(
 			z.object({
-				title: z.string().nullish()
+				title: z.string().nullish(),
+				libraryIds: z.array(z.string()).min(1).max(100).nullish(),
+				limit: z.number().int().min(1).max(100).default(100)
 			})
 		)
 		.query(async ({ input }) => {
-			const index = await createSearchIndex()
-			const results = await search(index, {
-				term: input.title ?? undefined,
-				boost: { title: 2 },
-				limit: 10
-			})
-			const items = await Collection.findAll({
+			let titleSearchIds: string[] = []
+			if (input.title) {
+				const index = await createSearchIndex()
+				const results = await search(index, {
+					term: input.title ?? undefined,
+					boost: { title: 2 },
+					limit: input.limit
+				})
+				titleSearchIds = results.hits.map(r => r.document.id as string)
+			}
+			const collections = await Collection.findAll({
 				where: {
-					id: {
-						[Op.in]: results.hits.map(r => r.document.id)
-					}
-				}
+					...(input.title ? { id: { [Op.in]: titleSearchIds } } : {}),
+					...(input.libraryIds
+						? { libraryId: { [Op.in]: input.libraryIds } }
+						: {})
+				},
+				limit: input.limit
 			})
-			const sortedItems = results.hits
-				.map(r => items.find(i => i.id === r.document.id)!)
-				.filter(i => i != null)
-			return sortedItems.map(c => c.toJSON())
+			const sortedCollections = input.title
+				? titleSearchIds
+						.map(id => collections.find(i => i.id === id)!)
+						.filter(i => i != null)
+				: collections
+			return sortedCollections.map(c => c.toJSON())
 		}),
 
 	get: maybePublicProcedure

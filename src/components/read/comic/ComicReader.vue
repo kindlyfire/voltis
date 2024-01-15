@@ -51,7 +51,7 @@
 <script lang="ts" setup>
 import slugify from 'slugify'
 import { useComicReaderStore } from './state'
-import { useWindowScroll, watchDebounced } from '@vueuse/core'
+import { useScroll, useWindowScroll, watchDebounced } from '@vueuse/core'
 
 const props = defineProps<{
 	itemId: string
@@ -79,7 +79,7 @@ watchEffect(() => {
 watchEffect(() => {
 	if (store.item && store.collection && readerMainRef.value) {
 		setTimeout(() => {
-			window.scrollTo({
+			document.getElementById('mainOverflowArea')?.scrollTo({
 				top: readerMainRef.value!.offsetTop,
 				left: 0,
 				behavior: 'smooth'
@@ -111,17 +111,22 @@ function onReaderClick(ev: MouseEvent) {
 	}
 }
 
+const mainOverflowArea = ref<HTMLElement | null>(null)
+onMounted(() => {
+	mainOverflowArea.value = document.getElementById('mainOverflowArea')
+})
+
 // Automatically update page index in longstrip mode based on scroll
-const windowScroll = useWindowScroll()
+const pageScroll = useScroll(mainOverflowArea)
 watchDebounced(
-	() => windowScroll.y.value,
+	() => pageScroll.y.value,
 	() => {
 		if (store.readerMode.value === 'longstrip') {
 			const children = Array.from(
 				readerMainRef.value!.children
 			) as HTMLImageElement[]
 			const lastChildInViewport = children.findLast(el => {
-				return el.offsetTop < windowScroll.y.value + window.innerHeight
+				return el.offsetTop < pageScroll.y.value + window.innerHeight
 			})
 			if (lastChildInViewport)
 				store.readerState.pageIndex = children.indexOf(lastChildInViewport)

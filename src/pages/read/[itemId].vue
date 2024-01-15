@@ -6,6 +6,10 @@
 <script lang="ts" setup>
 import ComicReader from '../../components/read/comic/ComicReader.vue'
 
+definePageMeta({
+	sidebarEnabled: false
+})
+
 const route = useRoute()
 const itemId = computed(() => {
 	return typeof route.params.itemId === 'string' ? route.params.itemId : null

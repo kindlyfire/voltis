@@ -14,8 +14,14 @@ import {
 import { UserSession } from './user-session'
 import { createVoter } from '../utils/voter'
 import bcrypt from 'bcrypt'
+import { SpreadTwo } from '../../utils'
 
 export interface UserPreferences {}
+
+export type UserExport = SpreadTwo<
+	Partial<InferAttributes<User>>,
+	Pick<InferAttributes<User>, 'id' | 'username'>
+>
 
 export class User extends Model<
 	InferAttributes<User>,
@@ -40,7 +46,7 @@ export class User extends Model<
 	export(user?: User | undefined) {
 		return userVoter.run(this.toJSON(), {
 			user
-		})
+		}) as UserExport
 	}
 
 	async setPassword(password: string) {
