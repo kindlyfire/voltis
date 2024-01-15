@@ -109,6 +109,7 @@ const mScanLibraries = useMutation({
 		await trpc.scan.scanLibraries.mutate({
 			libraryIds: ids
 		})
+		await qLibraries.refetch()
 	}
 })
 </script>

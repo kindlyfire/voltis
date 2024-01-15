@@ -37,7 +37,6 @@ import { useLibraries } from '../../../state/composables/queries'
 import { useLayoutStore } from '../state'
 
 const qLibraries = useLibraries({})
-await qLibraries.suspense()
 const layoutStore = useLayoutStore()
 </script>
 

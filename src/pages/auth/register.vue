@@ -47,11 +47,15 @@
 <script lang="ts" setup>
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import { trpc } from '../../plugins/trpc'
-import { useUser } from '../../state/composables/queries'
+import { useMeta, useUser } from '../../state/composables/queries'
 import { z } from 'zod'
 
+definePageMeta({
+	sidebarEnabled: false
+})
+
 const queryClient = useQueryClient()
-const qMeta = trpc.meta.useQuery()
+const qMeta = useMeta()
 const meta = qMeta.data
 const qUser = useUser()
 
@@ -74,7 +78,7 @@ const mCreateUser = useMutation({
 			email: state.email,
 			password: state.password
 		})
-		await qMeta.refresh()
+		await qMeta.refetch()
 		queryClient.setQueryData(['user'], u)
 		await navigateTo('/')
 	}

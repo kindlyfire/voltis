@@ -14,7 +14,7 @@
 			<NuxtLink
 				to="/"
 				class="font-bold text-lg font-mono"
-				:class="[sidebarEnabled ? 'block wide:hidden' : 'hidden']"
+				:class="[sidebarEnabled ? 'block wide:hidden' : '']"
 				>Voltis</NuxtLink
 			>
 			<div class="ml-auto"></div>
@@ -94,12 +94,12 @@
 <script lang="ts" setup>
 import { useMutation } from '@tanstack/vue-query'
 import { trpc } from '../../../plugins/trpc'
-import { useUser } from '../../../state/composables/queries'
+import { useMeta, useUser } from '../../../state/composables/queries'
 import { useLayoutStore } from '../state'
 
 const route = useRoute()
 const sidebarEnabled = computed(() => route.meta.sidebarEnabled ?? true)
-const qMeta = await trpc.meta.useQuery()
+const qMeta = useMeta()
 const qUser = useUser()
 const user = qUser.data
 const searchModalOpen = ref(false)

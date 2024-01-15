@@ -1,7 +1,11 @@
 <template>
-	<NuxtLayout>
-		<NuxtPage />
-	</NuxtLayout>
+	<Suspense>
+		<NuxtLayout>
+			<ClientOnly>
+				<NuxtPage />
+			</ClientOnly>
+		</NuxtLayout>
+	</Suspense>
 </template>
 
 <script lang="ts" setup>
@@ -12,34 +16,39 @@ const qMeta = useMeta()
 const qUser = useUser()
 await Promise.all([qMeta.suspense(), qUser.suspense()])
 
+async function checkPathAccess() {
+	const meta = qMeta.data.value!
+	const user = qUser.data.value
+	// Force user creation redirect
+	if (meta.forceUserCreation && route.path !== '/auth/register') {
+		await navigateTo('/auth/register')
+	}
+	// Guest access disabled + user not logged in redirect
+	else if (
+		!meta.guestAccess &&
+		!user &&
+		route.path !== '/auth/login' &&
+		route.path !== '/auth/register'
+	) {
+		await navigateTo('/auth/login')
+	}
+	// Admin dashboard not admin redirect
+	else if (!user?.roles?.includes('admin') && route.path.startsWith('/admin')) {
+		await navigateTo('/')
+	}
+}
+await checkPathAccess()
+
 watch(
 	() => [route.fullPath, qUser.data.value],
-	() => {
-		const meta = qMeta.data.value!
-		const user = qUser.data.value
-		// Force user creation redirect
-		if (meta.forceUserCreation && route.path !== '/auth/register') {
-			navigateTo('/auth/register')
-		}
-		// Guest access disabled + user not logged in redirect
-		else if (
-			!meta.guestAccess &&
-			!user &&
-			route.path !== '/auth/login' &&
-			route.path !== '/auth/register'
-		) {
-			navigateTo('/auth/login')
-		}
-		// Admin dashboard not admin redirect
-		else if (
-			!user?.roles?.includes('admin') &&
-			route.path.startsWith('/admin')
-		) {
-			navigateTo('/')
-		}
-	},
+	() => checkPathAccess(),
 	{ immediate: true, deep: true }
 )
+
+onErrorCaptured(e => {
+	console.error(e)
+	return false
+})
 </script>
 
 <style>
