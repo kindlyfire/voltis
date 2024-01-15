@@ -41,10 +41,9 @@
 </template>
 
 <script lang="ts" setup>
-import { useMutation } from '@tanstack/vue-query'
+import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import { trpc } from '../../plugins/trpc'
 import { useUser } from '../../state/composables/queries'
-import { queryClient } from '../../plugins/vue-query'
 import { z } from 'zod'
 
 const qMeta = trpc.meta.useQuery()
@@ -55,6 +54,7 @@ const schema = z.object({
 	emailOrUsername: z.string().min(3, 'Must be at least 3 characters'),
 	password: z.string().min(8, 'Must be at least 8 characters')
 })
+const queryClient = useQueryClient()
 
 const state = reactive({
 	emailOrUsername: '',

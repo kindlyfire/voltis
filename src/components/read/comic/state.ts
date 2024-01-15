@@ -12,9 +12,7 @@ export const useComicReaderStore = () => {
 	const qItem = useItem(itemId)
 	const item = computed(() => qItem.data.value)
 
-	const qCollection = useCollection(
-		computed(() => item.value?.collectionId ?? null)
-	)
+	const qCollection = useCollection(computed(() => item.value?.collectionId))
 	const collection = computed(() => qCollection.data.value)
 
 	const qReaderData = useReaderData(itemId)

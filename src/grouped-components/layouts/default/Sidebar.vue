@@ -11,23 +11,6 @@
 				Home
 			</ALinkButton>
 			<div class="flex flex-col">
-				<ALinkButton
-					to="/lists"
-					class="font-medium text-sm flex gap-x-2.5 px-3.5 py-2.5"
-				>
-					<Icon name="ph:list-bullets-bold" dynamic class="h-5 scale-[1.4]" />
-					Lists
-				</ALinkButton>
-				<!-- <ALinkButton
-					v-for="lib in qLibraries.data.value"
-					:to="'/'"
-					:variant="'ghost'"
-					color="gray"
-				>
-					{{ lib.name }}
-				</ALinkButton> -->
-			</div>
-			<div class="flex flex-col">
 				<div class="font-medium text-sm flex gap-x-2.5 px-3.5 py-2.5">
 					<Icon name="ph:folder-notch-bold" dynamic class="h-5 scale-[1.4]" />
 					Libraries
@@ -47,7 +30,8 @@
 import ALinkButton from '../../../components/ALinkButton.vue'
 import { useLibraries } from '../../../state/composables/queries'
 
-const qLibraries = useLibraries()
+const qLibraries = useLibraries({})
+await qLibraries.suspense()
 </script>
 
 <style></style>

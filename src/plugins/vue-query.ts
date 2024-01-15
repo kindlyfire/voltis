@@ -6,12 +6,10 @@ import {
 	hydrate
 } from '@tanstack/vue-query'
 
-export let queryClient: QueryClient
-
 export default defineNuxtPlugin(nuxtApp => {
 	const vueQueryState = useState<DehydratedState | null>('vue-query')
 
-	queryClient = new QueryClient({
+	const queryClient = new QueryClient({
 		defaultOptions: {
 			queries: {
 				refetchOnMount: false,

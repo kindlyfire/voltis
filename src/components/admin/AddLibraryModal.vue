@@ -114,7 +114,7 @@ const emit = defineEmits<{
 	'update:modelValue': [open: boolean]
 }>()
 
-const qLibraries = useLibraries()
+const qLibraries = useLibraries({})
 const libraryId = ref(null) as Ref<string | null>
 
 const schema = z.object({

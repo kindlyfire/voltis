@@ -1,12 +1,12 @@
 <template>
-	<div class="acontainer">
-		<div class="flex flex-row gap-4">
+	<AMainWrapper>
+		<template #side>
 			<UserPagesSidebar />
-			<div>
-				<div class="text-5xl font-bold">Preferences</div>
-			</div>
-		</div>
-	</div>
+		</template>
+		<template #main>
+			<div class="text-5xl font-bold">Preferences</div>
+		</template>
+	</AMainWrapper>
 </template>
 
 <script lang="ts" setup>

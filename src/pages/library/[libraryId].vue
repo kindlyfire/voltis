@@ -13,7 +13,7 @@ import { useLibraries } from '../../state/composables/queries'
 import { trpc } from '../../plugins/trpc'
 
 const route = useRoute()
-const qLibraries = useLibraries()
+const qLibraries = useLibraries({})
 await qLibraries.suspense()
 const library = computed(
 	() => qLibraries.data.value?.find(l => l.id === route.params.libraryId)!

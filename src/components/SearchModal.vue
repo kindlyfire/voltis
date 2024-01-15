@@ -84,10 +84,7 @@
 import slugify from 'slugify'
 import type { InferAttributes } from 'sequelize'
 import type { Collection } from '../server/models/collection'
-import { useQuery } from '@tanstack/vue-query'
-import type { inferProcedureInput } from '@trpc/server'
-import type { AppRouter } from '../server/trpc/routers'
-import { trpc } from '../plugins/trpc'
+import { useCollections } from '../state/composables/queries'
 
 const props = defineProps<{
 	modelValue: boolean
@@ -99,25 +96,20 @@ const emit = defineEmits<{
 const searchTerm = ref('')
 const results = ref([]) as Ref<InferAttributes<Collection>[]>
 
-const queryData = computed(() => {
-	return <inferProcedureInput<AppRouter['items']['query']>>{
-		title: searchTerm.value.trim()
+const qQuery = useCollections(
+	computed(() => {
+		return {
+			title: searchTerm.value.trim()
+		}
+	}),
+	{
+		enabled: computed(() => props.modelValue)
 	}
-})
-const qQuery = useQuery({
-	queryKey: [
-		'collection-query',
-		computed(() => JSON.stringify(unref(queryData)))
-	],
-	async queryFn() {
-		return trpc.collections.query.query(unref(queryData))
-	},
-	enabled: computed(() => props.modelValue)
-})
+)
 watch(
 	() => qQuery.data.value,
 	value => {
-		results.value = value ?? []
+		results.value = value ?? results.value
 	}
 )
 </script>

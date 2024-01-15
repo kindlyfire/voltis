@@ -1,15 +1,13 @@
 <template>
-	<div class="w-[300px] shrink-0 flex flex-col gap-2">
-		<UButton
-			v-for="link in linksExpanded"
-			:key="link.to"
-			:to="link.to"
-			:variant="link.variant"
-			size="lg"
-		>
-			{{ link.name }}
-		</UButton>
-	</div>
+	<UButton
+		v-for="link in linksExpanded"
+		:key="link.to"
+		:to="link.to"
+		:variant="link.variant"
+		size="lg"
+	>
+		{{ link.name }}
+	</UButton>
 </template>
 
 <script lang="ts" setup>

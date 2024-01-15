@@ -1,5 +1,5 @@
 <template>
-	<div class="CollectionDescription" v-html="qHtml.data.value"></div>
+	<div class="CollectionDescription" v-html="qHtml.data.value ?? ''"></div>
 </template>
 
 <script lang="ts" setup>

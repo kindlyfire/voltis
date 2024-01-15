@@ -1,20 +1,20 @@
 <template>
-	<div class="acontainer">
-		<div class="flex flex-row gap-4">
+	<AMainWrapper>
+		<template #side>
 			<UserPagesSidebar />
-			<div class="flex flex-col gap-4 grow">
-				<div class="text-5xl font-bold">Account</div>
+		</template>
+		<template #main>
+			<div class="text-5xl font-bold">Account</div>
 
-				<UFormGroup label="Username" name="username" size="lg">
-					<UInput :model-value="user.username" disabled />
-				</UFormGroup>
+			<UFormGroup label="Username" name="username" size="lg">
+				<UInput :model-value="user.username" disabled />
+			</UFormGroup>
 
-				<UFormGroup label="Email" name="email" size="lg">
-					<UInput :model-value="user.email" disabled />
-				</UFormGroup>
-			</div>
-		</div>
-	</div>
+			<UFormGroup label="Email" name="email" size="lg">
+				<UInput :model-value="user.email" disabled />
+			</UFormGroup>
+		</template>
+	</AMainWrapper>
 </template>
 
 <script lang="ts" setup>

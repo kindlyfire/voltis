@@ -1,92 +1,89 @@
 <template>
-	<div class="acontainer">
-		<div class="flex flex-row gap-4">
+	<AMainWrapper>
+		<template #side>
 			<AdminPagesSidebar />
-			<div class="flex flex-col gap-4 grow">
-				<div class="text-5xl font-bold">Libraries</div>
+		</template>
+		<template #main>
+			<div class="text-5xl font-bold">Libraries</div>
 
-				<div class="flex items-center gap-2">
-					<UButton size="lg" @click="addEditModalOpen = true">
-						<UIcon
-							name="ph:folder-notch-plus-bold"
-							dynamic
-							class="h-4 scale-[1.4]"
-						/>
-						Add library
-					</UButton>
-					<UButton
-						size="lg"
-						color="gray"
-						@click="mScanLibraries.mutate(libraries?.map(l => l.id!) ?? [])"
-						:loading="mScanLibraries.isPending.value"
-					>
-						<UIcon
-							name="ph:arrows-clockwise-bold"
-							dynamic
-							class="h-4 scale-[1.4]"
-						/>
-						Scan all
-					</UButton>
-				</div>
+			<div class="flex items-center gap-2">
+				<UButton size="lg" @click="addEditModalOpen = true">
+					<UIcon
+						name="ph:folder-notch-plus-bold"
+						dynamic
+						class="h-4 scale-[1.4]"
+					/>
+					Add library
+				</UButton>
+				<UButton
+					size="lg"
+					color="gray"
+					@click="mScanLibraries.mutate(libraries?.map(l => l.id!) ?? [])"
+					:loading="mScanLibraries.isPending.value"
+				>
+					<UIcon
+						name="ph:arrows-clockwise-bold"
+						dynamic
+						class="h-4 scale-[1.4]"
+					/>
+					Scan all
+				</UButton>
+			</div>
 
-				<div v-if="qLibraries.isPending.value">Loading...</div>
-				<div v-else-if="!libraries?.length">
-					No libraries set up yet. Add one to get started!
-				</div>
-				<div v-else class="grid grid-cols-2 gap-4">
-					<div
-						v-for="lib in libraries"
-						class="card rounded-md flex items-center"
-					>
-						{{ lib.name }}
-						<div class="ml-auto">
-							<UButton
-								color="gray"
-								variant="ghost"
-								@click="mScanLibraries.mutate([lib.id!])"
-								:loading="mScanLibraries.isPending.value && mScanLibraries.variables.value?.includes(lib.id!)"
-							>
-								<UIcon
-									name="ph:arrows-clockwise-bold"
-									dynamic
-									square
-									class="scale-[1.4]"
-								/>
-							</UButton>
-							<UButton
-								color="gray"
-								variant="ghost"
-								@click="
+			<div v-if="qLibraries.isPending.value">Loading...</div>
+			<div v-else-if="!libraries?.length">
+				No libraries set up yet. Add one to get started!
+			</div>
+			<div v-else class="grid grid-cols-2 gap-4">
+				<div v-for="lib in libraries" class="card rounded-md flex items-center">
+					{{ lib.name }}
+					<div class="ml-auto">
+						<UButton
+							color="gray"
+							variant="ghost"
+							@click="mScanLibraries.mutate([lib.id!])"
+							:loading="mScanLibraries.isPending.value && mScanLibraries.variables.value?.includes(lib.id!)"
+						>
+							<UIcon
+								name="ph:arrows-clockwise-bold"
+								dynamic
+								square
+								class="scale-[1.4]"
+							/>
+						</UButton>
+						<UButton
+							color="gray"
+							variant="ghost"
+							@click="
 									() => {
 										addEditModalOpen = true
 										addEditModalLibraryId = lib.id!
 									}
 								"
-							>
-								<UIcon
-									name="ph:pencil-simple-bold"
-									dynamic
-									square
-									class="scale-[1.4]"
-								/>
-							</UButton>
-						</div>
+						>
+							<UIcon
+								name="ph:pencil-simple-bold"
+								dynamic
+								square
+								class="scale-[1.4]"
+							/>
+						</UButton>
 					</div>
 				</div>
 			</div>
-		</div>
+		</template>
+	</AMainWrapper>
 
-		<AddLibraryModal
-			:model-value="addEditModalOpen"
-			@update:model-value="
-				$event => {
-					addEditModalOpen = $event
-					addEditModalLibraryId = null
-				}
-			"
-			:library-id="addEditModalLibraryId"
-		/>
-	</div>
+	<AddLibraryModal
+		:model-value="addEditModalOpen"
+		@update:model-value="
+			$event => {
+				addEditModalOpen = $event
+				addEditModalLibraryId = null
+			}
+		"
+		:library-id="addEditModalLibraryId"
+	/>
 </template>
 
 <script lang="ts" setup>
@@ -96,7 +93,8 @@ import AdminPagesSidebar from '../../components/admin/AdminPagesSidebar.vue'
 import { useLibraries } from '../../state/composables/queries'
 import { trpc } from '../../plugins/trpc'
 
-const qLibraries = useLibraries()
+const qLibraries = useLibraries({})
+await qLibraries.suspense()
 const libraries = qLibraries.data
 
 const addEditModalOpen = ref(false)

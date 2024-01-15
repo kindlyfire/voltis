@@ -5,13 +5,12 @@
 </template>
 
 <script lang="ts" setup>
-import { trpc } from './plugins/trpc'
-import { useUser } from './state/composables/queries'
+import { useMeta, useUser } from './state/composables/queries'
 
 const route = useRoute()
-const qMeta = trpc.meta.useQuery()
+const qMeta = useMeta()
 const qUser = useUser()
-await Promise.all([qMeta, qUser.suspense()])
+await Promise.all([qMeta.suspense(), qUser.suspense()])
 
 watch(
 	() => [route.fullPath, qUser.data.value],

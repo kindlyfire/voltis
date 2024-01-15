@@ -45,12 +45,12 @@
 </template>
 
 <script lang="ts" setup>
-import { useMutation } from '@tanstack/vue-query'
+import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import { trpc } from '../../plugins/trpc'
 import { useUser } from '../../state/composables/queries'
-import { queryClient } from '../../plugins/vue-query'
 import { z } from 'zod'
 
+const queryClient = useQueryClient()
 const qMeta = trpc.meta.useQuery()
 const meta = qMeta.data
 const qUser = useUser()
