@@ -8,8 +8,10 @@
 		}"
 		class=""
 	>
-		<div class="p-4">
-			<div class="flex items-center gap-2">
+		<div class="padding-modal">
+			<div
+				class="flex flex-col-reverse items-stretch sm:flex-row sm:items-center gap-2"
+			>
 				<div class="font-bold grow">
 					<UInput v-model="searchTerm" placeholder="Search" autofocus>
 						<template #trailing>
@@ -21,7 +23,7 @@
 						</template>
 					</UInput>
 				</div>
-				<div class="flex items-center">
+				<div class="flex items-center justify-between sm:justify-normal">
 					<UButton
 						color="gray"
 						variant="ghost"
@@ -46,7 +48,7 @@
 			</div>
 		</div>
 		<hr />
-		<div class="p-4">
+		<div class="padding-modal">
 			<div v-if="qQuery.isLoading.value && !results?.length">Loading...</div>
 			<div v-else-if="qQuery.isError.value" class="text-red-500">
 				{{ qQuery.error }}

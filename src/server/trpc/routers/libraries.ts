@@ -3,13 +3,30 @@ import { adminProcedure, maybePublicProcedure, router } from '../trpc.js'
 import { Library } from '../../models/library'
 import { Item } from '../../models/item'
 import { Op } from 'sequelize'
+import { db } from '../../plugins/sequelize'
 
 export const rLibraries = router({
 	query: maybePublicProcedure
 		.input(z.object({}))
 		.query(async ({ input, ctx }) => {
-			const libraries = await Library.findAll()
-			return libraries.map(c => c.export(ctx.user))
+			const libraries = await Library.findAll({
+				attributes: {
+					include: [
+						[
+							db.literal(`(
+								SELECT COUNT(*)
+								FROM collections AS col
+								WHERE col.libraryId = \`Library\`.id
+							)`),
+							'collectionCount'
+						]
+					]
+				}
+			})
+			return libraries.map(c => ({
+				...c.export(ctx.user),
+				collectionCount: c.get('collectionCount') as string
+			}))
 		}),
 
 	get: maybePublicProcedure

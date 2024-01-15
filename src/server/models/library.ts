@@ -13,6 +13,12 @@ import {
 } from 'sequelize'
 import { User } from './user'
 import { Collection } from './collection'
+import { SpreadTwo } from '../../utils'
+
+export type LibraryExport = SpreadTwo<
+	Partial<InferAttributes<Library>>,
+	Pick<InferAttributes<Library>, 'id' | 'lastScanAt' | 'matcher' | 'name'>
+>
 
 export class Library extends Model<
 	InferAttributes<Library>,
@@ -30,7 +36,7 @@ export class Library extends Model<
 	export(user?: User | undefined | null) {
 		return libraryVoter.run(this.toJSON(), {
 			user
-		})
+		}) as LibraryExport
 	}
 
 	declare collections?: NonAttribute<Collection[]>

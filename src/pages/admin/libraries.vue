@@ -34,9 +34,12 @@
 			<div v-else-if="!libraries?.length">
 				No libraries set up yet. Add one to get started!
 			</div>
-			<div v-else class="grid grid-cols-2 gap-4">
+			<div v-else class="grid lg:grid-cols-2 gap-4">
 				<div v-for="lib in libraries" class="card rounded-md flex items-center">
-					{{ lib.name }}
+					<div>
+						<div>{{ lib.name }}</div>
+						<div class="text-muted">{{ lib.collectionCount }} collections</div>
+					</div>
 					<div class="ml-auto">
 						<UButton
 							color="gray"

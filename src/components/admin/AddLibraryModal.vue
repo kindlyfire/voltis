@@ -8,7 +8,7 @@
 		}"
 		class=""
 	>
-		<div class="flex items-center p-4">
+		<div class="flex items-center padding-modal">
 			<div class="font-bold">{{ libraryId ? 'Edit' : 'Add' }} library</div>
 			<div class="ml-auto">
 				<UButton
@@ -21,7 +21,7 @@
 			</div>
 		</div>
 		<hr />
-		<div class="p-4 grow">
+		<div class="padding-modal grow">
 			<UForm
 				ref="formRef"
 				class="flex flex-col gap-4"

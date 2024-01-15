@@ -56,4 +56,8 @@ watch(
 	margin: 0 auto;
 	padding: 0 8px;
 }
+
+.padding-modal {
+	@apply p-2 sm:p-4;
+}
 </style>

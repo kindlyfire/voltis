@@ -1,7 +1,7 @@
 <template>
-	<div class="acontainer flex flex-col gap-4">
-		<div class="flex flex-row gap-4">
-			<div class="w-[300px] shrink-0 flex flex-col gap-2">
+	<div class="acontainer">
+		<div class="flex flex-col md:flex-row gap-4">
+			<div class="lg:w-[300px] md:w-[200px] shrink-0 flex flex-col gap-2">
 				<slot name="side" />
 			</div>
 			<div class="flex flex-col gap-4 grow">

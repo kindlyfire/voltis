@@ -33,4 +33,4 @@ you.
   - [x] Trigger library scans
 - [ ] OPDS support
 - [ ] Dark mode
-- [ ] Mobile-friendly UI
+- [x] Mobile-friendly UI (mostly)

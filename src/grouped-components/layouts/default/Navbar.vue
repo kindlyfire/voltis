@@ -1,25 +1,32 @@
 <template>
 	<div
-		class="card rounded-none border-t-0 border-x-0 mb-4 flex flex-row items-center h-[50px] shrink-0"
+		class="card px-0 rounded-none border-t-0 border-x-0 mb-4 flex flex-row items-center h-[50px] shrink-0"
 	>
-		<div class="flex flex-row items-center gap-2 acontainer">
+		<div class="flex flex-row items-center gap-1 sm:gap-2 acontainer">
+			<UButton color="gray" class="wide:hidden">
+				<UIcon
+					name="ph:list-bold"
+					dynamic
+					class="h-5 scale-[1.2]"
+					@click="layoutStore.sidebarOpen = true"
+				/>
+			</UButton>
 			<NuxtLink
-				v-if="!sidebarEnabled"
 				to="/"
 				class="font-bold text-lg font-mono"
+				:class="[sidebarEnabled ? 'block wide:hidden' : 'hidden']"
 				>Voltis</NuxtLink
 			>
 			<div class="ml-auto"></div>
 
 			<template v-if="user">
 				<UButton color="gray" @click="searchModalOpen = true">
-					<UIcon name="ph:magnifying-glass-bold" dynamic class="scale-[1.2]" />
-					Search
-				</UButton>
-
-				<UButton color="gray" to="/user/account">
-					<UIcon name="ph:user-bold" dynamic class="scale-[1.2]" />
-					{{ user.username }}
+					<UIcon
+						name="ph:magnifying-glass-bold"
+						dynamic
+						class="h-5 scale-[1.2]"
+					/>
+					<div class="hidden sm:block">Search</div>
 				</UButton>
 
 				<ClientOnly>
@@ -35,6 +42,7 @@
 
 					<UPopover :popper="{ placement: 'bottom-end', offsetDistance: 4 }">
 						<UButton color="gray">
+							{{ user.username }}
 							<UIcon
 								name="ph:caret-down-bold"
 								dynamic
@@ -87,6 +95,7 @@
 import { useMutation } from '@tanstack/vue-query'
 import { trpc } from '../../../plugins/trpc'
 import { useUser } from '../../../state/composables/queries'
+import { useLayoutStore } from '../state'
 
 const route = useRoute()
 const sidebarEnabled = computed(() => route.meta.sidebarEnabled ?? true)
@@ -94,6 +103,7 @@ const qMeta = await trpc.meta.useQuery()
 const qUser = useUser()
 const user = qUser.data
 const searchModalOpen = ref(false)
+const layoutStore = useLayoutStore()
 
 const mLogout = useMutation({
 	async mutationFn() {
