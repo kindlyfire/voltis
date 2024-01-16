@@ -7,7 +7,7 @@
 	>
 		<ComicReaderPages />
 	</div>
-	<div class="absolute bottom-0 inset-x-0 pointer-events-none p-1 pt-0">
+	<div class="fixed bottom-0 inset-x-0 pointer-events-none p-1 pt-0">
 		<UProgress :value="progress" size="sm" />
 	</div>
 </template>
@@ -83,6 +83,11 @@ function onReaderClick(ev: MouseEvent) {
 	if (store.readerMode === 'pages') {
 		store.switchPage(action === ReaderAction.Previous ? -1 : 1)
 	} else {
+		const screenHeight =
+			document
+				.getElementById('bottom-screen-reference')
+				?.getBoundingClientRect().y ?? document.body.clientHeight
+
 		// If at top, go to previous chapter. If at bottom, go to next chapter.
 		// Otherwise scroll up/down
 		const el = mainOverflowArea.value!
@@ -98,7 +103,7 @@ function onReaderClick(ev: MouseEvent) {
 			el.scrollTo({
 				top:
 					el.scrollTop +
-					(action === ReaderAction.Previous ? -1 : 1) * 0.95 * el.clientHeight,
+					(action === ReaderAction.Previous ? -1 : 1) * 0.95 * screenHeight,
 				left: 0,
 				behavior: 'smooth'
 			})

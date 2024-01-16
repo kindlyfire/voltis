@@ -8,9 +8,17 @@ import {
 import type { FileMetadataCustomData } from '../../../../server/scanning/comic/metadata-file'
 
 interface ReaderState {
+	itemId: string | null
 	pageIndex: number
 	mode: 'pages' | 'longstrip' | null
 	pages: Array<ReturnType<typeof createPageState>>
+}
+
+const defaultReaderState: ReaderState = {
+	itemId: null,
+	pageIndex: 0,
+	mode: null,
+	pages: []
 }
 
 const PREFETCH_COUNT = 3
@@ -39,11 +47,14 @@ export const useComicReaderStore = defineStore('comic-reader', () => {
 	const qReaderData = useReaderData(itemId)
 	const readerData = computed(() => qReaderData.data.value)
 
-	const readerState = reactive({
-		pageIndex: 0,
-		mode: null,
-		pages: []
-	}) as ReaderState
+	let cachedReaderState = reactive({ ...defaultReaderState })
+	const readerState = computed(() => {
+		if (cachedReaderState.itemId !== itemId.value) {
+			cachedReaderState = reactive({ ...defaultReaderState })
+			cachedReaderState.itemId = itemId.value
+		}
+		return cachedReaderState
+	})
 
 	watch(
 		() => [readerData.value, collection.value] as const,
@@ -51,12 +62,12 @@ export const useComicReaderStore = defineStore('comic-reader', () => {
 			const cachedMode = collection
 				? collectionReaderModes.get(collection.id)
 				: null
-			if (readerState.mode) return
-			readerState.mode = cachedMode ?? rd?.suggestedMode ?? 'pages'
+			if (readerState.value.mode) return
+			readerState.value.mode = cachedMode ?? rd?.suggestedMode ?? 'pages'
 		}
 	)
 	watch(
-		() => [readerState.mode, collection.value] as const,
+		() => [readerState.value.mode, collection.value] as const,
 		([mode, collection]) => {
 			if (mode && collection) collectionReaderModes.set(collection.id, mode)
 		}
@@ -65,7 +76,7 @@ export const useComicReaderStore = defineStore('comic-reader', () => {
 		() => readerData.value,
 		() => {
 			if (!readerData.value) return
-			readerState.pages = readerData.value.files.map(f =>
+			readerState.value.pages = readerData.value.files.map(f =>
 				createPageState(itemId.value!, f)
 			)
 		},
@@ -76,15 +87,16 @@ export const useComicReaderStore = defineStore('comic-reader', () => {
 	const readerPages = usePagesToRender(readerState)
 
 	function switchPage(offset: 1 | -1) {
-		const newIndex = readerState.pageIndex + offset
-		if (newIndex < 0 || newIndex >= readerState.pages.length) {
+		const newIndex = readerState.value.pageIndex + offset
+		if (newIndex < 0 || newIndex >= readerState.value.pages.length) {
 			switchChapter(offset)
 			return
 		}
-		readerState.pageIndex = newIndex
+		readerState.value.pageIndex = newIndex
 	}
 	function switchMode() {
-		readerState.mode = readerState.mode === 'pages' ? 'longstrip' : 'pages'
+		readerState.value.mode =
+			readerState.value.mode === 'pages' ? 'longstrip' : 'pages'
 	}
 	function switchChapter(offset: 1 | -1) {
 		const currentIndex =
@@ -125,7 +137,7 @@ export const useComicReaderStore = defineStore('comic-reader', () => {
 		collection,
 		qReaderData,
 		readerData,
-		readerMode: computed(() => readerState.mode ?? 'pages'),
+		readerMode: computed(() => readerState.value.mode ?? 'pages'),
 		readerState,
 		readerPages,
 		switchPage,
@@ -176,20 +188,25 @@ function createPageState(
 	return state
 }
 
-function setupAutoPageFetch(readerState: ReaderState) {
+function setupAutoPageFetch(readerState: Ref<ReaderState>) {
 	watch(
-		() => [readerState.pageIndex, readerState.pages.map(p => p.blobUrl)],
+		() => [
+			readerState.value.pageIndex,
+			readerState.value.pages.map(p => p.blobUrl)
+		],
 		() => {
-			const pages = readerState.pages
+			const pages = readerState.value.pages
 			if (pages.length === 0) return
-			const p = pages[readerState.pageIndex]
+			const p = pages[readerState.value.pageIndex]
 			p.fetch()
 
 			if (!p.blobUrl) return
-			if (readerState.pageIndex > 0) pages[readerState.pageIndex - 1].fetch()
+			if (readerState.value.pageIndex > 0)
+				pages[readerState.value.pageIndex - 1].fetch()
 			for (
-				let i = readerState.pageIndex + 1;
-				i < readerState.pageIndex + 1 + PREFETCH_COUNT && i < pages.length;
+				let i = readerState.value.pageIndex + 1;
+				i < readerState.value.pageIndex + 1 + PREFETCH_COUNT &&
+				i < pages.length;
 				i++
 			) {
 				pages[i].fetch()
@@ -198,17 +215,17 @@ function setupAutoPageFetch(readerState: ReaderState) {
 	)
 }
 
-function usePagesToRender(readerState: ReaderState) {
+function usePagesToRender(readerState: Ref<ReaderState>) {
 	return computed(() => {
-		const pages = readerState.pages
+		const pages = readerState.value.pages
 		if (pages.length === 0) return []
 
-		if (readerState.mode === 'pages') {
-			const p = pages[readerState.pageIndex]
+		if (readerState.value.mode === 'pages') {
+			const p = pages[readerState.value.pageIndex]
 			p.fetch()
 			return [p]
-		} else if (readerState.mode === 'longstrip') {
-			return pages.slice(0, readerState.pageIndex + 2)
+		} else if (readerState.value.mode === 'longstrip') {
+			return pages.slice(0, readerState.value.pageIndex + 2)
 		} else {
 			return []
 		}
