@@ -1,18 +1,12 @@
 <template>
-	<div v-if="!itemId" class="acontainer">Page not found.</div>
-	<ComicReader v-else :item-id="itemId" />
+	<Page />
 </template>
 
 <script lang="ts" setup>
-import ComicReader from '../../components/read/comic/ComicReader.vue'
+import Page from '@/grouped-components/pages/read/[itemId]/page.vue'
 
 definePageMeta({
 	sidebarEnabled: false
-})
-
-const route = useRoute()
-const itemId = computed(() => {
-	return typeof route.params.itemId === 'string' ? route.params.itemId : null
 })
 </script>
 

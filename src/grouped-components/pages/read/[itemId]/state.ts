@@ -1,17 +1,22 @@
 import slugify from 'slugify'
-import { type FileMetadataCustomData } from '../../../server/scanning/comic/metadata-file'
+import type { InjectionKey } from 'vue'
 import {
 	useCollection,
 	useItem,
 	useItems,
 	useReaderData
-} from '../../../state/composables/queries'
+} from '../../../../state/composables/queries'
+import type { FileMetadataCustomData } from '../../../../server/scanning/comic/metadata-file'
 
 interface ReaderState {
 	pageIndex: number
 	mode: 'pages' | 'longstrip' | null
 	pages: Array<ReturnType<typeof createPageState>>
 }
+
+export const readerStateKey = Symbol() as InjectionKey<
+	ReturnType<typeof useComicReaderStore>
+>
 
 // Cache the reader modes per collection so that switching between chapters
 // doesn't change the mode
@@ -163,6 +168,7 @@ function createPageState(
 		fetch() {
 			if (fetchPromise || state.blobUrl) return
 			fetchPromise = doFetch().catch(e => {
+				console.error('Failed to fetch page', e)
 				state.error = e.message ?? '' + e
 			})
 		}

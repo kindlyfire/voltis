@@ -4,7 +4,7 @@ function color(varname) {
 
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-	content: ['src/**/*.vue'],
+	content: ['src/**/*.vue', 'src/**/*.ts'],
 	theme: {
 		extend: {
 			colors: {
