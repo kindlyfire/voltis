@@ -2,7 +2,7 @@
 	<AMainWrapper>
 		<template #side>
 			<img
-				:src="'/api/cover?collection-id=' + collection.id"
+				:src="'/api/cover?width=640&collection-id=' + collection.id"
 				alt=""
 				class="rounded-lg shadow"
 			/>

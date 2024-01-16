@@ -16,6 +16,20 @@
 		"useTabs": true,
 		"arrowParens": "avoid"
 	},
+	"pnpm": {
+		"supportedArchitectures": {
+			"os": [
+				"win32",
+				"darwin",
+				"current",
+				"linux"
+			],
+			"cpu": [
+				"x64",
+				"arm64"
+			]
+		}
+	},
 	"devDependencies": {
 		"@nuxt/devtools": "^1.0.6",
 		"@nuxtjs/tailwindcss": "^6.10.4",

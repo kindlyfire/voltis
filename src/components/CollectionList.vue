@@ -5,7 +5,11 @@
 			class="card p-0 overflow-hidden"
 			:title="i.name"
 		>
-			<img class="cover" :src="'/api/cover?collection-id=' + i.id" alt="" />
+			<img
+				class="cover"
+				:src="'/api/cover?width=320&collection-id=' + i.id"
+				alt=""
+			/>
 			<div
 				class="overflow-hidden whitespace-nowrap text-ellipsis w-full text-sm px-1"
 			>

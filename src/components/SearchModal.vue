@@ -67,7 +67,7 @@
 						<div>
 							<img
 								class="cover h-16 rounded overflow-hidden"
-								:src="'/api/cover?collection-id=' + col.id"
+								:src="'/api/cover?width=320&collection-id=' + col.id"
 							/>
 						</div>
 						<div>

@@ -15,9 +15,8 @@ you.
   - [x] Fetch metadata through MangaDex
     - [ ] Allow overriding the MangaDex ID if search fails
   - [x] Parse volumes/chapter numbers, sort
-  - [ ] Comic reader (╯°□°）╯︵ ┻━┻
-    - [x] Basic reader with manga/comic and webtoon modes
-    - [ ] Better reader
+  - [x] Comic reader (╯°□°）╯︵ ┻━┻
+    - [x] Manga/comic and webtoon modes
 - [ ] Add support for ebooks
   - [ ] ...
 - [ ] User accounts
