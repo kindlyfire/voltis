@@ -16,7 +16,8 @@ module.exports = {
 				'c-bg-3': color('bg-3')
 			},
 			screens: {
-				wide: '1400px'
+				wide: '1400px',
+				xs: '500px'
 			}
 		}
 	},

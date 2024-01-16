@@ -4,7 +4,7 @@
 			<AdminPagesSidebar />
 		</template>
 		<template #main>
-			<div class="text-5xl font-bold">Summary</div>
+			<PageTitle title="Summary" pagetitle="Summary (Admin)" />
 		</template>
 	</AMainWrapper>
 </template>

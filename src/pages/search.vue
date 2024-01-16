@@ -1,5 +1,6 @@
 <template>
 	<div class="acontainer flex flex-col gap-2">
+		<PageTitle :pagetitle="searchTerm ? `${searchTerm} (Search)` : 'Search'" />
 		<div>
 			<UInput v-model="searchTerm" placeholder="Search" />
 		</div>

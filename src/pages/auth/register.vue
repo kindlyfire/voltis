@@ -6,6 +6,7 @@
 			@submit="mCreateUser.mutate()"
 			class="flex flex-col gap-4"
 		>
+			<PageTitle pagetitle="Register" />
 			<h1 class="text-3xl font-bold">Register</h1>
 			<div>
 				{{ topMessage }}

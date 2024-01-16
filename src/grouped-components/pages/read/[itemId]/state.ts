@@ -227,19 +227,42 @@ function setupAutoPageFetch(readerState: Ref<ReaderState>) {
 	)
 }
 
-function usePagesToRender(readerState: Ref<ReaderState>) {
+function usePagesToRender(readerState: Ref<ReaderState>): ComputedRef<{
+	all: ReaderState['pages'][0][]
+	hidden: ReaderState['pages'][0][]
+}> {
 	return computed(() => {
 		const pages = readerState.value.pages
-		if (pages.length === 0) return []
+		if (pages.length === 0)
+			return {
+				all: [],
+				hidden: []
+			}
 
 		if (readerState.value.mode === 'pages') {
 			const p = pages[readerState.value.pageIndex]
 			p.fetch()
-			return [p]
+
+			const all = pages.slice(
+				Math.max(0, readerState.value.pageIndex - 2),
+				Math.min(pages.length, readerState.value.pageIndex + 3)
+			)
+
+			// Include as hidden pages the two previous and next pages
+			return {
+				all,
+				hidden: all.filter(p => p !== pages[readerState.value.pageIndex])
+			}
 		} else if (readerState.value.mode === 'longstrip') {
-			return pages.slice(0, readerState.value.pageIndex + 2)
+			return {
+				all: pages.slice(0, readerState.value.pageIndex + 2),
+				hidden: []
+			}
 		} else {
-			return []
+			return {
+				all: [],
+				hidden: []
+			}
 		}
 	})
 }

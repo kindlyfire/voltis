@@ -1,5 +1,6 @@
 <template>
 	<div class="acontainer">
+		<PageTitle pagetitle="Home" />
 		<CollectionList :collections="qCollections.data.value ?? []" />
 	</div>
 </template>

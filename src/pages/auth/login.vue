@@ -6,6 +6,7 @@
 			@submit="mLogin.mutate()"
 			class="flex flex-col gap-4"
 		>
+			<PageTitle pagetitle="Login" />
 			<h1 class="text-3xl font-bold">Login</h1>
 			<div v-if="topMessage">
 				{{ topMessage }}

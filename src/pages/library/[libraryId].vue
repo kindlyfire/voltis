@@ -1,6 +1,6 @@
 <template>
 	<div class="acontainer flex flex-col gap-4">
-		<div class="text-5xl font-bold">{{ library.name }}</div>
+		<PageTitle :title="library.name" />
 		<div>
 			<CollectionList :collections="qCollections.data.value ?? []" />
 		</div>

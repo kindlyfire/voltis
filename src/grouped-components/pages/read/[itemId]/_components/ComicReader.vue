@@ -48,7 +48,7 @@ watchEffect(() => {
 		store.item &&
 		store.collection &&
 		mainRef.value?.readerMainRef &&
-		store.readerPages.length > 0 &&
+		store.readerPages.all.length > 0 &&
 		store.readerState.pageIndex === 0 &&
 		scrolledForItem.value !== store.item.id
 	) {

@@ -4,7 +4,7 @@
 			<AdminPagesSidebar />
 		</template>
 		<template #main>
-			<div class="text-5xl font-bold">Libraries</div>
+			<PageTitle title="Libraries" pagetitle="Libraries (Admin)" />
 
 			<div class="flex items-center gap-2">
 				<UButton size="lg" @click="addEditModalOpen = true">

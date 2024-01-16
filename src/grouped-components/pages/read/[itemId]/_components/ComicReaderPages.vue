@@ -1,5 +1,5 @@
 <template>
-	<template v-for="p in store.readerPages">
+	<template v-for="p in store.readerPages.all">
 		<div
 			v-if="p.error || !p.blobUrl"
 			:style="
@@ -9,6 +9,7 @@
 				}
 			"
 			class="flex flex-col items-center justify-center gap-2"
+			:class="[store.readerPages.hidden.includes(p) && 'hidden']"
 		>
 			<template v-if="p.error">
 				<div>
@@ -30,7 +31,10 @@
 			v-else
 			:src="p.blobUrl"
 			alt=""
-			:class="modeClasses[store.readerMode].images"
+			:class="[
+				modeClasses[store.readerMode].images,
+				store.readerPages.hidden.includes(p) && 'hidden'
+			]"
 		/>
 	</template>
 </template>

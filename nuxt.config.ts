@@ -4,7 +4,10 @@ export default defineNuxtConfig({
 		dataDir: 'data',
 		sessionCookieName: 'voltis_session',
 		registrationsEnabled: false,
-		guestAccess: false
+		guestAccess: false,
+		public: {
+			brand: 'Voltis'
+		}
 	},
 	modules: ['@nuxt/ui', '@pinia/nuxt'],
 	srcDir: 'src',

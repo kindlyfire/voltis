@@ -4,7 +4,7 @@
 			<UserPagesSidebar />
 		</template>
 		<template #main>
-			<div class="text-5xl font-bold">Account</div>
+			<PageTitle title="Account" />
 
 			<UFormGroup label="Username" name="username" size="lg">
 				<UInput :model-value="user.username" disabled />

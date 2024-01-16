@@ -4,7 +4,7 @@
 			<UserPagesSidebar />
 		</template>
 		<template #main>
-			<div class="text-5xl font-bold">Preferences</div>
+			<PageTitle title="Preferences" />
 		</template>
 	</AMainWrapper>
 </template>

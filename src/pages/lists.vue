@@ -1,6 +1,6 @@
 <template>
 	<div class="acontainer flex flex-col gap-4">
-		<div class="text-5xl font-bold">Lists</div>
+		<PageTitle title="Lists" />
 	</div>
 </template>
 
