@@ -21,9 +21,11 @@ const defaultReaderState: ReaderState = {
 	pages: []
 }
 
-const PREFETCH_COUNT = 3
+const PREFETCH_COUNT = 10
 export const useComicReaderStore = defineStore('comic-reader', () => {
 	const toast = useToast()
+	const route = useRoute()
+
 	const itemId = ref(null as string | null)
 	const menuOpen = ref(false)
 
@@ -59,11 +61,16 @@ export const useComicReaderStore = defineStore('comic-reader', () => {
 	watch(
 		() => [readerData.value, collection.value] as const,
 		([rd, collection]) => {
+			if (readerState.value.mode || !readerData.value) return
 			const cachedMode = collection
 				? collectionReaderModes.get(collection.id)
 				: null
-			if (readerState.value.mode) return
-			readerState.value.mode = cachedMode ?? rd?.suggestedMode ?? 'pages'
+			readerState.value.mode =
+				cachedMode ?? rd?.suggestedMode ?? readerState.value.mode
+			if ('end' in route.query) {
+				readerState.value.pageIndex = readerData.value.files.length - 1
+				navigateTo(route.path, { replace: true })
+			}
 		}
 	)
 	watch(
@@ -120,7 +127,7 @@ export const useComicReaderStore = defineStore('comic-reader', () => {
 			return
 		}
 		const nextItem = items.value![nextIndex]
-		navigateTo('/read/' + nextItem.id)
+		navigateTo('/read/' + nextItem.id + (offset === -1 ? '?end' : ''))
 		toast.add({
 			title: 'Reading ' + nextItem.name,
 			timeout: 2000
@@ -181,6 +188,7 @@ function createPageState(
 			fetchPromise = doFetch().catch(e => {
 				console.error('Failed to fetch page', e)
 				state.error = e.message ?? '' + e
+				fetchPromise = null
 			})
 		}
 	})
@@ -201,15 +209,19 @@ function setupAutoPageFetch(readerState: Ref<ReaderState>) {
 			p.fetch()
 
 			if (!p.blobUrl) return
-			if (readerState.value.pageIndex > 0)
-				pages[readerState.value.pageIndex - 1].fetch()
 			for (
-				let i = readerState.value.pageIndex + 1;
-				i < readerState.value.pageIndex + 1 + PREFETCH_COUNT &&
-				i < pages.length;
+				let i = 1, prefetched = 0;
+				i <= PREFETCH_COUNT && prefetched < PREFETCH_COUNT;
 				i++
 			) {
-				pages[i].fetch()
+				if (readerState.value.pageIndex + i < pages.length) {
+					pages[readerState.value.pageIndex + i].fetch()
+					prefetched++
+				}
+				if (readerState.value.pageIndex - i >= 0) {
+					pages[readerState.value.pageIndex - i].fetch()
+					prefetched++
+				}
 			}
 		}
 	)

@@ -22,5 +22,7 @@ export default defineEventHandler(async event => {
 		return 'Not Found'
 	}
 
+	setHeader(event, 'Cache-Control', 'public, max-age=31536000')
+
 	await sendStream(event, new Blob([file.data]).stream())
 })

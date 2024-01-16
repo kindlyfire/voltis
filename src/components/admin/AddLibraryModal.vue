@@ -27,7 +27,7 @@
 				class="flex flex-col gap-4"
 				:schema="schema"
 				:state="state"
-				@submit="mCreate.mutate()"
+				@submit="mSave.mutate()"
 			>
 				<UFormGroup label="Name" name="name" size="lg">
 					<UInput v-model="state.name" />
@@ -82,7 +82,7 @@
 				</div>
 
 				<div class="flex items-center gap-2">
-					<UButton type="submit" :loading="mCreate.isPending.value">
+					<UButton type="submit" :loading="mSave.isPending.value">
 						{{ libraryId ? 'Save' : 'Create' }}
 					</UButton>
 					<UButton
@@ -90,6 +90,7 @@
 						@click.prevent.stop="mDelete.mutate()"
 						:loading="mDelete.isPending.value"
 						color="red"
+						variant="soft"
 					>
 						Delete
 					</UButton>
@@ -101,7 +102,6 @@
 
 <script lang="ts" setup>
 import { z } from 'zod'
-import type { UForm } from '../../../.nuxt/components'
 import { useMutation } from '@tanstack/vue-query'
 import { trpc } from '../../plugins/trpc'
 import { useLibraries } from '../../state/composables/queries'
@@ -113,6 +113,10 @@ const props = defineProps<{
 const emit = defineEmits<{
 	'update:modelValue': [open: boolean]
 }>()
+
+// InstanceType<typeof UForm> does not result in the correct types. I don't know
+// what would.
+const formRef = ref(null) as Ref<{ clear(path: string): void } | null>
 
 const qLibraries = useLibraries({})
 const libraryId = ref(null) as Ref<string | null>
@@ -134,6 +138,7 @@ function addPath() {
 	if (v && !state.paths.includes(v)) {
 		state.paths.push(v)
 		pathInputValue.value = ''
+		formRef.value?.clear('paths')
 	}
 }
 
@@ -151,13 +156,13 @@ watch(
 			if (lib) {
 				state.name = lib.name!
 				state.matcher = lib.matcher as any
-				state.paths = lib.paths!
+				state.paths = [...lib.paths!]
 			}
 		}
 	}
 )
 
-const mCreate = useMutation({
+const mSave = useMutation({
 	async mutationFn() {
 		if (!props.libraryId) {
 			await trpc.libraries.create.mutate({
@@ -178,7 +183,7 @@ const mCreate = useMutation({
 	}
 })
 const errorMessage = computed(() => {
-	const e = mCreate.error.value || mDelete.error.value
+	const e = mSave.error.value || mDelete.error.value
 	if (!e) return
 	if (e.name === 'TRPCError') {
 		return e.message

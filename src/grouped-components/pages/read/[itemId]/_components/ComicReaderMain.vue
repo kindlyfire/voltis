@@ -62,6 +62,10 @@ enum ReaderAction {
 	Next
 }
 function onReaderClick(ev: MouseEvent) {
+	if (ev.target instanceof HTMLElement) {
+		if (ev.target.tagName === 'BUTTON') return
+	}
+
 	// Calculate which zone the click was in (left, center, right) and resolve
 	// it to an action
 	const width = window.innerWidth
