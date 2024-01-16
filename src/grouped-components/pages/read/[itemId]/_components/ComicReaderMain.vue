@@ -1,7 +1,7 @@
 <template>
 	<div
 		class="-mb-4 mt-4 relative"
-		:class="modeClasses[store.readerMode.value].main"
+		:class="modeClasses[store.readerMode].main"
 		ref="readerMainRef"
 		@click="onReaderClick"
 	>
@@ -14,11 +14,11 @@
 
 <script lang="ts" setup>
 import { useScroll, watchDebounced } from '@vueuse/core'
-import { readerStateKey } from '../state'
 import ComicReaderPages from './ComicReaderPages.vue'
 import { modeClasses } from './shared'
+import { useComicReaderStore } from '../state'
 
-const store = inject(readerStateKey)!
+const store = useComicReaderStore()
 
 const readerMainRef = ref<HTMLDivElement | null>(null)
 const mainOverflowArea = ref<HTMLElement | null>(null)
@@ -31,6 +31,7 @@ defineExpose({
 })
 
 const progress = computed(() => {
+	if (store.readerState.pages.length === 0) return 0
 	return (
 		((store.readerState.pageIndex + 1) / store.readerState.pages.length) * 100
 	)
@@ -41,7 +42,7 @@ const pageScroll = useScroll(mainOverflowArea)
 watchDebounced(
 	() => pageScroll.y.value,
 	() => {
-		if (store.readerMode.value === 'longstrip') {
+		if (store.readerMode === 'longstrip') {
 			const children = Array.from(
 				readerMainRef.value!.children
 			) as HTMLImageElement[]
@@ -75,11 +76,11 @@ function onReaderClick(ev: MouseEvent) {
 	}
 
 	if (action === ReaderAction.Menu) {
-		// TODO
+		store.menuOpen = true
 		return
 	}
 
-	if (store.readerMode.value === 'pages') {
+	if (store.readerMode === 'pages') {
 		store.switchPage(action === ReaderAction.Previous ? -1 : 1)
 	} else {
 		// If at top, go to previous chapter. If at bottom, go to next chapter.

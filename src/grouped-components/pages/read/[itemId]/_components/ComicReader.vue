@@ -1,32 +1,35 @@
 <template>
-	<div class="acontainer" v-if="store.item.value && store.collection.value">
+	<div class="acontainer" v-if="store.item && store.collection">
 		<div class="text-lg font-semibold">
-			{{ store.item.value.name }}
+			{{ store.item.name }}
 		</div>
 		<div>
 			<NuxtLink
-				:to="
-					'/' +
-					slugify(store.collection.value.name) +
-					':' +
-					store.collection.value.id
-				"
+				:to="'/' + slugify(store.collection.name) + ':' + store.collection.id"
 				class="text-primary hover:underline"
 			>
-				{{ store.collection.value.name }}
+				{{ store.collection.name }}
 			</NuxtLink>
-		</div>
-		<div>
-			<UButton @click="store.switchMode()">Switch mode</UButton>
 		</div>
 	</div>
 	<ComicReaderMain ref="mainRef" />
+	<USlideover
+		side="right"
+		v-model="store.menuOpen"
+		:ui="{
+			width: 'max-w-[300px]'
+		}"
+		:transition="false"
+	>
+		<ComicReaderMenu />
+	</USlideover>
 </template>
 
 <script lang="ts" setup>
 import slugify from 'slugify'
-import { readerStateKey, useComicReaderStore } from '../state'
 import ComicReaderMain from './ComicReaderMain.vue'
+import { useComicReaderStore } from '../state'
+import ComicReaderMenu from './ComicReaderMenu.vue'
 
 const props = defineProps<{
 	itemId: string
@@ -34,23 +37,22 @@ const props = defineProps<{
 const emit = defineEmits<{}>()
 
 const store = useComicReaderStore()
-provide(readerStateKey, store)
 watchEffect(() => {
-	store.itemId.value = props.itemId
+	store.itemId = props.itemId
 })
 
 const mainRef = ref<InstanceType<typeof ComicReaderMain> | null>(null)
 const scrolledForItem = ref('')
 watchEffect(() => {
 	if (
-		store.item.value &&
-		store.collection.value &&
+		store.item &&
+		store.collection &&
 		mainRef.value?.readerMainRef &&
-		store.readerPages.value.length > 0 &&
+		store.readerPages.length > 0 &&
 		store.readerState.pageIndex === 0 &&
-		scrolledForItem.value !== store.item.value.id
+		scrolledForItem.value !== store.item.id
 	) {
-		scrolledForItem.value = store.item.value.id
+		scrolledForItem.value = store.item.id
 		setTimeout(() => {
 			document.getElementById('mainOverflowArea')?.scrollTo({
 				top: mainRef.value!.readerMainRef!.offsetTop,
@@ -63,10 +65,10 @@ watchEffect(() => {
 
 defineShortcuts({
 	ArrowLeft: () => {
-		store.switchPage(-1)
+		if (!store.menuOpen) store.switchPage(-1)
 	},
 	ArrowRight: () => {
-		store.switchPage(1)
+		if (!store.menuOpen) store.switchPage(1)
 	}
 })
 </script>

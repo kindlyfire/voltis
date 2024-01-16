@@ -1,9 +1,9 @@
 <template>
-	<template v-for="p in store.readerPages.value">
+	<template v-for="p in store.readerPages">
 		<div
 			v-if="p.error || !p.blobUrl"
 			:style="
-				store.readerMode.value === 'longstrip' && {
+				store.readerMode === 'longstrip' && {
 					width: p.file.width + 'px',
 					height: p.file.height + 'px'
 				}
@@ -30,16 +30,16 @@
 			v-else
 			:src="p.blobUrl"
 			alt=""
-			:class="modeClasses[store.readerMode.value].images"
+			:class="modeClasses[store.readerMode].images"
 		/>
 	</template>
 </template>
 
 <script lang="ts" setup>
-import { readerStateKey } from '../state'
+import { useComicReaderStore } from '../state'
 import { modeClasses } from './shared'
 
-const store = inject(readerStateKey)!
+const store = useComicReaderStore()
 </script>
 
 <style></style>

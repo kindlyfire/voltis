@@ -79,7 +79,7 @@
 			<template v-else>
 				<UButton to="/auth/login" color="gray">Log in</UButton>
 				<UButton
-					v-if="qMeta.data.value!.registrationsEnabled"
+					v-if="qMeta.data.value?.registrationsEnabled"
 					to="/auth/register"
 					color="gray"
 					>Register</UButton

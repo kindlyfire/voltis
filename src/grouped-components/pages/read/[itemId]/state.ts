@@ -1,5 +1,4 @@
 import slugify from 'slugify'
-import type { InjectionKey } from 'vue'
 import {
 	useCollection,
 	useItem,
@@ -14,18 +13,15 @@ interface ReaderState {
 	pages: Array<ReturnType<typeof createPageState>>
 }
 
-export const readerStateKey = Symbol() as InjectionKey<
-	ReturnType<typeof useComicReaderStore>
->
-
-// Cache the reader modes per collection so that switching between chapters
-// doesn't change the mode
-const collectionReaderModes = reactive(new Map<string, ReaderState['mode']>())
-
 const PREFETCH_COUNT = 3
-export const useComicReaderStore = () => {
+export const useComicReaderStore = defineStore('comic-reader', () => {
 	const toast = useToast()
 	const itemId = ref(null as string | null)
+	const menuOpen = ref(false)
+
+	// Cache the reader modes per collection so that switching between chapters
+	// doesn't change the mode
+	const collectionReaderModes = reactive(new Map<string, ReaderState['mode']>())
 
 	const qItem = useItem(itemId)
 	const item = computed(() => qItem.data.value)
@@ -102,6 +98,7 @@ export const useComicReaderStore = () => {
 				navigateTo(
 					'/' + slugify(collection.value.name) + ':' + collection.value.id
 				)
+				menuOpen.value = false
 				if (nextIndex < 0)
 					toast.add({
 						title: 'No more chapters',
@@ -119,9 +116,11 @@ export const useComicReaderStore = () => {
 	}
 
 	return {
+		menuOpen,
 		itemId,
 		qItem,
 		item,
+		items,
 		qCollection,
 		collection,
 		qReaderData,
@@ -138,7 +137,7 @@ export const useComicReaderStore = () => {
 			() => qItem.isLoading.value || qReaderData.isLoading.value
 		)
 	}
-}
+})
 
 function createPageState(
 	itemId: string,
