@@ -1,6 +1,7 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
 	runtimeConfig: {
+		dataDir: 'data',
 		sessionCookieName: 'voltis_session',
 		registrationsEnabled: false,
 		guestAccess: false
@@ -22,7 +23,7 @@ export default defineNuxtConfig({
 	vite: {
 		build: {
 			rollupOptions: {
-				external: ['sqlite3', 'sequelize', 'sharp']
+				external: ['sqlite3', 'sharp', 'bcrypt']
 			}
 		}
 	}

@@ -1,11 +1,13 @@
 import { Sequelize } from 'sequelize'
 import path from 'path'
 import { newUnpackedPromise } from '../utils/utils'
+import fs from 'fs-extra'
 
 function createDatabase() {
+	const runtimeConfig = useRuntimeConfig()
 	return new Sequelize({
 		dialect: 'sqlite',
-		storage: path.join(process.cwd(), 'db.sqlite3'),
+		storage: path.join(runtimeConfig.dataDir, 'db.sqlite3'),
 		// storage: ':memory:',
 		logging: false
 	})
@@ -17,6 +19,9 @@ const { promise, resolve } = newUnpackedPromise()
 export const dbReady = promise
 
 export default defineNitroPlugin(async () => {
+	const runtimeConfig = useRuntimeConfig()
+	await fs.mkdir(runtimeConfig.dataDir, { recursive: true })
+
 	db = createDatabase()
 
 	await importModel(import('../models/collection'))

@@ -25,6 +25,7 @@ logs
 
 # Other
 *.sqlite3
+Dockerfile
 
 # Application files (default path)
 /data
