@@ -16,19 +16,8 @@ export class ComicReader {
 	}
 
 	async load() {
-		const buf = await fs.readFile(this.item.path)
-		// TODO: Switch to async
-		const decompressed = fflate.unzipSync(new Uint8Array(buf), {
-			filter(file) {
-				return ['.png', '.jpg', '.jpeg'].includes(path.extname(file.name))
-			}
-		})
-		this.files = Object.entries(decompressed)
-			.map(([name, data]) => ({
-				name,
-				data
-			}))
-			.sort((a, b) => a.name.localeCompare(b.name))
+		const files = await unzipStream(fs.createReadStream(this.item.path))
+		this.files = files.sort((a, b) => a.name.localeCompare(b.name))
 	}
 }
 
@@ -56,3 +45,49 @@ export const getComicReader = pMemoize(getComicReaderUncached, {
 	cacheKey: ([id]) => id,
 	cache
 })
+
+/**
+ * Unzips a stream and returns an array of files and their data. It would
+ * probably (1000%) be nicer to unzip to a temp directory with a native program.
+ *
+ * While this is slower than fflate's synchroneous unzip, it doesn't block the
+ * event loop in the event of slow I/O (like a network mount)
+ */
+async function unzipStream(stream: fs.ReadStream) {
+	const unzipper = new fflate.Unzip()
+	unzipper.register(fflate.UnzipInflate)
+
+	let files = [] as Array<{ name: string; data: Uint8Array }>
+	const promises = [] as Promise<any>[]
+	unzipper.onfile = f => {
+		if (!['.png', '.jpg', '.jpeg'].includes(path.extname(f.name))) return
+		const bufs = [] as Uint8Array[]
+		const p = newUnpackedPromise()
+		f.ondata = (e, d, final) => {
+			bufs.push(d)
+			if (final) {
+				files.push({
+					name: f.name,
+					data: new Uint8Array(Buffer.concat(bufs))
+				})
+				p.resolve()
+			}
+		}
+		promises.push(p.promise)
+		f.start()
+	}
+
+	stream.on('data', (d: Buffer) => {
+		unzipper.push(d)
+	})
+	stream.on('end', () => {
+		unzipper.push(Buffer.alloc(0), true)
+	})
+
+	await new Promise((resolve, reject) => {
+		stream.on('error', reject)
+		stream.on('end', resolve)
+	})
+	await Promise.all(promises)
+	return files
+}
