@@ -15,7 +15,7 @@ const emit = defineEmits<{}>()
 
 <style>
 .GridContainer {
-	container: grid-container / size;
+	container: grid-container / inline-size;
 }
 
 .GridInner {
