@@ -37,7 +37,9 @@ export const comicMatcher: Matcher = {
 
 	listItems(col, dirEntries) {
 		const files = dirEntries.filter(
-			f => f.isFile() && f.name.toLowerCase().endsWith('.cbz')
+			f =>
+				f.isFile() &&
+				COMIC_EXTENSIONS.includes(path.extname(f.name).toLowerCase())
 		)
 		return files
 			.map(f => {
