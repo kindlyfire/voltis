@@ -1,7 +1,19 @@
 import { create, insertMultiple } from '@orama/orama'
 import { Collection } from '../models/collection'
 
-export async function createSearchIndex() {
+let index: Awaited<ReturnType<typeof createSearchIndex>> | null = null
+export async function getSearchIndex() {
+	if (!index) {
+		index = await createSearchIndex()
+	}
+	return index
+}
+
+export function resetSearchIndex() {
+	index = null
+}
+
+async function createSearchIndex() {
 	const index = await create({
 		schema: {
 			title: 'string'

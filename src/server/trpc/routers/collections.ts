@@ -3,6 +3,7 @@ import { maybePublicProcedure, router } from '../trpc.js'
 import { Collection } from '../../models/collection'
 import { search } from '@orama/orama'
 import { Op } from 'sequelize'
+import { getSearchIndex } from '../../utils/search-index'
 
 export const rCollections = router({
 	query: maybePublicProcedure
@@ -16,7 +17,7 @@ export const rCollections = router({
 		.query(async ({ input }) => {
 			let titleSearchIds: string[] = []
 			if (input.title) {
-				const index = await createSearchIndex()
+				const index = await getSearchIndex()
 				const results = await search(index, {
 					term: input.title ?? undefined,
 					boost: { title: 2 },

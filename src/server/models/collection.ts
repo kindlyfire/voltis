@@ -13,6 +13,7 @@ import {
 } from 'sequelize'
 import { Library } from './library'
 import { Item } from './item'
+import { resetSearchIndex } from '../utils/search-index'
 
 export interface CollectionMetadataSource {
 	name: string
@@ -176,6 +177,9 @@ export function init(sequelize: Sequelize) {
 				},
 				beforeUpdate(instance, options) {
 					instance.mergeMetadata()
+				},
+				afterSave() {
+					resetSearchIndex()
 				}
 			}
 		}

@@ -4,6 +4,7 @@ import { Library } from '../../models/library'
 import { Item } from '../../models/item'
 import { Op } from 'sequelize'
 import { db } from '../../plugins/sequelize'
+import { resetSearchIndex } from '../../utils/search-index'
 
 export const rLibraries = router({
 	query: maybePublicProcedure
@@ -89,6 +90,7 @@ export const rLibraries = router({
 				await collection.destroy()
 			}
 			await library.destroy()
+			resetSearchIndex()
 			return true
 		})
 })
