@@ -2,7 +2,7 @@
 	"name": "voltis",
 	"private": true,
 	"type": "module",
-	"version": "0.0.2",
+	"version": "0.0.3",
 	"packageManager": "pnpm@8.13.1",
 	"scripts": {
 		"build": "nuxt build",
@@ -18,42 +18,50 @@
 		"arrowParens": "avoid"
 	},
 	"devDependencies": {
+		"@isaacs/ttlcache": "^1.4.1",
 		"@nuxt/devtools": "^1.0.6",
+		"@nuxt/ui": "^2.12.0",
 		"@nuxtjs/tailwindcss": "^6.10.4",
 		"@orama/orama": "2.0.0-beta.12",
-		"@types/bcrypt": "^5.0.2",
-		"@types/dompurify": "^3.0.5",
-		"@types/fs-extra": "^11.0.4",
-		"nuxt": "^3.9.1",
-		"tsx": "^4.7.0",
-		"vue": "^3.4.7",
-		"vue-router": "^4.2.5",
-		"@isaacs/ttlcache": "^1.4.1",
-		"@nuxt/ui": "^2.12.0",
 		"@pinia/nuxt": "^0.5.1",
 		"@tanstack/vue-query": "^5.17.9",
 		"@trpc/client": "^10.45.0",
 		"@trpc/server": "^10.45.0",
+		"@types/bcrypt": "^5.0.2",
+		"@types/dompurify": "^3.0.5",
+		"@types/fs-extra": "^11.0.4",
 		"@vueuse/core": "^10.7.2",
 		"consola": "^3.2.3",
 		"dompurify": "^3.0.8",
 		"fflate": "^0.8.1",
 		"fs-extra": "^11.2.0",
+		"globby": "^14.0.0",
 		"marked": "^11.1.1",
 		"nanoid": "^5.0.4",
+		"nuxt": "^3.9.1",
 		"p-memoize": "^7.1.1",
 		"p-queue": "^8.0.1",
 		"pathe": "^1.1.1",
 		"pinia": "^2.1.7",
+		"sequelize": "^6.35.2",
 		"slugify": "^1.6.6",
 		"superjson": "^2.2.1",
 		"trpc-nuxt": "^0.10.15",
+		"tsx": "^4.7.0",
+		"vue": "^3.4.7",
+		"vue-router": "^4.2.5",
 		"zod": "^3.22.4",
-		"sequelize": "^6.35.2"
+		"nitropack": "^2.8.1",
+		"execa": "^8.0.1"
 	},
 	"dependencies": {
-		"sqlite3": "^5.1.7",
+		"bcrypt": "^5.1.1",
 		"sharp": "^0.33.2",
-		"bcrypt": "^5.1.1"
+		"sqlite3": "^5.1.7"
+	},
+	"pnpm": {
+		"patchedDependencies": {
+			"nitropack@2.8.1": "patches/nitropack@2.8.1.patch"
+		}
 	}
 }
