@@ -40,7 +40,7 @@ export function omitKeys<T extends Record<string, unknown>, K extends keyof T>(
 export function newUnpackedPromise<T = void>() {
 	let resolve!: (value: T) => void
 	let reject!: (reason?: any) => void
-	const promise = new Promise((res, rej) => {
+	const promise = new Promise<T>((res, rej) => {
 		resolve = res
 		reject = rej
 	})

@@ -2,7 +2,8 @@ import { Collection } from '../../models/collection'
 import { Item, ItemMetadataSource } from '../../models/item'
 import sharp from 'sharp'
 import { promiseAllSettled2 } from '../../utils/utils'
-import { getComicReader } from '../../utils/comic-reader'
+import { getComicData } from '../../utils/comic-reader'
+import path from 'pathe'
 
 export interface FileMetadataCustomData {
 	suggestedMode?: 'pages' | 'longstrip'
@@ -18,13 +19,13 @@ export const fileMetadataFn = async (
 	item: Item,
 	source: ItemMetadataSource
 ): Promise<ItemMetadataSource> => {
-	const reader = await getComicReader(item.id)
+	const comicData = await getComicData(item.id)
 
 	const [files] = await promiseAllSettled2(
-		reader.files.map(async f => {
-			const meta = await sharp(f.data).metadata()
+		comicData.files.map(async f => {
+			const meta = await sharp(path.join(comicData.root, f)).metadata()
 			return {
-				name: f.name,
+				name: f,
 				width: meta.width ?? 1,
 				height: meta.height ?? 1
 			}

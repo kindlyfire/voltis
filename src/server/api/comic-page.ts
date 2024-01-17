@@ -1,5 +1,7 @@
 import { getQuery } from 'h3'
-import { getComicReader } from '../utils/comic-reader'
+import { getComicData } from '../utils/comic-reader'
+import fs from 'fs-extra'
+import path from 'pathe'
 
 export default defineEventHandler(async event => {
 	const query = getQuery(event)
@@ -10,13 +12,13 @@ export default defineEventHandler(async event => {
 		return 'Bad Request'
 	}
 
-	const reader = await getComicReader(itemId).catch(() => null)
-	if (!reader) {
+	const comicData = await getComicData(itemId).catch(() => null)
+	if (!comicData) {
 		setResponseStatus(event, 404)
 		return 'Not Found'
 	}
 
-	const file = reader.files.find(file => file.name === fileName)
+	const file = comicData.files.find(f => f === fileName)
 	if (!file) {
 		setResponseStatus(event, 404)
 		return 'Not Found'
@@ -24,5 +26,5 @@ export default defineEventHandler(async event => {
 
 	setHeader(event, 'Cache-Control', 'public, max-age=31536000')
 
-	await sendStream(event, new Blob([file.data]).stream())
+	await sendStream(event, fs.createReadStream(path.join(comicData.root, file)))
 })
