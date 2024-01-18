@@ -1,7 +1,7 @@
 <template>
 	<div>
 		<div class="h-[50px] flex items-center px-2 gap-1 sm:gap-2">
-			<UButton color="gray" @click="store.menuOpen = false">
+			<UButton color="gray" @click="reader.state.menuOpen = false">
 				<UIcon name="ph:x-bold" dynamic class="h-5 scale-[1.2]" />
 			</UButton>
 		</div>
@@ -11,7 +11,7 @@
 					<UIcon name="ph:book-open-bold" dynamic class="h-6 w-6" />
 				</div>
 				<div class="text-sm">
-					{{ store.collection?.name }}
+					{{ chapter?.collectionTitle ?? 'Loading...' }}
 				</div>
 			</div>
 
@@ -20,7 +20,7 @@
 					<UIcon name="ph:file-bold" dynamic class="h-6 w-6" />
 				</div>
 				<div class="text-sm">
-					{{ store.item?.name }}
+					{{ chapter?.title ?? 'Loading...' }}
 				</div>
 			</div>
 
@@ -30,7 +30,7 @@
 						square
 						class="w-[32px] justify-center"
 						color="gray"
-						@click="store.switchPage(-1)"
+						@click="reader.goToPage(Math.max(reader.state.page - 1, 0))"
 					>
 						<UIcon name="ph:caret-left-bold" dynamic class="h-5 scale-[1.2]" />
 					</UButton>
@@ -39,17 +39,23 @@
 						:options="pageOptions"
 						value-attribute="value"
 						option-attribute="label"
-						v-model="store.readerState.pageIndex"
+						:model-value="reader.state.page"
+						@update:model-value="reader.goToPage($event)"
 					>
-						<template #label>
-							Page {{ store.readerState.pageIndex + 1 }}
-						</template>
+						<template #label> Page {{ reader.state.page + 1 }} </template>
 					</USelectMenu>
 					<UButton
 						square
 						class="w-[32px] justify-center"
 						color="gray"
-						@click="store.switchPage(1)"
+						@click="
+							reader.goToPage(
+								Math.min(
+									reader.state.page + 1,
+									(chapter?.pages.length ?? 1) - 1
+								)
+							)
+						"
 					>
 						<UIcon name="ph:caret-right-bold" dynamic class="h-5 scale-[1.2]" />
 					</UButton>
@@ -62,7 +68,7 @@
 						square
 						class="w-[32px] justify-center"
 						color="gray"
-						@click="store.switchChapter(-1)"
+						@click="reader.switchChapter(SwitchChapterDirection.Backward)"
 					>
 						<UIcon name="ph:caret-left-bold" dynamic class="h-5 scale-[1.2]" />
 					</UButton>
@@ -71,18 +77,18 @@
 						:options="chapterOptions"
 						value-attribute="value"
 						option-attribute="label"
-						:model-value="store.itemId ?? ''"
-						@update:model-value="$router.push('/read/' + $event)"
+						:model-value="reader.state.chapterId"
+						@update:model-value="reader.switchChapterById($event)"
 					>
 						<template #label>
-							{{ store.item?.name || '...' }}
+							{{ chapter?.title ?? 'Loading...' }}
 						</template>
 					</USelectMenu>
 					<UButton
 						square
 						class="w-[32px] justify-center"
 						color="gray"
-						@click="store.switchChapter(1)"
+						@click="reader.switchChapter(SwitchChapterDirection.Forward)"
 					>
 						<UIcon name="ph:caret-right-bold" dynamic class="h-5 scale-[1.2]" />
 					</UButton>
@@ -91,32 +97,43 @@
 
 			<hr />
 
-			<UButton @click="store.switchMode()" size="lg" color="gray">
-				{{ store.readerMode === 'pages' ? 'Single Page' : 'Longstrip' }}
+			<UButton
+				@click="
+					reader.state.mode =
+						reader.state.mode === 'longstrip' ? 'pages' : 'longstrip'
+				"
+				size="lg"
+				color="gray"
+			>
+				{{ reader.state.mode === 'pages' ? 'Single Page' : 'Longstrip' }}
 			</UButton>
 		</div>
 	</div>
 </template>
 
 <script lang="ts" setup>
-import { useComicReaderStore } from '../state'
+import { SwitchChapterDirection, readerKey } from './use-reader'
 
-const store = useComicReaderStore()
+const reader = inject(readerKey)!
 
-const pageOptions = computed(() =>
-	store.readerState.pages.map((page, index) => ({
-		label: `Page ${index + 1}`,
-		value: index
-	}))
-)
+const chapter = computed(() => {
+	return reader.state.chaptersData.find(c => c.id === reader.state.chapterId)
+})
 
-const chapterOptions = computed(
-	() =>
-		store.items?.map(item => ({
-			label: item.name,
-			value: item.id
+const pageOptions = computed(() => {
+	return (
+		chapter.value?.pages.map((_, i) => ({
+			label: `Page ${i + 1}`,
+			value: i
 		})) ?? []
-)
+	)
+})
+const chapterOptions = computed(() => {
+	return reader.state.chapters.map(c => ({
+		label: c.title,
+		value: c.id
+	}))
+})
 </script>
 
 <style></style>

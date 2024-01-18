@@ -6,19 +6,31 @@ import {
 	FileMetadataCustomData,
 	fileMetadataFn
 } from '../../scanning/comic/metadata-file'
+import { InferAttributes, WhereOptions } from 'sequelize'
 
 export const rItems = router({
 	query: maybePublicProcedure
 		.input(
 			z.object({
-				collectionId: z.string()
+				collectionId: z.string().nullish(),
+				inSameCollectionAs: z.string().nullish()
 			})
 		)
 		.query(async ({ input }) => {
-			const items = await Item.findAll({
-				where: {
-					collectionId: input.collectionId
+			const where: WhereOptions<InferAttributes<Item>> = {}
+
+			if (input.inSameCollectionAs) {
+				const item = await Item.findByPk(input.inSameCollectionAs)
+				if (!item) {
+					throw new TRPCError({ code: 'NOT_FOUND' })
 				}
+				where.collectionId = item.collectionId
+			} else if (input.collectionId) {
+				where.collectionId = input.collectionId
+			}
+
+			const items = await Item.findAll({
+				where
 			})
 
 			return items
@@ -60,5 +72,39 @@ export const rItems = router({
 			}
 
 			return fileSource.customData! as FileMetadataCustomData
+		}),
+
+	getReaderData2: maybePublicProcedure
+		.input(z.object({ id: z.string() }))
+		.query(async ({ input }) => {
+			const item = await Item.findByPk(input.id, {
+				include: {
+					association: Item.associations.collection,
+					required: true
+				}
+			})
+			if (!item) {
+				throw new TRPCError({ code: 'NOT_FOUND' })
+			}
+
+			let fileSource = item.metadata.sources.find(s => s.name === 'file')
+			if (!fileSource) {
+				await item.applyMetadataSourceFn('file', fileMetadataFn)
+				item.save()
+				fileSource = item.metadata.sources.find(s => s.name === 'file')
+			}
+			if (!fileSource) {
+				throw new TRPCError({ code: 'NOT_FOUND' })
+			}
+
+			const data = fileSource.customData! as FileMetadataCustomData
+
+			return {
+				collectionId: item.collectionId,
+				pages: data.files,
+				suggestedMode: data.suggestedMode ?? 'pages',
+				chapterTitle: item.name,
+				collectionTitle: item.collection!.name
+			}
 		})
 })

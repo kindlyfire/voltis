@@ -97,7 +97,7 @@
 			<div class="flex flex-col gap-1">
 				<NuxtLink
 					v-for="i in pageItems"
-					:to="'/read/' + i.id"
+					:to="'/read/' + i.id + '/0'"
 					class="card w-full border-l-4 border-l-[rgb(var(--color-primary-DEFAULT)/0.75)]"
 				>
 					<div class="flex items-center gap-2">
