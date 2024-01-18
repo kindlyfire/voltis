@@ -133,8 +133,7 @@ watchDebounced(
 	() => {
 		const viewingPage = getViewingPage()
 		if (viewingPage != null) {
-			reader.state.page = viewingPage
-			reader.state.provider.onPageChange(reader.state.page)
+			reader.setPageTo(viewingPage)
 		}
 	},
 	{ debounce: 25 }

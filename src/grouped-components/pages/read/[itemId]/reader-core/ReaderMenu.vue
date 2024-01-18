@@ -10,9 +10,12 @@
 				<div>
 					<UIcon name="ph:book-open-bold" dynamic class="h-6 w-6" />
 				</div>
-				<div class="text-sm">
+				<NuxtLink
+					class="text-sm text-primary hover:underline"
+					:to="chapter?.collectionLink"
+				>
 					{{ chapter?.collectionTitle ?? 'Loading...' }}
-				</div>
+				</NuxtLink>
 			</div>
 
 			<div class="flex items-center gap-2 pl-2">
@@ -30,7 +33,7 @@
 						square
 						class="w-[32px] justify-center"
 						color="gray"
-						@click="reader.goToPage(Math.max(reader.state.page - 1, 0))"
+						@click="reader.goToPage(reader.state.page - 1)"
 					>
 						<UIcon name="ph:caret-left-bold" dynamic class="h-5 scale-[1.2]" />
 					</UButton>
@@ -48,14 +51,7 @@
 						square
 						class="w-[32px] justify-center"
 						color="gray"
-						@click="
-							reader.goToPage(
-								Math.min(
-									reader.state.page + 1,
-									(chapter?.pages.length ?? 1) - 1
-								)
-							)
-						"
+						@click="reader.goToPage(reader.state.page + 1)"
 					>
 						<UIcon name="ph:caret-right-bold" dynamic class="h-5 scale-[1.2]" />
 					</UButton>
@@ -97,14 +93,7 @@
 
 			<hr />
 
-			<UButton
-				@click="
-					reader.state.mode =
-						reader.state.mode === 'longstrip' ? 'pages' : 'longstrip'
-				"
-				size="lg"
-				color="gray"
-			>
+			<UButton @click="reader.switchMode()" size="lg" color="gray">
 				{{ reader.state.mode === 'pages' ? 'Single Page' : 'Longstrip' }}
 			</UButton>
 		</div>

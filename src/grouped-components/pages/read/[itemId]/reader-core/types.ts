@@ -1,9 +1,4 @@
-import type {
-	ReaderState,
-	SwitchChapterDirection,
-	SwitchChapterPagePosition
-} from './use-reader'
-import { Hookable } from 'hookable'
+import type { SwitchChapterDirection } from './use-reader'
 
 export interface ReaderDataPage {
 	name: string
@@ -28,6 +23,7 @@ export interface ChapterData {
 	title: string
 	collectionId: string
 	collectionTitle: string
+	collectionLink: string
 }
 
 export interface ChapterListItem {
@@ -37,37 +33,14 @@ export interface ChapterListItem {
 
 export interface ReaderProvider {
 	getChapterId(): string
-
-	getChapterData(id: string): Promise<ChapterData>
-
+	fetchChapterData(id: string): Promise<ChapterData>
 	/**
 	 * Chapters are expected to be returned in REVERSE order of reading. The
 	 * first chapter to read is the last one in the array.
 	 */
 	getChapterList(): Promise<ChapterListItem[]>
-
 	onPageChange(page: number): void
-
-	onChapterChange(chapter: ChapterListItem): void
-
-	onChapterLoaded(chapter: ChapterData): void
-
+	beforeChapterChange(chapter: ChapterListItem): void
+	afterChapterChange(chapter: ChapterData): void
 	onChapterChangeBeyondAvailable(direction: SwitchChapterDirection): void
-}
-
-export interface Reader {
-	state: ReaderState
-	activeChapter: ComputedRef<ChapterData | null>
-	hooks: Hookable<ReaderHooks>
-
-	reset(): void
-
-	switchChapter(
-		dir: SwitchChapterDirection,
-		pos?: SwitchChapterPagePosition
-	): void
-
-	switchChapterById(id: string, pos?: SwitchChapterPagePosition): void
-
-	goToPage(page: number): void
 }

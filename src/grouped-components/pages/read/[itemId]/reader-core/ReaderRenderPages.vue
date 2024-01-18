@@ -46,6 +46,7 @@ const chapterPages = computed(() => {
 const p = computed(() => {
 	if (!chapterPages.value) return
 	const p = chapterPages.value[reader.state.page]
+	if (!p) return
 	p.fetch()
 	return p
 })
@@ -58,15 +59,13 @@ useReaderActions({
 				SwitchChapterDirection.Backward,
 				SwitchChapterPagePosition.End
 			)
-		reader.state.page--
-		reader.state.provider.onPageChange(reader.state.page)
+		reader.setPageTo(reader.state.page - 1)
 	},
 	onNext() {
 		if (!chapterPages.value) return
 		if (reader.state.page >= chapterPages.value.length - 1)
 			return reader.switchChapter(SwitchChapterDirection.Forward)
-		reader.state.page++
-		reader.state.provider.onPageChange(reader.state.page)
+		reader.setPageTo(reader.state.page + 1)
 	}
 })
 
@@ -79,6 +78,7 @@ watchEffect(() => {
 
 	// We make sure the first page is loaded, then the second page, and then the
 	// third and fourth can be loaded in parallel
+	if (pagesToPreload.length === 0) return
 	pagesToPreload[0].fetch()
 	if (!pagesToPreload[0].blobUrl || pagesToPreload.length < 2) return
 	pagesToPreload[1].fetch()

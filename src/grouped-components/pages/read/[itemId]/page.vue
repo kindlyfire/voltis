@@ -49,7 +49,7 @@ const provider: ReaderProvider = {
 		return itemId.value
 	},
 
-	async getChapterData(id) {
+	async fetchChapterData(id) {
 		const data = await trpc.items.getReaderData2.query({ id })
 		let startPage =
 			typeof route.params.page === 'string' ? +route.params.page : 0
@@ -59,6 +59,8 @@ const provider: ReaderProvider = {
 			title: data.chapterTitle,
 			collectionId: data.collectionId,
 			collectionTitle: data.collectionTitle,
+			collectionLink:
+				'/' + slugify(data.collectionTitle) + ':' + data.collectionId,
 			pages: data.pages.map(p => ({
 				...p,
 				url:
@@ -83,7 +85,7 @@ const provider: ReaderProvider = {
 		}))
 	},
 
-	onChapterChange(chapter) {
+	beforeChapterChange(chapter) {
 		toast.add({
 			title: 'Reading ' + chapter.title,
 			timeout: 2000
@@ -97,7 +99,7 @@ const provider: ReaderProvider = {
 		else router.push('/read/' + currentChapterData.value.id + '/' + page)
 	},
 
-	onChapterLoaded(chapter) {
+	afterChapterChange(chapter) {
 		currentChapterData.value = chapter
 	},
 
