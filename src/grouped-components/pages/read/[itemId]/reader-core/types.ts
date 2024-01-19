@@ -13,6 +13,7 @@ export interface ReaderDataPageLoaded extends ReaderDataPage {
 
 export interface ReaderHooks {
 	goToPage(page: number): void
+	beforeChapterChange(chapter: ChapterListItem): void
 }
 
 export interface ChapterData {

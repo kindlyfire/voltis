@@ -138,8 +138,9 @@ export function useReader(_provider: ReaderProvider) {
 			return
 		}
 		state.chapterId = chapter.id
-		state.provider.beforeChapterChange(chapter)
 		state.page = 0
+		state.provider.beforeChapterChange(chapter)
+		hooks.callHook('beforeChapterChange', chapter)
 		_loadChapter(chapter.id)
 			.then(() => {
 				const pages = state.chaptersPages.get(chapter.id)!

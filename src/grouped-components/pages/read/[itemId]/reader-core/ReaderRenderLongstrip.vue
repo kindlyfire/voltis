@@ -46,11 +46,7 @@ import {
 	readerKey
 } from './use-reader'
 import { useReaderActions } from './use-reader-actions'
-import {
-	getPagesInPreloadOrder,
-	preloadPages,
-	type PageLoader
-} from './page-loader'
+import { getPagesInPreloadOrder, preloadPages } from './page-loader'
 
 const reader = inject(readerKey)!
 const imageWrapperRef = ref<HTMLDivElement | null>(null)
@@ -170,6 +166,14 @@ onMounted(() => {
 onUnmounted(
 	reader.hooks.hook('goToPage', page => {
 		scrollToPage()
+	})
+)
+onUnmounted(
+	reader.hooks.hook('beforeChapterChange', () => {
+		reader.state.scrollRef?.scrollTo({
+			top: reader.state.mainRef?.offsetTop ?? 0,
+			behavior: 'instant'
+		})
 	})
 )
 </script>
