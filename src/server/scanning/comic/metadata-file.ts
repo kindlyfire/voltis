@@ -1,12 +1,11 @@
-import { Collection } from '../../models/collection'
-import { Item, ItemMetadataSource } from '../../models/item'
 import sharp from 'sharp'
 import { promiseAllSettled2 } from '../../utils/utils'
 import { getComicData } from '../../utils/comic-reader'
 import path from 'pathe'
+import { DiskCollection, DiskItem } from '@prisma/client'
 
-export interface FileMetadataCustomData {
-	suggestedMode?: 'pages' | 'longstrip'
+export interface DiskItemComicMetadata {
+	suggestedMode: 'pages' | 'longstrip'
 	files: Array<{
 		name: string
 		width: number
@@ -14,11 +13,9 @@ export interface FileMetadataCustomData {
 	}>
 }
 
-export const fileMetadataFn = async (
-	col: Collection,
-	item: Item,
-	source: ItemMetadataSource
-): Promise<ItemMetadataSource> => {
+export const diskItemComicMetadataFn = async (
+	item: DiskItem
+): Promise<DiskItemComicMetadata> => {
 	const comicData = await getComicData(item.id)
 
 	const [files] = await promiseAllSettled2(
@@ -40,11 +37,7 @@ export const fileMetadataFn = async (
 	}
 
 	return {
-		...source,
-		updatedAt: new Date().toISOString(),
-		customData: <FileMetadataCustomData>{
-			suggestedMode,
-			files
-		}
+		suggestedMode,
+		files
 	}
 }

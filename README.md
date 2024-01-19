@@ -30,6 +30,5 @@ you.
   - [ ] Manage users
   - [x] Manage libraries
   - [x] Trigger library scans
-- [ ] OPDS support
 - [ ] Dark mode
 - [x] Mobile-friendly UI (mostly)

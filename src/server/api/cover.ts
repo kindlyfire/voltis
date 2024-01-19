@@ -1,9 +1,8 @@
 import { getQuery } from 'h3'
 import fs from 'fs-extra'
-import { Item } from '../models/item'
-import { Collection } from '../models/collection'
 import sharp from 'sharp'
 import { z } from 'zod'
+import { prisma } from '../database'
 
 const schema = z.object({
 	'item-id': z.string().optional(),
@@ -22,12 +21,12 @@ export default defineEventHandler(async event => {
 
 	let coverPath = ''
 	if (itemId) {
-		const item = await Item.findByPk(itemId)
+		const item = await prisma.item.findById(itemId)
 		if (item?.coverPath) {
 			coverPath = item.coverPath
 		}
 	} else if (collectionId) {
-		const collection = await Collection.findByPk(collectionId)
+		const collection = await prisma.collection.findById(collectionId)
 		if (collection?.coverPath) {
 			coverPath = collection.coverPath
 		}

@@ -84,9 +84,8 @@
 
 <script lang="ts" setup>
 import slugify from 'slugify'
-import type { InferAttributes } from 'sequelize'
-import type { Collection } from '../server/models/collection'
 import { useCollections } from '../state/composables/queries'
+import type { Collection } from '@prisma/client'
 
 const props = defineProps<{
 	modelValue: boolean
@@ -96,7 +95,7 @@ const emit = defineEmits<{
 }>()
 
 const searchTerm = ref('')
-const results = ref([]) as Ref<InferAttributes<Collection>[]>
+const results = ref([]) as Ref<Collection[]>
 
 const qQuery = useCollections(
 	computed(() => {

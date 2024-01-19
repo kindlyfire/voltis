@@ -2,12 +2,12 @@ import cluster from 'node:cluster'
 import pMemoize from 'p-memoize'
 import TTLCache from '@isaacs/ttlcache'
 import { ComicResponse, isComicRequest } from './types'
-import { Item } from '../../models/item'
 import os from 'node:os'
 import path from 'pathe'
 import fs from 'fs-extra'
 import { execa } from 'execa'
 import { globby } from 'globby'
+import { prisma } from '../../database'
 
 if (cluster.isPrimary) {
 	cluster.on('message', (worker, msg) => {
@@ -54,7 +54,7 @@ async function _getComicData(itemId: string) {
 		throw new Error('getComicData must be called on the primary cluster worker')
 	}
 
-	const item = await Item.findByPk(itemId)
+	const item = await prisma.diskItem.findById(itemId)
 	if (!item) throw new Error(`Item ${itemId} not found`)
 
 	const dir = path.join(os.tmpdir(), 'voltis', itemId)

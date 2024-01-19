@@ -1,16 +1,15 @@
 import fs from 'fs-extra'
 import { MaybePromise } from '../../utils'
-import { Collection } from '../models/collection'
-import { Item } from '../models/item'
+import { DiskCollection, DiskItem } from '@prisma/client'
 
 export interface MatcherCollection {
-	contentId: string
+	contentUri: string
 	defaultName: string
 	coverPath?: string | null
 }
 
 export interface MatcherItem {
-	contentId: string
+	contentUri: string
 	defaultName: string
 	path: string
 	coverPath?: string | null
@@ -33,7 +32,7 @@ export interface Matcher {
 	 * Update all data possible for a collection, without changing either the
 	 * path or the content ID. If possible, do the least I/O possible.
 	 */
-	updateCollection(col: Collection): MaybePromise<any>
+	updateCollection(col: DiskCollection): MaybePromise<any>
 
 	/**
 	 * Return the content IDs of all items in a collection, along with their
@@ -41,14 +40,14 @@ export interface Matcher {
 	 * has changed.
 	 */
 	listItems(
-		col: Collection,
+		col: DiskCollection,
 		dirEntries: fs.Dirent[]
 	): MaybePromise<MatcherItem[]>
 
 	/**
 	 * Update all items for a collection.
 	 */
-	updateItems(col: Collection, existingItems: Item[]): MaybePromise<any>
+	updateItems(col: DiskCollection, existingItems: DiskItem[]): MaybePromise<any>
 }
 
 export const matchers: Matcher[] = []

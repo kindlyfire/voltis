@@ -1,9 +1,8 @@
 import { z } from 'zod'
 import { adminProcedure, router } from '../trpc'
-import { Op } from 'sequelize'
-import { Library } from '../../models/library'
 import { TRPCError } from '@trpc/server'
 import { scanLibrary } from '../../scanning/scanner'
+import { prisma } from '../../database'
 
 export const rScan = router({
 	scanLibraries: adminProcedure
@@ -13,12 +12,8 @@ export const rScan = router({
 			})
 		)
 		.mutation(async opts => {
-			const libraries = await Library.findAll({
-				where: {
-					id: {
-						[Op.in]: opts.input.libraryIds
-					}
-				}
+			const libraries = await prisma.library.findMany({
+				where: { id: { in: opts.input.libraryIds } }
 			})
 			if (libraries.length !== opts.input.libraryIds.length) {
 				throw new TRPCError({

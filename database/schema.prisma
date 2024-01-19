@@ -1,0 +1,133 @@
+datasource db {
+    provider = "postgresql"
+    url      = env("DB_URI")
+}
+
+generator client {
+    provider      = "prisma-client-js"
+    binaryTargets = ["native"]
+}
+
+generator json {
+    provider = "prisma-json-types-generator"
+}
+
+generator kysely {
+    provider     = "prisma-kysely"
+    output       = "../src/server/database"
+    fileName     = "types-kysely.ts"
+    enumFileName = "enums-kysely.ts"
+}
+
+model User {
+    id        String   @id @default(cuid())
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    username    String
+    email       String   @unique
+    password    String
+    roles       String[]
+    preferences Json
+
+    UserSession UserSession[]
+}
+
+model UserSession {
+    id        String   @id @default(cuid())
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    token  String @unique
+    userId String
+    User   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Library {
+    id        String   @id @default(cuid())
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    name     String
+    type     String
+    paths    String[]
+    lastScan DateTime?
+
+    DiskCollection DiskCollection[]
+}
+
+// model Tag {
+//     id        String   @id @default(cuid())
+//     createdAt DateTime @default(now())
+//     updatedAt DateTime @updatedAt
+
+//     name  String
+//     types String[]
+// }
+
+model DiskCollection {
+    id        String   @id @default(cuid())
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    name               String
+    type               String
+    path               String
+    coverPath          String?
+    contentUri         String
+    contentUriOverride String?
+    missing            Boolean @default(false)
+
+    Library   Library    @relation(fields: [libraryId], references: [id], onDelete: Cascade)
+    libraryId String
+    DiskItem  DiskItem[]
+}
+
+model DiskItem {
+    id        String   @id @default(cuid())
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    name       String
+    path       String
+    coverPath  String?
+    contentUri String
+    /// [DiskItemMetadata]
+    metadata   Json
+
+    DiskCollection   DiskCollection @relation(fields: [diskCollectionId], references: [id], onDelete: Cascade)
+    diskCollectionId String
+}
+
+model Collection {
+    id        String   @id @default(cuid())
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    name         String
+    nameOverride String?
+    type         String
+    contentUri   String
+    coverPath    String?
+    /// [CollectionMetadata]
+    metadata     Json
+
+    Item Item[]
+}
+
+model Item {
+    id        String   @id @default(cuid())
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    name         String
+    nameOverride String?
+    type         String
+    contentUri   String
+    coverPath    String?
+    metadata     Json
+    sortValue    Int[]
+
+    Collection   Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+    collectionId String
+}

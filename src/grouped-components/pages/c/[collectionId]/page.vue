@@ -24,12 +24,12 @@
 				</div>
 			</div>
 
-			<UAlert
+			<!-- <UAlert
 				v-if="collection.missing"
 				title="The files for this collection were missing during the last scan and may be unavailable."
 				color="red"
 				variant="subtle"
-			/>
+			/> -->
 
 			<div class="grid gap-2 grid-cols-2 md:gap-4 md:grid-cols-1">
 				<div class="flex flex-col" v-if="metadata.pubStatus">
@@ -51,7 +51,7 @@
 					</div>
 					<div class="-mt-1">{{ metadata.authors.join(', ') }}</div>
 				</div>
-				<div class="flex flex-col">
+				<!-- <div class="flex flex-col">
 					<div class="flex items-center gap-1 text-sm text-muted">
 						<UIcon name="ph:link-bold" dynamic class="scale-[1.2]" />
 						Links
@@ -72,7 +72,7 @@
 							Mangadex
 						</NuxtLink>
 					</div>
-				</div>
+				</div> -->
 				<div class="flex flex-col">
 					<div class="flex items-center gap-1 text-sm text-muted">
 						<UIcon name="ph:clock-bold" dynamic class="scale-[1.2]" />
@@ -162,9 +162,9 @@ const qCollection = useQuery({
 })
 await qCollection.suspense()
 const collection = computed(() => qCollection.data.value!)
-const metadata = computed(() => collection.value?.metadata.merged ?? {})
+const metadata = computed(() => collection.value?.metadata.comic! ?? {})
 const sourceMangadex = computed(() => {
-	return collection.value?.metadata.sources.find(i => i.name === 'mangadex')
+	return collection.value?.metadata.comic
 })
 
 const qItems = useItems(

@@ -1,7 +1,6 @@
 import { Matcher, MatcherItem } from '..'
 import path from 'pathe'
 import slugify from 'slugify'
-import { mangadexMetadataFn } from './metadata-mangadex'
 
 const COVER_FILENAMES = ['cover.jpg', 'cover.png', 'cover.jpeg']
 const CLEAN_FILENAME_RE = /((\[.+\])|(\(.+\))|(\{.+\})|\s)+$/g
@@ -23,16 +22,18 @@ export const comicMatcher: Matcher = {
 			.name.replaceAll(CLEAN_FILENAME_RE, '')
 			.trim()
 		return {
-			contentId: slugify(cleanedName, {
-				lower: true
-			}),
+			contentUri:
+				'comic:' +
+				slugify(cleanedName, {
+					lower: true
+				}),
 			defaultName: cleanedName,
 			coverPath: cover ? path.join(dir, cover) : null
 		}
 	},
 
 	async updateCollection(col) {
-		await col.applyMetadataSourceFn('mangadex', mangadexMetadataFn)
+		// await col.applyMetadataSourceFn('mangadex', mangadexMetadataFn)
 	},
 
 	listItems(col, dirEntries) {
@@ -49,20 +50,22 @@ export const comicMatcher: Matcher = {
 					.trim()
 				const contentId = extractNameContentId(cleanedName)
 				return <MatcherItem>{
-					contentId: contentId ?? '',
+					contentUri: contentId
+						? (col.contentUriOverride || col.contentUri) + ':' + contentId
+						: '',
 					defaultName:
 						formatNameData(extractNameData(cleanedName)) || cleanedName,
 					path: path.join(col.path, f.name)
 				}
 			})
-			.filter(f => f.contentId)
+			.filter(f => f.contentUri)
 	},
 
 	updateItems(col, existingItems) {
-		for (const item of existingItems) {
-			const { volume, chapter } = extractNameData(item.name)
-			item.sortValue = [volume ?? 1000000, chapter ?? 0]
-		}
+		// for (const item of existingItems) {
+		// 	const { volume, chapter } = extractNameData(item.name)
+		// 	item.sortValue = [volume ?? 1000000, chapter ?? 0]
+		// }
 	}
 }
 
@@ -100,7 +103,7 @@ function extractNameContentId(name: string) {
 		return null
 	}
 	if (chapter === null) return `v${volume}`
-	return `v${volume}:c${chapter}`
+	return `v${volume}-c${chapter}`
 }
 
 function formatNameData(data: ReturnType<typeof extractNameData>) {

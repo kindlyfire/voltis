@@ -1,5 +1,5 @@
 import { create, insertMultiple } from '@orama/orama'
-import { Collection } from '../models/collection'
+import { prisma } from '../database'
 
 let index: Awaited<ReturnType<typeof createSearchIndex>> | null = null
 export async function getSearchIndex() {
@@ -20,8 +20,12 @@ async function createSearchIndex() {
 		} as const
 	})
 
-	const collections = await Collection.findAll({
-		attributes: ['id', 'name', 'nameOverride']
+	const collections = await prisma.collection.findMany({
+		select: {
+			id: true,
+			name: true,
+			nameOverride: true
+		}
 	})
 
 	await insertMultiple(

@@ -84,10 +84,3 @@ const _useItem = createQueryWrapper<AppRouter['items']['get']>('item', o =>
 )
 export const useItem = (id: MaybeRef<string | null | undefined>) =>
 	_useItem(computed(() => (unref(id) ? { id: unref(id)! } : null)))
-
-const _useReaderData = createQueryWrapper<AppRouter['items']['getReaderData']>(
-	'reader-data',
-	o => trpc.items.getReaderData.query(o)
-)
-export const useReaderData = (id: MaybeRef<string | null | undefined>) =>
-	_useReaderData(computed(() => (unref(id) ? { id: unref(id)! } : null)))

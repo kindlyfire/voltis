@@ -50,7 +50,7 @@ const provider: ReaderProvider = {
 	},
 
 	async fetchChapterData(id) {
-		const data = await trpc.items.getReaderData2.query({ id })
+		const data = await trpc.items.getReaderData.query({ id })
 		let startPage =
 			typeof route.params.page === 'string' ? +route.params.page : 0
 		startPage = Math.max(0, Math.min(startPage, data.pages.length - 1))
@@ -64,8 +64,8 @@ const provider: ReaderProvider = {
 			pages: data.pages.map(p => ({
 				...p,
 				url:
-					'/api/comic-page?item-id=' +
-					encodeURIComponent(id) +
+					'/api/comic-page?ditem-id=' +
+					encodeURIComponent(data.diskItemId) +
 					'&file-name=' +
 					encodeURIComponent(p.name)
 			})),

@@ -20,13 +20,12 @@
 </template>
 
 <script lang="ts" setup>
-import type { InferAttributes } from 'sequelize'
-import type { Collection } from '../server/models/collection'
+import type { Collection } from '@prisma/client'
 import GridContainer from './GridContainer.vue'
 import slugify from 'slugify'
 
 const props = defineProps<{
-	collections: InferAttributes<Collection>[]
+	collections: Collection[]
 }>()
 const emit = defineEmits<{}>()
 </script>

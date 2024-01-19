@@ -1,9 +1,11 @@
 import { z } from 'zod'
 import { publicProcedure, router, userProcedure } from '../trpc'
-import { User } from '../../models/user'
-import { Op } from 'sequelize'
 import { TRPCError } from '@trpc/server'
 import { areRegistrationsEnabled } from '../../utils/state'
+import { prisma } from '../../database'
+import { dbUtils } from '../../database/utils'
+import { userVoter } from '../../database/voters'
+import { Prisma } from '@prisma/client'
 
 export const rAuth = router({
 	login: publicProcedure
@@ -14,9 +16,9 @@ export const rAuth = router({
 			})
 		)
 		.mutation(async opts => {
-			const user = await User.findOne({
+			const user = await prisma.user.findFirst({
 				where: {
-					[Op.or]: [
+					OR: [
 						{ email: opts.input.emailOrUsername },
 						{ username: opts.input.emailOrUsername }
 					]
@@ -28,15 +30,21 @@ export const rAuth = router({
 				})
 			}
 
-			const passwordMatch = await user.checkPassword(opts.input.password)
+			const passwordMatch = await dbUtils.user.checkPassword(
+				user,
+				opts.input.password
+			)
 			if (!passwordMatch) {
 				throw new TRPCError({
 					code: 'UNAUTHORIZED'
 				})
 			}
 
-			const session = await user.createSession({
-				lastSeenAt: new Date()
+			const session = await prisma.userSession.create({
+				data: {
+					token: dbUtils.userSession.createToken(),
+					userId: user.id
+				}
 			})
 			const runtimeConfig = useRuntimeConfig(opts.ctx.event)
 			setCookie(
@@ -49,11 +57,11 @@ export const rAuth = router({
 				}
 			)
 
-			return user.export(user)
+			return userVoter.run(user, { user })
 		}),
 
 	me: userProcedure.query(async opts => {
-		return opts.ctx.user.export(opts.ctx.user)
+		return userVoter.run(opts.ctx.user, { user: opts.ctx.user })
 	}),
 
 	register: publicProcedure
@@ -73,16 +81,21 @@ export const rAuth = router({
 				})
 			}
 
-			const user = User.build({
-				email: opts.input.email,
-				username: opts.input.username,
-				roles: reg.forced ? ['admin'] : []
+			const user = await prisma.user.create({
+				data: {
+					email: opts.input.email,
+					username: opts.input.username,
+					roles: reg.forced ? ['admin'] : [],
+					password: await dbUtils.user.hashPassword(opts.input.password),
+					preferences: {}
+				}
 			})
-			await user.setPassword(opts.input.password)
-			await user.save()
 
-			const session = await user.createSession({
-				lastSeenAt: new Date()
+			const session = await prisma.userSession.create({
+				data: {
+					token: dbUtils.userSession.createToken(),
+					userId: user.id
+				}
 			})
 			const runtimeConfig = useRuntimeConfig(opts.ctx.event)
 			setCookie(
@@ -95,7 +108,7 @@ export const rAuth = router({
 				}
 			)
 
-			return user.export(user)
+			return userVoter.run(user, { user })
 		}),
 
 	logout: publicProcedure.mutation(async opts => {

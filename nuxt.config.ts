@@ -26,7 +26,7 @@ export default defineNuxtConfig({
 	vite: {
 		build: {
 			rollupOptions: {
-				external: ['sqlite3', 'sharp', 'bcrypt']
+				external: ['sqlite3', 'sharp', 'bcrypt', 'pg']
 			}
 		}
 	}

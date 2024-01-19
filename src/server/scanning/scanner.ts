@@ -1,12 +1,11 @@
 import consola from 'consola'
-import { Library } from '../models/library'
 import fs from 'fs-extra'
 import path from 'pathe'
-import { Collection } from '../models/collection'
-import { Item } from '../models/item'
-import { Op } from 'sequelize'
 import { comicMatcher } from '../scanning/comic'
 import { MatcherCollection } from '../scanning'
+import { Library } from '@prisma/client'
+import { prisma } from '../database'
+import { mergeCollections } from './merger'
 
 export async function scanLibrary(lib: Library) {
 	consola.log('Scanning', lib.name)
@@ -36,52 +35,51 @@ export async function scanLibrary(lib: Library) {
 		})
 	)
 
-	const collections = await Collection.findAll({
-		where: {
-			libraryId: lib.id
-		}
+	const collections = await prisma.diskCollection.findMany({
+		where: { libraryId: lib.id }
 	})
 	const missingCollections = collections.filter(
-		c => !matchedCollections.some(m => m.contentId === c.contentId)
+		c => !matchedCollections.some(m => m.contentUri === c.contentUri)
 	)
 	const otherCollections = matchedCollections.filter(
-		m => !collections.some(c => c.contentId === m.contentId)
+		m => !collections.some(c => c.contentUri === m.contentUri)
 	)
 
 	for (const col of missingCollections) {
-		await col.update({
-			missing: true
+		await prisma.diskCollection.update({
+			where: { id: col.id },
+			data: { missing: true }
 		})
 	}
 	for (const matched of otherCollections) {
-		const col = collections.find(c => c.contentId === matched.contentId)
+		const col = collections.find(c => c.contentUri === matched.contentUri)
 		if (col) {
-			await col.update({
-				missing: false,
-				path: matched.path,
-				name: matched.defaultName,
-				coverPath: matched.coverPath ?? ''
+			await prisma.diskCollection.update({
+				where: { id: col.id },
+				data: {
+					missing: false,
+					path: matched.path,
+					name: matched.defaultName,
+					coverPath: matched.coverPath ?? ''
+				}
 			})
 		} else {
-			collections.push(
-				await Collection.create({
-					contentId: matched.contentId,
+			const v = await prisma.diskCollection.create({
+				data: {
+					contentUri: matched.contentUri,
 					name: matched.defaultName,
 					path: matched.path,
 					coverPath: matched.coverPath ?? '',
-					kind: 'comic',
-					libraryId: lib.id
-				})
-			)
+					libraryId: lib.id,
+					type: 'comic'
+				}
+			})
+			collections.push(v)
 		}
 	}
 
-	const items = await Item.findAll({
-		where: {
-			collectionId: {
-				[Op.in]: collections.map(c => c.id)
-			}
-		}
+	const items = await prisma.diskItem.findMany({
+		where: { DiskCollection: { libraryId: lib.id } }
 	})
 	for (const col of collections.filter(c => !c.missing)) {
 		const itemContentIds = await comicMatcher.listItems(
@@ -91,53 +89,67 @@ export async function scanLibrary(lib: Library) {
 
 		const missingItems = items.filter(
 			i =>
-				i.collectionId === col.id &&
-				!itemContentIds.some(m => m.contentId === i.contentId)
+				i.diskCollectionId === col.id &&
+				!itemContentIds.some(m => m.contentUri === i.contentUri)
 		)
 		const otherItems = itemContentIds.filter(
 			m =>
 				!items.some(
-					i => i.collectionId === col.id && i.contentId === m.contentId
+					i => i.diskCollectionId === col.id && i.contentUri === m.contentUri
 				)
 		)
 
 		for (const item of missingItems) {
-			await item.destroy()
+			await prisma.diskItem.delete({ where: { id: item.id } })
 		}
 		for (const matched of otherItems) {
 			const item = items.find(
-				i => i.collectionId === col.id && i.contentId === matched.contentId
+				i =>
+					i.diskCollectionId === col.id && i.contentUri === matched.contentUri
 			)
 			if (item) {
-				await item.update({
-					path: matched.path,
-					coverPath: matched.coverPath || item.coverPath || ''
+				await prisma.diskItem.update({
+					where: { id: item.id },
+					data: {
+						path: matched.path,
+						coverPath: matched.coverPath ?? item.coverPath ?? ''
+					}
 				})
 			} else {
-				items.push(
-					await Item.create({
-						collectionId: col.id,
-						contentId: matched.contentId,
+				const v = await prisma.diskItem.create({
+					data: {
+						diskCollectionId: col.id,
+						contentUri: matched.contentUri,
 						name: matched.defaultName,
 						path: matched.path,
 						coverPath: matched.coverPath ?? '',
-						altNames: [],
-						metadata: {
-							sources: []
-						},
-						sortValue: []
-					})
-				)
+						metadata: {}
+					}
+				})
+				items.push(v)
 			}
 		}
 
 		consola.log('Updating collection', col.name)
 		await comicMatcher.updateCollection(col)
-		await col.save()
+		await prisma.diskCollection.update({
+			where: { id: col.id },
+			data: col
+		})
 
 		consola.log('Updating items', col.name)
-		const _items = items.filter(i => i.collectionId === col.id)
+		const _items = items.filter(i => i.diskCollectionId === col.id)
 		await comicMatcher.updateItems(col, _items)
-		await Promise.all(_items.map(i => i.save()))
+		await prisma.$transaction(
+			_items.map(i =>
+				prisma.diskItem.update({
+					where: { id: i.id },
+					data: i
+				})
+			)
+		)
 	}
+
+	consola.log('Merging collections and items')
+	await mergeCollections()
 }

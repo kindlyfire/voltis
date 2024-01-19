@@ -5,14 +5,14 @@ import path from 'pathe'
 
 export default defineEventHandler(async event => {
 	const query = getQuery(event)
-	const itemId = query['item-id']
+	const ditemId = query['ditem-id']
 	const fileName = query['file-name']
-	if (typeof itemId !== 'string' || typeof fileName !== 'string') {
+	if (typeof ditemId !== 'string' || typeof fileName !== 'string') {
 		setResponseStatus(event, 400)
 		return 'Bad Request'
 	}
 
-	const comicData = await getComicData(itemId).catch(() => null)
+	const comicData = await getComicData(ditemId).catch(() => null)
 	if (!comicData) {
 		setResponseStatus(event, 404)
 		return 'Not Found'

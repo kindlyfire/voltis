@@ -1,39 +1,33 @@
 import { z } from 'zod'
 import { adminProcedure, maybePublicProcedure, router } from '../trpc.js'
-import { Library } from '../../models/library'
-import { Item } from '../../models/item'
-import { Op } from 'sequelize'
-import { db } from '../../plugins/sequelize'
 import { resetSearchIndex } from '../../utils/search-index'
+import { prisma } from '../../database'
 
 export const rLibraries = router({
 	query: maybePublicProcedure
 		.input(z.object({}))
 		.query(async ({ input, ctx }) => {
-			const libraries = await Library.findAll({
-				attributes: {
-					include: [
-						[
-							db.literal(`(
-								SELECT COUNT(*)
-								FROM collections AS col
-								WHERE col.libraryId = \`Library\`.id
-							)`),
-							'collectionCount'
-						]
-					]
+			const libraries = await prisma.library.findMany({
+				include: {
+					_count: {
+						select: { DiskCollection: true }
+					}
 				}
 			})
-			return libraries.map(c => ({
-				...c.export(ctx.user),
-				collectionCount: c.get('collectionCount') as string
-			}))
+
+			return libraries.map(c => {
+				return {
+					...c,
+					_count: undefined,
+					collectionCount: c._count.DiskCollection
+				}
+			})
 		}),
 
 	get: maybePublicProcedure
 		.input(z.object({ id: z.string() }))
 		.query(async ({ input, ctx }) => {
-			return Library.findByPk(input.id).then(c => c?.export(ctx.user))
+			return await prisma.library.findById(input.id)
 		}),
 
 	create: adminProcedure
@@ -45,8 +39,14 @@ export const rLibraries = router({
 			})
 		)
 		.mutation(async ({ input, ctx }) => {
-			const library = await Library.create(input)
-			return library.export(ctx.user)
+			const library = await prisma.library.create({
+				data: {
+					name: input.name,
+					type: 'comic',
+					paths: input.paths
+				}
+			})
+			return library
 		}),
 
 	update: adminProcedure
@@ -59,37 +59,21 @@ export const rLibraries = router({
 			})
 		)
 		.mutation(async ({ input, ctx }) => {
-			const library = await Library.findByPk(input.id)
-			if (!library) {
-				throw new Error('Library not found')
-			}
-			await library.update(input)
-			return library.export(ctx.user)
+			const library = await prisma.library.update({
+				where: { id: input.id },
+				data: {
+					name: input.name,
+					type: 'comic',
+					paths: input.paths
+				}
+			})
+			return library
 		}),
 
 	delete: adminProcedure
 		.input(z.object({ id: z.string() }))
 		.mutation(async ({ input }) => {
-			const library = await Library.findByPk(input.id, {
-				include: {
-					association: Library.associations.collections,
-					attributes: ['id']
-				}
-			})
-			if (!library) {
-				throw new Error('Library not found')
-			}
-			await Item.destroy({
-				where: {
-					collectionId: {
-						[Op.in]: library.collections!.map(c => c.id)
-					}
-				}
-			})
-			for (const collection of library.collections!) {
-				await collection.destroy()
-			}
-			await library.destroy()
+			await prisma.library.delete({ where: { id: input.id } })
 			resetSearchIndex()
 			return true
 		})

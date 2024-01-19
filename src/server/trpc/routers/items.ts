@@ -1,12 +1,8 @@
 import { z } from 'zod'
 import { maybePublicProcedure, router } from '../trpc.js'
-import { Item } from '../../models/item'
 import { TRPCError } from '@trpc/server'
-import {
-	FileMetadataCustomData,
-	fileMetadataFn
-} from '../../scanning/comic/metadata-file'
-import { InferAttributes, WhereOptions } from 'sequelize'
+import { prisma } from '../../database'
+import { diskItemComicMetadataFn } from '../../scanning/comic/metadata-file'
 
 export const rItems = router({
 	query: maybePublicProcedure
@@ -17,94 +13,79 @@ export const rItems = router({
 			})
 		)
 		.query(async ({ input }) => {
-			const where: WhereOptions<InferAttributes<Item>> = {}
-
+			let collectionId: string | undefined
 			if (input.inSameCollectionAs) {
-				const item = await Item.findByPk(input.inSameCollectionAs)
+				const item = await prisma.item.findById(input.inSameCollectionAs)
 				if (!item) {
 					throw new TRPCError({ code: 'NOT_FOUND' })
 				}
-				where.collectionId = item.collectionId
+				collectionId = item.collectionId
 			} else if (input.collectionId) {
-				where.collectionId = input.collectionId
+				collectionId = input.collectionId
 			}
 
-			const items = await Item.findAll({
-				where
+			const items = await prisma.item.findMany({
+				where: { collectionId }
 			})
 
-			return items
-				.sort((a, b) => {
-					let i = 0
-					while (true) {
-						if (i >= a.sortValue.length) return 1
-						if (i >= b.sortValue.length) return -1
-						if (a.sortValue[i] < b.sortValue[i]) return 1
-						if (a.sortValue[i] > b.sortValue[i]) return -1
-						i++
-					}
-				})
-				.map(c => c.toJSON())
+			return items.sort((a, b) => {
+				let i = 0
+				while (true) {
+					if (i >= a.sortValue.length) return 1
+					if (i >= b.sortValue.length) return -1
+					if (a.sortValue[i] < b.sortValue[i]) return 1
+					if (a.sortValue[i] > b.sortValue[i]) return -1
+					i++
+				}
+			})
 		}),
 
 	get: maybePublicProcedure
 		.input(z.object({ id: z.string() }))
 		.query(async ({ input }) => {
-			return Item.findByPk(input.id).then(c => c?.toJSON() ?? null)
+			return await prisma.item.findById(input.id)
 		}),
 
 	getReaderData: maybePublicProcedure
 		.input(z.object({ id: z.string() }))
 		.query(async ({ input }) => {
-			const item = await Item.findByPk(input.id)
-			if (!item) {
-				throw new TRPCError({ code: 'NOT_FOUND' })
-			}
-
-			let fileSource = item.metadata.sources.find(s => s.name === 'file')
-			if (!fileSource) {
-				await item.applyMetadataSourceFn('file', fileMetadataFn)
-				item.save()
-				fileSource = item.metadata.sources.find(s => s.name === 'file')
-			}
-			if (!fileSource) {
-				throw new TRPCError({ code: 'NOT_FOUND' })
-			}
-
-			return fileSource.customData! as FileMetadataCustomData
-		}),
-
-	getReaderData2: maybePublicProcedure
-		.input(z.object({ id: z.string() }))
-		.query(async ({ input }) => {
-			const item = await Item.findByPk(input.id, {
-				include: {
-					association: Item.associations.collection,
-					required: true
-				}
+			const item = await prisma.item.findUnique({
+				where: { id: input.id },
+				include: { Collection: true }
 			})
 			if (!item) {
-				throw new TRPCError({ code: 'NOT_FOUND' })
+				throw new TRPCError({ code: 'NOT_FOUND', message: 'Item not found.' })
 			}
 
-			let fileSource = item.metadata.sources.find(s => s.name === 'file')
+			const ditem = await prisma.diskItem.findFirst({
+				where: { contentUri: item.contentUri }
+			})
+			if (!ditem) {
+				throw new TRPCError({
+					code: 'NOT_FOUND',
+					message: 'No disk item found.'
+				})
+			}
+
+			let fileSource = ditem.metadata?.comic
 			if (!fileSource) {
-				await item.applyMetadataSourceFn('file', fileMetadataFn)
-				item.save()
-				fileSource = item.metadata.sources.find(s => s.name === 'file')
+				fileSource = await diskItemComicMetadataFn(ditem)
+				await prisma.diskItem.update({
+					where: { id: ditem.id },
+					data: { metadata: { comic: fileSource } }
+				})
 			}
 			if (!fileSource) {
 				throw new TRPCError({ code: 'NOT_FOUND' })
 			}
-
-			const data = fileSource.customData! as FileMetadataCustomData
 
 			return {
 				collectionId: item.collectionId,
-				pages: data.files,
-				suggestedMode: data.suggestedMode ?? 'pages',
+				pages: fileSource.files,
+				suggestedMode: fileSource.suggestedMode ?? 'pages',
 				chapterTitle: item.name,
-				collectionTitle: item.collection!.name
+				collectionTitle: item.Collection.name,
+				diskItemId: ditem.id
 			}
 		})
 })

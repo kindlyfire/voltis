@@ -38,14 +38,13 @@
 </template>
 
 <script lang="ts" setup>
-import type { InferAttributes } from 'sequelize'
-import type { Collection } from '../server/models/collection'
 import type { inferProcedureInput } from '@trpc/server'
 import type { AppRouter } from '../server/trpc/routers'
 import { useQuery } from '@tanstack/vue-query'
 import { trpc } from '../plugins/trpc'
 import slugify from 'slugify'
 import { useUrlSearchParams } from '@vueuse/core'
+import type { Collection } from '@prisma/client'
 
 const params = useUrlSearchParams('history')
 const searchTerm = computed({
@@ -56,7 +55,7 @@ const searchTerm = computed({
 		params.q = value
 	}
 })
-const results = ref([]) as Ref<InferAttributes<Collection>[]>
+const results = ref([]) as Ref<Collection[]>
 
 const queryData = computed(() => {
 	return <inferProcedureInput<AppRouter['collections']['query']>>{
