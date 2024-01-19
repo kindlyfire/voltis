@@ -46,6 +46,11 @@ import {
 	readerKey
 } from './use-reader'
 import { useReaderActions } from './use-reader-actions'
+import {
+	getPagesInPreloadOrder,
+	preloadPages,
+	type PageLoader
+} from './page-loader'
 
 const reader = inject(readerKey)!
 const imageWrapperRef = ref<HTMLDivElement | null>(null)
@@ -94,25 +99,28 @@ useReaderActions({
 	}
 })
 
-function prefetchPagesAround(index: number, offset: number) {
-	const pages = chapterPages.value?.slice(
-		Math.max(0, index - offset),
-		index + offset + 1
-	)
-	if (!pages) return false
-	pages.forEach(p => p.fetch())
-	return pages.every(p => p.blobUrl)
-}
+const averagePageHeight = computed(() => {
+	if (!chapterPages.value?.length) return null
+	let sum = 0
+	for (const page of chapterPages.value) {
+		sum += page.page.height
+	}
+	return sum / chapterPages.value.length
+})
 
 // Page loading strategy
 watchEffect(() => {
-	const pageIndex = reader.state.page
-
 	if (!chapterPages.value) return
-	if (!prefetchPagesAround(pageIndex, 1)) return
-	if (!prefetchPagesAround(pageIndex, 4)) return
-	if (!prefetchPagesAround(pageIndex, 8)) return
-	if (!prefetchPagesAround(pageIndex, 12)) return
+	const pagesInPreloadOrder = getPagesInPreloadOrder(
+		chapterPages.value,
+		reader.state.page
+	)
+	const pagesPerScreen = Math.ceil(
+		reader.state.scrollRef!.clientHeight / averagePageHeight.value!
+	)
+	const pagesToPreload = pagesPerScreen * 5
+	const preloadConcurrency = pagesPerScreen * 2
+	preloadPages(pagesInPreloadOrder.slice(0, pagesToPreload), preloadConcurrency)
 })
 
 const pageScroll = useScroll(reader.state.scrollRef!)

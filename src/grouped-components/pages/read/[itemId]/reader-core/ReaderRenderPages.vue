@@ -31,6 +31,7 @@
 </template>
 
 <script lang="ts" setup>
+import { getPagesInPreloadOrder, preloadPages } from './page-loader'
 import {
 	SwitchChapterDirection,
 	SwitchChapterPagePosition,
@@ -71,20 +72,14 @@ useReaderActions({
 
 // Page loading strategy
 watchEffect(() => {
-	const pageIndex = reader.state.page
-
 	if (!chapterPages.value) return
-	const pagesToPreload = chapterPages.value.slice(pageIndex, pageIndex + 3)
-
-	// We make sure the first page is loaded, then the second page, and then the
-	// third and fourth can be loaded in parallel
-	if (pagesToPreload.length === 0) return
-	pagesToPreload[0].fetch()
-	if (!pagesToPreload[0].blobUrl || pagesToPreload.length < 2) return
-	pagesToPreload[1].fetch()
-	if (!pagesToPreload[1].blobUrl) return
-	pagesToPreload[2]?.fetch()
-	pagesToPreload[3]?.fetch()
+	const pagesInPreloadOrder = getPagesInPreloadOrder(
+		chapterPages.value,
+		reader.state.page
+	)
+	const pagesToPreload = 5
+	const preloadConcurrency = 2
+	preloadPages(pagesInPreloadOrder.slice(0, pagesToPreload), preloadConcurrency)
 })
 
 onMounted(() => {

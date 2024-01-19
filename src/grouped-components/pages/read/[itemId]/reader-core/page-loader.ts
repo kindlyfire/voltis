@@ -37,3 +37,33 @@ function getPageLoader(page: ChapterData['pages'][0]) {
 
 	return state
 }
+
+export function getPagesInPreloadOrder(pages: PageLoader[], pageIndex: number) {
+	const pagesInPreloadOrder: PageLoader[] = []
+	for (let i = 0; i < pages.length; i++) {
+		const index1 = pageIndex + i
+		const index2 = pageIndex - i
+		if (index1 < pages.length) {
+			pagesInPreloadOrder.push(pages[index1])
+		}
+		if (index2 !== index1 && index2 >= 0 && index2 < pages.length) {
+			pagesInPreloadOrder.push(pages[index2])
+		}
+	}
+	return pagesInPreloadOrder
+}
+
+export function preloadPages(pages: PageLoader[], concurrency: number) {
+	for (
+		let i = 0, preloading = 0;
+		i < pages.length && preloading < concurrency;
+		i++
+	) {
+		const page = pages[i]
+		if (page.blobUrl) {
+			continue
+		}
+		page.fetch()
+		preloading++
+	}
+}
