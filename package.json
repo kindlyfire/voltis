@@ -2,10 +2,10 @@
 	"name": "voltis",
 	"private": true,
 	"type": "module",
-	"version": "0.0.4",
+	"version": "0.0.6",
 	"packageManager": "pnpm@8.13.1",
 	"scripts": {
-		"build": "nuxt build",
+		"build": "prisma generate && nuxt build",
 		"dev": "nuxt dev",
 		"generate": "nuxt generate",
 		"preview": "nuxt preview"
