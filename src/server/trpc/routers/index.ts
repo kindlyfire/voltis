@@ -1,10 +1,10 @@
 import { areRegistrationsEnabled } from '../../utils/state'
 import { publicProcedure, router } from '../trpc.js'
 import { rAuth } from './auth'
-import { rCollections } from './collections'
-import { rItems } from './items'
+import { rCollections } from './libraries/collections'
+import { rItems } from './libraries/items'
 import { rLibraries } from './libraries'
-import { rScan } from './scan'
+import { rScan } from './libraries/scan'
 
 export const appRouter = router({
 	items: rItems,

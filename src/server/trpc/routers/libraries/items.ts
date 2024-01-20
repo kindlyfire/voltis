@@ -1,8 +1,8 @@
 import { z } from 'zod'
-import { maybePublicProcedure, router } from '../trpc.js'
+import { maybePublicProcedure, router } from '../../trpc.js'
 import { TRPCError } from '@trpc/server'
-import { prisma } from '../../database'
-import { diskItemComicMetadataFn } from '../../scanning/comic/metadata-file'
+import { prisma } from '../../../database'
+import { diskItemComicMetadataFn } from '../../../scanning/comic/metadata-file'
 
 export const rItems = router({
 	query: maybePublicProcedure

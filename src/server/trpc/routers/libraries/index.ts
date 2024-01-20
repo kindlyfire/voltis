@@ -1,8 +1,8 @@
 import { z } from 'zod'
-import { adminProcedure, maybePublicProcedure, router } from '../trpc.js'
-import { resetSearchIndex } from '../../utils/search-index'
-import { prisma } from '../../database'
-import { dbUtils } from '../../database/utils'
+import { adminProcedure, maybePublicProcedure, router } from '../../trpc.js'
+import { resetSearchIndex } from '../../../utils/search-index'
+import { prisma } from '../../../database'
+import { dbUtils } from '../../../database/utils'
 
 export const rLibraries = router({
 	query: maybePublicProcedure

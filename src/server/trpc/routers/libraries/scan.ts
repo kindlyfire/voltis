@@ -1,8 +1,8 @@
 import { z } from 'zod'
-import { adminProcedure, router } from '../trpc'
+import { adminProcedure, router } from '../../trpc'
 import { TRPCError } from '@trpc/server'
-import { scanLibrary } from '../../scanning/scanner'
-import { prisma } from '../../database'
+import { scanLibrary } from '../../../scanning/scanner'
+import { prisma } from '../../../database'
 
 export const rScan = router({
 	scanLibraries: adminProcedure
