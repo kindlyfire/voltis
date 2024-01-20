@@ -21,5 +21,9 @@ declare global {
 				}
 			}
 		}
+
+		type UserItemDataProgress = {
+			page: number
+		}
 	}
 }

@@ -30,7 +30,10 @@ model User {
     roles       String[]
     preferences Json
 
-    UserSession UserSession[]
+    UserSession        UserSession[]
+    UserItemData       UserItemData[]
+    UserCollectionData UserCollectionData[]
+    UserCustomList     UserCustomList[]
 }
 
 model UserSession {
@@ -112,7 +115,8 @@ model Collection {
     /// [CollectionMetadata]
     metadata     Json
 
-    Item Item[]
+    Item               Item[]
+    UserCollectionData UserCollectionData[]
 }
 
 model Item {
@@ -128,6 +132,72 @@ model Item {
     metadata     Json
     sortValue    Int[]
 
-    Collection   Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+    Collection          Collection            @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+    collectionId        String
+    UserItemData        UserItemData[]
+    UserCustomList_Item UserCustomList_Item[]
+}
+
+model UserItemData {
+    id        String   @id
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    /// [UserItemDataProgress]
+    progress   Json?
+    completed  Boolean @default(false)
+    bookmarked Boolean @default(false)
+
+    User   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+    userId String
+    Item   Item   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+    itemId String
+
+    @@unique([userId, itemId])
+}
+
+model UserCollectionData {
+    id        String   @id
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    notes  String?
+    rating Int?
+
+    User         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+    userId       String
+    Collection   Collection @relation(fields: [collectionId], references: [id])
     collectionId String
+
+    @@unique([userId, collectionId])
+}
+
+model UserCustomList {
+    id        String   @id
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    name   String
+    type   String // 'custom' | 'reading' | 'plan to read' | 'on hold' | 're-reading' | 'dropped'
+    public Boolean @default(false)
+
+    User                User                  @relation(fields: [userId], references: [id])
+    userId              String
+    UserCustomList_Item UserCustomList_Item[]
+}
+
+model UserCustomList_Item {
+    id        String   @id
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    order Int
+    notes String?
+
+    UserCustomList   UserCustomList @relation(fields: [userCustomListId], references: [id])
+    userCustomListId String
+    Item             Item           @relation(fields: [itemId], references: [id])
+    itemId           String
+
+    @@unique([userCustomListId, itemId])
 }

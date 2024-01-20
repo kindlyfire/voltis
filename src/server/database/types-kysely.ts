@@ -77,6 +77,46 @@ export type User = {
     roles: string[];
     preferences: unknown;
 };
+export type UserCollectionData = {
+    id: string;
+    createdAt: Generated<Timestamp>;
+    updatedAt: Timestamp;
+    notes: string | null;
+    rating: number | null;
+    userId: string;
+    collectionId: string;
+};
+export type UserCustomList = {
+    id: string;
+    createdAt: Generated<Timestamp>;
+    updatedAt: Timestamp;
+    name: string;
+    type: string;
+    public: Generated<boolean>;
+    userId: string;
+};
+export type UserCustomList_Item = {
+    id: string;
+    createdAt: Generated<Timestamp>;
+    updatedAt: Timestamp;
+    order: number;
+    notes: string | null;
+    userCustomListId: string;
+    itemId: string;
+};
+export type UserItemData = {
+    id: string;
+    createdAt: Generated<Timestamp>;
+    updatedAt: Timestamp;
+    /**
+     * [UserItemDataProgress]
+     */
+    progress: unknown | null;
+    completed: Generated<boolean>;
+    bookmarked: Generated<boolean>;
+    userId: string;
+    itemId: string;
+};
 export type UserSession = {
     id: string;
     createdAt: Generated<Timestamp>;
@@ -91,5 +131,9 @@ export type DB = {
     Item: Item;
     Library: Library;
     User: User;
+    UserCollectionData: UserCollectionData;
+    UserCustomList: UserCustomList;
+    UserCustomList_Item: UserCustomList_Item;
+    UserItemData: UserItemData;
     UserSession: UserSession;
 };

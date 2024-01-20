@@ -1,8 +1,10 @@
 import { z } from 'zod'
-import { maybePublicProcedure, router } from '../../trpc.js'
+import { maybePublicProcedure, router, userProcedure } from '../../trpc.js'
 import { TRPCError } from '@trpc/server'
 import { prisma } from '../../../database'
 import { diskItemComicMetadataFn } from '../../../scanning/comic/metadata-file'
+import { dbUtils } from '../../../database/utils'
+import { Item, Prisma } from '@prisma/client'
 
 export const rItems = router({
 	query: maybePublicProcedure
@@ -12,30 +14,34 @@ export const rItems = router({
 				inSameCollectionAs: z.string().nullish()
 			})
 		)
-		.query(async ({ input }) => {
+		.query(async opts => {
 			let collectionId: string | undefined
-			if (input.inSameCollectionAs) {
-				const item = await prisma.item.findById(input.inSameCollectionAs)
+			if (opts.input.inSameCollectionAs) {
+				const item = await prisma.item.findById(opts.input.inSameCollectionAs)
 				if (!item) {
 					throw new TRPCError({ code: 'NOT_FOUND' })
 				}
 				collectionId = item.collectionId
-			} else if (input.collectionId) {
-				collectionId = input.collectionId
+			} else if (opts.input.collectionId) {
+				collectionId = opts.input.collectionId
 			}
 
 			const items = await prisma.item.findMany({
-				where: { collectionId }
+				where: { collectionId },
+				include: {
+					UserItemData: opts.ctx.user
+						? {
+								where: { userId: opts.ctx.user.id }
+						  }
+						: false
+				}
 			})
 
-			return items.sort((a, b) => {
-				let i = 0
-				while (true) {
-					if (i >= a.sortValue.length) return 1
-					if (i >= b.sortValue.length) return -1
-					if (a.sortValue[i] < b.sortValue[i]) return 1
-					if (a.sortValue[i] > b.sortValue[i]) return -1
-					i++
+			return sortItems(items).map(item => {
+				return {
+					...item,
+					UserItemData: undefined,
+					userData: item.UserItemData[0]
 				}
 			})
 		}),
@@ -48,10 +54,19 @@ export const rItems = router({
 
 	getReaderData: maybePublicProcedure
 		.input(z.object({ id: z.string() }))
-		.query(async ({ input }) => {
+		.query(async ({ input, ctx }) => {
 			const item = await prisma.item.findUnique({
 				where: { id: input.id },
-				include: { Collection: true }
+				include: {
+					Collection: true,
+					UserItemData: ctx.user
+						? {
+								where: {
+									userId: ctx.user.id
+								}
+						  }
+						: false
+				}
 			})
 			if (!item) {
 				throw new TRPCError({ code: 'NOT_FOUND', message: 'Item not found.' })
@@ -79,13 +94,70 @@ export const rItems = router({
 				throw new TRPCError({ code: 'NOT_FOUND' })
 			}
 
+			const userProgress = item.UserItemData?.at(0)
+				? {
+						page: item.UserItemData[0].progress?.page ?? 0,
+						completed: item.UserItemData[0].completed
+				  }
+				: null
+
 			return {
 				collectionId: item.collectionId,
 				pages: fileSource.files,
 				suggestedMode: fileSource.suggestedMode ?? 'pages',
 				chapterTitle: item.name,
 				collectionTitle: item.Collection.name,
-				diskItemId: ditem.id
+				diskItemId: ditem.id,
+				userProgress
 			}
+		}),
+
+	updateUserData: userProcedure
+		.input(
+			z.object({
+				itemId: z.string(),
+				progress: z.record(z.any()).nullish(),
+				completed: z.boolean().nullish(),
+				bookmarked: z.boolean().nullish()
+			})
+		)
+		.mutation(async opts => {
+			await prisma.userItemData.upsert({
+				where: {
+					userId_itemId: {
+						userId: opts.ctx.user.id,
+						itemId: opts.input.itemId
+					}
+				},
+				create: {
+					id: dbUtils.createId(),
+					userId: opts.ctx.user.id,
+					itemId: opts.input.itemId,
+					progress: opts.input.progress ?? undefined,
+					completed: opts.input.completed ?? undefined,
+					bookmarked: opts.input.bookmarked ?? undefined
+				},
+				update: {
+					progress: opts.input.completed
+						? Prisma.DbNull
+						: opts.input.progress ?? undefined,
+					completed: opts.input.completed ?? undefined,
+					bookmarked: opts.input.bookmarked ?? undefined
+				}
+			})
+			return true
 		})
 })
+
+export function sortItems<T extends Item>(items: T[]) {
+	return items.sort((a, b) => {
+		let i = 0
+		while (true) {
+			if (i >= a.sortValue.length) return 1
+			if (i >= b.sortValue.length) return -1
+			if (a.sortValue[i] < b.sortValue[i]) return 1
+			if (a.sortValue[i] > b.sortValue[i]) return -1
+			i++
+		}
+	})
+}

@@ -94,40 +94,7 @@
 			<div>
 				<Description :text="metadata.description || 'No description.'" />
 			</div>
-			<div class="flex flex-col gap-1">
-				<NuxtLink
-					v-for="i in pageItems"
-					:to="'/read/' + i.id + '/0'"
-					class="card w-full border-l-4 border-l-[rgb(var(--color-primary-DEFAULT)/0.75)]"
-				>
-					<div class="flex items-center gap-2">
-						<div>
-							<button class="flex items-center text-muted">
-								<UIcon
-									name="ph:check-square-offset-bold"
-									dynamic
-									class="scale-[1.2]"
-								/>
-							</button>
-						</div>
-						<div
-							class="overflow-hidden whitespace-nowrap text-ellipsis font-semibold"
-						>
-							{{ i.name }}
-						</div>
-					</div>
-				</NuxtLink>
-			</div>
-			<div class="flex items-center justify-center">
-				<UPagination
-					:page-count="pageSize"
-					:total="items?.length ?? 0"
-					v-model="page"
-					show-last
-					show-first
-					size="lg"
-				/>
-			</div>
+			<ChapterList :q-items="qItems" />
 		</template>
 	</AMainWrapper>
 </template>
@@ -138,6 +105,7 @@ import { trpc } from '../../../../plugins/trpc'
 import { useItems } from '../../../../state/composables/queries'
 import { formatDate } from '../../../../utils'
 import Description from './Description.vue'
+import ChapterList from './ChapterList.vue'
 
 const route = useRoute()
 const collectionId = computed(() =>
@@ -145,13 +113,6 @@ const collectionId = computed(() =>
 		? route.params.collectionId.split(':').at(-1) || ''
 		: ''
 )
-const page = ref(1)
-const pageSize = ref(50)
-const pageItems = computed(() => {
-	const start = (page.value - 1) * pageSize.value
-	const end = start + pageSize.value
-	return items.value?.slice(start, end) ?? []
-})
 
 const qCollection = useQuery({
 	queryKey: ['collection', collectionId],
@@ -170,9 +131,9 @@ const sourceMangadex = computed(() => {
 const qItems = useItems(
 	computed(() =>
 		collection.value ? { collectionId: collection.value.id } : null
-	)
+	),
+	{ enabled: computed(() => !!collection.value) }
 )
-const items = qItems.data
 
 useHead({
 	title: computed(() => collection.value?.name ?? 'Loading...')
