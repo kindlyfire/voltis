@@ -1,7 +1,6 @@
 import { z } from 'zod'
 import { maybePublicProcedure, router } from '../trpc.js'
 import { search } from '@orama/orama'
-import { Op } from 'sequelize'
 import { getSearchIndex } from '../../utils/search-index'
 import { prisma } from '../../database'
 

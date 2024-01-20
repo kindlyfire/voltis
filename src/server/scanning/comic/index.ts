@@ -61,11 +61,9 @@ export const comicMatcher: Matcher = {
 			.filter(f => f.contentUri)
 	},
 
-	updateItems(col, existingItems) {
-		// for (const item of existingItems) {
-		// 	const { volume, chapter } = extractNameData(item.name)
-		// 	item.sortValue = [volume ?? 1000000, chapter ?? 0]
-		// }
+	updateItems(col, item, dcols, ditems) {
+		const { volume, chapter } = extractNameData(item.name)
+		item.sortValue = [volume ?? 1000000, chapter ?? 0]
 	}
 }
 

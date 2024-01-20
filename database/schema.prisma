@@ -20,7 +20,7 @@ generator kysely {
 }
 
 model User {
-    id        String   @id @default(cuid())
+    id        String   @id
     createdAt DateTime @default(now())
     updatedAt DateTime @updatedAt
 
@@ -34,7 +34,7 @@ model User {
 }
 
 model UserSession {
-    id        String   @id @default(cuid())
+    id        String   @id
     createdAt DateTime @default(now())
     updatedAt DateTime @updatedAt
 
@@ -44,7 +44,7 @@ model UserSession {
 }
 
 model Library {
-    id        String   @id @default(cuid())
+    id        String   @id
     createdAt DateTime @default(now())
     updatedAt DateTime @updatedAt
 
@@ -57,7 +57,7 @@ model Library {
 }
 
 // model Tag {
-//     id        String   @id @default(cuid())
+//     id        String   @id
 //     createdAt DateTime @default(now())
 //     updatedAt DateTime @updatedAt
 
@@ -66,7 +66,7 @@ model Library {
 // }
 
 model DiskCollection {
-    id        String   @id @default(cuid())
+    id        String   @id
     createdAt DateTime @default(now())
     updatedAt DateTime @updatedAt
 
@@ -84,7 +84,7 @@ model DiskCollection {
 }
 
 model DiskItem {
-    id        String   @id @default(cuid())
+    id        String   @id
     createdAt DateTime @default(now())
     updatedAt DateTime @updatedAt
 
@@ -100,14 +100,14 @@ model DiskItem {
 }
 
 model Collection {
-    id        String   @id @default(cuid())
+    id        String   @id
     createdAt DateTime @default(now())
     updatedAt DateTime @updatedAt
 
     name         String
     nameOverride String?
     type         String
-    contentUri   String
+    contentUri   String  @unique
     coverPath    String?
     /// [CollectionMetadata]
     metadata     Json
@@ -116,7 +116,7 @@ model Collection {
 }
 
 model Item {
-    id        String   @id @default(cuid())
+    id        String   @id
     createdAt DateTime @default(now())
     updatedAt DateTime @updatedAt
 

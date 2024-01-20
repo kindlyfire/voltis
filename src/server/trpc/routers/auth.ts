@@ -42,6 +42,7 @@ export const rAuth = router({
 
 			const session = await prisma.userSession.create({
 				data: {
+					id: dbUtils.createId(),
 					token: dbUtils.userSession.createToken(),
 					userId: user.id
 				}
@@ -83,6 +84,7 @@ export const rAuth = router({
 
 			const user = await prisma.user.create({
 				data: {
+					id: dbUtils.createId(),
 					email: opts.input.email,
 					username: opts.input.username,
 					roles: reg.forced ? ['admin'] : [],
@@ -93,6 +95,7 @@ export const rAuth = router({
 
 			const session = await prisma.userSession.create({
 				data: {
+					id: dbUtils.createId(),
 					token: dbUtils.userSession.createToken(),
 					userId: user.id
 				}

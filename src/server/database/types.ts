@@ -14,6 +14,12 @@ declare global {
 				pubStatus: string | null
 				titles: string[]
 			}
+			sources?: {
+				mangadex?: {
+					id?: string | null
+					overrideId?: string | null
+				}
+			}
 		}
 	}
 }

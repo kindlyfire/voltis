@@ -1,10 +1,3 @@
-import { nanoid } from 'nanoid'
-
-// NOTE: Do not change ID length. Some things depend on it.
-export function createId(prefix: 'c' | 'i' | 'u' | 's' | 'l'): string {
-	return prefix + nanoid(12)
-}
-
 export function unixNow() {
 	return Math.floor(Date.now() / 1000)
 }

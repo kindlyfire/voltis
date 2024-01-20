@@ -64,8 +64,7 @@
 		"bcrypt": "^5.1.1",
 		"pg": "^8.11.3",
 		"prisma": "^5.8.1",
-		"sharp": "^0.33.2",
-		"sqlite3": "^5.1.7"
+		"sharp": "^0.33.2"
 	},
 	"pnpm": {
 		"patchedDependencies": {

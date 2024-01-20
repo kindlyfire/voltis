@@ -6,6 +6,7 @@ import { MatcherCollection } from '../scanning'
 import { Library } from '@prisma/client'
 import { prisma } from '../database'
 import { mergeCollections } from './merger'
+import { dbUtils } from '../database/utils'
 
 export async function scanLibrary(lib: Library) {
 	consola.log('Scanning', lib.name)
@@ -66,6 +67,7 @@ export async function scanLibrary(lib: Library) {
 		} else {
 			const v = await prisma.diskCollection.create({
 				data: {
+					id: dbUtils.createId(),
 					contentUri: matched.contentUri,
 					name: matched.defaultName,
 					path: matched.path,
@@ -118,6 +120,7 @@ export async function scanLibrary(lib: Library) {
 			} else {
 				const v = await prisma.diskItem.create({
 					data: {
+						id: dbUtils.createId(),
 						diskCollectionId: col.id,
 						contentUri: matched.contentUri,
 						name: matched.defaultName,
@@ -136,18 +139,6 @@ export async function scanLibrary(lib: Library) {
 			where: { id: col.id },
 			data: col
 		})
-
-		consola.log('Updating items', col.name)
-		const _items = items.filter(i => i.diskCollectionId === col.id)
-		await comicMatcher.updateItems(col, _items)
-		await prisma.$transaction(
-			_items.map(i =>
-				prisma.diskItem.update({
-					where: { id: i.id },
-					data: i
-				})
-			)
-		)
 	}
 
 	consola.log('Merging collections and items')

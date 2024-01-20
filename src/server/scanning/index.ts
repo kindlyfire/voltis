@@ -1,6 +1,6 @@
 import fs from 'fs-extra'
 import { MaybePromise } from '../../utils'
-import { DiskCollection, DiskItem } from '@prisma/client'
+import { Collection, DiskCollection, DiskItem, Item } from '@prisma/client'
 
 export interface MatcherCollection {
 	contentUri: string
@@ -47,7 +47,12 @@ export interface Matcher {
 	/**
 	 * Update all items for a collection.
 	 */
-	updateItems(col: DiskCollection, existingItems: DiskItem[]): MaybePromise<any>
+	updateItems(
+		col: Collection,
+		item: Item,
+		dcols: DiskCollection[],
+		ditems: DiskItem[]
+	): MaybePromise<any>
 }
 
 export const matchers: Matcher[] = []

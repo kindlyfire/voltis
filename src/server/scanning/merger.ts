@@ -7,6 +7,8 @@
 
 import consola from 'consola'
 import { prisma } from '../database'
+import { dbUtils } from '../database/utils'
+import { comicMatcher } from './comic'
 
 export async function mergeCollections() {
 	const [diskCollections, collections, diskItems, items] = await Promise.all([
@@ -23,6 +25,7 @@ export async function mergeCollections() {
 		if (!col) {
 			const v = await prisma.collection.create({
 				data: {
+					id: dbUtils.createId(),
 					contentUri: uri,
 					name: dcol.name,
 					coverPath: dcol.coverPath ?? '',
@@ -38,17 +41,18 @@ export async function mergeCollections() {
 
 	// Create missing items
 	for (const ditem of diskItems) {
-		const item = items.find(i => i.contentUri === ditem.contentUri)
+		let item = items.find(i => i.contentUri === ditem.contentUri)
 		if (!item) {
 			const collection = collections.find(
 				c => c.contentUri === stripLastUriPart(ditem.contentUri)
 			)
 			if (!collection) {
-				consola.warn('No collection found for item', ditem)
+				consola.warn('No collection found for ditem', ditem)
 				continue
 			}
-			const v = await prisma.item.create({
+			item = await prisma.item.create({
 				data: {
+					id: dbUtils.createId(),
 					contentUri: ditem.contentUri,
 					name: ditem.name,
 					coverPath: ditem.coverPath ?? '',
@@ -57,8 +61,28 @@ export async function mergeCollections() {
 					collectionId: collection?.id
 				}
 			})
-			items.push(v)
+			items.push(item)
 		}
+	}
+
+	// Update items data
+	for (const item of items) {
+		const collection = collections.find(c => c.id === item.collectionId)
+		if (!collection) {
+			consola.warn('No collection found for item', item)
+			continue
+		}
+		const ditems = diskItems.filter(i => i.contentUri === item.contentUri)
+		const dcols = diskCollections.filter(
+			c =>
+				(c.contentUriOverride || c.contentUri) ===
+				stripLastUriPart(item.contentUri)
+		)
+		await comicMatcher.updateItems(collection, item, dcols, ditems)
+		await prisma.item.update({
+			where: { id: item.id },
+			data: item
+		})
 	}
 }
 

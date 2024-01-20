@@ -3,6 +3,9 @@ import { nanoid } from 'nanoid'
 import { User } from '@prisma/client'
 
 export const dbUtils = {
+	createId() {
+		return nanoid(14)
+	},
 	user: {
 		async hashPassword(password: string) {
 			return await bcrypt.hash(password, 10)

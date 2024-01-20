@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { adminProcedure, maybePublicProcedure, router } from '../trpc.js'
 import { resetSearchIndex } from '../../utils/search-index'
 import { prisma } from '../../database'
+import { dbUtils } from '../../database/utils'
 
 export const rLibraries = router({
 	query: maybePublicProcedure
@@ -41,6 +42,7 @@ export const rLibraries = router({
 		.mutation(async ({ input, ctx }) => {
 			const library = await prisma.library.create({
 				data: {
+					id: dbUtils.createId(),
 					name: input.name,
 					type: 'comic',
 					paths: input.paths
