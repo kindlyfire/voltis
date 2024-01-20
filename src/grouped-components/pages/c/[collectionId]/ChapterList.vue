@@ -15,7 +15,7 @@
 			<div class="flex items-center gap-2">
 				<div>
 					<button
-						class="flex items-center text-muted"
+						class="flex items-center text-muted -m-2 h-10 px-2"
 						@click.stop.prevent="
 							updateItem({ id: i.id, completed: !i.userData?.completed })
 						"
@@ -42,32 +42,6 @@
 						Page {{ i.userData.progress.page + 1 }}
 					</span>
 				</NuxtLink>
-
-				<div>
-					<UPopover
-						:popper="{ placement: 'bottom-end', offsetDistance: 4 }"
-						class="flex items-center justify-center cursor-auto"
-					>
-						<button class="flex items-center justify-center">
-							<UIcon
-								name="ph:dots-three-vertical-bold"
-								dynamic
-								class="scale-[1.2] h-5"
-							/>
-						</button>
-
-						<template #panel>
-							<div class="p-1 w-[10rem] flex flex-col">
-								<UButton @click="" variant="ghost" color="gray"
-									>Mark as read</UButton
-								>
-								<UButton @click="" variant="ghost" color="gray"
-									>Mark this and below as read</UButton
-								>
-							</div>
-						</template>
-					</UPopover>
-				</div>
 			</div>
 		</div>
 	</div>

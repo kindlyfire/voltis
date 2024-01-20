@@ -73,6 +73,11 @@ async function _getComicData(itemId: string) {
 		onlyFiles: true
 	})
 
+	// Sort the files alphabetically
+	files.sort((a, b) => {
+		return a.localeCompare(b)
+	})
+
 	return {
 		root: dir,
 		files

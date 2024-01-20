@@ -32,11 +32,8 @@
 
 <script lang="ts" setup>
 import { getPagesInPreloadOrder, preloadPages } from './page-loader'
-import {
-	SwitchChapterDirection,
-	SwitchChapterPagePosition,
-	readerKey
-} from './use-reader'
+import { SwitchChapterDirection, SwitchChapterPagePosition } from './types'
+import { readerKey } from './use-reader'
 import { useReaderActions } from './use-reader-actions'
 
 const reader = inject(readerKey)!

@@ -2,7 +2,7 @@
 	<div class="acontainer !mb-4" v-if="currentChapterData">
 		<PageTitle
 			:pagetitle="
-				currentChapterData.title + ' - ' + currentChapterData.collectionTitle
+				currentChapterData.title + ' - ' + currentChapterData.collection.title
 			"
 		/>
 		<div class="text-lg font-semibold">
@@ -12,13 +12,13 @@
 			<NuxtLink
 				:to="
 					'/' +
-					slugify(currentChapterData.collectionTitle) +
+					slugify(currentChapterData.collection.title) +
 					':' +
-					currentChapterData.collectionId
+					currentChapterData.collection.id
 				"
 				class="text-primary hover:underline"
 			>
-				{{ currentChapterData.collectionTitle }}
+				{{ currentChapterData.collection.title }}
 			</NuxtLink>
 		</div>
 	</div>
@@ -30,8 +30,12 @@
 import slugify from 'slugify'
 import { trpc } from '../../../../plugins/trpc'
 import Reader from './reader-core/Reader.vue'
-import type { ChapterData, ReaderProvider } from './reader-core/types'
-import { SwitchChapterDirection } from './reader-core/use-reader'
+import {
+	SwitchChapterDirection,
+	type ChapterData,
+	type ReaderProvider
+} from './reader-core/types'
+import { useDebounceFn } from '@vueuse/core'
 
 const route = useRoute()
 const router = useRouter()
@@ -40,10 +44,15 @@ const itemId = computed(() => {
 })
 const toast = useToast()
 const readerRef = ref<InstanceType<typeof Reader>>()
+const loadingIndicator = useLoadingIndicator()
 
 const currentChapterData = ref(null as null | ChapterData)
 
-const provider: ReaderProvider = {
+const provider: ReaderProvider<{
+	page: number
+	updateProgress: () => Promise<void>
+	updateProgressDebounced: () => Promise<void>
+}> = {
 	getChapterId() {
 		if (!itemId.value) throw new Error('No chapter to load.')
 		return itemId.value
@@ -54,13 +63,49 @@ const provider: ReaderProvider = {
 		let startPage =
 			typeof route.params.page === 'string' ? +route.params.page : 0
 		startPage = Math.max(0, Math.min(startPage, data.pages.length - 1))
+
+		let completed = data.userProgress?.completed ?? false
+
+		const customData = {
+			page: startPage,
+			async updateProgress() {
+				if (completed) return
+				completed = customData.page === data.pages.length - 1
+				await trpc.items.updateUserData
+					.mutate({
+						itemId: id,
+						completed,
+						progress:
+							customData.page === data.pages.length - 1
+								? null
+								: {
+										page: customData.page
+								  }
+					})
+					.catch(e => {
+						console.error(e)
+						toast.add({
+							title: 'Failed to update progress',
+							timeout: 2000
+						})
+					})
+			},
+			async updateProgressDebounced() {}
+		}
+		customData.updateProgressDebounced = useDebounceFn(
+			customData.updateProgress,
+			3000,
+			{ maxWait: 5000 }
+		)
+
 		return {
 			id,
 			title: data.chapterTitle,
-			collectionId: data.collectionId,
-			collectionTitle: data.collectionTitle,
-			collectionLink:
-				'/' + slugify(data.collectionTitle) + ':' + data.collectionId,
+			collection: {
+				id: data.collectionId,
+				title: data.collectionTitle,
+				link: '/' + slugify(data.collectionTitle) + ':' + data.collectionId
+			},
 			pages: data.pages.map(p => ({
 				...p,
 				url:
@@ -69,8 +114,9 @@ const provider: ReaderProvider = {
 					'&file-name=' +
 					encodeURIComponent(p.name)
 			})),
-			startPage,
-			suggestedMode: data.suggestedMode
+			page: startPage,
+			mode: data.suggestedMode,
+			custom: customData
 		}
 	},
 
@@ -85,35 +131,41 @@ const provider: ReaderProvider = {
 		}))
 	},
 
-	beforeChapterChange(chapter) {
+	beforeChapterChange(ev) {
 		toast.add({
-			title: 'Reading ' + chapter.title,
+			title: 'Reading ' + ev.chapter.title,
 			timeout: 2000
 		})
 	},
 
-	onPageChange(page) {
-		if (!currentChapterData.value) return
-		if (route.fullPath.includes(currentChapterData.value.id))
-			router.replace('/read/' + currentChapterData.value.id + '/' + page)
-		else router.push('/read/' + currentChapterData.value.id + '/' + page)
+	onPageChange(ev) {
+		if (route.fullPath.includes(ev.chapter.id))
+			router.replace('/read/' + ev.chapter.id + '/' + ev.value)
+		else router.push('/read/' + ev.chapter.id + '/' + ev.value)
+		ev.custom.page = ev.value
+		ev.custom.updateProgressDebounced()
 	},
 
-	afterChapterChange(chapter) {
-		currentChapterData.value = chapter
-	},
+	afterChapterChange() {},
 
-	onChapterChangeBeyondAvailable(direction) {
-		if (direction === SwitchChapterDirection.Forward) {
+	async onChapterChangeBeyondAvailable(ev) {
+		if (ev.custom) {
+			loadingIndicator.start()
+			await ev.custom.updateProgress()
+			loadingIndicator.finish()
+		}
+		if (ev.direction === SwitchChapterDirection.Forward) {
 			toast.add({
 				title: 'No more chapters',
 				timeout: 2000
 			})
 		}
-		const chapter = readerRef.value!.reader.activeChapter.value
-		if (!chapter) return
+		if (!ev.chapter) return
 		router.push(
-			'/' + slugify(chapter.collectionTitle) + ':' + chapter.collectionId
+			'/' +
+				slugify(ev.chapter.collection.title) +
+				':' +
+				ev.chapter.collection.id
 		)
 	}
 }

@@ -1,10 +1,12 @@
 import type { InjectionKey } from 'vue'
 import { getPageLoaders, type PageLoader } from './page-loader'
-import type {
-	ChapterData,
-	ChapterListItem,
-	ReaderHooks,
-	ReaderProvider
+import {
+	SwitchChapterDirection,
+	type ChapterData,
+	type ChapterListItem,
+	type ReaderHooks,
+	type ReaderProvider,
+	SwitchChapterPagePosition
 } from './types'
 import { createHooks } from 'hookable'
 import pMemoize from 'p-memoize'
@@ -28,15 +30,6 @@ function createReaderState(provider: ReaderProvider) {
 	})
 }
 export type ReaderState = ReturnType<typeof createReaderState>
-
-export enum SwitchChapterDirection {
-	Forward,
-	Backward
-}
-export enum SwitchChapterPagePosition {
-	Start,
-	End
-}
 
 export type Reader = ReturnType<typeof useReader>
 export function useReader(_provider: ReaderProvider) {
@@ -64,9 +57,12 @@ export function useReader(_provider: ReaderProvider) {
 
 	async function _loadChapter(id: string) {
 		const chapterData = await _loadChapterData(id)
-		state.page = chapterData.startPage
-		if (!state.mode) state.mode = chapterData.suggestedMode
-		state.provider.afterChapterChange(chapterData)
+		state.page = chapterData.page
+		if (!state.mode) state.mode = chapterData.mode
+		state.provider.afterChapterChange({
+			custom: chapterData.custom,
+			chapter: chapterData
+		})
 	}
 
 	let preloadChapterPromise: Promise<any> | null = null
@@ -96,9 +92,17 @@ export function useReader(_provider: ReaderProvider) {
 	}
 
 	function setPageTo(page: number) {
-		if (page < 0 || page > (activeChapter.value?.pages.length ?? 0)) return
+		if (!activeChapter.value) return
+		if (page < 0 || page > activeChapter.value.pages.length) return
+
+		const oldPage = state.page
 		state.page = page
-		state.provider.onPageChange(page)
+		state.provider.onPageChange({
+			chapter: activeChapter.value,
+			custom: activeChapter.value.custom,
+			value: page,
+			oldValue: oldPage
+		})
 
 		const pagesLeft = activeChapter.value!.pages.length - page
 		if (pagesLeft < 10) _preloadChapter()
@@ -123,7 +127,11 @@ export function useReader(_provider: ReaderProvider) {
 	) {
 		const chapter = _getChapterInDirection(dir)
 		if (!chapter) {
-			return state.provider.onChapterChangeBeyondAvailable(dir)
+			return state.provider.onChapterChangeBeyondAvailable({
+				custom: activeChapter.value?.custom ?? null,
+				chapter: activeChapter.value ?? null,
+				direction: dir
+			})
 		}
 		switchChapterById(chapter.id, pos)
 	}
@@ -137,9 +145,12 @@ export function useReader(_provider: ReaderProvider) {
 			setGlobalError('Could not switch chapter: chapter not found')
 			return
 		}
+		state.provider.beforeChapterChange({
+			custom: activeChapter.value?.custom,
+			chapter
+		})
 		state.chapterId = chapter.id
 		state.page = 0
-		state.provider.beforeChapterChange(chapter)
 		hooks.callHook('beforeChapterChange', chapter)
 		_loadChapter(chapter.id)
 			.then(() => {

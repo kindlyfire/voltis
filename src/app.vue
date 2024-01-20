@@ -7,10 +7,7 @@
 		</NuxtLayout>
 	</Suspense>
 	<UNotifications />
-	<div
-		class="fixed bottom-0 pointer-events-none"
-		id="bottom-screen-reference"
-	></div>
+	<NuxtLoadingIndicator />
 </template>
 
 <script lang="ts" setup>

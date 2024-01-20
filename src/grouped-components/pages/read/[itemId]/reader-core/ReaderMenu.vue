@@ -12,9 +12,9 @@
 				</div>
 				<NuxtLink
 					class="text-sm text-primary hover:underline"
-					:to="chapter?.collectionLink"
+					:to="chapter?.collection.link"
 				>
-					{{ chapter?.collectionTitle ?? 'Loading...' }}
+					{{ chapter?.collection.title ?? 'Loading...' }}
 				</NuxtLink>
 			</div>
 
@@ -101,7 +101,8 @@
 </template>
 
 <script lang="ts" setup>
-import { SwitchChapterDirection, readerKey } from './use-reader'
+import { SwitchChapterDirection } from './types'
+import { readerKey } from './use-reader'
 
 const reader = inject(readerKey)!
 

@@ -132,7 +132,11 @@ const qItems = useItems(
 	computed(() =>
 		collection.value ? { collectionId: collection.value.id } : null
 	),
-	{ enabled: computed(() => !!collection.value) }
+	{
+		enabled: computed(() => !!collection.value),
+		refetchOnMount: true,
+		refetchOnWindowFocus: true
+	}
 )
 
 useHead({

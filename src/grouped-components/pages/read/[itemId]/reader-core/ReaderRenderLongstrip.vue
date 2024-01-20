@@ -40,13 +40,10 @@
 
 <script lang="ts" setup>
 import { useScroll, watchDebounced } from '@vueuse/core'
-import {
-	SwitchChapterDirection,
-	SwitchChapterPagePosition,
-	readerKey
-} from './use-reader'
+import { readerKey } from './use-reader'
 import { useReaderActions } from './use-reader-actions'
 import { getPagesInPreloadOrder, preloadPages } from './page-loader'
+import { SwitchChapterDirection, SwitchChapterPagePosition } from './types'
 
 const reader = inject(readerKey)!
 const imageWrapperRef = ref<HTMLDivElement | null>(null)
@@ -140,7 +137,7 @@ watchDebounced(
 			reader.setPageTo(viewingPage)
 		}
 	},
-	{ debounce: 25 }
+	{ debounce: 25, maxWait: 100 }
 )
 
 function scrollToPage() {
