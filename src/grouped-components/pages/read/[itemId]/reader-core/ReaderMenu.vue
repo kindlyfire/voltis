@@ -27,7 +27,26 @@
 				</div>
 			</div>
 
-			<UFormGroup label="Page">
+			<UFormGroup
+				:ui="{
+					label: {
+						base: 'w-full'
+					}
+				}"
+			>
+				<template #label>
+					<div class="flex items-center mb-1 w-full">
+						<div>Page</div>
+						<div class="ml-auto">
+							{{
+								reader.activeChapter.value
+									? `(${reader.activeChapter.value.pages.length})`
+									: ''
+							}}
+						</div>
+					</div>
+				</template>
+
 				<div class="flex items-center gap-1">
 					<UButton
 						square
@@ -58,7 +77,26 @@
 				</div>
 			</UFormGroup>
 
-			<UFormGroup label="Chapter">
+			<UFormGroup
+				:ui="{
+					label: {
+						base: 'w-full'
+					}
+				}"
+			>
+				<template #label>
+					<div class="flex items-center mb-1 w-full">
+						<div>Chapter</div>
+						<div class="ml-auto">
+							{{
+								reader.state.chapters.length
+									? `(${reader.state.chapters.length})`
+									: ''
+							}}
+						</div>
+					</div>
+				</template>
+
 				<div class="flex items-center gap-1">
 					<UButton
 						square

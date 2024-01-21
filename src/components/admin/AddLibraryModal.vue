@@ -35,7 +35,7 @@
 
 				<UFormGroup label="Type" name="matcher" size="lg">
 					<USelect
-						v-model="state.matcher"
+						v-model="state.type"
 						:options="[{ name: 'Comics', value: 'comic' }]"
 						option-attribute="name"
 						value-attribute="value"
@@ -43,8 +43,8 @@
 				</UFormGroup>
 
 				<UFormGroup label="Paths" name="paths" size="lg">
-					<div class="flex flex-col gap-1">
-						<div class="py-2" v-if="state.paths.length > 0">
+					<div class="flex flex-col gap-2">
+						<div class="flex flex-col gap-1" v-if="state.paths.length > 0">
 							<div v-for="p in state.paths" class="flex items-center gap-2">
 								<UButton
 									color="gray"
@@ -123,12 +123,12 @@ const libraryId = ref(null) as Ref<string | null>
 
 const schema = z.object({
 	name: z.string().min(1, 'Must be at least 1 character'),
-	matcher: z.enum(['comic']),
+	type: z.enum(['comic']),
 	paths: z.array(z.string()).min(1, 'Must have at least 1 path')
 })
 const state = reactive({
 	name: '',
-	matcher: 'comic',
+	type: 'comic',
 	paths: []
 }) as z.output<typeof schema>
 
@@ -148,14 +148,14 @@ watch(
 	() => {
 		if (props.modelValue) {
 			state.name = ''
-			state.matcher = 'comic'
+			state.type = 'comic'
 			state.paths = []
 
 			libraryId.value = props.libraryId ?? null
 			const lib = qLibraries.data.value?.find(l => l.id === libraryId.value)
 			if (lib) {
 				state.name = lib.name!
-				state.matcher = lib.matcher as any
+				state.type = lib.type as any
 				state.paths = [...lib.paths!]
 			}
 		}
@@ -167,14 +167,14 @@ const mSave = useMutation({
 		if (!props.libraryId) {
 			await trpc.libraries.create.mutate({
 				name: state.name,
-				matcher: state.matcher,
+				matcher: state.type,
 				paths: state.paths
 			})
 		} else {
 			await trpc.libraries.update.mutate({
 				id: props.libraryId!,
 				name: state.name,
-				matcher: state.matcher,
+				matcher: state.type,
 				paths: state.paths
 			})
 		}

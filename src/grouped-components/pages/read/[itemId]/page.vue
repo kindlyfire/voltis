@@ -1,24 +1,22 @@
 <template>
-	<div class="acontainer !mb-4" v-if="currentChapterData">
+	<div class="acontainer !mb-4" v-if="activeChapter">
 		<PageTitle
-			:pagetitle="
-				currentChapterData.title + ' - ' + currentChapterData.collection.title
-			"
+			:pagetitle="activeChapter.title + ' - ' + activeChapter.collection.title"
 		/>
 		<div class="text-lg font-semibold">
-			{{ currentChapterData.title }}
+			{{ activeChapter.title }}
 		</div>
 		<div>
 			<NuxtLink
 				:to="
 					'/' +
-					slugify(currentChapterData.collection.title) +
+					slugify(activeChapter.collection.title) +
 					':' +
-					currentChapterData.collection.id
+					activeChapter.collection.id
 				"
 				class="text-primary hover:underline"
 			>
-				{{ currentChapterData.collection.title }}
+				{{ activeChapter.collection.title }}
 			</NuxtLink>
 		</div>
 	</div>
@@ -32,7 +30,6 @@ import { trpc } from '../../../../plugins/trpc'
 import Reader from './reader-core/Reader.vue'
 import {
 	SwitchChapterDirection,
-	type ChapterData,
 	type ReaderProvider
 } from './reader-core/types'
 import { useDebounceFn } from '@vueuse/core'
@@ -46,7 +43,9 @@ const toast = useToast()
 const readerRef = ref<InstanceType<typeof Reader>>()
 const loadingIndicator = useLoadingIndicator()
 
-const currentChapterData = ref(null as null | ChapterData)
+const activeChapter = computed(() => {
+	return readerRef.value?.reader.activeChapter.value
+})
 
 const provider: ReaderProvider<{
 	page: number
