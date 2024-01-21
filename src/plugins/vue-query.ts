@@ -12,9 +12,6 @@ export default defineNuxtPlugin(nuxtApp => {
 	const queryClient = new QueryClient({
 		defaultOptions: {
 			queries: {
-				refetchOnMount: false,
-				refetchOnWindowFocus: false,
-				refetchOnReconnect: false,
 				retry: false
 			}
 		}

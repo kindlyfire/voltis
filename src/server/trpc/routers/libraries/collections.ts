@@ -103,15 +103,12 @@ export const rCollections = router({
 							progress: true
 						}
 					}
-				},
-				select: {
-					id: true
 				}
 			})
 
 			// Result is items from earliest to latest
 			items = sortItems(items).toReversed()
-			const lastRead = items.find(i =>
+			const lastRead = items.findLast(i =>
 				i.UserItemData.length > 0
 					? i.UserItemData[0].completed || i.UserItemData[0].progress
 					: false

@@ -16,10 +16,7 @@
 					<PageTitle :title="collection.name" />
 
 					<div>
-						<UButton size="lg">
-							<UIcon name="ph:book-open-bold" dynamic class="h-4 scale-[1.4]" />
-							Start reading
-						</UButton>
+						<ReadingButton :collection-id="collection.id" :q-items="qItems" />
 					</div>
 				</div>
 			</div>
@@ -86,10 +83,7 @@
 		<template #main>
 			<PageTitle :title="collection.name" class="hidden md:block" />
 			<div class="hidden md:block">
-				<UButton size="lg">
-					<UIcon name="ph:book-open-bold" dynamic class="h-4 scale-[1.4]" />
-					Start reading
-				</UButton>
+				<ReadingButton :collection-id="collection.id" :q-items="qItems" />
 			</div>
 			<div>
 				<Description :text="metadata.description || 'No description.'" />
@@ -106,6 +100,7 @@ import { useItems } from '../../../../state/composables/queries'
 import { formatDate } from '../../../../utils'
 import Description from './Description.vue'
 import ChapterList from './ChapterList.vue'
+import ReadingButton from './ReadingButton.vue'
 
 const route = useRoute()
 const collectionId = computed(() =>
@@ -133,9 +128,7 @@ const qItems = useItems(
 		collection.value ? { collectionId: collection.value.id } : null
 	),
 	{
-		enabled: computed(() => !!collection.value),
-		refetchOnMount: true,
-		refetchOnWindowFocus: true
+		enabled: computed(() => !!collection.value)
 	}
 )
 

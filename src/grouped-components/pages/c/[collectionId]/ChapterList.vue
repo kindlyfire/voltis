@@ -44,8 +44,11 @@
 					</span>
 				</NuxtLink>
 				<div v-if="user">
-					<UPopover :popper="{ placement: 'bottom-end', offsetDistance: 4 }">
-						<button>
+					<UPopover
+						:popper="{ placement: 'bottom-end', offsetDistance: 4 }"
+						class="flex items-center justify-center"
+					>
+						<button class="flex items-center justify-center -m-2 h-10 px-2">
 							<UIcon
 								name="ph:dots-three-vertical-bold"
 								dynamic
