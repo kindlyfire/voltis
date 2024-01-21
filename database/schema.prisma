@@ -166,7 +166,7 @@ model UserCollectionData {
 
     User         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
     userId       String
-    Collection   Collection @relation(fields: [collectionId], references: [id])
+    Collection   Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
     collectionId String
 
     @@unique([userId, collectionId])
@@ -181,7 +181,7 @@ model UserCustomList {
     type   String // 'custom' | 'reading' | 'plan to read' | 'on hold' | 're-reading' | 'dropped'
     public Boolean @default(false)
 
-    User                User                  @relation(fields: [userId], references: [id])
+    User                User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
     userId              String
     UserCustomList_Item UserCustomList_Item[]
 }
@@ -194,9 +194,9 @@ model UserCustomList_Item {
     order Int
     notes String?
 
-    UserCustomList   UserCustomList @relation(fields: [userCustomListId], references: [id])
+    UserCustomList   UserCustomList @relation(fields: [userCustomListId], references: [id], onDelete: Cascade)
     userCustomListId String
-    Item             Item           @relation(fields: [itemId], references: [id])
+    Item             Item           @relation(fields: [itemId], references: [id], onDelete: Cascade)
     itemId           String
 
     @@unique([userCustomListId, itemId])

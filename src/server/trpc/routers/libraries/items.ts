@@ -146,6 +146,47 @@ export const rItems = router({
 				}
 			})
 			return true
+		}),
+
+	bulkUpdateReadStatus: userProcedure
+		.input(
+			z.object({
+				itemIds: z.array(z.string()),
+				completed: z.boolean()
+			})
+		)
+		.mutation(async opts => {
+			const existing = await prisma.userItemData.findMany({
+				where: {
+					userId: opts.ctx.user.id,
+					itemId: { in: opts.input.itemIds }
+				},
+				select: { itemId: true }
+			})
+
+			await prisma.$transaction([
+				prisma.userItemData.updateMany({
+					where: {
+						userId: opts.ctx.user.id,
+						itemId: { in: existing.map(e => e.itemId) }
+					},
+					data: {
+						completed: opts.input.completed,
+						progress: Prisma.DbNull
+					}
+				}),
+				prisma.userItemData.createMany({
+					data: opts.input.itemIds
+						.filter(itemId => !existing.some(e => e.itemId === itemId))
+						.map(itemId => ({
+							id: dbUtils.createId(),
+							userId: opts.ctx.user.id,
+							itemId: itemId,
+							completed: opts.input.completed
+						}))
+				})
+			])
+			return true
 		})
 })
 

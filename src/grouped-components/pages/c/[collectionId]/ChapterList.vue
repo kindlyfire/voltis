@@ -15,6 +15,7 @@
 			<div class="flex items-center gap-2">
 				<div>
 					<button
+						:disabled="itemChangePromises.has(i.id)"
 						class="flex items-center text-muted -m-2 h-10 px-2"
 						@click.stop.prevent="
 							updateItem({ id: i.id, completed: !i.userData?.completed })
@@ -42,6 +43,87 @@
 						Page {{ i.userData.progress.page + 1 }}
 					</span>
 				</NuxtLink>
+				<div v-if="user">
+					<UPopover :popper="{ placement: 'bottom-end', offsetDistance: 4 }">
+						<button>
+							<UIcon
+								name="ph:dots-three-vertical-bold"
+								dynamic
+								class="scale-[1.2]"
+							/>
+						</button>
+
+						<template #panel>
+							<div
+								class="p-1 w-[10rem] flex flex-col cursor-auto"
+								@click.stop.prevent=""
+							>
+								<div class="px-2.5 py-1 text-sm text-muted">Mark below</div>
+								<div class="grid grid-cols-2 gap-1">
+									<UButton
+										color="gray"
+										class="justify-center"
+										size="xs"
+										@click.stop.prevent="
+											updateItemBulk({
+												id: i.id,
+												completed: true,
+												direction: 'below'
+											})
+										"
+									>
+										Read
+									</UButton>
+									<UButton
+										color="gray"
+										class="justify-center"
+										size="xs"
+										@click.stop.prevent="
+											updateItemBulk({
+												id: i.id,
+												completed: false,
+												direction: 'below'
+											})
+										"
+									>
+										Unread
+									</UButton>
+								</div>
+								<div class="px-2.5 py-1 text-sm text-muted">Mark above</div>
+								<div class="grid grid-cols-2 gap-1">
+									<UButton
+										color="gray"
+										class="justify-center"
+										size="xs"
+										@click.stop.prevent="
+											updateItemBulk({
+												id: i.id,
+												completed: true,
+												direction: 'above'
+											})
+										"
+									>
+										Read
+									</UButton>
+									<UButton
+										color="gray"
+										class="justify-center"
+										size="xs"
+										@click.stop.prevent="
+											updateItemBulk({
+												id: i.id,
+												completed: false,
+												direction: 'above'
+											})
+										"
+									>
+										Unread
+									</UButton>
+								</div>
+							</div>
+						</template>
+					</UPopover>
+				</div>
 			</div>
 		</div>
 	</div>
@@ -65,7 +147,9 @@ const props = defineProps<{
 	qItems: ReturnType<typeof useItems>
 }>()
 const emit = defineEmits<{}>()
-const user = useUser()
+const qUser = useUser()
+const user = qUser.data
+const loadingIndicator = useLoadingIndicator()
 
 const items = computed(() => props.qItems.data?.value ?? [])
 
@@ -83,10 +167,11 @@ function updateItem(data: {
 	completed?: boolean
 	bookmarked?: boolean
 }) {
-	if (itemChangePromises.has(data.id) || !user.data.value) {
+	if (itemChangePromises.has(data.id) || !user.value) {
 		return
 	}
 
+	loadingIndicator.start()
 	const p = Promise.resolve()
 		.then(async () => {
 			await trpc.items.updateUserData.mutate({
@@ -101,6 +186,45 @@ function updateItem(data: {
 		})
 		.finally(() => {
 			itemChangePromises.delete(data.id)
+			loadingIndicator.finish()
+		})
+	itemChangePromises.set(data.id, p)
+}
+
+function updateItemBulk(data: {
+	id: string
+	completed: boolean
+	direction: 'above' | 'below'
+}) {
+	if (itemChangePromises.has(data.id) || !user.value) {
+		return
+	}
+
+	const itemIndex = items.value.findIndex(i => i.id === data.id)
+	if (itemIndex === -1) return
+
+	const itemsToChange =
+		data.direction === 'above'
+			? items.value.slice(0, itemIndex)
+			: items.value.slice(itemIndex + 1)
+
+	if (itemsToChange.length === 0) return
+
+	loadingIndicator.start()
+	const p = Promise.resolve()
+		.then(async () => {
+			await trpc.items.bulkUpdateReadStatus.mutate({
+				itemIds: itemsToChange.map(i => i.id),
+				completed: data.completed
+			})
+			await props.qItems.refetch()
+		})
+		.catch(e => {
+			console.error('Error updating items', e)
+		})
+		.finally(() => {
+			itemChangePromises.delete(data.id)
+			loadingIndicator.finish()
 		})
 	itemChangePromises.set(data.id, p)
 }
