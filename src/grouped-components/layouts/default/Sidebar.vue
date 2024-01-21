@@ -23,7 +23,7 @@
 			</div>
 			<ALinkButton
 				v-for="lib in qLibraries.data.value"
-				:to="'/library/' + lib.id"
+				:to="routeBuilder['/library/[libraryId]'](lib.id)"
 			>
 				{{ lib.name }}
 			</ALinkButton>

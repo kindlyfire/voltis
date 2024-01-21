@@ -34,6 +34,13 @@ export async function mergeCollections() {
 				}
 			})
 			collections.push(v)
+		} else {
+			col.name = dcol.name
+			col.coverPath = dcol.coverPath || col.coverPath || ''
+			await prisma.collection.update({
+				where: { id: col.id },
+				data: col
+			})
 		}
 	}
 

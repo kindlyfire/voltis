@@ -9,10 +9,10 @@
 		<div>
 			<NuxtLink
 				:to="
-					'/' +
-					slugify(activeChapter.collection.title) +
-					':' +
-					activeChapter.collection.id
+					routeBuilder['/c/[collectionId]/[name]'](
+						activeChapter.collection.id,
+						activeChapter.collection.title
+					)
 				"
 				class="text-primary hover:underline"
 			>
@@ -103,7 +103,10 @@ const provider: ReaderProvider<{
 			collection: {
 				id: data.collectionId,
 				title: data.collectionTitle,
-				link: '/' + slugify(data.collectionTitle) + ':' + data.collectionId
+				link: routeBuilder['/c/[collectionId]/[name]'](
+					data.collectionId,
+					slugify(data.collectionTitle)
+				)
 			},
 			pages: data.pages.map(p => ({
 				...p,
@@ -138,9 +141,9 @@ const provider: ReaderProvider<{
 	},
 
 	onPageChange(ev) {
-		if (route.fullPath.includes(ev.chapter.id))
-			router.replace('/read/' + ev.chapter.id + '/' + ev.value)
-		else router.push('/read/' + ev.chapter.id + '/' + ev.value)
+		const url = routeBuilder['/read/[itemId]/[page]'](ev.chapter.id, ev.value)
+		if (route.fullPath.includes(ev.chapter.id)) router.replace(url)
+		else router.push(url)
 		ev.custom.page = ev.value
 		ev.custom.updateProgressDebounced()
 	},

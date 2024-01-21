@@ -9,7 +9,12 @@
 					: 'border-l-[rgb(var(--color-primary-DEFAULT)/0.75)]'
 			]"
 			@click="
-				$router.push('/read/' + i.id + '/' + (i.userData?.progress?.page ?? 0))
+				$router.push(
+					routeBuilder['/read/[itemId]/[page]'](
+						i.id,
+						i.userData?.progress?.page ?? 0
+					)
+				)
 			"
 		>
 			<div class="flex items-center gap-2">
@@ -32,7 +37,12 @@
 				</div>
 				<NuxtLink
 					class="overflow-hidden whitespace-nowrap text-ellipsis font-semibold grow"
-					:to="'/read/' + i.id + '/' + (i.userData?.progress?.page ?? 0)"
+					:to="
+						routeBuilder['/read/[itemId]/[page]'](
+							i.id,
+							i.userData?.progress?.page ?? 0
+						)
+					"
 				>
 					{{ i.name }}
 

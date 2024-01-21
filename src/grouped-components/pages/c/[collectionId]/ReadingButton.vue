@@ -36,8 +36,9 @@ const readingItem = computed(() => {
 const readUrl = computed(() => {
 	const item = readingItem.value || items.value?.[0]
 	if (!item) return
-	return (
-		'/read/' + item.id + '/' + (qReadStatus.data.value?.progress?.page ?? 0)
+	return routeBuilder['/read/[itemId]/[page]'](
+		item.id,
+		qReadStatus.data.value?.progress?.page ?? 0
 	)
 })
 

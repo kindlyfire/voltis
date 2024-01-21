@@ -13,7 +13,9 @@
 			<div v-else class="flex flex-col">
 				<UButton
 					v-for="col in results"
-					:to="'/' + slugify(col.name) + ':' + col.id"
+					:to="
+						routeBuilder['/c/[collectionId]/[name]'](col.id, slugify(col.name))
+					"
 					color="gray"
 					variant="ghost"
 					square

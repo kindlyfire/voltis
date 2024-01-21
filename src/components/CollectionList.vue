@@ -1,7 +1,7 @@
 <template>
 	<GridContainer :items="collections" v-slot="{ item: i }">
 		<NuxtLink
-			:to="'/' + slugify(i.name) + ':' + i.id"
+			:to="routeBuilder['/c/[collectionId]/[name]'](i.id, slugify(i.name))"
 			class="card p-0 overflow-hidden"
 			:title="i.name"
 		>
