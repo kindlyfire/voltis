@@ -6,6 +6,7 @@ import { rItems } from './libraries/items'
 import { rLibraries } from './libraries'
 import { rScan } from './libraries/scan'
 import { rUser } from './user'
+import { rCustomLists } from './custom-lists'
 
 export const appRouter = router({
 	items: rItems,
@@ -14,6 +15,7 @@ export const appRouter = router({
 	libraries: rLibraries,
 	scan: rScan,
 	user: rUser,
+	customLists: rCustomLists,
 
 	meta: publicProcedure.query(async opts => {
 		const runtimeConfig = useRuntimeConfig(opts.ctx.event)

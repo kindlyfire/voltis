@@ -115,8 +115,9 @@ model Collection {
     /// [CollectionMetadata]
     metadata     Json
 
-    Item               Item[]
-    UserCollectionData UserCollectionData[]
+    Item                      Item[]
+    UserCollectionData        UserCollectionData[]
+    UserCustomList_Collection UserCustomList_Collection[]
 }
 
 model Item {
@@ -132,10 +133,9 @@ model Item {
     metadata     Json
     sortValue    Int[]
 
-    Collection          Collection            @relation(fields: [collectionId], references: [id], onDelete: Cascade)
-    collectionId        String
-    UserItemData        UserItemData[]
-    UserCustomList_Item UserCustomList_Item[]
+    Collection   Collection     @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+    collectionId String
+    UserItemData UserItemData[]
 }
 
 model UserItemData {
@@ -181,12 +181,12 @@ model UserCustomList {
     type   String // 'custom' | 'reading' | 'plan to read' | 'on hold' | 're-reading' | 'dropped'
     public Boolean @default(false)
 
-    User                User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
-    userId              String
-    UserCustomList_Item UserCustomList_Item[]
+    User                      User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+    userId                    String
+    UserCustomList_Collection UserCustomList_Collection[]
 }
 
-model UserCustomList_Item {
+model UserCustomList_Collection {
     id        String   @id
     createdAt DateTime @default(now())
     updatedAt DateTime @updatedAt
@@ -196,8 +196,6 @@ model UserCustomList_Item {
 
     UserCustomList   UserCustomList @relation(fields: [userCustomListId], references: [id], onDelete: Cascade)
     userCustomListId String
-    Item             Item           @relation(fields: [itemId], references: [id], onDelete: Cascade)
-    itemId           String
-
-    @@unique([userCustomListId, itemId])
+    Collection       Collection     @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+    collectionId     String
 }

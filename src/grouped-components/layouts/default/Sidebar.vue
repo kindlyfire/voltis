@@ -16,7 +16,15 @@
 			<Icon name="ph:house-bold" dynamic class="h-5 scale-[1.4]" />
 			Home
 		</ALinkButton>
-		<div class="flex flex-col">
+		<ALinkButton to="/library" size="lg">
+			<Icon name="ph:book-bookmark-bold" dynamic class="h-5 scale-[1.4]" />
+			My Library
+		</ALinkButton>
+		<ALinkButton to="/lists" size="lg">
+			<Icon name="ph:list-bullets-bold" dynamic class="h-5 scale-[1.4]" />
+			My Lists
+		</ALinkButton>
+		<!-- <div class="flex flex-col">
 			<div class="font-medium text-sm flex gap-x-2.5 px-3.5 py-2.5">
 				<Icon name="ph:folder-notch-bold" dynamic class="h-5 scale-[1.4]" />
 				Libraries
@@ -27,7 +35,7 @@
 			>
 				{{ lib.name }}
 			</ALinkButton>
-		</div>
+		</div> -->
 	</div>
 </template>
 

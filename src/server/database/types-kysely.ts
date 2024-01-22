@@ -95,14 +95,14 @@ export type UserCustomList = {
     public: Generated<boolean>;
     userId: string;
 };
-export type UserCustomList_Item = {
+export type UserCustomList_Collection = {
     id: string;
     createdAt: Generated<Timestamp>;
     updatedAt: Timestamp;
     order: number;
     notes: string | null;
     userCustomListId: string;
-    itemId: string;
+    collectionId: string;
 };
 export type UserItemData = {
     id: string;
@@ -133,7 +133,7 @@ export type DB = {
     User: User;
     UserCollectionData: UserCollectionData;
     UserCustomList: UserCustomList;
-    UserCustomList_Item: UserCustomList_Item;
+    UserCustomList_Collection: UserCustomList_Collection;
     UserItemData: UserItemData;
     UserSession: UserSession;
 };

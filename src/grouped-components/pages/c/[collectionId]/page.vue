@@ -15,8 +15,9 @@
 				<div class="flex flex-col gap-2">
 					<PageTitle :title="collection.name" />
 
-					<div>
+					<div class="flex gap-2">
 						<ReadingButton :collection-id="collection.id" :q-items="qItems" />
+						<LibraryButton :collection-id="collection.id" />
 					</div>
 				</div>
 			</div>
@@ -82,8 +83,9 @@
 
 		<template #main>
 			<PageTitle :title="collection.name" class="hidden md:block" />
-			<div class="hidden md:block">
+			<div class="hidden md:flex gap-2">
 				<ReadingButton :collection-id="collection.id" :q-items="qItems" />
+				<LibraryButton :collection-id="collection.id" />
 			</div>
 			<div>
 				<Description :text="metadata.description || 'No description.'" />
@@ -101,6 +103,7 @@ import { formatDate } from '../../../../utils'
 import Description from './Description.vue'
 import ChapterList from './ChapterList.vue'
 import ReadingButton from './ReadingButton.vue'
+import LibraryButton from './LibraryButton.vue'
 
 const route = useRoute()
 const collectionId = computed(() =>
