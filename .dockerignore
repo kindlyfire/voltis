@@ -29,3 +29,4 @@ Dockerfile
 
 # Application files (default path)
 /data
+/comics

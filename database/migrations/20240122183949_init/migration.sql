@@ -172,7 +172,7 @@ CREATE UNIQUE INDEX "UserCollectionData_userId_collectionId_key" ON "UserCollect
 ALTER TABLE "UserSession" ADD CONSTRAINT "UserSession_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "DiskCollection" ADD CONSTRAINT "DiskCollection_dataSourceId_fkey" FOREIGN KEY ("dataSourceId") REFERENCES "DataSource"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "DiskCollection" ADD CONSTRAINT "DiskCollection_dataSourceId_fkey" FOREIGN KEY ("dataSourceId") REFERENCES "DataSource"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "DiskItem" ADD CONSTRAINT "DiskItem_diskCollectionId_fkey" FOREIGN KEY ("diskCollectionId") REFERENCES "DiskCollection"("id") ON DELETE CASCADE ON UPDATE CASCADE;

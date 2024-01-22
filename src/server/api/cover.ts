@@ -40,6 +40,12 @@ export default defineEventHandler(async event => {
 		return 'Not Found'
 	}
 
+	const stat = await fs.stat(coverPath).catch(() => null)
+	if (!stat) {
+		setResponseStatus(event, 404)
+		return 'Not Found'
+	}
+
 	setHeader(event, 'Cache-Control', 'public, max-age=31536000')
 
 	if (width !== 'full') {

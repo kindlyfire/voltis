@@ -81,7 +81,7 @@ model DiskCollection {
     contentUriOverride String?
     missing            Boolean @default(false)
 
-    DataSource   DataSource @relation(fields: [dataSourceId], references: [id])
+    DataSource   DataSource @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
     dataSourceId String
     DiskItem     DiskItem[]
 }

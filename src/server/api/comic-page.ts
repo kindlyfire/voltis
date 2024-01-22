@@ -24,7 +24,14 @@ export default defineEventHandler(async event => {
 		return 'Not Found'
 	}
 
+	const fullPath = path.join(comicData.root, file)
+	const stat = await fs.stat(fullPath).catch(() => null)
+	if (!stat) {
+		setResponseStatus(event, 404)
+		return 'Not Found'
+	}
+
 	setHeader(event, 'Cache-Control', 'public, max-age=31536000')
 
-	await sendStream(event, fs.createReadStream(path.join(comicData.root, file)))
+	await sendStream(event, fs.createReadStream(fullPath))
 })
