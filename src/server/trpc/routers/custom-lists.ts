@@ -7,6 +7,7 @@ const zReadingStatusEnum = z.enum([
 	'custom',
 	'reading',
 	'plan to read',
+	'completed',
 	'on hold',
 	're-reading',
 	'dropped'

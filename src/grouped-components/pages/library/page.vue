@@ -2,8 +2,8 @@
 	<div class="acontainer flex flex-col gap-4">
 		<PageTitle title="Library" />
 		<div class="flex items-start -mb-2 overflow-auto">
-			<div class="w-[501px] shrink-0">
-				<UTabs :items="tabOptions" v-model="selectedIndex"></UTabs>
+			<div class="shrink-0">
+				<UTabs :items="libraryTypes" v-model="selectedIndex"></UTabs>
 			</div>
 		</div>
 
@@ -54,11 +54,13 @@
 import { useQuery } from '@tanstack/vue-query'
 import { trpc } from '../../../plugins/trpc'
 import slugify from 'slugify'
+import { libraryTypes } from '../../../constants'
 
 const route = useRoute()
 const router = useRouter()
 
-const tabs = ['reading', 'plan to read', 'on hold', 're-reading', 'dropped']
+const tabs = libraryTypes.map(x => x.type)
+
 const tab = computed(() => {
 	const v = route.query.tab
 	return tabs.includes(v as any) ? (v as string) : 'reading'
@@ -87,29 +89,6 @@ const qCollections = useQuery({
 	}
 })
 const collections = computed(() => qCollections.data.value ?? [])
-
-const tabOptions = [
-	{
-		label: 'Reading',
-		type: 'reading'
-	},
-	{
-		label: 'Plan to read',
-		type: 'plan to read'
-	},
-	{
-		label: 'On hold',
-		type: 'on hold'
-	},
-	{
-		label: 'Re-reading',
-		type: 're-reading'
-	},
-	{
-		label: 'Dropped',
-		type: 'dropped'
-	}
-]
 </script>
 
 <style></style>

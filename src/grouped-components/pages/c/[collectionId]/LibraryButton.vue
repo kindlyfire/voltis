@@ -6,10 +6,11 @@
 		label-attribute="label"
 		size="lg"
 		:disabled="mSaveToLibrary.isPending.value"
+		:loading="mSaveToLibrary.isPending.value"
 	>
 		<template #label>
 			<span v-if="selectedOption" class="truncate">{{
-				options.find(o => o.type === selectedOption)!.label
+				optionsWithRemove.find(o => o.type === selectedOption)!.label
 			}}</span>
 			<span v-else>Add to library</span>
 		</template>
@@ -19,6 +20,7 @@
 <script lang="ts" setup>
 import { useMutation, useQuery } from '@tanstack/vue-query'
 import { trpc } from '../../../../plugins/trpc'
+import { libraryTypes } from '../../../../constants'
 
 const props = defineProps<{
 	collectionId: string
@@ -30,7 +32,7 @@ const qListsForItem = useQuery({
 	async queryFn() {
 		const lists = await trpc.customLists.getUserListsForCollection.query({
 			id: props.collectionId,
-			types: ['reading', 'plan to read', 'on hold', 're-reading', 'dropped']
+			types: libraryTypes.map(x => x.type) as any
 		})
 		return lists
 	}
@@ -61,40 +63,17 @@ const selectedOption = computed({
 	}
 })
 
-const options = [
-	{
-		label: 'Reading',
-		type: 'reading'
-	},
-	{
-		label: 'Plan to read',
-		type: 'plan to read'
-	},
-	{
-		label: 'On hold',
-		type: 'on hold'
-	},
-	{
-		label: 'Re-reading',
-		type: 're-reading'
-	},
-	{
-		label: 'Dropped',
-		type: 'dropped'
-	}
-]
-
 const optionsWithRemove = computed(() => {
 	if (selectedOption.value) {
 		return [
-			...options,
+			...libraryTypes,
 			{
 				label: '(remove)',
 				type: 'remove'
 			}
 		]
 	}
-	return options
+	return libraryTypes
 })
 </script>
 
