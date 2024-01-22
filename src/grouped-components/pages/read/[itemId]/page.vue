@@ -164,10 +164,10 @@ const provider: ReaderProvider<{
 		}
 		if (!ev.chapter) return
 		router.push(
-			'/' +
-				slugify(ev.chapter.collection.title) +
-				':' +
-				ev.chapter.collection.id
+			routeBuilder['/c/[collectionId]/[name]'](
+				ev.chapter.collection.id,
+				slugify(ev.chapter.collection.title)
+			)
 		)
 	}
 }

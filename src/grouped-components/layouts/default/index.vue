@@ -2,14 +2,15 @@
 	<div class="flex items-stretch">
 		<div
 			v-if="sidebarEnabled"
-			class="w-[250px] h-screen card p-0 border-l-0 border-t-0 border-b-0 rounded-none hidden wide:flex flex-col"
+			class="w-[250px] shrink-0 h-screen card p-0 border-l-0 border-t-0 border-b-0 rounded-none hidden wide:flex flex-col fixed"
 		>
 			<Sidebar />
 		</div>
 		<div
-			id="mainOverflowArea"
-			class="flex flex-col grow h-screen overflow-auto"
-		>
+			v-if="sidebarEnabled"
+			class="w-[250px] shrink-0 hidden wide:block"
+		></div>
+		<div class="flex flex-col grow">
 			<Navbar />
 			<slot />
 			<div class="mb-4"></div>

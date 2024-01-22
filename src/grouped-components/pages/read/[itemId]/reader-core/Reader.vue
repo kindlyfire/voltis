@@ -15,7 +15,7 @@ const reader = useReader(props.provider)
 provide(readerKey, reader)
 
 onMounted(() => {
-	reader.state.scrollRef = document.getElementById('mainOverflowArea')
+	reader.state.scrollRef = document.documentElement
 })
 
 defineExpose({
