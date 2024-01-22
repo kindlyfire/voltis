@@ -1,4 +1,5 @@
 <template>
+	<div class="absolute h-screen w-0" ref="screenHeightRef"></div>
 	<div ref="imageWrapperRef" class="cursor-pointer flex flex-col items-center">
 		<template v-for="p of pages">
 			<div
@@ -39,7 +40,7 @@
 </template>
 
 <script lang="ts" setup>
-import { useScroll, watchDebounced } from '@vueuse/core'
+import { useWindowScroll, watchDebounced } from '@vueuse/core'
 import { readerKey } from './use-reader'
 import { useReaderActions } from './use-reader-actions'
 import { getPagesInPreloadOrder, preloadPages } from './page-loader'
@@ -48,17 +49,19 @@ import { SwitchChapterDirection, SwitchChapterPagePosition } from './types'
 const reader = inject(readerKey)!
 const imageWrapperRef = ref<HTMLDivElement | null>(null)
 const screenBottomRef = ref<HTMLDivElement | null>(null)
+const screenHeightRef = ref<HTMLDivElement | null>(null)
 
 const chapterPages = computed(() => {
 	return reader.state.chaptersPages.get(reader.state.chapterId)
 })
 const pages = chapterPages
 
-const getScreenHeight = () =>
-	screenBottomRef.value?.getBoundingClientRect().y ?? document.body.clientHeight
+const getVisibleScreenHeight = () =>
+	window.visualViewport?.height ??
+	screenBottomRef.value?.getBoundingClientRect().y ??
+	document.body.clientHeight
 useReaderActions({
 	onBack() {
-		const screenHeight = getScreenHeight()
 		const el = reader.state.scrollRef!
 
 		if (el.scrollTop === 0) {
@@ -69,22 +72,23 @@ useReaderActions({
 		} else {
 			// Scroll up/down by 95% of the screen height
 			el.scrollTo({
-				top: el.scrollTop + -0.95 * screenHeight,
+				top: el.scrollTop + -0.95 * getVisibleScreenHeight(),
 				left: 0,
 				behavior: 'smooth'
 			})
 		}
 	},
 	onNext() {
-		const screenHeight = getScreenHeight()
 		const el = reader.state.scrollRef!
+		const realScreenHeight =
+			screenHeightRef.value?.clientHeight ?? getVisibleScreenHeight()
 
-		if (el.scrollTop + el.clientHeight > el.scrollHeight - 10) {
+		if (el.scrollTop + realScreenHeight > el.scrollHeight - 10) {
 			reader.switchChapter(SwitchChapterDirection.Forward)
 		} else {
 			// Scroll up/down by 95% of the screen height
 			el.scrollTo({
-				top: el.scrollTop + 0.95 * screenHeight,
+				top: el.scrollTop + 0.95 * getVisibleScreenHeight(),
 				left: 0,
 				behavior: 'smooth'
 			})
@@ -116,7 +120,7 @@ watchEffect(() => {
 	preloadPages(pagesInPreloadOrder.slice(0, pagesToPreload), preloadConcurrency)
 })
 
-const pageScroll = useScroll(reader.state.scrollRef!)
+const pageScroll = useWindowScroll()
 function getViewingPage() {
 	const children = Array.from(
 		imageWrapperRef.value!.children

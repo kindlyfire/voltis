@@ -10,7 +10,7 @@
 			v-if="sidebarEnabled"
 			class="w-[250px] shrink-0 hidden wide:block"
 		></div>
-		<div class="flex flex-col grow">
+		<div class="flex flex-col grow max-w-[100vw]">
 			<Navbar />
 			<slot />
 			<div class="mb-4"></div>
