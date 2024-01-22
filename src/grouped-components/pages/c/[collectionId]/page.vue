@@ -88,7 +88,7 @@
 				<LibraryButton :collection-id="collection.id" />
 			</div>
 			<div>
-				<Description :text="metadata.description || 'No description.'" />
+				<Markdown :text="metadata.description || 'No description.'" />
 			</div>
 			<ChapterList :q-items="qItems" />
 		</template>
@@ -100,10 +100,10 @@ import { useQuery } from '@tanstack/vue-query'
 import { trpc } from '../../../../plugins/trpc'
 import { useItems } from '../../../../state/composables/queries'
 import { formatDate } from '../../../../utils'
-import Description from './Description.vue'
 import ChapterList from './ChapterList.vue'
 import ReadingButton from './ReadingButton.vue'
 import LibraryButton from './LibraryButton.vue'
+import Markdown from '../../../../components/Markdown.vue'
 
 const route = useRoute()
 const collectionId = computed(() =>

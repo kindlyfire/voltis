@@ -1,5 +1,5 @@
 <template>
-	<div class="CollectionDescription" v-html="qHtml.data.value ?? ''"></div>
+	<div class="Markdown" v-html="qHtml.data.value ?? ''"></div>
 </template>
 
 <script lang="ts" setup>
@@ -21,7 +21,7 @@ const qHtml = useQuery({
 </script>
 
 <style>
-.CollectionDescription a {
+.Markdown a {
 	@apply text-primary hover:underline;
 }
 </style>
