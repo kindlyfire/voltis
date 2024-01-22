@@ -24,27 +24,15 @@
 			<Icon name="ph:list-bullets-bold" dynamic class="h-5 scale-[1.4]" />
 			My Lists
 		</ALinkButton>
-		<!-- <div class="flex flex-col">
-			<div class="font-medium text-sm flex gap-x-2.5 px-3.5 py-2.5">
-				<Icon name="ph:folder-notch-bold" dynamic class="h-5 scale-[1.4]" />
-				Libraries
-			</div>
-			<ALinkButton
-				v-for="lib in qLibraries.data.value"
-				:to="routeBuilder['/library/[libraryId]'](lib.id)"
-			>
-				{{ lib.name }}
-			</ALinkButton>
-		</div> -->
 	</div>
 </template>
 
 <script lang="ts" setup>
 import ALinkButton from '../../../components/ALinkButton.vue'
-import { useLibraries } from '../../../state/composables/queries'
+import { useDataSources } from '../../../state/composables/queries'
 import { useLayoutStore } from '../state'
 
-const qLibraries = useLibraries({})
+const qLibraries = useDataSources({})
 const layoutStore = useLayoutStore()
 </script>
 

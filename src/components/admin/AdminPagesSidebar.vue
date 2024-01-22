@@ -13,7 +13,7 @@
 <script lang="ts" setup>
 const links = [
 	{ name: 'Summary', to: '/admin/summary' },
-	{ name: 'Libraries', to: '/admin/libraries' }
+	{ name: 'Data Sources', to: '/admin/datasources' }
 ]
 
 const route = useRoute()

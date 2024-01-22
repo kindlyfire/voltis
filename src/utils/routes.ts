@@ -9,7 +9,6 @@ export const routeBuilder = {
 	'/c/[collectionId]': (collectionId: string) => `/c/${collectionId}`,
 	'/c/[collectionId]/[name]': (collectionId: string, name: string) =>
 		`/c/${collectionId}/${name}`,
-	'/library/[libraryId]': (libraryId: string) => `/library/${libraryId}`,
 	'/read/[itemId]/[page]': (itemId: string, page: string | number) =>
 		`/read/${itemId}/${page}`,
 	'/user/account': () => '/user/account',

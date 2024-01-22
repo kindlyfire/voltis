@@ -4,7 +4,6 @@ import { search } from '@orama/orama'
 import { getSearchIndex } from '../../../utils/search-index'
 import { prisma } from '../../../database'
 import { dbUtils } from '../../../database/utils'
-import { Item, Prisma } from '@prisma/client'
 import { sortItems } from './items'
 
 export const rCollections = router({
@@ -12,7 +11,6 @@ export const rCollections = router({
 		.input(
 			z.object({
 				title: z.string().nullish(),
-				libraryIds: z.array(z.string()).min(1).max(100).nullish(),
 				limit: z.number().int().min(1).max(100).default(100)
 			})
 		)
@@ -29,10 +27,7 @@ export const rCollections = router({
 			}
 			const collections = await prisma.collection.findMany({
 				where: {
-					...(opts.input.title ? { id: { in: titleSearchIds } } : {}),
-					...(opts.input.libraryIds
-						? { libraryId: { in: opts.input.libraryIds } }
-						: {})
+					...(opts.input.title ? { id: { in: titleSearchIds } } : {})
 				},
 				take: opts.input.limit,
 				include: {

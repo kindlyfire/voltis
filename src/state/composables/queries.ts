@@ -59,10 +59,9 @@ function createQueryWrapper<T extends BuildProcedure<'query', any, any>>(
 	}
 }
 
-export const useLibraries = createQueryWrapper<AppRouter['libraries']['query']>(
-	'libraries',
-	o => trpc.libraries.query.query(o)
-)
+export const useDataSources = createQueryWrapper<
+	AppRouter['libraries']['query']
+>('libraries', o => trpc.libraries.query.query(o))
 
 export const useCollections = createQueryWrapper<
 	AppRouter['collections']['query']

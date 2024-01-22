@@ -18,6 +18,15 @@ export type Collection = {
      */
     metadata: unknown;
 };
+export type DataSource = {
+    id: string;
+    createdAt: Generated<Timestamp>;
+    updatedAt: Timestamp;
+    name: string;
+    type: string;
+    paths: string[];
+    lastScan: Timestamp | null;
+};
 export type DiskCollection = {
     id: string;
     createdAt: Generated<Timestamp>;
@@ -29,7 +38,7 @@ export type DiskCollection = {
     contentUri: string;
     contentUriOverride: string | null;
     missing: Generated<boolean>;
-    libraryId: string;
+    dataSourceId: string;
 };
 export type DiskItem = {
     id: string;
@@ -57,15 +66,6 @@ export type Item = {
     metadata: unknown;
     sortValue: number[];
     collectionId: string;
-};
-export type Library = {
-    id: string;
-    createdAt: Generated<Timestamp>;
-    updatedAt: Timestamp;
-    name: string;
-    type: string;
-    paths: string[];
-    lastScan: Timestamp | null;
 };
 export type User = {
     id: string;
@@ -126,10 +126,10 @@ export type UserSession = {
 };
 export type DB = {
     Collection: Collection;
+    DataSource: DataSource;
     DiskCollection: DiskCollection;
     DiskItem: DiskItem;
     Item: Item;
-    Library: Library;
     User: User;
     UserCollectionData: UserCollectionData;
     UserCustomList: UserCustomList;

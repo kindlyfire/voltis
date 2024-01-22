@@ -24,7 +24,7 @@ CREATE TABLE "UserSession" (
 );
 
 -- CreateTable
-CREATE TABLE "Library" (
+CREATE TABLE "DataSource" (
     "id" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -33,7 +33,7 @@ CREATE TABLE "Library" (
     "paths" TEXT[],
     "lastScan" TIMESTAMP(3),
 
-    CONSTRAINT "Library_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "DataSource_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -48,7 +48,7 @@ CREATE TABLE "DiskCollection" (
     "contentUri" TEXT NOT NULL,
     "contentUriOverride" TEXT,
     "missing" BOOLEAN NOT NULL DEFAULT false,
-    "libraryId" TEXT NOT NULL,
+    "dataSourceId" TEXT NOT NULL,
 
     CONSTRAINT "DiskCollection_pkey" PRIMARY KEY ("id")
 );
@@ -172,7 +172,7 @@ CREATE UNIQUE INDEX "UserCollectionData_userId_collectionId_key" ON "UserCollect
 ALTER TABLE "UserSession" ADD CONSTRAINT "UserSession_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "DiskCollection" ADD CONSTRAINT "DiskCollection_libraryId_fkey" FOREIGN KEY ("libraryId") REFERENCES "Library"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "DiskCollection" ADD CONSTRAINT "DiskCollection_dataSourceId_fkey" FOREIGN KEY ("dataSourceId") REFERENCES "DataSource"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "DiskItem" ADD CONSTRAINT "DiskItem_diskCollectionId_fkey" FOREIGN KEY ("diskCollectionId") REFERENCES "DiskCollection"("id") ON DELETE CASCADE ON UPDATE CASCADE;

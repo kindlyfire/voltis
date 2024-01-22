@@ -46,7 +46,7 @@ model UserSession {
     User   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
-model Library {
+model DataSource {
     id        String   @id
     createdAt DateTime @default(now())
     updatedAt DateTime @updatedAt
@@ -81,9 +81,9 @@ model DiskCollection {
     contentUriOverride String?
     missing            Boolean @default(false)
 
-    Library   Library    @relation(fields: [libraryId], references: [id], onDelete: Cascade)
-    libraryId String
-    DiskItem  DiskItem[]
+    DataSource   DataSource @relation(fields: [dataSourceId], references: [id])
+    dataSourceId String
+    DiskItem     DiskItem[]
 }
 
 model DiskItem {

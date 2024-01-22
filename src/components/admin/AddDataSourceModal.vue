@@ -9,7 +9,9 @@
 		class=""
 	>
 		<div class="flex items-center padding-modal">
-			<div class="font-bold">{{ libraryId ? 'Edit' : 'Add' }} library</div>
+			<div class="font-bold">
+				{{ dataSourceId ? 'Edit' : 'Add' }} data source
+			</div>
 			<div class="ml-auto">
 				<UButton
 					@click="emit('update:modelValue', false)"
@@ -83,10 +85,10 @@
 
 				<div class="flex items-center gap-2">
 					<UButton type="submit" :loading="mSave.isPending.value">
-						{{ libraryId ? 'Save' : 'Create' }}
+						{{ dataSourceId ? 'Save' : 'Create' }}
 					</UButton>
 					<UButton
-						v-if="libraryId"
+						v-if="dataSourceId"
 						@click.prevent.stop="mDelete.mutate()"
 						:loading="mDelete.isPending.value"
 						color="red"
@@ -104,11 +106,11 @@
 import { z } from 'zod'
 import { useMutation } from '@tanstack/vue-query'
 import { trpc } from '../../plugins/trpc'
-import { useLibraries } from '../../state/composables/queries'
+import { useDataSources } from '../../state/composables/queries'
 
 const props = defineProps<{
 	modelValue: boolean
-	libraryId?: string | null
+	dataSourceId?: string | null
 }>()
 const emit = defineEmits<{
 	'update:modelValue': [open: boolean]
@@ -118,8 +120,8 @@ const emit = defineEmits<{
 // what would.
 const formRef = ref(null) as Ref<{ clear(path: string): void } | null>
 
-const qLibraries = useLibraries({})
-const libraryId = ref(null) as Ref<string | null>
+const qLibraries = useDataSources({})
+const dataSourceId = ref(null) as Ref<string | null>
 
 const schema = z.object({
 	name: z.string().min(1, 'Must be at least 1 character'),
@@ -151,8 +153,8 @@ watch(
 			state.type = 'comic'
 			state.paths = []
 
-			libraryId.value = props.libraryId ?? null
-			const lib = qLibraries.data.value?.find(l => l.id === libraryId.value)
+			dataSourceId.value = props.dataSourceId ?? null
+			const lib = qLibraries.data.value?.find(l => l.id === dataSourceId.value)
 			if (lib) {
 				state.name = lib.name!
 				state.type = lib.type as any
@@ -164,7 +166,7 @@ watch(
 
 const mSave = useMutation({
 	async mutationFn() {
-		if (!props.libraryId) {
+		if (!props.dataSourceId) {
 			await trpc.libraries.create.mutate({
 				name: state.name,
 				matcher: state.type,
@@ -172,7 +174,7 @@ const mSave = useMutation({
 			})
 		} else {
 			await trpc.libraries.update.mutate({
-				id: props.libraryId!,
+				id: props.dataSourceId!,
 				name: state.name,
 				matcher: state.type,
 				paths: state.paths
@@ -193,8 +195,8 @@ const errorMessage = computed(() => {
 
 const mDelete = useMutation({
 	async mutationFn() {
-		if (!props.libraryId) return
-		await trpc.libraries.delete.mutate({ id: props.libraryId })
+		if (!props.dataSourceId) return
+		await trpc.libraries.delete.mutate({ id: props.dataSourceId })
 		await qLibraries.refetch()
 		emit('update:modelValue', false)
 	}

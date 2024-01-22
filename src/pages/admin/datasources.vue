@@ -4,7 +4,7 @@
 			<AdminPagesSidebar />
 		</template>
 		<template #main>
-			<PageTitle title="Libraries" pagetitle="Libraries (Admin)" />
+			<PageTitle title="Data Sources" pagetitle="Data Sources (Admin)" />
 
 			<div class="flex items-center gap-2">
 				<UButton size="lg" @click="addEditModalOpen = true">
@@ -13,12 +13,12 @@
 						dynamic
 						class="h-4 scale-[1.4]"
 					/>
-					Add library
+					Add data source
 				</UButton>
 				<UButton
 					size="lg"
 					color="gray"
-					@click="mScanLibraries.mutate(libraries?.map(l => l.id!) ?? [])"
+					@click="mScanLibraries.mutate(dataSources?.map(l => l.id!) ?? [])"
 					:loading="mScanLibraries.isPending.value"
 				>
 					<UIcon
@@ -30,12 +30,15 @@
 				</UButton>
 			</div>
 
-			<div v-if="qLibraries.isPending.value">Loading...</div>
-			<div v-else-if="!libraries?.length">
-				No libraries set up yet. Add one to get started!
+			<div v-if="qDataSources.isPending.value">Loading...</div>
+			<div v-else-if="!dataSources?.length">
+				No data sources set up yet. Add one to get started!
 			</div>
 			<div v-else class="grid lg:grid-cols-2 gap-4">
-				<div v-for="lib in libraries" class="card rounded-md flex items-center">
+				<div
+					v-for="lib in dataSources"
+					class="card rounded-md flex items-center"
+				>
 					<div>
 						<div>{{ lib.name }}</div>
 						<div class="text-muted">{{ lib.collectionCount }} collections</div>
@@ -60,7 +63,7 @@
 							@click="
 									() => {
 										addEditModalOpen = true
-										addEditModalLibraryId = lib.id!
+										addEditModalDataSourceId = lib.id!
 									}
 								"
 						>
@@ -77,39 +80,39 @@
 		</template>
 	</AMainWrapper>
 
-	<AddLibraryModal
+	<AddDataSourceModal
 		:model-value="addEditModalOpen"
 		@update:model-value="
 			$event => {
 				addEditModalOpen = $event
-				addEditModalLibraryId = null
+				addEditModalDataSourceId = null
 			}
 		"
-		:library-id="addEditModalLibraryId"
+		:data-source-id="addEditModalDataSourceId"
 	/>
 </template>
 
 <script lang="ts" setup>
 import { useMutation } from '@tanstack/vue-query'
-import AddLibraryModal from '../../components/admin/AddLibraryModal.vue'
+import AddDataSourceModal from '../../components/admin/AddDataSourceModal.vue'
 import AdminPagesSidebar from '../../components/admin/AdminPagesSidebar.vue'
-import { useLibraries } from '../../state/composables/queries'
+import { useDataSources } from '../../state/composables/queries'
 import { trpc } from '../../plugins/trpc'
 
-const qLibraries = useLibraries({})
-await qLibraries.suspense()
-const libraries = qLibraries.data
+const qDataSources = useDataSources({})
+await qDataSources.suspense()
+const dataSources = qDataSources.data
 
 const addEditModalOpen = ref(false)
-const addEditModalLibraryId = ref(null) as Ref<string | null>
+const addEditModalDataSourceId = ref(null) as Ref<string | null>
 
 const mScanLibraries = useMutation({
 	async mutationFn(ids: string[]) {
 		if (ids.length === 0) return
-		await trpc.scan.scanLibraries.mutate({
-			libraryIds: ids
+		await trpc.scan.scanDataSources.mutate({
+			dataSourceIds: ids
 		})
-		await qLibraries.refetch()
+		await qDataSources.refetch()
 	}
 })
 </script>

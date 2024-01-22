@@ -3,17 +3,17 @@ import fs from 'fs-extra'
 import path from 'pathe'
 import { comicMatcher } from '../scanning/comic'
 import { MatcherCollection } from '../scanning'
-import { Library } from '@prisma/client'
 import { prisma } from '../database'
 import { mergeCollections } from './merger'
 import { dbUtils } from '../database/utils'
+import { DataSource } from '@prisma/client'
 
-export async function scanLibrary(lib: Library) {
-	consola.log('Scanning', lib.name)
+export async function scanDataSource(dataSource: DataSource) {
+	consola.log('Scanning', dataSource.name)
 
 	const matchedCollections: (MatcherCollection & { path: string })[] = []
 	await Promise.all(
-		lib.paths.map(async libPath => {
+		dataSource.paths.map(async libPath => {
 			const directories = await fs
 				.readdir(libPath, { withFileTypes: true })
 				.then(entries => entries.filter(d => d.isDirectory()))
@@ -37,7 +37,7 @@ export async function scanLibrary(lib: Library) {
 	)
 
 	const collections = await prisma.diskCollection.findMany({
-		where: { libraryId: lib.id }
+		where: { dataSourceId: dataSource.id }
 	})
 	const missingCollections = collections.filter(
 		c => !matchedCollections.some(m => m.contentUri === c.contentUri)
@@ -72,7 +72,7 @@ export async function scanLibrary(lib: Library) {
 					name: matched.defaultName,
 					path: matched.path,
 					coverPath: matched.coverPath ?? '',
-					libraryId: lib.id,
+					dataSourceId: dataSource.id,
 					type: 'comic'
 				}
 			})
@@ -81,7 +81,7 @@ export async function scanLibrary(lib: Library) {
 	}
 
 	const items = await prisma.diskItem.findMany({
-		where: { DiskCollection: { libraryId: lib.id } }
+		where: { DiskCollection: { dataSourceId: dataSource.id } }
 	})
 	for (const col of collections.filter(c => !c.missing)) {
 		const itemContentIds = await comicMatcher.listItems(
