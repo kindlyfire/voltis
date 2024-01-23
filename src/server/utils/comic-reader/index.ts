@@ -12,7 +12,6 @@ import { prisma } from '../../database'
 export const getComicData = defineClusterFn({
 	name: 'getComicData',
 	async fn(itemId: string) {
-		console.log('is master?', cluster.isPrimary, itemId)
 		return await getComicDataPrimary(itemId)
 	}
 })
@@ -81,7 +80,7 @@ async function unzipFileToFolder(file: string, folder: string) {
 			await execa('unzip', [file, '-d', folder])
 		}
 	} catch (e) {
-		console.error('error unzipping', e)
+		console.error('error unzipping', file, 'to', folder, e)
 		throw new Error('Error unzipping file')
 	}
 }

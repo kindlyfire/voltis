@@ -4,4 +4,5 @@
  */
 export default defineNitroPlugin(async () => {
 	await import('../utils/comic-reader')
+	await import('../scanning/scanner')
 })

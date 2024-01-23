@@ -8,7 +8,7 @@ export function filterTruthyArrayValues<T>(
 	return arr.filter(v => !(v == null || v === false)) as T[]
 }
 
-export function pickKeys<T extends Record<string, unknown>, K extends keyof T>(
+export function pickKeys<T extends object, K extends keyof T>(
 	obj: T,
 	keys: K[]
 ) {
@@ -19,7 +19,7 @@ export function pickKeys<T extends Record<string, unknown>, K extends keyof T>(
 	return out
 }
 
-export function omitKeys<T extends Record<string, unknown>, K extends keyof T>(
+export function omitKeys<T extends object, K extends keyof T>(
 	obj: T,
 	keys: K[]
 ) {
@@ -27,7 +27,7 @@ export function omitKeys<T extends Record<string, unknown>, K extends keyof T>(
 	for (const key of keys) {
 		delete out[key]
 	}
-	return out
+	return out as Omit<T, K>
 }
 
 export function newUnpackedPromise<T = void>() {

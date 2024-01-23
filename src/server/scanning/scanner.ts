@@ -7,8 +7,27 @@ import { prisma } from '../database'
 import { mergeCollections } from './merger'
 import { dbUtils } from '../database/utils'
 import { DataSource } from '@prisma/client'
+import { TaskContext, taskRunner } from '../utils/task-runner'
 
-export async function scanDataSource(dataSource: DataSource) {
+export const scanDataSources = defineClusterFn({
+	name: 'scanDataSources',
+	fn: async (dataSources: DataSource[]) => {
+		if (taskRunner.tasks.some(t => t.name === 'scanDataSource'))
+			throw new Error('A scan is already ongoing')
+
+		await taskRunner.run({
+			name: 'scanDataSource',
+			displayName: 'Scan data source' + (dataSources.length > 1 ? 's' : ''),
+			async fn(ctx) {
+				for (const dataSource of dataSources) {
+					await _scanDataSource(ctx, dataSource)
+				}
+			}
+		})
+	}
+})
+
+async function _scanDataSource(ctx: TaskContext, dataSource: DataSource) {
 	consola.log('Scanning', dataSource.name)
 
 	const matchedCollections: (MatcherCollection & { path: string })[] = []

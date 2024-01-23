@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { adminProcedure, router } from '../../trpc'
 import { TRPCError } from '@trpc/server'
-import { scanDataSource } from '../../../scanning/scanner'
+import { scanDataSources } from '../../../scanning/scanner'
 import { prisma } from '../../../database'
 
 export const rScan = router({
@@ -22,7 +22,7 @@ export const rScan = router({
 				})
 			}
 
-			await Promise.all(dataSources.map(lib => scanDataSource(lib)))
+			await scanDataSources(dataSources)
 
 			return true
 		})
