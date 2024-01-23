@@ -2,7 +2,7 @@ import sharp from 'sharp'
 import { promiseAllSettled2 } from '../../utils/utils'
 import { getComicData } from '../../utils/comic-reader'
 import path from 'pathe'
-import { DiskCollection, DiskItem } from '@prisma/client'
+import { DiskItem } from '@prisma/client'
 
 export interface DiskItemComicMetadata {
 	suggestedMode: 'pages' | 'longstrip'

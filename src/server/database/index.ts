@@ -1,7 +1,7 @@
 import { PrismaClient, Prisma } from '@prisma/client'
 import { Kysely, PostgresDialect } from 'kysely'
 import pg from 'pg'
-import { DB } from '../database/types'
+import { DB } from '../database/types-kysely'
 
 const u = new URL(process.env.DB_URI!)
 const dialect = new PostgresDialect({
