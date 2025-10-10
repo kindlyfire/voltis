@@ -1,0 +1,32 @@
+[project]
+name = "voltis"
+version = "0.1.0"
+description = "Library for ebooks and comics (& co)"
+requires-python = ">=3.13"
+dependencies = [
+    "anyio>=4.11.0",
+    "click>=8.3.0",
+    "fastapi[standard]>=0.118.3",
+    "orjson>=3.11.3",
+    "psycopg[binary]>=3.2.10",
+    "pydantic>=2.12.0",
+    "pydantic-settings>=2.11.0",
+    "python-dotenv>=1.1.1",
+    "sqlalchemy>=2.0.44",
+    "uvicorn>=0.37.0",
+]
+
+[project.scripts]
+voltis = "voltis.cli.main:main"
+
+[tool.uv]
+package = true
+config-settings = { editable_mode = "compat" }
+
+[tool.ruff]
+line-length = 100
+
+[tool.pyright]
+typeCheckingMode = "standard"
+# extraPaths = ["src"]
+include = ["src"]
