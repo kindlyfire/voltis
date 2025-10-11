@@ -1,5 +1,7 @@
 from functools import cache
+from typing import Annotated
 
+from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -7,6 +9,13 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from .settings import settings
+
+
+def _rb_provider(request: Request) -> "ResourceBroker":
+    return request.app.state.resource_broker
+
+
+RbProvider = Annotated["ResourceBroker", Depends(_rb_provider)]
 
 
 class ResourceBroker:
@@ -25,4 +34,4 @@ class ResourceBroker:
         )
 
     def get_asession(self) -> AsyncSession:
-        return AsyncSession(self.get_aengine())
+        return AsyncSession(self.get_aengine(), expire_on_commit=False)

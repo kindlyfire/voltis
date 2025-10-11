@@ -5,8 +5,10 @@ description = "Library for ebooks and comics (& co)"
 requires-python = ">=3.14"
 dependencies = [
     "anyio>=4.11.0",
+    "bcrypt>=5.0.0",
     "click>=8.3.0",
     "fastapi[standard]>=0.118.3",
+    "httpx>=0.28.1",
     "orjson>=3.11.3",
     "psycopg[binary]>=3.2.10",
     "pydantic>=2.12.0",
