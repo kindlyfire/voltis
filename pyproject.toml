@@ -2,7 +2,7 @@
 name = "voltis"
 version = "0.1.0"
 description = "Library for ebooks and comics (& co)"
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 dependencies = [
     "anyio>=4.11.0",
     "click>=8.3.0",
@@ -13,6 +13,7 @@ dependencies = [
     "pydantic-settings>=2.11.0",
     "python-dotenv>=1.1.1",
     "sqlalchemy>=2.0.44",
+    "structlog>=25.4.0",
     "uvicorn>=0.37.0",
 ]
 
@@ -30,3 +31,6 @@ line-length = 100
 typeCheckingMode = "standard"
 # extraPaths = ["src"]
 include = ["src"]
+
+[dependency-groups]
+dev = ["pyright>=1.1.406", "pytest>=8.4.2", "ruff>=0.14.0"]

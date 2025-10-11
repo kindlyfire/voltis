@@ -1,6 +1,7 @@
 import logging
-import uvicorn
+
 import click
+import uvicorn
 
 
 @click.command()

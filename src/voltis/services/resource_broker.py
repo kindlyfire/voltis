@@ -1,4 +1,5 @@
 from functools import cache
+
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,

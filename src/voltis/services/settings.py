@@ -1,4 +1,5 @@
 from typing import Final
+
 import dotenv
 from pydantic_settings import BaseSettings
 

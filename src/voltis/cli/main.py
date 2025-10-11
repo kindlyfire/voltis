@@ -1,5 +1,6 @@
 import click
 
+from .migrate import migrate
 from .run import run
 
 
@@ -8,3 +9,4 @@ def main(): ...
 
 
 main.add_command(run)
+main.add_command(migrate)
