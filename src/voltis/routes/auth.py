@@ -3,11 +3,12 @@ from uuid import uuid4
 
 import bcrypt
 from fastapi import APIRouter, Body, HTTPException, Request, Response
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
 from voltis.db.models import Session, User
 from voltis.services.resource_broker import RbProvider
+from voltis.services.settings import settings
 
 router = APIRouter()
 
@@ -55,9 +56,12 @@ async def route_auth_register(
     rb: RbProvider,
     request: Request,
     response: Response,
-    username: Annotated[str, Body()],
-    password: Annotated[str, Body()],
+    username: Annotated[str, Body(min_length=2)],
+    password: Annotated[str, Body(min_length=8)],
 ):
+    if settings.REGISTRATION_ENABLED is False:
+        raise HTTPException(status_code=403, detail="Registration is disabled")
+
     async with rb.get_asession() as session:
         # Check if user exists
         result = await session.execute(select(User).where(User.username == username))
@@ -90,5 +94,25 @@ async def route_auth_register(
         secure=secure,
         samesite="lax",
     )
+
+    return {"success": True}
+
+
+@router.post("/logout")
+async def route_auth_logout(
+    rb: RbProvider,
+    request: Request,
+    response: Response,
+):
+    session_token = request.cookies.get("voltis_session")
+    if not session_token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    async with rb.get_asession() as session:
+        await session.execute(delete(Session).where(Session.token == session_token))
+        await session.commit()
+
+    # Clear cookie
+    response.delete_cookie(key="voltis_session")
 
     return {"success": True}

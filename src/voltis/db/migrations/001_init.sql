@@ -1,8 +1,10 @@
 CREATE TABLE users (
     id TEXT PRIMARY KEY,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
     username TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL
+    password_hash TEXT NOT NULL,
+    permissions TEXT[] NOT NULL DEFAULT '{}'
 );
 
 CREATE TABLE sessions (
