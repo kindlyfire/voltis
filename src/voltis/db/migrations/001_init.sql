@@ -13,3 +13,13 @@ CREATE TABLE sessions (
 );
 
 CREATE INDEX idx_sessions_user_id ON sessions(user_id);
+
+CREATE TABLE content (
+    id TEXT PRIMARY KEY,
+    content_id TEXT UNIQUE NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('book', 'book_series', 'comic', 'comic_series')),
+    title TEXT NOT NULL,
+    "order" INTEGER,
+    order_parts REAL[],
+    parent_id TEXT REFERENCES content(id)
+);

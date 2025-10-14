@@ -3,6 +3,7 @@ from typing import Literal
 
 from sqlalchemy import (
     ARRAY,
+    REAL,
     ForeignKey,
     Text,
 )
@@ -91,6 +92,7 @@ class Content(_Base, _DefaultColumns):
     """
 
     order: Mapped[int | None] = col()
+    order_parts: Mapped[list[float] | None] = col(ARRAY(REAL))
 
     parent_id: Mapped[str | None] = col(Text, ForeignKey("content.id"))
     parent: Mapped["Content | None"] = relationship(
