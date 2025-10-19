@@ -13,7 +13,13 @@ from sqlalchemy.orm import mapped_column as col
 
 
 class _Base(DeclarativeBase):
-    pass
+    def as_dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+    def __repr__(self):
+        d = self.as_dict()
+        d_str = ", ".join(f"{k}={v!r}" for k, v in d.items())
+        return f"<{self.__class__.__name__} {d_str}>"
 
 
 class _DefaultColumns:

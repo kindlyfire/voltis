@@ -1,4 +1,5 @@
 import re
+from uuid import uuid4
 
 from voltis.db.models import Content
 
@@ -49,8 +50,16 @@ class ComicScanner(ScannerBase):
         # Process each root item
         for item in items:
             if item.type == "directory" and item.children:
-                contents.extend(await self._process_directory(item))
+                contents.extend(await self._process_children(item))
 
+        return contents
+
+    async def _process_children(self, parent: FoundItem) -> list[Content]:
+        """Process all children of a directory."""
+        contents: list[Content] = []
+        for child in parent.children or []:
+            if child.type == "directory":
+                contents.extend(await self._process_directory(child))
         return contents
 
     async def _process_directory(self, directory: FoundItem) -> list[Content]:
@@ -60,11 +69,17 @@ class ComicScanner(ScannerBase):
 
         cbz_files = [c for c in directory.children if c.type == "file" and c.path.suffix == ".cbz"]
         if not cbz_files:
-            return []
+            # If the directory contains files, skip it. Otherwise, recurse into
+            # it.
+            all_files = [c for c in directory.children if c.type == "file"]
+            if all_files:
+                return []
+            else:
+                return await self._process_children(directory)
 
         name, year = _parse_series_name(directory.path.name)
         series = Content(
-            id="",
+            id=uuid4().hex,
             content_id=f"{name}_{year}" if year else name,
             type="comic_series",
             title=name,
@@ -96,7 +111,7 @@ class ComicScanner(ScannerBase):
         title = " ".join(parts) if parts else None
 
         return Content(
-            id="",
+            id=uuid4().hex,
             content_id=f"{series.content_id}:v{vol_num or 0}_ch{ch_num or 0}",
             type="comic",
             title=title,
@@ -173,7 +188,6 @@ def _parse_series_year(name: str) -> int | None:
     matches = list(re.finditer(r"\((\d+)\)", name))
     for match in reversed(matches):
         year = int(match.group(1))
-        # Valid year: 4 digits and >= 1000
         if year >= 1000 and year <= 9999:
             return year
 
