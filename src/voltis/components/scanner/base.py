@@ -1,21 +1,31 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 import anyio
 import structlog
 
-from voltis.db.models import Content, DataSource
+from voltis.db.models import ContentType, DataSource
 from voltis.services.resource_broker import ResourceBroker
 
 logger = structlog.stdlib.get_logger()
 
 
 @dataclass(slots=True)
-class FoundItem:
+class FsItem:
     type: Literal["file", "directory"]
     path: anyio.Path
-    children: list["FoundItem"] | None
+    children: list["FsItem"] | None
+
+
+@dataclass(slots=True)
+class ContentItem:
+    content_id: str
+    title: str
+    type: ContentType
+    order: int | None
+    order_parts: list[int | float] | None = None
+    children: list["ContentItem"] = field(default_factory=list)
 
 
 class ScannerBase(ABC):
@@ -30,14 +40,14 @@ class ScannerBase(ABC):
         await self.scan_items([item])
 
     @abstractmethod
-    async def scan_items(self, items: list[FoundItem]) -> list[Content]:
+    async def scan_items(self, items: list[FsItem]) -> list[ContentItem]:
         """
-        Scan the given item and its children, returning a list of Content
+        Scan the given item and its children, returning a list of ContentItem
         instances that are *not* linked to the database. They'll be matched by
         content_id and inserted.
         """
 
-    async def find_items(self) -> FoundItem:
+    async def find_items(self) -> FsItem:
         """
         Walk all folders in self.ds.path recursively up to depth 5, returning a
         tree structure.
@@ -46,11 +56,11 @@ class ScannerBase(ABC):
             A FoundItem representing the root folder with all its children.
         """
 
-        async def _inner(path: anyio.Path, depth: int) -> FoundItem | None:
+        async def _inner(path: anyio.Path, depth: int) -> FsItem | None:
             if depth > 5:
                 return None
 
-            children: list[FoundItem] = []
+            children: list[FsItem] = []
 
             async for item in path.iterdir():
                 if await item.is_dir():
@@ -58,11 +68,21 @@ class ScannerBase(ABC):
                     if child_item:
                         children.append(child_item)
                 elif await item.is_file():
-                    children.append(FoundItem(type="file", path=item, children=None))
+                    children.append(FsItem(type="file", path=item, children=None))
 
-            return FoundItem(type="directory", path=path, children=children if children else None)
+            return FsItem(type="directory", path=path, children=children if children else None)
 
         root_path = anyio.Path(self.ds.path)
         item = await _inner(root_path, depth=1)
         assert item is not None
         return item
+
+    async def save(self, items: list[ContentItem]) -> None:
+        """
+        Save the given ContentItem instances to the database. All top-level
+        items are considered "complete", so data for them will be inserted,
+        updated and deleted as needed to make it match.
+        """
+
+        async with self.rb.get_asession() as session:
+            ...

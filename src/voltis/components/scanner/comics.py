@@ -1,13 +1,10 @@
 import re
-from uuid import uuid4
 
-from voltis.db.models import Content
-
-from .base import FoundItem, ScannerBase
+from .base import ContentItem, FsItem, ScannerBase
 
 
 class ComicScanner(ScannerBase):
-    async def scan_items(self, items: list[FoundItem]) -> list[Content]:
+    async def scan_items(self, items: list[FsItem]) -> list[ContentItem]:
         """
         We scan walk through folders. If a folder contains a .cbz file, we
         consider it a comic folder.
@@ -45,7 +42,7 @@ class ComicScanner(ScannerBase):
         As a last resort, the first number in the filename is considered the
         volume.
         """
-        contents: list[Content] = []
+        contents: list[ContentItem] = []
 
         # Process each root item
         for item in items:
@@ -54,15 +51,15 @@ class ComicScanner(ScannerBase):
 
         return contents
 
-    async def _process_children(self, parent: FoundItem) -> list[Content]:
+    async def _process_children(self, parent: FsItem) -> list[ContentItem]:
         """Process all children of a directory."""
-        contents: list[Content] = []
+        contents: list[ContentItem] = []
         for child in parent.children or []:
             if child.type == "directory":
                 contents.extend(await self._process_directory(child))
         return contents
 
-    async def _process_directory(self, directory: FoundItem) -> list[Content]:
+    async def _process_directory(self, directory: FsItem) -> list[ContentItem]:
         """Process a directory that contains .cbz files as a comic series."""
         if not directory.children:
             return []
@@ -78,22 +75,20 @@ class ComicScanner(ScannerBase):
                 return await self._process_children(directory)
 
         name, year = _parse_series_name(directory.path.name)
-        series = Content(
-            id=uuid4().hex,
+        series = ContentItem(
             content_id=f"{name}_{year}" if year else name,
             type="comic_series",
             title=name,
             order=None,
-            parent_id=None,
         )
-
-        volumes = [
+        children = [
             self._process_cbz(cbz, series) for cbz in sorted(cbz_files, key=lambda x: x.path.name)
         ]
+        series.children = [child for child in children if child]
 
-        return [series] + volumes
+        return [series]
 
-    def _process_cbz(self, cbz: FoundItem, series: Content) -> Content:
+    def _process_cbz(self, cbz: FsItem, series: ContentItem) -> ContentItem | None:
         """Create a Content entry for a single .cbz file."""
         filename = cbz.path.stem
 
@@ -110,14 +105,15 @@ class ComicScanner(ScannerBase):
             parts.append(f"Ch. {ch_num}")
         title = " ".join(parts) if parts else None
 
-        return Content(
-            id=uuid4().hex,
+        if not title:
+            return None
+
+        return ContentItem(
             content_id=f"{series.content_id}:v{vol_num or 0}_ch{ch_num or 0}",
             type="comic",
             title=title,
             order=0,
             order_parts=[vol_num or 0, ch_num or 0],
-            parent_id=series.id,
         )
 
 

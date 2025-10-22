@@ -11,6 +11,9 @@ from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.orm import DeclarativeBase, Mapped, relationship
 from sqlalchemy.orm import mapped_column as col
 
+DataSourceType = Literal["comics", "books"]
+ContentType = Literal["comic", "comic_series", "book", "book_series"]
+
 
 class _Base(DeclarativeBase):
     def as_dict(self):
@@ -62,6 +65,7 @@ class DataSource(_Base, _DefaultColumns):
     __tablename__ = "data_sources"
 
     path: Mapped[str] = col(Text)
+    type: Mapped[DataSourceType] = col(Text)
     scanned_at: Mapped[datetime.datetime | None] = col(TIMESTAMP)
 
 
@@ -88,8 +92,6 @@ class Content(_Base, _DefaultColumns):
     present.
     """
 
-    type: Mapped[Literal["book", "book_series", "comic", "comic_series"]] = col(Text)
-
     title: Mapped[str] = col(Text)
     """
     The title. This typically does not repeat the title given in the parent
@@ -97,6 +99,7 @@ class Content(_Base, _DefaultColumns):
     "Volume 1", not "My Name Volume 1".
     """
 
+    type: Mapped[ContentType] = col(Text)
     order: Mapped[int | None] = col()
     order_parts: Mapped[list[float] | None] = col(ARRAY(REAL))
 
