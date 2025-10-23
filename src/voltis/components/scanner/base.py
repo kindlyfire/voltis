@@ -4,8 +4,9 @@ from typing import Literal
 
 import anyio
 import structlog
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from voltis.db.models import ContentType, DataSource
+from voltis.db.models import Content, ContentType, DataSource
 from voltis.services.resource_broker import ResourceBroker
 
 logger = structlog.stdlib.get_logger()
@@ -23,9 +24,18 @@ class ContentItem:
     content_id: str
     title: str
     type: ContentType
-    order: int | None
     order_parts: list[int | float] | None = None
+    """Will be compared in order to sort items within their parent."""
     children: list["ContentItem"] = field(default_factory=list)
+
+    # Internal fields
+    _order: int | None = None
+    """The computed order based on the order_parts of all children of an
+    item."""
+    _content_inst: Content | None = None
+    """The matching Content instance. Filled in in the matching step."""
+    _content_new: bool = False
+    """Whether this ContentItem represents a new Content to be inserted."""
 
 
 class ScannerBase(ABC):
@@ -77,6 +87,16 @@ class ScannerBase(ABC):
         assert item is not None
         return item
 
+    async def match_items(self, session: AsyncSession, items: list[ContentItem]) -> list[Content]:
+        """
+        Match ContentItem instances to existing Content rows in the database,
+        filling in the _content_inst and _content_new fields.
+
+        Returns:
+            A list of Content instances to be deleted.
+        """
+        raise NotImplementedError()
+
     async def save(self, items: list[ContentItem]) -> None:
         """
         Save the given ContentItem instances to the database. All top-level
@@ -85,4 +105,4 @@ class ScannerBase(ABC):
         """
 
         async with self.rb.get_asession() as session:
-            ...
+            raise NotImplementedError()

@@ -68,6 +68,8 @@ class DataSource(_Base, _DefaultColumns):
     type: Mapped[DataSourceType] = col(Text)
     scanned_at: Mapped[datetime.datetime | None] = col(TIMESTAMP)
 
+    contents: Mapped[list["Content"]] = relationship(back_populates="datasource")
+
 
 class Content(_Base, _DefaultColumns):
     """
@@ -85,7 +87,7 @@ class Content(_Base, _DefaultColumns):
 
     __tablename__ = "content"
 
-    content_id: Mapped[str] = col(Text, unique=True)
+    content_id: Mapped[str] = col(Text)
     """
     A unique identifier for this piece of content. This is typically based on
     the root content title and year (of the series), and volume/issue numbers if
@@ -108,3 +110,6 @@ class Content(_Base, _DefaultColumns):
         back_populates="children", remote_side="Content.id"
     )
     children: Mapped[list["Content"]] = relationship(back_populates="parent")
+
+    datasource_id: Mapped[str] = col(Text, ForeignKey("data_sources.id"))
+    datasource: Mapped["DataSource"] = relationship()

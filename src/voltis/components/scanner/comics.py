@@ -75,20 +75,17 @@ class ComicScanner(ScannerBase):
                 return await self._process_children(directory)
 
         name, year = _parse_series_name(directory.path.name)
+        children = [self._process_cbz(cbz) for cbz in sorted(cbz_files, key=lambda x: x.path.name)]
         series = ContentItem(
             content_id=f"{name}_{year}" if year else name,
             type="comic_series",
             title=name,
-            order=None,
+            children=[child for child in children if child],
         )
-        children = [
-            self._process_cbz(cbz, series) for cbz in sorted(cbz_files, key=lambda x: x.path.name)
-        ]
-        series.children = [child for child in children if child]
 
         return [series]
 
-    def _process_cbz(self, cbz: FsItem, series: ContentItem) -> ContentItem | None:
+    def _process_cbz(self, cbz: FsItem) -> ContentItem | None:
         """Create a Content entry for a single .cbz file."""
         filename = cbz.path.stem
 
@@ -109,10 +106,9 @@ class ComicScanner(ScannerBase):
             return None
 
         return ContentItem(
-            content_id=f"{series.content_id}:v{vol_num or 0}_ch{ch_num or 0}",
+            content_id=f"v{vol_num or 0}_ch{ch_num or 0}",
             type="comic",
             title=title,
-            order=0,
             order_parts=[vol_num or 0, ch_num or 0],
         )
 
