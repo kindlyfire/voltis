@@ -24,7 +24,9 @@ CREATE TABLE data_sources (
 
 CREATE TABLE content (
     id TEXT PRIMARY KEY,
-    content_id TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    uri_part TEXT NOT NULL,
     title TEXT NOT NULL,
     type TEXT NOT NULL CHECK (type IN ('book', 'book_series', 'comic', 'comic_series')),
     "order" INTEGER,
@@ -33,4 +35,4 @@ CREATE TABLE content (
     datasource_id TEXT NOT NULL REFERENCES data_sources(id)
 );
 
-CREATE UNIQUE INDEX idx_content_unique ON content(content_id, COALESCE(parent_id, ''), datasource_id);
+CREATE UNIQUE INDEX idx_content_unique ON content(uri_part, COALESCE(parent_id, ''), datasource_id);

@@ -77,7 +77,7 @@ class ComicScanner(ScannerBase):
         name, year = _parse_series_name(directory.path.name)
         children = [self._process_cbz(cbz) for cbz in sorted(cbz_files, key=lambda x: x.path.name)]
         series = ContentItem(
-            content_id=f"{name}_{year}" if year else name,
+            uri_part=f"{name}_{year}" if year else name,
             type="comic_series",
             title=name,
             children=[child for child in children if child],
@@ -106,11 +106,14 @@ class ComicScanner(ScannerBase):
             return None
 
         return ContentItem(
-            content_id=f"v{vol_num or 0}_ch{ch_num or 0}",
+            uri_part=f"v{vol_num or 0}_ch{ch_num or 0}",
             type="comic",
             title=title,
             order_parts=[vol_num or 0, ch_num or 0],
         )
+
+    async def scan_item(self, item: ContentItem) -> None:
+        pass
 
 
 def _parse_volume_number(name: str) -> int | float | None:

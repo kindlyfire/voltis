@@ -1,5 +1,6 @@
 import datetime
 from typing import Literal
+from uuid import uuid4
 
 from sqlalchemy import (
     ARRAY,
@@ -24,6 +25,12 @@ class _Base(DeclarativeBase):
         d_str = ", ".join(f"{k}={v!r}" for k, v in d.items())
         return f"<{self.__class__.__name__} {d_str}>"
 
+    @classmethod
+    def make_id(cls) -> str:
+        if not hasattr(cls, "__idprefix__"):
+            raise NotImplementedError("gen_id requires __idprefix__ to be set")
+        return f"{getattr(cls, '__idprefix__')}_{uuid4().hex}"
+
 
 class _DefaultColumns:
     id: Mapped[str] = col(Text, primary_key=True)
@@ -37,6 +44,7 @@ class _DefaultColumns:
 
 class User(_Base, _DefaultColumns):
     __tablename__ = "users"
+    __idprefix__ = "u"
 
     username: Mapped[str] = col(Text, unique=True)
     password_hash: Mapped[str] = col(Text)
@@ -47,6 +55,7 @@ class User(_Base, _DefaultColumns):
 
 class Session(_Base):
     __tablename__ = "sessions"
+    __idprefix__ = "s"
 
     token: Mapped[str] = col(Text, primary_key=True)
     user_id: Mapped[str] = col(Text, ForeignKey("users.id"))
@@ -63,6 +72,7 @@ class DataSource(_Base, _DefaultColumns):
     """
 
     __tablename__ = "data_sources"
+    __idprefix__ = "ds"
 
     path: Mapped[str] = col(Text)
     type: Mapped[DataSourceType] = col(Text)
@@ -86,8 +96,9 @@ class Content(_Base, _DefaultColumns):
     """
 
     __tablename__ = "content"
+    __idprefix__ = "c"
 
-    content_id: Mapped[str] = col(Text)
+    uri_part: Mapped[str] = col(Text)
     """
     A unique identifier for this piece of content. This is typically based on
     the root content title and year (of the series), and volume/issue numbers if

@@ -125,7 +125,7 @@ async def test_comic_scanner_example_structure(rb):
 
     # Check specific series
     series_name_2020 = next(s for s in contents if s.title == "Series Name")
-    assert series_name_2020.content_id == "Series Name_2020"
+    assert series_name_2020.uri_part == "Series Name_2020"
 
     # Check that Series Name has 3 children
     assert len(series_name_2020.children) == 3
