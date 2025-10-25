@@ -3,3 +3,4 @@
 __pycache__
 .vscode
 *.egg-info
+.ruff_cache

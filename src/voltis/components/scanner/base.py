@@ -1,3 +1,4 @@
+import datetime
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Literal, Sequence
@@ -10,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from voltis.db.models import Content, ContentType, DataSource
 from voltis.services.resource_broker import ResourceBroker
+from voltis.utils.misc import now_without_tz
 
 logger = structlog.stdlib.get_logger()
 
@@ -19,6 +21,7 @@ class FsItem:
     type: Literal["file", "directory"]
     path: anyio.Path
     children: list["FsItem"] | None
+    modified_at: datetime.datetime | None = None
 
 
 @dataclass(slots=True)
@@ -26,15 +29,19 @@ class ContentItem:
     uri_part: str
     title: str
     type: ContentType
+    file_uri: str
+    cover_uri: str | None = None
     order_parts: list[int | float] | None = None
     """Will be compared in order to sort items within their parent."""
     children: list["ContentItem"] = field(default_factory=list)
+    file_modified_at: datetime.datetime | None = None
+    metadata: dict = field(default_factory=dict)
 
     # Internal fields
     _order: int | None = None
     """The computed order based on the order_parts of all children of an
     item."""
-    _content_inst: Content | None = None
+    content_inst: Content | None = None
     """The matching Content instance. Filled in in the matching step."""
     _content_new: bool = False
     """Whether this ContentItem represents a new Content to be inserted."""
@@ -59,7 +66,7 @@ class ScannerBase(ABC):
         """
 
     async def scan(self):
-        logger.info("Starting scan", path=self.ds.path)
+        logger.info("Starting scan", path=self.ds.path_uri)
         item = await self._find_items()
         logger.info("Found items", item=item)
         await self.scan_items([item])
@@ -85,11 +92,21 @@ class ScannerBase(ABC):
                     if child_item:
                         children.append(child_item)
                 elif await item.is_file():
-                    children.append(FsItem(type="file", path=item, children=None))
+                    stat = await item.stat()
+                    children.append(
+                        FsItem(
+                            type="file",
+                            path=item,
+                            children=None,
+                            # REVIEW: We may want to make it possible to ignore
+                            # modified_at?
+                            modified_at=datetime.datetime.fromtimestamp(stat.st_mtime),
+                        )
+                    )
 
             return FsItem(type="directory", path=path, children=children if children else None)
 
-        root_path = anyio.Path(self.ds.path)
+        root_path = anyio.Path.from_uri(self.ds.path_uri)
         item = await _inner(root_path, depth=1)
         assert item is not None
         return item
@@ -123,7 +140,7 @@ class ScannerBase(ABC):
     ) -> list[Content]:
         """The recursive part of match_items, walking through the tree of
         ContentItem instances to match them with Content instances."""
-        parent_id = parent._content_inst.id if parent and parent._content_inst else None
+        parent_id = parent.content_inst.id if parent and parent.content_inst else None
 
         # We start with a full list and remove items as we match them.
         to_delete: list[Content] = [c for c in contents_map.values() if c.parent_id == parent_id]
@@ -131,19 +148,27 @@ class ScannerBase(ABC):
         for item in parent_children:
             content_inst = contents_map.get((parent_id, item.uri_part))
             if content_inst:
-                item._content_inst = content_inst
-                item._content_new = False
                 to_delete.remove(content_inst)
             else:
-                item._content_inst = Content(
+                content_inst = Content(
                     id=Content.make_id(),
                     uri_part=item.uri_part,
-                    title=item.title,
+                    valid=True,
                     type=item.type,
-                    datasource_id=self.ds.id,
                     parent_id=parent_id,
+                    datasource_id=self.ds.id,
+                    created_at=now_without_tz(),
+                    updated_at=now_without_tz(),
                 )
                 item._content_new = True
+
+            item.content_inst = content_inst
+            content_inst.title = item.title
+            content_inst.file_uri = item.file_uri
+            content_inst.cover_uri = item.cover_uri
+            content_inst.order_parts = item.order_parts
+            content_inst.metadata_ = item.metadata
+            content_inst.file_modified_at = item.file_modified_at
 
             if item.children:
                 child_deletes = await self._match_items_rec(contents_map, item, item.children)
@@ -164,19 +189,8 @@ class ScannerBase(ABC):
             if all_items:
                 objs: list[dict] = []
                 for item in all_items:
-                    assert item._content_inst is not None
-                    objs.append(
-                        {
-                            "id": item._content_inst.id,
-                            "uri_part": item.uri_part,
-                            "title": item.title,
-                            "type": item.type,
-                            "datasource_id": self.ds.id,
-                            "parent_id": item._content_inst.parent_id,
-                            "order": item._order,
-                            "order_parts": item.order_parts,
-                        }
-                    )
+                    assert item.content_inst is not None
+                    objs.append(item.content_inst.as_dict())
 
                 stmt = insert(Content).values(objs)
                 stmt = stmt.on_conflict_do_update(
@@ -184,9 +198,13 @@ class ScannerBase(ABC):
                     set_={
                         "title": stmt.excluded.title,
                         "type": stmt.excluded.type,
+                        "file_uri": stmt.excluded.file_uri,
+                        "cover_uri": stmt.excluded.cover_uri,
                         "parent_id": stmt.excluded.parent_id,
                         "order": stmt.excluded.order,
                         "order_parts": stmt.excluded.order_parts,
+                        "metadata": stmt.excluded.metadata,
+                        "file_modified_at": stmt.excluded.file_modified_at,
                     },
                 )
                 await session.execute(stmt)

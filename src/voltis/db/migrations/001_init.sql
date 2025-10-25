@@ -17,7 +17,7 @@ CREATE TABLE data_sources (
     id TEXT PRIMARY KEY,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    path TEXT NOT NULL,
+    path_uri TEXT NOT NULL,
     type TEXT NOT NULL,
     scanned_at TIMESTAMP
 );
@@ -28,9 +28,14 @@ CREATE TABLE content (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
     uri_part TEXT NOT NULL,
     title TEXT NOT NULL,
+    valid BOOLEAN NOT NULL DEFAULT TRUE,
+    file_uri TEXT NOT NULL,
+    cover_uri TEXT,
     type TEXT NOT NULL CHECK (type IN ('book', 'book_series', 'comic', 'comic_series')),
     "order" INTEGER,
     order_parts REAL[],
+    metadata JSONB NOT NULL DEFAULT '{}'::JSONB,
+    file_modified_at TIMESTAMP,
     parent_id TEXT REFERENCES content(id),
     datasource_id TEXT NOT NULL REFERENCES data_sources(id)
 );

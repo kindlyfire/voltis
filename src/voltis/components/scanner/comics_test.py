@@ -99,7 +99,7 @@ async def test_comic_scanner_example_structure(rb):
         rb,
         DataSource(
             id="test-id",
-            path="/library",
+            path_uri="file:///library",
         ),
     )
     root = create_mock_structure()

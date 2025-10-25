@@ -80,6 +80,7 @@ class ComicScanner(ScannerBase):
             uri_part=f"{name}_{year}" if year else name,
             type="comic_series",
             title=name,
+            file_uri=directory.path.as_uri(),
             children=[child for child in children if child],
         )
 
@@ -109,10 +110,13 @@ class ComicScanner(ScannerBase):
             uri_part=f"v{vol_num or 0}_ch{ch_num or 0}",
             type="comic",
             title=title,
+            file_uri=cbz.path.as_uri(),
+            file_modified_at=cbz.modified_at,
             order_parts=[vol_num or 0, ch_num or 0],
         )
 
     async def scan_item(self, item: ContentItem) -> None:
+        assert item.content_inst
         pass
 
 
@@ -122,7 +126,6 @@ def _parse_volume_number(name: str) -> int | float | None:
 
     Supports formats: #01, v01, v.01, vol.1, v1.5
     """
-    # Try #01, v01, v.01, vol.1, v1.5
     if match := re.search(r"(?:#|v\.?|vol\.)\s*(\d+(?:\.\d+)?)", name, re.IGNORECASE):
         num = match.group(1)
         return float(num) if "." in num else int(num)

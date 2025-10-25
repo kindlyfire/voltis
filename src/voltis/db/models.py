@@ -1,5 +1,5 @@
 import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import uuid4
 
 from sqlalchemy import (
@@ -8,7 +8,8 @@ from sqlalchemy import (
     ForeignKey,
     Text,
 )
-from sqlalchemy.dialects.postgresql import TIMESTAMP
+from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP
+from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import DeclarativeBase, Mapped, relationship
 from sqlalchemy.orm import mapped_column as col
 
@@ -18,7 +19,7 @@ ContentType = Literal["comic", "comic_series", "book", "book_series"]
 
 class _Base(DeclarativeBase):
     def as_dict(self):
-        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+        return {c.key: getattr(self, c.key) for c in inspect(self).mapper.column_attrs}
 
     def __repr__(self):
         d = self.as_dict()
@@ -74,7 +75,7 @@ class DataSource(_Base, _DefaultColumns):
     __tablename__ = "data_sources"
     __idprefix__ = "ds"
 
-    path: Mapped[str] = col(Text)
+    path_uri: Mapped[str] = col(Text)
     type: Mapped[DataSourceType] = col(Text)
     scanned_at: Mapped[datetime.datetime | None] = col(TIMESTAMP)
 
@@ -112,9 +113,25 @@ class Content(_Base, _DefaultColumns):
     "Volume 1", not "My Name Volume 1".
     """
 
+    valid: Mapped[bool] = col(default=True)
+    """When a file is detected but metadata extraction fails, this is set to
+    false. For example, a `My Comic/Ch.1.cbz` that isn't actually a zip."""
+
+    file_uri: Mapped[str] = col(Text)
+    """The URI referring to the file or folder on disk, e.g.
+    `file:///path/to/file.cbz`. This could extended to other protocols in the
+    future, for example S3 or webdav."""
+
+    cover_uri: Mapped[str | None] = col(Text)
+    """The URI referring to the cover image for this content, if any. Same
+    format as file_uri. It may transparently treat a zip file as a folder
+    once. For example `file:///path/to/file.cbz/cover.png`"""
+
     type: Mapped[ContentType] = col(Text)
     order: Mapped[int | None] = col()
     order_parts: Mapped[list[float] | None] = col(ARRAY(REAL))
+    metadata_: Mapped[dict[str, Any] | None] = col("metadata", JSONB, server_default="{}")
+    file_modified_at: Mapped[datetime.datetime | None] = col(TIMESTAMP)
 
     parent_id: Mapped[str | None] = col(Text, ForeignKey("content.id"))
     parent: Mapped["Content | None"] = relationship(
