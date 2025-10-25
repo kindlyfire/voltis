@@ -1,6 +1,7 @@
 import datetime
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+import math
 from typing import Literal, Sequence
 
 import anyio
@@ -31,7 +32,7 @@ class ContentItem:
     type: ContentType
     file_uri: str
     cover_uri: str | None = None
-    order_parts: list[int | float] | None = None
+    order_parts: list[int | float] = field(default_factory=list)
     """Will be compared in order to sort items within their parent."""
     children: list["ContentItem"] = field(default_factory=list)
     file_modified_at: datetime.datetime | None = None
@@ -144,6 +145,7 @@ class ScannerBase(ABC):
 
         # We start with a full list and remove items as we match them.
         to_delete: list[Content] = [c for c in contents_map.values() if c.parent_id == parent_id]
+        children: list[Content] = []
 
         for item in parent_children:
             content_inst = contents_map.get((parent_id, item.uri_part))
@@ -162,7 +164,9 @@ class ScannerBase(ABC):
                 )
                 item._content_new = True
 
+            children.append(content_inst)
             item.content_inst = content_inst
+
             content_inst.title = item.title
             content_inst.file_uri = item.file_uri
             content_inst.cover_uri = item.cover_uri
@@ -173,6 +177,12 @@ class ScannerBase(ABC):
             if item.children:
                 child_deletes = await self._match_items_rec(contents_map, item, item.children)
                 to_delete.extend(child_deletes)
+
+        # Sort children by order_parts
+        max_len = max((len(c.order_parts) for c in children), default=0)
+        children.sort(key=lambda x: x.order_parts + [-math.inf] * (max_len - len(x.order_parts)))
+        for order, child in enumerate(children):
+            child.order = order
 
         return to_delete
 
@@ -190,6 +200,10 @@ class ScannerBase(ABC):
                 objs: list[dict] = []
                 for item in all_items:
                     assert item.content_inst is not None
+                    if not item.content_inst.has_changes():
+                        continue
+
+                    item.content_inst.updated_at = now_without_tz()
                     objs.append(item.content_inst.as_dict())
 
                 stmt = insert(Content).values(objs)

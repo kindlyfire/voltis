@@ -129,8 +129,20 @@ async def test_save_and_update(rb):
             type="comic_series",
             file_uri="",
             children=[
-                ContentItem(uri_part="issue1", title="Issue 1", type="comic", file_uri=""),
-                ContentItem(uri_part="issue2", title="Issue 2", type="comic", file_uri=""),
+                ContentItem(
+                    uri_part="issue1",
+                    title="Issue 1",
+                    type="comic",
+                    file_uri="",
+                    order_parts=[1, 0],
+                ),
+                ContentItem(
+                    uri_part="issue2",
+                    title="Issue 2",
+                    type="comic",
+                    file_uri="",
+                    order_parts=[2, 0],
+                ),
             ],
         ),
         ContentItem(
@@ -139,8 +151,20 @@ async def test_save_and_update(rb):
             type="comic_series",
             file_uri="",
             children=[
-                ContentItem(uri_part="issue1", title="Issue 1", type="comic", file_uri=""),
-                ContentItem(uri_part="issue2", title="Issue 2", type="comic", file_uri=""),
+                ContentItem(
+                    uri_part="issue2",
+                    title="Issue 2 series2",
+                    type="comic",
+                    file_uri="",
+                    order_parts=[2, 0],
+                ),
+                ContentItem(
+                    uri_part="issue1",
+                    title="Issue 1 series2",
+                    type="comic",
+                    file_uri="",
+                    order_parts=[1, 0],
+                ),
             ],
         ),
     ]
@@ -157,10 +181,20 @@ async def test_save_and_update(rb):
         contents = (await session.scalars(select(Content))).all()
         assert len(contents) == 6  # 2 series + 4 issues
 
+        series1_issue1 = next(
+            c
+            for c in contents
+            if c.title == "Issue 1"
+            and items[0].content_inst
+            and c.parent_id == items[0].content_inst.id
+        )
+
     # Modify series1: remove issue2, add issue3
     items[0].children = [
         items[0].children[0],  # Keep issue1
-        ContentItem(uri_part="issue3", title="Issue 3", type="comic", file_uri=""),
+        ContentItem(
+            uri_part="issue3", title="Issue 3", type="comic", file_uri="", order_parts=[3, 0]
+        ),
     ]
 
     # Match and save again
@@ -178,3 +212,25 @@ async def test_save_and_update(rb):
         ]
         assert len(series1_contents) == 2
         assert {c.uri_part for c in series1_contents} == {"issue1", "issue3"}
+
+        # Check that issue1's updated_at hasn't changed
+        series1_issue1_updated = next(
+            c
+            for c in contents
+            if c.title == "Issue 1"
+            and items[0].content_inst
+            and c.parent_id == items[0].content_inst.id
+        )
+        assert series1_issue1.updated_at == series1_issue1_updated.updated_at
+        assert series1_issue1_updated.order == 0
+
+        # Check the order
+        title_orders = {
+            "Issue 1": 0,
+            "Issue 3": 1,
+            "Issue 1 series2": 0,
+            "Issue 2 series2": 1,
+        }
+        for c in contents:
+            if c.parent_id is not None:
+                assert c.order == title_orders[c.title]

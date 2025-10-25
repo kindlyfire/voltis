@@ -7,9 +7,9 @@ from sqlalchemy import (
     REAL,
     ForeignKey,
     Text,
+    inspect,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP
-from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import DeclarativeBase, Mapped, relationship
 from sqlalchemy.orm import mapped_column as col
 
@@ -25,6 +25,12 @@ class _Base(DeclarativeBase):
         d = self.as_dict()
         d_str = ", ".join(f"{k}={v!r}" for k, v in d.items())
         return f"<{self.__class__.__name__} {d_str}>"
+
+    def has_changes(self) -> bool:
+        # Unfortunately, can't use .modified. Maybe doing `inst.something =
+        # inst.something` sets it to modified even though it isn't?
+        insp = inspect(self)
+        return any(attr.history.has_changes() for attr in insp.attrs)
 
     @classmethod
     def make_id(cls) -> str:
@@ -129,7 +135,7 @@ class Content(_Base, _DefaultColumns):
 
     type: Mapped[ContentType] = col(Text)
     order: Mapped[int | None] = col()
-    order_parts: Mapped[list[float] | None] = col(ARRAY(REAL))
+    order_parts: Mapped[list[float]] = col(ARRAY(REAL))
     metadata_: Mapped[dict[str, Any] | None] = col("metadata", JSONB, server_default="{}")
     file_modified_at: Mapped[datetime.datetime | None] = col(TIMESTAMP)
 
