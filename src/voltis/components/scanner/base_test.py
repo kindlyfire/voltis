@@ -22,21 +22,20 @@ async def test_match_items(rb):
         id="test-datasource",
         path_uri="file:///test/path",
     )
-    scanner = _TestScanner(rb, ds)
+    scanner = _TestScanner()
 
     items = [
         ContentItem(
             uri_part="series1",
             title="Series 1",
             type="comic_series",
-            file_uri="",
             children=[
-                ContentItem(uri_part="issue1", title="Issue 1", type="comic", file_uri=""),
-                ContentItem(uri_part="issue2", title="Issue 2", type="comic", file_uri=""),
-                ContentItem(uri_part="issue3", title="Issue 3", type="comic", file_uri=""),
+                ContentItem(uri_part="issue1", title="Issue 1", type="comic"),
+                ContentItem(uri_part="issue2", title="Issue 2", type="comic"),
+                ContentItem(uri_part="issue3", title="Issue 3", type="comic"),
             ],
         ),
-        ContentItem(uri_part="series2", title="Series 2", type="comic_series", file_uri=""),
+        ContentItem(uri_part="series2", title="Series 2", type="comic_series"),
     ]
 
     existing_contents = [
@@ -82,31 +81,31 @@ async def test_match_items(rb):
         ),
     ]
 
-    to_delete = await scanner._match_items(items, existing_contents)
+    to_delete = await scanner.match_from_instances(items, existing_contents)
 
     # Check series1 matched existing content
     assert items[0].content_inst is not None
     assert items[0].content_inst.id == "s1"
-    assert items[0]._content_new is False
+    assert items[0].content_new is False
 
     # Check issue1 matched
     assert items[0].children[0].content_inst
     assert items[0].children[0].content_inst.id == "i1"
-    assert items[0].children[0]._content_new is False
+    assert items[0].children[0].content_new is False
 
     # Check issue2 matched
     assert items[0].children[1].content_inst
     assert items[0].children[1].content_inst.id == "i2"
-    assert items[0].children[1]._content_new is False
+    assert items[0].children[1].content_new is False
 
     # Check issue3 is new
     assert items[0].children[2].content_inst
     assert items[0].children[2].content_inst.id is not None
-    assert items[0].children[2]._content_new is True
+    assert items[0].children[2].content_new is True
 
     # Check series2 is new
     assert items[1].content_inst is not None
-    assert items[1]._content_new is True
+    assert items[1].content_new is True
 
     # Check old_series is marked for deletion
     assert len(to_delete) == 2
@@ -119,7 +118,7 @@ async def test_save_and_update(rb):
     """Test saving items to the database and updating them."""
 
     ds = DataSource(id="test-datasource", path_uri="file:///test/path", type="comics")
-    scanner = _TestScanner(rb, ds)
+    scanner = _TestScanner()
 
     # Initial items: two series with two entries each
     items = [
@@ -127,20 +126,17 @@ async def test_save_and_update(rb):
             uri_part="series1",
             title="Series 1",
             type="comic_series",
-            file_uri="",
             children=[
                 ContentItem(
                     uri_part="issue1",
                     title="Issue 1",
                     type="comic",
-                    file_uri="",
                     order_parts=[1, 0],
                 ),
                 ContentItem(
                     uri_part="issue2",
                     title="Issue 2",
                     type="comic",
-                    file_uri="",
                     order_parts=[2, 0],
                 ),
             ],
@@ -149,20 +145,17 @@ async def test_save_and_update(rb):
             uri_part="series2",
             title="Series 2",
             type="comic_series",
-            file_uri="",
             children=[
                 ContentItem(
                     uri_part="issue2",
                     title="Issue 2 series2",
                     type="comic",
-                    file_uri="",
                     order_parts=[2, 0],
                 ),
                 ContentItem(
                     uri_part="issue1",
                     title="Issue 1 series2",
                     type="comic",
-                    file_uri="",
                     order_parts=[1, 0],
                 ),
             ],
@@ -174,9 +167,9 @@ async def test_save_and_update(rb):
         session.add(ds)
         await session.commit()
 
-        to_delete = await scanner.match_items(session, items)
+        to_delete = await scanner.match_from_db(session, ds.id, items)
         assert to_delete == []
-        await scanner.save(items, to_delete)
+        await scanner.save(session, ds.id, items, to_delete)
 
         contents = (await session.scalars(select(Content))).all()
         assert len(contents) == 6  # 2 series + 4 issues
@@ -189,20 +182,17 @@ async def test_save_and_update(rb):
             and c.parent_id == items[0].content_inst.id
         )
 
-    # Modify series1: remove issue2, add issue3
-    items[0].children = [
-        items[0].children[0],  # Keep issue1
-        ContentItem(
-            uri_part="issue3", title="Issue 3", type="comic", file_uri="", order_parts=[3, 0]
-        ),
-    ]
+        # Modify series1: remove issue2, add issue3
+        items[0].children = [
+            items[0].children[0],  # Keep issue1
+            ContentItem(uri_part="issue3", title="Issue 3", type="comic", order_parts=[3, 0]),
+        ]
 
-    # Match and save again
-    async with rb.get_asession() as session:
-        to_delete = await scanner.match_items(session, items)
+        # Match and save again
+        to_delete = await scanner.match_from_db(session, ds.id, items)
         assert len(to_delete) == 1
         assert to_delete[0].uri_part == "issue2"
-        await scanner.save(items, to_delete)
+        await scanner.save(session, ds.id, items, to_delete)
 
         contents = (await session.scalars(select(Content))).all()
         assert len(contents) == 6  # 2 series + 4 issues (issue2 deleted, issue3 added)

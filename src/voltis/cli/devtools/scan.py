@@ -66,22 +66,21 @@ async def _scan(
     if scanner_type == "comics":
         from voltis.components.scanner.comics import ComicScanner
 
-        scanner = ComicScanner(rb, ds)
+        scanner = ComicScanner()
     else:
         click.echo(f"Error: Unknown scanner type {scanner_type}", err=True)
         return
 
     # Scan the directory
     click.echo(f"Scanning directory: {ds.path_uri}")
-    item = await scanner._find_items()
-    content_items = await scanner.scan_items([item])
+    content_items = await scanner.scan(ds.path_uri)
 
     # Match items
     if datasource_id:
         async with rb.get_asession() as session:
-            to_delete = await scanner.match_items(session, content_items)
+            to_delete = await scanner.match_from_db(session, ds.id, content_items)
     else:
-        to_delete = await scanner._match_items(content_items, [])
+        to_delete = await scanner.match_from_instances(content_items, [])
 
     click.echo("")
 

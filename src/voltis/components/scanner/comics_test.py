@@ -3,7 +3,6 @@ from anyio import Path
 
 from voltis.components.scanner.base import FsItem
 from voltis.components.scanner.comics import ComicScanner
-from voltis.db.models import DataSource
 
 
 def create_mock_structure():
@@ -93,15 +92,9 @@ def create_mock_structure():
 
 
 @pytest.mark.anyio
-async def test_comic_scanner_example_structure(rb):
+async def test_comic_scanner_example_structure():
     """Test that the comic scanner correctly parses the example directory structure."""
-    scanner = ComicScanner(
-        rb,
-        DataSource(
-            id="test-id",
-            path_uri="file:///library",
-        ),
-    )
+    scanner = ComicScanner()
     root = create_mock_structure()
     contents = await scanner.scan_items(root)
 
