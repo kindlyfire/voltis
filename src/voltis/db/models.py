@@ -1,6 +1,7 @@
 import datetime
+import random
+import string
 from typing import Any, Literal
-from uuid import uuid4
 
 from sqlalchemy import (
     ARRAY,
@@ -13,7 +14,8 @@ from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP
 from sqlalchemy.orm import DeclarativeBase, Mapped, relationship
 from sqlalchemy.orm import mapped_column as col
 
-DataSourceType = Literal["comics", "books"]
+from voltis.components.scanner.loader import ScannerType
+
 ContentType = Literal["comic", "comic_series", "book", "book_series"]
 
 
@@ -36,7 +38,8 @@ class _Base(DeclarativeBase):
     def make_id(cls) -> str:
         if not hasattr(cls, "__idprefix__"):
             raise NotImplementedError("gen_id requires __idprefix__ to be set")
-        return f"{getattr(cls, '__idprefix__')}_{uuid4().hex}"
+        rand = "".join(random.choices(string.ascii_letters + string.digits, k=10))
+        return f"{getattr(cls, '__idprefix__')}_{rand}"
 
 
 class _DefaultColumns:
@@ -82,7 +85,7 @@ class DataSource(_Base, _DefaultColumns):
     __idprefix__ = "ds"
 
     path_uri: Mapped[str] = col(Text)
-    type: Mapped[DataSourceType] = col(Text)
+    type: Mapped[ScannerType] = col(Text)
     scanned_at: Mapped[datetime.datetime | None] = col(TIMESTAMP)
 
     contents: Mapped[list["Content"]] = relationship(back_populates="datasource")

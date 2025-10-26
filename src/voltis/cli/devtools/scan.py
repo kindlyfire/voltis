@@ -1,9 +1,11 @@
 import pathlib
+
 import anyio
 import click
 from sqlalchemy import select
 
 from voltis.components.scanner.base import ContentItem
+from voltis.components.scanner.loader import ScannerType, get_scanner
 from voltis.db.models import DataSource
 from voltis.services.resource_broker import ResourceBroker
 from voltis.utils.misc import now_without_tz
@@ -18,7 +20,6 @@ from voltis.utils.misc import now_without_tz
     "--type",
     "scanner_type",
     type=click.Choice(["comics"]),
-    required=True,
     help="Type of scanner to use",
 )
 @click.option(
@@ -26,16 +27,38 @@ from voltis.utils.misc import now_without_tz
     type=str,
     help="DataSource ID to use (if not provided, use in-memory datasource)",
 )
-@click.pass_obj
-def scan(rb: ResourceBroker, directory: str | None, scanner_type: str, datasource: str | None):
+@click.option(
+    "--save",
+    is_flag=True,
+    help="Save the scan results to the database",
+)
+def scan(
+    directory: str | None,
+    scanner_type: ScannerType | None,
+    datasource: str | None,
+    save: bool,
+):
     """Perform a test scan on a folder with a given scanner."""
-    anyio.run(_scan, rb, directory, scanner_type, datasource)
+    rb = ResourceBroker()
+    anyio.run(_scan, rb, directory, scanner_type, datasource, save)
 
 
 async def _scan(
-    rb: ResourceBroker, directory: str | None, scanner_type: str, datasource_id: str | None
+    rb: ResourceBroker,
+    directory: str | None,
+    scanner_type: ScannerType | None,
+    datasource_id: str | None,
+    save: bool,
 ):
-    """Async implementation of the scan command."""
+    if not datasource_id:
+        if save:
+            click.echo("\nError: --save requires --datasource to be specified", err=True)
+        elif not scanner_type:
+            click.echo("\nError: --type is required when not using --datasource", err=True)
+        return
+    if not directory and not datasource_id:
+        click.echo("\nError: either directory argument or --datasource must be provided", err=True)
+        return
 
     # Get or create datasource
     if datasource_id:
@@ -47,12 +70,13 @@ async def _scan(
             ds = result
         if directory:
             ds.path_uri = pathlib.Path(directory).as_uri()
-    else:
-        if not directory:
+        if scanner_type and ds.type != scanner_type:
             click.echo(
-                "Error: directory argument is required when --datasource is not provided", err=True
+                f"Warning: Overriding DataSource type {ds.type} with specified type {scanner_type}"
             )
-            return
+            ds.type = scanner_type
+    else:
+        assert directory
         ds = DataSource(
             id=DataSource.make_id(),
             path_uri=pathlib.Path(directory).as_uri(),
@@ -63,13 +87,7 @@ async def _scan(
         )
 
     # Create scanner
-    if scanner_type == "comics":
-        from voltis.components.scanner.comics import ComicScanner
-
-        scanner = ComicScanner()
-    else:
-        click.echo(f"Error: Unknown scanner type {scanner_type}", err=True)
-        return
+    scanner = get_scanner(ds.type)
 
     # Scan the directory
     click.echo(f"Scanning directory: {ds.path_uri}")
@@ -95,6 +113,12 @@ async def _scan(
         click.echo(f"Items to delete: {len(to_delete)}")
         for content in to_delete:
             click.echo(f"  - {content}")
+
+    if save:
+        async with rb.get_asession() as session:
+            await scanner.save(session, ds.id, content_items, to_delete)
+            await session.commit()
+        click.echo("\nScan results saved to database.")
 
 
 def _print_content_tree(item: ContentItem, indent: int = 0):

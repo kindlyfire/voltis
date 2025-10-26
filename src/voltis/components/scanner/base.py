@@ -157,19 +157,18 @@ class ScannerBase(ABC):
         """Save the given ContentItem instances to the database."""
         all_items = ContentItem.flatten(to_upsert)
 
-        # Bulk upsert
-        if all_items:
-            objs: list[dict] = []
-            for item in all_items:
-                assert item.content_inst is not None
-                if not item.content_inst.has_changes():
-                    continue
+        upsert_objs: list[dict] = []
+        for item in all_items:
+            assert item.content_inst is not None
+            if not item.content_inst.has_changes():
+                continue
 
-                item.content_inst.updated_at = now_without_tz()
-                item.content_inst.datasource_id = datasource_id
-                objs.append(item.content_inst.as_dict())
+            item.content_inst.updated_at = now_without_tz()
+            item.content_inst.datasource_id = datasource_id
+            upsert_objs.append(item.content_inst.as_dict())
 
-            stmt = insert(Content).values(objs)
+        if upsert_objs:
+            stmt = insert(Content).values(upsert_objs)
             stmt = stmt.on_conflict_do_update(
                 index_elements=["id"],
                 set_={

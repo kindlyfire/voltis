@@ -10,3 +10,7 @@ class BookScanner(ScannerBase):
         """
 
         raise NotImplementedError()
+
+    async def scan_item(self, item: ContentItem) -> None:
+        assert item.content_inst
+        pass

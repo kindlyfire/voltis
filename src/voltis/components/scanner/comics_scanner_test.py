@@ -2,7 +2,7 @@ import pytest
 from anyio import Path
 
 from voltis.components.scanner.base import FsItem
-from voltis.components.scanner.comics import ComicScanner
+from voltis.components.scanner.comics_scanner import ComicScanner
 
 
 def create_mock_structure():
