@@ -2,7 +2,7 @@ import pytest
 from sqlalchemy import select
 
 from voltis.components.scanner.base import ContentItem, FsItem, ScannerBase
-from voltis.db.models import Content, DataSource
+from voltis.db.models import Content, Library
 
 
 class _TestScanner(ScannerBase):
@@ -18,9 +18,9 @@ class _TestScanner(ScannerBase):
 @pytest.mark.anyio
 async def test_match_items(rb):
     """Test that _match_items correctly matches ContentItems to existing Content."""
-    ds = DataSource(
-        id="test-datasource",
-        path_uri="file:///test/path",
+    lib = Library(
+        id="test-library",
+        sources=[{"path_uri": "file:///test/path"}],
     )
     scanner = _TestScanner()
 
@@ -44,7 +44,7 @@ async def test_match_items(rb):
             uri_part="series1",
             title="Series 1",
             type="comic_series",
-            datasource_id=ds.id,
+            library_id=lib.id,
             parent_id=None,
         ),
         Content(
@@ -52,7 +52,7 @@ async def test_match_items(rb):
             uri_part="issue1",
             title="Issue 1",
             type="comic",
-            datasource_id=ds.id,
+            library_id=lib.id,
             parent_id="s1",
         ),
         Content(
@@ -60,7 +60,7 @@ async def test_match_items(rb):
             uri_part="issue2",
             title="Issue 2 (old)",
             type="comic",
-            datasource_id=ds.id,
+            library_id=lib.id,
             parent_id="s1",
         ),
         Content(
@@ -68,7 +68,7 @@ async def test_match_items(rb):
             uri_part="issue4",
             title="Issue 4 (to be deleted)",
             type="comic",
-            datasource_id=ds.id,
+            library_id=lib.id,
             parent_id="s1",
         ),
         Content(
@@ -76,7 +76,7 @@ async def test_match_items(rb):
             uri_part="old_series",
             title="Old Series",
             type="comic_series",
-            datasource_id=ds.id,
+            library_id=lib.id,
             parent_id=None,
         ),
     ]
@@ -117,7 +117,7 @@ async def test_match_items(rb):
 async def test_save_and_update(rb):
     """Test saving items to the database and updating them."""
 
-    ds = DataSource(id="test-datasource", path_uri="file:///test/path", type="comics")
+    lib = Library(id="test-library", sources=[{"path_uri": "file:///test/path"}], type="comics")
     scanner = _TestScanner()
 
     # Initial items: two series with two entries each
@@ -164,12 +164,12 @@ async def test_save_and_update(rb):
 
     # Match and save (all new)
     async with rb.get_asession() as session:
-        session.add(ds)
+        session.add(lib)
         await session.commit()
 
-        to_delete = await scanner.match_from_db(session, ds.id, items)
+        to_delete = await scanner.match_from_db(session, lib.id, items)
         assert to_delete == []
-        await scanner.save(session, ds.id, items, to_delete)
+        await scanner.save(session, lib.id, items, to_delete)
 
         contents = (await session.scalars(select(Content))).all()
         assert len(contents) == 6  # 2 series + 4 issues
@@ -189,10 +189,10 @@ async def test_save_and_update(rb):
         ]
 
         # Match and save again
-        to_delete = await scanner.match_from_db(session, ds.id, items)
+        to_delete = await scanner.match_from_db(session, lib.id, items)
         assert len(to_delete) == 1
         assert to_delete[0].uri_part == "issue2"
-        await scanner.save(session, ds.id, items, to_delete)
+        await scanner.save(session, lib.id, items, to_delete)
 
         contents = (await session.scalars(select(Content))).all()
         assert len(contents) == 6  # 2 series + 4 issues (issue2 deleted, issue3 added)

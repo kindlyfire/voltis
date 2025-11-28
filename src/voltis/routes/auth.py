@@ -7,7 +7,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
 from voltis.db.models import Session, User
-from voltis.services.resource_broker import RbProvider
+from voltis.routes._providers import RbProvider
 from voltis.services.settings import settings
 
 router = APIRouter()

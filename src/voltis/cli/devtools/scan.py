@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from voltis.components.scanner.base import ContentItem
 from voltis.components.scanner.loader import ScannerType, get_scanner
-from voltis.db.models import DataSource
+from voltis.db.models import Library
 from voltis.services.resource_broker import ResourceBroker
 from voltis.utils.misc import now_without_tz
 
@@ -23,9 +23,9 @@ from voltis.utils.misc import now_without_tz
     help="Type of scanner to use",
 )
 @click.option(
-    "--datasource",
+    "--library",
     type=str,
-    help="DataSource ID to use (if not provided, use in-memory datasource)",
+    help="Library ID to use (if not provided, use in-memory library)",
 )
 @click.option(
     "--save",
@@ -35,51 +35,50 @@ from voltis.utils.misc import now_without_tz
 def scan(
     directory: str | None,
     scanner_type: ScannerType | None,
-    datasource: str | None,
+    library: str | None,
     save: bool,
 ):
     """Perform a test scan on a folder with a given scanner."""
     rb = ResourceBroker()
-    anyio.run(_scan, rb, directory, scanner_type, datasource, save)
+    anyio.run(_scan, rb, directory, scanner_type, library, save)
 
 
 async def _scan(
     rb: ResourceBroker,
     directory: str | None,
     scanner_type: ScannerType | None,
-    datasource_id: str | None,
+    library_id: str | None,
     save: bool,
 ):
-    if not datasource_id:
+    if not library_id:
         if save:
-            click.echo("\nError: --save requires --datasource to be specified", err=True)
+            click.echo("\nError: --save requires --library to be specified", err=True)
+            return
         elif not scanner_type:
-            click.echo("\nError: --type is required when not using --datasource", err=True)
-        return
-    if not directory and not datasource_id:
-        click.echo("\nError: either directory argument or --datasource must be provided", err=True)
+            click.echo("\nError: --type is required when not using --library", err=True)
+            return
+    if not directory and not library_id:
+        click.echo("\nError: either directory argument or --library must be provided", err=True)
         return
 
-    # Get or create datasource
-    if datasource_id:
+    # Get or create library
+    if library_id:
         async with rb.get_asession() as session:
-            result = await session.scalar(select(DataSource).where(DataSource.id == datasource_id))
+            result = await session.scalar(select(Library).where(Library.id == library_id))
             if not result:
-                click.echo(f"Error: DataSource {datasource_id} not found", err=True)
+                click.echo(f"Error: Library {library_id} not found", err=True)
                 return
-            ds = result
-        if directory:
-            ds.path_uri = pathlib.Path(directory).as_uri()
-        if scanner_type and ds.type != scanner_type:
+            lib = result
+        if scanner_type and lib.type != scanner_type:
             click.echo(
-                f"Warning: Overriding DataSource type {ds.type} with specified type {scanner_type}"
+                f"Warning: Overriding Library type {lib.type} with specified type {scanner_type}"
             )
-            ds.type = scanner_type
+            lib.type = scanner_type
     else:
         assert directory
-        ds = DataSource(
-            id=DataSource.make_id(),
-            path_uri=pathlib.Path(directory).as_uri(),
+        lib = Library(
+            id=Library.make_id(),
+            sources=[{"path_uri": pathlib.Path(directory).as_uri()}],
             type=scanner_type,
             scanned_at=None,
             created_at=now_without_tz(),
@@ -87,26 +86,32 @@ async def _scan(
         )
 
     # Create scanner
-    scanner = get_scanner(ds.type)
+    scanner = get_scanner(lib.type)
+    path_uris = [source.path_uri for source in lib.get_sources()]
 
-    # Scan the directory
-    click.echo(f"Scanning directory: {ds.path_uri}")
-    content_items = await scanner.scan(ds.path_uri)
+    # Scan all paths and merge results
+    all_content_items: list[ContentItem] = []
+    for path_uri in path_uris:
+        # TODO: If the same item is present in more than one folder, it should
+        # be rejected. Maybe even reject both to be sure.
+        click.echo(f"Scanning: {path_uri}")
+        content_items = await scanner.scan(path_uri)
+        all_content_items.extend(content_items)
 
     # Match items
-    if datasource_id:
+    if library_id:
         async with rb.get_asession() as session:
-            to_delete = await scanner.match_from_db(session, ds.id, content_items)
+            to_delete = await scanner.match_from_db(session, lib.id, all_content_items)
     else:
-        to_delete = await scanner.match_from_instances(content_items, [])
+        to_delete = await scanner.match_from_instances(all_content_items, [])
 
     click.echo("")
 
-    if not content_items:
+    if not all_content_items:
         click.echo("No content found.")
     else:
-        click.echo(f"Found {len(content_items)} top-level item(s):\n")
-        for item in content_items:
+        click.echo(f"Found {len(all_content_items)} top-level item(s):\n")
+        for item in all_content_items:
             _print_content_tree(item, indent=0)
 
     if to_delete:
@@ -116,7 +121,7 @@ async def _scan(
 
     if save:
         async with rb.get_asession() as session:
-            await scanner.save(session, ds.id, content_items, to_delete)
+            await scanner.save(session, lib.id, all_content_items, to_delete)
             await session.commit()
         click.echo("\nScan results saved to database.")
 

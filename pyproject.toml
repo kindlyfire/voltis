@@ -7,6 +7,7 @@ dependencies = [
     "anyio>=4.11.0",
     "bcrypt>=5.0.0",
     "click>=8.3.0",
+    "colorama>=0.4.6",
     "fastapi[standard]>=0.118.3",
     "httpx>=0.28.1",
     "lxml>=6.0.2",

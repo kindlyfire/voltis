@@ -3,6 +3,8 @@ import random
 import string
 from typing import Any, Literal
 
+from colorama import Fore, Style
+from pydantic import BaseModel
 from sqlalchemy import (
     ARRAY,
     REAL,
@@ -25,8 +27,9 @@ class _Base(DeclarativeBase):
 
     def __repr__(self):
         d = self.as_dict()
-        d_str = ", ".join(f"{k}={v!r}" for k, v in d.items())
-        return f"<{self.__class__.__name__} {d_str}>"
+        parts = [f"{k}={Fore.YELLOW}{v!r}{Style.RESET_ALL}" for k, v in d.items()]
+        d_str = ", ".join(parts)
+        return f"<{Fore.CYAN}{self.__class__.__name__}{Style.RESET_ALL} {d_str}>"
 
     def has_changes(self) -> bool:
         # Unfortunately, can't use .modified. Maybe doing `inst.something =
@@ -73,22 +76,34 @@ class Session(_Base):
     user: Mapped["User"] = relationship(back_populates="sessions")
 
 
-class DataSource(_Base, _DefaultColumns):
+class LibrarySource(BaseModel):
+    path_uri: str
+
+
+class Library(_Base, _DefaultColumns):
     """
-    A data source represents a folder on disk that contains books or comics.
+    A library is a collection of books, comics, series or movies. It defines
+    scanning rules for one or more folders, and items are grouped under its
+    banner.
 
     Right now, only folders are supported, but I would like to add support for
     S3. And maybe native rclone support.
     """
 
-    __tablename__ = "data_sources"
-    __idprefix__ = "ds"
+    __tablename__ = "libraries"
+    __idprefix__ = "l"
 
-    path_uri: Mapped[str] = col(Text)
     type: Mapped[ScannerType] = col(Text)
     scanned_at: Mapped[datetime.datetime | None] = col(TIMESTAMP)
+    sources: Mapped[list[Any]] = col("sources", JSONB, server_default="{}")
 
-    contents: Mapped[list["Content"]] = relationship(back_populates="datasource")
+    contents: Mapped[list["Content"]] = relationship(back_populates="library")
+
+    def get_sources(self) -> list[LibrarySource]:
+        return [LibrarySource.model_validate(source) for source in self.sources]
+
+    def set_sources(self, sources: list[LibrarySource]):
+        self.sources = [source.model_dump(mode="json") for source in sources]
 
 
 class Content(_Base, _DefaultColumns):
@@ -148,5 +163,5 @@ class Content(_Base, _DefaultColumns):
     )
     children: Mapped[list["Content"]] = relationship(back_populates="parent")
 
-    datasource_id: Mapped[str] = col(Text, ForeignKey("data_sources.id"))
-    datasource: Mapped["DataSource"] = relationship()
+    library_id: Mapped[str] = col(Text, ForeignKey("libraries.id"))
+    library: Mapped["Library"] = relationship()

@@ -13,13 +13,13 @@ CREATE TABLE sessions (
 );
 CREATE INDEX idx_sessions_user_id ON sessions(user_id);
 
-CREATE TABLE data_sources (
+CREATE TABLE libraries (
     id TEXT PRIMARY KEY,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    path_uri TEXT NOT NULL,
     type TEXT NOT NULL,
-    scanned_at TIMESTAMP
+    scanned_at TIMESTAMP,
+    sources JSONB NOT NULL DEFAULT '[]'::JSONB
 );
 
 CREATE TABLE content (
@@ -37,7 +37,7 @@ CREATE TABLE content (
     metadata JSONB NOT NULL DEFAULT '{}'::JSONB,
     file_modified_at TIMESTAMP,
     parent_id TEXT REFERENCES content(id),
-    datasource_id TEXT NOT NULL REFERENCES data_sources(id)
+    library_id TEXT NOT NULL REFERENCES libraries(id)
 );
 
-CREATE UNIQUE INDEX idx_content_unique ON content(uri_part, COALESCE(parent_id, ''), datasource_id);
+CREATE UNIQUE INDEX idx_content_unique ON content(uri_part, COALESCE(parent_id, ''), library_id);

@@ -73,7 +73,7 @@ class ScannerBase(ABC):
         return await self.scan_items([item])
 
     async def match_from_db(
-        self, session: AsyncSession, datasource_id: str, items: list[ContentItem]
+        self, session: AsyncSession, library_id: str, items: list[ContentItem]
     ) -> list[Content]:
         """
         Match ContentItem instances to existing Content rows in the database,
@@ -83,7 +83,7 @@ class ScannerBase(ABC):
             list[Content]: Content instances to be deleted.
         """
         contents_res = await session.scalars(
-            select(Content).where(Content.datasource_id == datasource_id)
+            select(Content).where(Content.library_id == library_id)
         )
         return await self.match_from_instances(items, contents_res.all())
 
@@ -150,7 +150,7 @@ class ScannerBase(ABC):
     async def save(
         self,
         session: AsyncSession,
-        datasource_id: str,
+        library_id: str,
         to_upsert: list[ContentItem],
         to_delete: list[Content],
     ) -> None:
@@ -164,7 +164,7 @@ class ScannerBase(ABC):
                 continue
 
             item.content_inst.updated_at = now_without_tz()
-            item.content_inst.datasource_id = datasource_id
+            item.content_inst.library_id = library_id
             upsert_objs.append(item.content_inst.as_dict())
 
         if upsert_objs:
