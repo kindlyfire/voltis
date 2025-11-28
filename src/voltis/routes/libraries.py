@@ -1,3 +1,97 @@
-from fastapi import APIRouter
+import datetime
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from sqlalchemy import select
+
+from voltis.components.scanner.loader import ScannerType
+from voltis.db.models import Library
+from voltis.routes._providers import RbProvider, UserProvider
+from voltis.utils.misc import now_without_tz
 
 router = APIRouter()
+
+
+class LibrarySourceDTO(BaseModel):
+    path_uri: str
+
+
+class LibraryDTO(BaseModel):
+    id: str
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+    type: ScannerType
+    scanned_at: datetime.datetime | None
+    sources: list[LibrarySourceDTO]
+
+    @classmethod
+    def from_model(cls, model: Library) -> "LibraryDTO":
+        return cls(
+            id=model.id,
+            created_at=model.created_at,
+            updated_at=model.updated_at,
+            type=model.type,
+            scanned_at=model.scanned_at,
+            sources=[LibrarySourceDTO(path_uri=s.path_uri) for s in model.get_sources()],
+        )
+
+
+class UpsertRequest(BaseModel):
+    type: ScannerType
+    sources: list[LibrarySourceDTO]
+
+
+@router.get("")
+async def list_libraries(
+    rb: RbProvider,
+    _user: UserProvider,
+) -> list[LibraryDTO]:
+    async with rb.get_asession() as session:
+        result = await session.scalars(select(Library))
+        return [LibraryDTO.from_model(lib) for lib in result.all()]
+
+
+@router.post("/{id_or_new}")
+async def upsert_library(
+    rb: RbProvider,
+    _user: UserProvider,
+    id_or_new: str,
+    body: UpsertRequest,
+) -> LibraryDTO:
+    async with rb.get_asession() as session:
+        if id_or_new == "new":
+            library = Library(
+                id=Library.make_id(),
+                type=body.type,
+                sources=[s.model_dump() for s in body.sources],
+                scanned_at=None,
+                created_at=now_without_tz(),
+                updated_at=now_without_tz(),
+            )
+            session.add(library)
+        else:
+            library = await session.get(Library, id_or_new)
+            if not library:
+                raise HTTPException(status_code=404, detail="Library not found")
+            library.type = body.type
+            library.sources = [s.model_dump() for s in body.sources]
+            library.updated_at = now_without_tz()
+
+        await session.commit()
+        await session.refresh(library)
+        return LibraryDTO.from_model(library)
+
+
+@router.delete("/{library_id}")
+async def delete_library(
+    rb: RbProvider,
+    _user: UserProvider,
+    library_id: str,
+) -> dict:
+    async with rb.get_asession() as session:
+        library = await session.get(Library, library_id)
+        if not library:
+            raise HTTPException(status_code=404, detail="Library not found")
+        await session.delete(library)
+        await session.commit()
+        return {"success": True}
