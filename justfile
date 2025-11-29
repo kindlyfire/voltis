@@ -2,6 +2,9 @@
 run *args='':
     uv run voltis "$@"
 
+frontend:
+    cd frontend && pnpm dev
+
 # Format imports (I), then format code
 fmt:
     uv run ruff check --select I --fix && uv run ruff format
