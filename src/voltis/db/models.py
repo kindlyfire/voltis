@@ -68,7 +68,6 @@ class User(_Base, _DefaultColumns):
 
 class Session(_Base):
     __tablename__ = "sessions"
-    __idprefix__ = "s"
 
     token: Mapped[str] = col(Text, primary_key=True)
     user_id: Mapped[str] = col(Text, ForeignKey("users.id"))

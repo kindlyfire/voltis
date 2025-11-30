@@ -15,11 +15,15 @@
 		"format": "prettier --write \"src/**/*.{vue,ts}\" *.json *.ts index.html"
 	},
 	"dependencies": {
+		"@mdi/font": "^7.4.47",
 		"@tailwindcss/vite": "^4.1.17",
+		"@tanstack/vue-query": "^5.92.0",
 		"pinia": "^3.0.4",
 		"tailwindcss": "^4.1.17",
 		"vue": "^3.5.25",
-		"vue-router": "^4.6.3"
+		"vue-router": "^4.6.3",
+		"vuetify": "^3.11.0",
+		"zod": "^4.1.13"
 	},
 	"devDependencies": {
 		"@tsconfig/node24": "^24.0.3",

@@ -46,6 +46,13 @@ async def list_users(
         return [UserDTO.from_model(u) for u in result.all()]
 
 
+@router.get("/me")
+async def get_current_user(
+    user: UserProvider,
+) -> UserDTO:
+    return UserDTO.from_model(user)
+
+
 @router.post("/{id_or_new}")
 async def upsert_user(
     rb: RbProvider,

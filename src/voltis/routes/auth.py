@@ -28,17 +28,14 @@ async def route_auth_login(
         if not user:
             raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    # Check password
     if not bcrypt.checkpw(password.encode(), user.password_hash.encode()):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     async with rb.get_asession() as session:
-        # Store session
         user_session = Session(token=uuid4().hex + uuid4().hex, user_id=user.id)
         session.add(user_session)
         await session.commit()
 
-    # Set cookie
     secure = request.url.scheme == "https"
     response.set_cookie(
         key="voltis_session",
@@ -62,30 +59,18 @@ async def route_auth_register(
     if settings.REGISTRATION_ENABLED is False:
         raise HTTPException(status_code=403, detail="Registration is disabled")
 
-    async with rb.get_asession() as session:
-        # Check if user exists
-        result = await session.execute(select(User).where(User.username == username))
-        existing_user = result.scalar_one_or_none()
-        if existing_user:
-            raise HTTPException(status_code=400, detail="Username already exists")
-
-    # Hash password
     password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
     async with rb.get_asession() as session:
-        # Create user
-        user = User(id=uuid4().hex, username=username, password_hash=password_hash)
-        session.add(user)
-        # Create session
+        user = User(id=User.make_id(), username=username, password_hash=password_hash)
         user_session = Session(token=uuid4().hex + uuid4().hex, user_id=user.id)
-        session.add(user_session)
+        session.add_all([user, user_session])
 
         try:
             await session.commit()
         except IntegrityError:
             raise HTTPException(status_code=400, detail="Username already exists")
 
-    # Set cookie
     secure = request.url.scheme == "https"
     response.set_cookie(
         key="voltis_session",
@@ -112,7 +97,6 @@ async def route_auth_logout(
         await session.execute(delete(Session).where(Session.token == session_token))
         await session.commit()
 
-    # Clear cookie
     response.delete_cookie(key="voltis_session")
 
     return {"success": True}

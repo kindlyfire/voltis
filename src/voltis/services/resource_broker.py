@@ -10,9 +10,6 @@ from .settings import settings
 
 
 class ResourceBroker:
-    def __init__(self):
-        pass
-
     @cache
     def get_aengine(self) -> AsyncEngine:
         return create_async_engine(

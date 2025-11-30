@@ -1,5 +1,5 @@
 [positional-arguments]
-run *args='':
+app *args='':
     uv run voltis "$@"
 
 frontend:

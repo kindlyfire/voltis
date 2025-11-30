@@ -41,13 +41,30 @@ export class RequestError extends Error {
 
 export async function apiFetch<TData>(
 	input: string,
-	init?: RequestInit
+	init?: RequestInit & {
+		allowNotJson?: boolean
+	}
+) {
+	const res = await apiFetchRaw<TData>(input, init)
+	return res.data
+}
+
+export async function apiFetchRaw<TData>(
+	input: string,
+	init?: RequestInit & {
+		allowNotJson?: boolean
+	}
 ): Promise<{ data: TData; res: Response }> {
 	const url = input.startsWith('http') ? input : `${API_URL}${input}`
 
+	const headers = new Headers(init?.headers)
+	if (typeof init?.body === 'string' && !headers.has('Content-Type')) {
+		headers.set('Content-Type', 'application/json')
+	}
+
 	let res: Response
 	try {
-		res = await fetch(url, init)
+		res = await fetch(url, { ...init, headers, credentials: 'include' })
 	} catch (err) {
 		throw new RequestError(err instanceof Error ? err.message : String(err))
 	}
@@ -59,7 +76,12 @@ export async function apiFetch<TData>(
 		text = await res.text()
 		json = JSON.parse(text)
 	} catch {
-		// Response wasn't JSON
+		if (!init?.allowNotJson) {
+			throw new RequestError(`Response wasn't JSON: ${text}`, {
+				response: res,
+				text,
+			})
+		}
 	}
 
 	if (!res.ok) {

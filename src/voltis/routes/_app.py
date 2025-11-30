@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from voltis.services.resource_broker import ResourceBroker
 
@@ -12,9 +13,17 @@ def create_app(rb: ResourceBroker):
     app = FastAPI()
     app.state.resource_broker = rb
 
-    app.include_router(auth_router, prefix="/auth")
-    app.include_router(users_router, prefix="/users")
-    app.include_router(libraries_router, prefix="/libraries")
-    app.include_router(collections_router, prefix="/collections")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    app.include_router(auth_router, prefix="/api/auth")
+    app.include_router(users_router, prefix="/api/users")
+    app.include_router(libraries_router, prefix="/api/libraries")
+    app.include_router(collections_router, prefix="/api/collections")
 
     return app
