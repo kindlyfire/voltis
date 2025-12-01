@@ -17,6 +17,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, relationship
 from sqlalchemy.orm import mapped_column as col
 
 from voltis.components.scanner.loader import ScannerType
+from voltis.db.utils import JSONMetadataMixin
 
 ContentType = Literal["comic", "comic_series", "book", "book_series"]
 
@@ -107,7 +108,14 @@ class Library(_Base, _DefaultColumns):
         self.sources = [source.model_dump(mode="json") for source in sources]
 
 
-class Content(_Base, _DefaultColumns):
+class ContentMetadata(BaseModel):
+    file_size: int | None = None
+    """Size of the content file."""
+    pages: list[str] | None = None
+    """Names, including extension, of the page files of a comic."""
+
+
+class Content(_Base, _DefaultColumns, JSONMetadataMixin[ContentMetadata]):
     """
     Individual pieces of content as well as groups of content (e.g. a series)
     each have a line in this table, in a tree-like structure.
@@ -123,6 +131,7 @@ class Content(_Base, _DefaultColumns):
 
     __tablename__ = "content"
     __idprefix__ = "c"
+    _metadata_class = ContentMetadata
 
     uri_part: Mapped[str] = col(Text)
     """

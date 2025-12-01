@@ -6,7 +6,7 @@
 				<VCard>
 					<VImg
 						v-if="item.cover_uri"
-						:src="`/api/files/cover/${item.id}`"
+						:src="`${API_URL}/files/cover/${item.id}`"
 						:aspect-ratio="2 / 3"
 						cover
 					/>
@@ -22,6 +22,7 @@ import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { contentApi } from '@/utils/api/content'
 import { librariesApi } from '@/utils/api/libraries'
+import { API_URL } from '@/utils/fetch'
 
 const route = useRoute()
 const libraryId = computed(() => route.params.id as string)

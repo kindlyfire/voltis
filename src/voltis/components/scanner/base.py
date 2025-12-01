@@ -27,7 +27,6 @@ class ContentItem:
     """Will be compared in order to sort items within their parent."""
     children: list["ContentItem"] = field(default_factory=list)
     file_modified_at: datetime.datetime | None = None
-    metadata: dict = field(default_factory=dict)
 
     order: int | None = None
     """Do not set in scanner impl. The computed order based on the order_parts
@@ -60,7 +59,7 @@ class ScannerBase(ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    async def scan_item(self, item: ContentItem) -> None:
+    async def scan_item(self, content: Content) -> None:
         """
         Analyze the ContentItem file to fill in metadata.
         """
@@ -132,7 +131,6 @@ class ScannerBase(ABC):
             content_inst.file_uri = item.file_uri
             content_inst.cover_uri = item.cover_uri
             content_inst.order_parts = item.order_parts
-            content_inst.metadata_ = item.metadata
             content_inst.file_modified_at = item.file_modified_at
 
             if item.children:
@@ -160,6 +158,7 @@ class ScannerBase(ABC):
         upsert_objs: list[dict] = []
         for item in all_items:
             assert item.content_inst is not None
+            item.content_inst._sync_metadata()
             if not item.content_inst.has_changes():
                 continue
 

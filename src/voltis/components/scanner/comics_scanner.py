@@ -1,6 +1,16 @@
 import re
+import zipfile
+from pathlib import Path
+
+import anyio
+import anyio.to_thread
+
+from voltis.db.models import Content
 
 from .base import ContentItem, FsItem, ScannerBase
+
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+COVER_NAMES = ["cover.jpg", "cover.jpeg", "cover.png"]
 
 
 class ComicScanner(ScannerBase):
@@ -115,9 +125,37 @@ class ComicScanner(ScannerBase):
             order_parts=[vol_num or 0, ch_num or 0],
         )
 
-    async def scan_item(self, item: ContentItem) -> None:
-        assert item.content_inst
-        pass
+    async def scan_item(self, content: Content) -> None:
+        if content.type == "comic_series":
+            await anyio.to_thread.run_sync(self._scan_series, content)
+        elif content.type == "comic":
+            await anyio.to_thread.run_sync(self._scan_comic, content)
+
+    def _scan_series(self, content: Content) -> None:
+        """Scan a comic series folder for a cover image."""
+        folder = Path.from_uri(content.file_uri)
+        for cover_name in COVER_NAMES:
+            cover_path = folder / cover_name
+            if cover_path.is_file():
+                content.cover_uri = cover_path.as_uri()
+                return
+
+    def _scan_comic(self, content: Content) -> None:
+        """Scan a comic file (.cbz) for pages and cover."""
+        path = Path.from_uri(content.file_uri)
+
+        try:
+            with zipfile.ZipFile(path, "r") as zf:
+                pages = _list_pages(zf)
+                if not pages:
+                    content.valid = False
+                    return
+
+                content.metadata_obj.file_size = path.stat().st_size
+                content.metadata_obj.pages = pages
+                content.cover_uri = f"{content.file_uri}/{pages[0]}"
+        except (zipfile.BadZipFile, OSError):
+            content.valid = False
 
 
 def _parse_volume_number(name: str) -> int | float | None:
@@ -202,3 +240,31 @@ def _clean_series_name(name: str) -> str:
             break
         name = cleaned
     return name.strip()
+
+
+def _list_pages(zf: zipfile.ZipFile) -> list[str]:
+    """
+    List image files in a zip archive, sorted naturally by filename.
+    Returns paths relative to the archive root.
+    """
+    pages: list[str] = []
+    for info in zf.infolist():
+        if info.is_dir():
+            continue
+        ext = Path(info.filename).suffix.lower()
+        if ext in IMAGE_EXTENSIONS:
+            pages.append(info.filename)
+
+    pages.sort(key=_natural_sort_key)
+    return pages
+
+
+def _natural_sort_key(s: str) -> list[int | str]:
+    """Sort key for natural sorting (e.g., page2 < page10)."""
+    parts: list[int | str] = []
+    for part in re.split(r"(\d+)", s):
+        if part.isdigit():
+            parts.append(int(part))
+        else:
+            parts.append(part.lower())
+    return parts

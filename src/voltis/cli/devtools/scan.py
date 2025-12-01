@@ -107,6 +107,16 @@ async def _scan(
 
     click.echo("")
 
+    to_not_delete = [
+        content
+        for content in ContentItem.flatten(all_content_items)
+        if content.content_inst not in to_delete
+    ]
+    for i, item in enumerate(to_not_delete):
+        click.echo(f"Updating metadata for {item.title} ({i + 1}/{len(to_not_delete)})")
+        assert item.content_inst
+        await scanner.scan_item(item.content_inst)
+
     if not all_content_items:
         click.echo("No content found.")
     else:
