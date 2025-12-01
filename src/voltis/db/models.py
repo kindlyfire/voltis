@@ -92,6 +92,7 @@ class Library(_Base, _DefaultColumns):
     __tablename__ = "libraries"
     __idprefix__ = "l"
 
+    name: Mapped[str] = col(Text)
     type: Mapped[ScannerType] = col(Text)
     scanned_at: Mapped[datetime.datetime | None] = col(TIMESTAMP)
     sources: Mapped[list[Any]] = col("sources", JSONB, server_default="{}")

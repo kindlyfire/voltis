@@ -20,6 +20,7 @@ class LibraryDTO(BaseModel):
     id: str
     created_at: datetime.datetime
     updated_at: datetime.datetime
+    name: str
     type: ScannerType
     scanned_at: datetime.datetime | None
     sources: list[LibrarySourceDTO]
@@ -30,6 +31,7 @@ class LibraryDTO(BaseModel):
             id=model.id,
             created_at=model.created_at,
             updated_at=model.updated_at,
+            name=model.name,
             type=model.type,
             scanned_at=model.scanned_at,
             sources=[LibrarySourceDTO(path_uri=s.path_uri) for s in model.get_sources()],
@@ -37,6 +39,7 @@ class LibraryDTO(BaseModel):
 
 
 class UpsertRequest(BaseModel):
+    name: str
     type: ScannerType
     sources: list[LibrarySourceDTO]
 
@@ -62,6 +65,7 @@ async def upsert_library(
         if id_or_new == "new":
             library = Library(
                 id=Library.make_id(),
+                name=body.name,
                 type=body.type,
                 sources=[s.model_dump() for s in body.sources],
                 scanned_at=None,
@@ -73,6 +77,7 @@ async def upsert_library(
             library = await session.get(Library, id_or_new)
             if not library:
                 raise HTTPException(status_code=404, detail="Library not found")
+            library.name = body.name
             library.type = body.type
             library.sources = [s.model_dump() for s in body.sources]
             library.updated_at = now_without_tz()

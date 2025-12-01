@@ -17,6 +17,7 @@ CREATE TABLE libraries (
     id TEXT PRIMARY KEY,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    name TEXT NOT NULL,
     type TEXT NOT NULL,
     scanned_at TIMESTAMP,
     sources JSONB NOT NULL DEFAULT '[]'::JSONB
