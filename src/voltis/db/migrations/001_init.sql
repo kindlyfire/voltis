@@ -9,7 +9,8 @@ CREATE TABLE users (
 
 CREATE TABLE sessions (
     token TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL REFERENCES users(id)
+    user_id TEXT NOT NULL REFERENCES users(id),
+    expires_at TIMESTAMP NOT NULL
 );
 CREATE INDEX idx_sessions_user_id ON sessions(user_id);
 

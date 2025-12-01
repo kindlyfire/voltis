@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 from uuid import uuid4
 
@@ -7,7 +8,11 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
 from voltis.db.models import Session, User
-from voltis.routes._providers import RbProvider
+from voltis.routes._providers import (
+    RbProvider,
+    SESSION_DURATION_DAYS,
+    set_session_cookie,
+)
 from voltis.services.settings import settings
 
 router = APIRouter()
@@ -32,18 +37,16 @@ async def route_auth_login(
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     async with rb.get_asession() as session:
-        user_session = Session(token=uuid4().hex + uuid4().hex, user_id=user.id)
+        expires_at = datetime.now(timezone.utc) + timedelta(days=SESSION_DURATION_DAYS)
+        user_session = Session(
+            token=uuid4().hex + uuid4().hex,
+            user_id=user.id,
+            expires_at=expires_at.replace(tzinfo=None),
+        )
         session.add(user_session)
         await session.commit()
 
-    secure = request.url.scheme == "https"
-    response.set_cookie(
-        key="voltis_session",
-        value=user_session.token,
-        httponly=True,
-        secure=secure,
-        samesite="lax",
-    )
+    set_session_cookie(request, response, user_session.token)
 
     return {"success": True}
 
@@ -63,7 +66,12 @@ async def route_auth_register(
 
     async with rb.get_asession() as session:
         user = User(id=User.make_id(), username=username, password_hash=password_hash)
-        user_session = Session(token=uuid4().hex + uuid4().hex, user_id=user.id)
+        expires_at = datetime.now(timezone.utc) + timedelta(days=SESSION_DURATION_DAYS)
+        user_session = Session(
+            token=uuid4().hex + uuid4().hex,
+            user_id=user.id,
+            expires_at=expires_at.replace(tzinfo=None),
+        )
         session.add_all([user, user_session])
 
         try:
@@ -71,14 +79,7 @@ async def route_auth_register(
         except IntegrityError:
             raise HTTPException(status_code=400, detail="Username already exists")
 
-    secure = request.url.scheme == "https"
-    response.set_cookie(
-        key="voltis_session",
-        value=user_session.token,
-        httponly=True,
-        secure=secure,
-        samesite="lax",
-    )
+    set_session_cookie(request, response, user_session.token)
 
     return {"success": True}
 

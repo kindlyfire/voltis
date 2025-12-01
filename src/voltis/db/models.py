@@ -71,6 +71,7 @@ class Session(_Base):
 
     token: Mapped[str] = col(Text, primary_key=True)
     user_id: Mapped[str] = col(Text, ForeignKey("users.id"))
+    expires_at: Mapped[datetime.datetime] = col(TIMESTAMP)
 
     user: Mapped["User"] = relationship(back_populates="sessions")
 
