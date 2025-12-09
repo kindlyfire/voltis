@@ -1,7 +1,7 @@
 import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 
@@ -49,6 +49,19 @@ class ContentDTO(BaseModel):
         )
 
 
+@router.get("/{content_id}")
+async def get_content(
+    rb: RbProvider,
+    _user: UserProvider,
+    content_id: str,
+) -> ContentDTO:
+    async with rb.get_asession() as session:
+        content = await session.get(Content, content_id)
+        if content is None:
+            raise HTTPException(status_code=404, detail="Content not found")
+        return ContentDTO.from_model(content)
+
+
 @router.get("")
 async def list_content(
     rb: RbProvider,
@@ -62,7 +75,10 @@ async def list_content(
         query = select(Content).where(Content.valid == valid)
 
         if parent_id is not None:
-            query = query.where(Content.parent_id == parent_id)
+            if parent_id == "null":
+                query = query.where(Content.parent_id.is_(None))
+            else:
+                query = query.where(Content.parent_id == parent_id)
         if library_id is not None:
             query = query.where(Content.library_id == library_id)
         if type:

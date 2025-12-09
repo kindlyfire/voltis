@@ -5,3 +5,10 @@ import { RouterView } from 'vue-router'
 <template>
 	<RouterView />
 </template>
+
+<style lang="css">
+.v-btn {
+	text-transform: none;
+	letter-spacing: normal;
+}
+</style>

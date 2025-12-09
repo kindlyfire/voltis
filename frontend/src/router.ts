@@ -4,6 +4,7 @@ import HomePage from './pages/HomePage.vue'
 import LibraryPage from './pages/LibraryPage.vue'
 import PageLogin from './pages/auth/PageLogin.vue'
 import PageRegister from './pages/auth/PageRegister.vue'
+import ContentPage from './pages/content/ContentPage.vue'
 
 const router = createRouter({
 	history: createWebHistory(import.meta.env.BASE_URL),
@@ -18,9 +19,14 @@ const router = createRouter({
 					component: HomePage,
 				},
 				{
-					path: 'l/:id',
+					path: '/:id(l_[^/]+)',
 					name: 'library',
 					component: LibraryPage,
+				},
+				{
+					path: '/:id(c_[^/]+)',
+					name: 'content',
+					component: ContentPage,
 				},
 			],
 		},

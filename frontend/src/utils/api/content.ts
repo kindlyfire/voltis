@@ -4,9 +4,15 @@ import { apiFetch } from '../fetch'
 import type { Content, ContentListParams } from './types'
 
 export const contentApi = {
+	useGet: (id: MaybeRef<string>) =>
+		useQuery({
+			queryKey: ['content', id],
+			queryFn: async () => apiFetch<Content>(`/content/${toValue(id)}`),
+		}),
+
 	useList: (params: MaybeRef<ContentListParams> = {}) =>
 		useQuery({
-			queryKey: ['content', params],
+			queryKey: ['content', 'list', params],
 			queryFn: async () => {
 				const p = toValue(params)
 				const searchParams = new URLSearchParams()
