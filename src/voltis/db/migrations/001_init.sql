@@ -32,12 +32,13 @@ CREATE TABLE content (
     title TEXT NOT NULL,
     valid BOOLEAN NOT NULL DEFAULT TRUE,
     file_uri TEXT NOT NULL,
+    file_mtime TIMESTAMP,
+    file_size INTEGER,
     cover_uri TEXT,
     type TEXT NOT NULL CHECK (type IN ('book', 'book_series', 'comic', 'comic_series')),
     "order" INTEGER,
     order_parts REAL[] NOT NULL DEFAULT '{}'::REAL[],
     metadata JSONB NOT NULL DEFAULT '{}'::JSONB,
-    file_modified_at TIMESTAMP,
     parent_id TEXT REFERENCES content(id),
     library_id TEXT NOT NULL REFERENCES libraries(id)
 );

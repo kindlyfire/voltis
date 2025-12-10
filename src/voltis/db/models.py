@@ -9,6 +9,7 @@ from sqlalchemy import (
     ARRAY,
     REAL,
     ForeignKey,
+    Integer,
     Text,
     inspect,
 )
@@ -16,10 +17,12 @@ from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP
 from sqlalchemy.orm import DeclarativeBase, Mapped, relationship
 from sqlalchemy.orm import mapped_column as col
 
-from voltis.components.scanner.loader import ScannerType
 from voltis.db.utils import JSONMetadataMixin
 
 ContentType = Literal["comic", "comic_series", "book", "book_series"]
+ScannerType = Literal["comics", "books"]
+GroupingContentTypes: list[ContentType] = ["book_series", "comic_series"]
+LeafContentTypes: list[ContentType] = ["book", "comic"]
 
 
 class _Base(DeclarativeBase):
@@ -155,6 +158,8 @@ class Content(_Base, _DefaultColumns, JSONMetadataMixin[ContentMetadata]):
     """The URI referring to the file or folder on disk, e.g.
     `file:///path/to/file.cbz`. This could extended to other protocols in the
     future, for example S3 or webdav."""
+    file_mtime: Mapped[datetime.datetime | None] = col(TIMESTAMP)
+    file_size: Mapped[int | None] = col(Integer)
 
     cover_uri: Mapped[str | None] = col(Text)
     """The URI referring to the cover image for this content, if any. Same
@@ -165,7 +170,6 @@ class Content(_Base, _DefaultColumns, JSONMetadataMixin[ContentMetadata]):
     order: Mapped[int | None] = col()
     order_parts: Mapped[list[float]] = col(ARRAY(REAL))
     metadata_: Mapped[dict[str, Any] | None] = col("metadata", JSONB, server_default="{}")
-    file_modified_at: Mapped[datetime.datetime | None] = col(TIMESTAMP)
 
     parent_id: Mapped[str | None] = col(Text, ForeignKey("content.id"))
     parent: Mapped["Content | None"] = relationship(

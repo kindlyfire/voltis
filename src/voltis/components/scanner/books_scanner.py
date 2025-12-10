@@ -1,16 +1,10 @@
-from .base import ContentItem, FsItem, ScannerBase
+from voltis.db.models import Content
+from .base import LibraryFile, ScannerBase
 
 
 class BookScanner(ScannerBase):
-    async def scan_items(self, items: list[FsItem]) -> list[ContentItem]:
-        """
-        We walk through folders and find all .epub files. We read the metadata
-        from the file to group them by series and keep the right order, if
-        possible.
-        """
+    def check_file_eligible(self, file: LibraryFile) -> bool:
+        raise NotImplementedError
 
-        raise NotImplementedError()
-
-    async def scan_item(self, item: ContentItem) -> None:
-        assert item.content_inst
-        pass
+    async def scan_file(self, file: LibraryFile, content: Content | None) -> Content:
+        raise NotImplementedError

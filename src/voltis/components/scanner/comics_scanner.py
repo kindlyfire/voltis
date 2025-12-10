@@ -1,148 +1,200 @@
+import pathlib
 import re
 import zipfile
-from pathlib import Path
 
-import anyio
-import anyio.to_thread
+import structlog
+from anyio import Path
 
 from voltis.db.models import Content
+from voltis.utils.misc import now_without_tz
 
-from .base import ContentItem, FsItem, ScannerBase
+from .base import LibraryFile, ScannerBase
+
+logger = structlog.stdlib.get_logger()
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 COVER_NAMES = ["cover.jpg", "cover.jpeg", "cover.png"]
 
 
 class ComicScanner(ScannerBase):
-    async def scan_items(self, items: list[FsItem]) -> list[ContentItem]:
-        """
-        We scan walk through folders. If a folder contains a .cbz file, we
-        consider it a comic folder.
+    """
+    Scanner for comic files (.cbz).
 
-        A "Specials" folder may exist inside a series folder, which will create
-        a sub-series.
+    Format:
 
-        We create one Content for the series, and then one child Content for
-        each volume/chapter.
+    Library Root
+    ├── Series Name (Starting Volume Year)
+    │   ├── Series Name (Vol Year) #01.cbz
+    │   ├── Series Name (Vol Year) #02.cbz
+    │   └── Series Name (Vol Year) #03.cbz
+    └── Series Name 2 (Starting Volume Year)
+        ├── Series Name 2 #01.cbz
+        └── Series Name 2 #02.cbz
 
-        Format:
+    Volume and chapter numbers parsing options (leading zeros are optional):
 
-        Library Root
-        ┖── Series Name (Starting Volume Year)
-            ┠── Series Name (Vol Year) #01.cbz
-            ┠── Series Name (Vol Year) #02.cbz
-            ┠── Series Name (Vol Year) #03.cbz
-        ┖── Series Name 2 (Starting Volume Year)
-            ┠── Series Name 2 #01.cbz
-            ┠── Series Name 2 #02.cbz
-            ⋮
-            ┖── Series Name 2 #06.cbz
-        ┖── Some Other Folder
-            ┖── Series Name 2 (Starting Volume Year)
-                ┠── Series Name 2 #01.cbz
-                ┠── Series Name 2 #02.cbz
-                ⋮
-                ┖── Series Name 2 #06.cbz
+    - Volume number: #01, v01, v.01, vol.1
+    - Chapter number: c01, ch01, ch.01, chap.01
 
-        Volume and chapter numbers parsing options (leading zeros are optional):
+    As a last resort, the first number in the filename is considered the
+    volume.
+    """
 
-        - Volume number: #01, v01, v.01, vol.1
-        - Chapter number: c01, ch01, ch.01, chap.01
+    def check_file_eligible(self, file: LibraryFile) -> bool:
+        return file.uri.endswith(".cbz")
 
-        As a last resort, the first number in the filename is considered the
-        volume.
-        """
-        contents: list[ContentItem] = []
+    async def scan_file(self, file: LibraryFile, content: Content | None) -> Content | None:
+        path = Path.from_uri(file.uri)
+        series = await self._get_or_create_series(path.parent)
 
-        # Process each root item
-        for item in items:
-            if item.type == "directory" and item.children:
-                contents.extend(await self._process_children(item))
-
-        return contents
-
-    async def _process_children(self, parent: FsItem) -> list[ContentItem]:
-        """Process all children of a directory."""
-        contents: list[ContentItem] = []
-        for child in parent.children or []:
-            if child.type == "directory":
-                contents.extend(await self._process_directory(child))
-        return contents
-
-    async def _process_directory(self, directory: FsItem) -> list[ContentItem]:
-        """Process a directory that contains .cbz files as a comic series."""
-        if not directory.children:
-            return []
-
-        cbz_files = [c for c in directory.children if c.type == "file" and c.path.suffix == ".cbz"]
-        if not cbz_files:
-            # If the directory contains files, skip it. Otherwise, recurse into
-            # it.
-            all_files = [c for c in directory.children if c.type == "file"]
-            if all_files:
-                return []
-            else:
-                return await self._process_children(directory)
-
-        name, year = _parse_series_name(directory.path.name)
-        children = [self._process_cbz(cbz) for cbz in sorted(cbz_files, key=lambda x: x.path.name)]
-        series = ContentItem(
-            uri_part=f"{name}_{year}" if year else name,
-            type="comic_series",
-            title=name,
-            file_uri=directory.path.as_uri(),
-            children=[child for child in children if child],
-        )
-
-        return [series]
-
-    def _process_cbz(self, cbz: FsItem) -> ContentItem | None:
-        """Create a Content entry for a single .cbz file."""
-        filename = cbz.path.stem
-
-        # Try to parse volume/chapter number
+        # Parse volume/chapter from filename
+        filename = path.stem
         vol_num = _parse_volume_number(filename)
         ch_num = _parse_chapter_number(filename)
         if vol_num is None and ch_num is None:
             ch_num = _parse_fallback_chapter_number(filename)
 
+        uri_part = f"v{vol_num or 0}_ch{ch_num or 0}"
+
+        # Build title from vol/chapter
         parts = []
         if vol_num is not None:
             parts.append(f"Vol. {vol_num}")
         if ch_num is not None:
             parts.append(f"Ch. {ch_num}")
-        title = " ".join(parts) if parts else None
+        title = " ".join(parts) if parts else filename
 
-        if not title:
-            return None
+        # Create or update content
+        if content is None:
+            content, should_skip = self._find_reusable_content(uri_part, series.id)
+            if should_skip:
+                return None
+            if content is None:
+                content = Content(
+                    id=Content.make_id(),
+                    library_id=self.library.id,
+                    uri_part=uri_part,
+                    type="comic",
+                    title=title,
+                    file_uri=file.uri,
+                    parent_id=series.id,
+                    valid=True,
+                    created_at=now_without_tz(),
+                    updated_at=now_without_tz(),
+                )
+            else:
+                content.title = title
+                content.file_uri = file.uri
+                content.valid = True
+                content.updated_at = now_without_tz()
+        else:
+            content.title = title
+            content.parent_id = series.id
+            content.updated_at = now_without_tz()
 
-        return ContentItem(
-            uri_part=f"v{vol_num or 0}_ch{ch_num or 0}",
-            type="comic",
-            title=title,
-            file_uri=cbz.path.as_uri(),
-            file_modified_at=cbz.modified_at,
-            order_parts=[vol_num or 0, ch_num or 0],
+        content.file_mtime = file.mtime
+        content.file_size = file.size
+        content.order_parts = [vol_num or 0, ch_num or 0]
+
+        if not self.no_fs:
+            self._scan_comic(content)
+
+        return content
+
+    async def _get_or_create_series(self, series_folder: Path) -> Content:
+        """Find an existing series or create a new one based on the folder."""
+        folder_uri = series_folder.as_uri()
+
+        name, year = _parse_series_name(series_folder.name)
+        uri_part = f"{name}_{year}" if year else name
+
+        for series in self.series:
+            if series.file_uri == folder_uri:
+                return series
+            if series.uri_part != uri_part or series.parent_id is not None:
+                continue
+
+            # Same series but different folder. Check if files still exist
+            # in the old folder - if so, keep the old file_uri. Otherwise,
+            # update to the new folder location.
+            old_folder_uri = series.file_uri
+            files_in_old_folder = any(item.uri.startswith(old_folder_uri) for item in self.fs_items)
+
+            if not files_in_old_folder:
+                series.file_uri = folder_uri
+                await self._update_series(series)
+
+            return series
+
+        # Create new series
+        series = Content(
+            id=Content.make_id(),
+            library_id=self.library.id,
+            uri_part=uri_part,
+            type="comic_series",
+            title=name,
+            file_uri=folder_uri,
+            order_parts=[],
+            created_at=now_without_tz(),
+            updated_at=now_without_tz(),
         )
+        await self._update_series(series)
+        return series
 
-    async def scan_item(self, content: Content) -> None:
-        if content.type == "comic_series":
-            await anyio.to_thread.run_sync(self._scan_series, content)
-        elif content.type == "comic":
-            await anyio.to_thread.run_sync(self._scan_comic, content)
+    async def _update_series(self, series: Content):
+        if not self.no_fs:
+            await self._scan_series_cover(series, Path.from_uri(series.file_uri))
 
-    def _scan_series(self, content: Content) -> None:
+        async with self.rb.get_asession() as session:
+            series.updated_at = now_without_tz()
+            session.add(series)
+            await session.commit()
+
+        if series not in self.series:
+            self.series.append(series)
+
+    async def _scan_series_cover(self, series: Content, folder: Path) -> None:
         """Scan a comic series folder for a cover image."""
-        folder = Path.from_uri(content.file_uri)
         for cover_name in COVER_NAMES:
             cover_path = folder / cover_name
-            if cover_path.is_file():
-                content.cover_uri = cover_path.as_uri()
+            if await cover_path.is_file():
+                series.cover_uri = cover_path.as_uri()
                 return
+
+    def _find_reusable_content(self, uri_part: str, parent_id: str) -> tuple[Content | None, bool]:
+        """
+        Find a content instance in to_remove with the same uri_part and parent.
+        If found and its file no longer exists, remove it from to_remove and
+        return it. If the file still exists, log a warning.
+
+        Returns:
+            (content, should_skip): content if reusable, None otherwise.
+                should_skip is True if we should skip this file entirely
+                (duplicate).
+        """
+        for i, (lib_file, content) in enumerate(self.to_remove):
+            if content.uri_part != uri_part or content.parent_id != parent_id:
+                continue
+
+            # Check if the old file still exists
+            file_exists = any(item.uri == lib_file.uri for item in self.fs_items)
+            if file_exists:
+                logger.warning(
+                    "Duplicate content detected, ignoring new file",
+                    uri_part=uri_part,
+                    existing_file=lib_file.uri,
+                )
+                return None, True
+
+            # Reuse this content - remove from to_remove list
+            self.to_remove.pop(i)
+            return content, False
+
+        return None, False
 
     def _scan_comic(self, content: Content) -> None:
         """Scan a comic file (.cbz) for pages and cover."""
-        path = Path.from_uri(content.file_uri)
+        path = pathlib.Path.from_uri(content.file_uri)
 
         try:
             with zipfile.ZipFile(path, "r") as zf:
@@ -150,8 +202,6 @@ class ComicScanner(ScannerBase):
                 if not pages:
                     content.valid = False
                     return
-
-                content.metadata_obj.file_size = path.stat().st_size
                 content.metadata_obj.pages = pages
                 content.cover_uri = f"{content.file_uri}/{pages[0]}"
         except (zipfile.BadZipFile, OSError):
@@ -220,12 +270,12 @@ def _parse_series_year(name: str) -> int | None:
         "My Series (90) (202)" -> None
         "My Series" -> None
     """
-    # Find all parenthesized groups and check from right to left
     matches = list(re.finditer(r"\((\d+)\)", name))
     for match in reversed(matches):
         year = int(match.group(1))
-        if year >= 1000 and year <= 9999:
+        if 1000 <= year <= 9999:
             return year
+    return None
 
 
 def _clean_series_name(name: str) -> str:
@@ -234,7 +284,6 @@ def _clean_series_name(name: str) -> str:
     left.
     """
     while True:
-        # Remove trailing [] or () tags
         cleaned = re.sub(r"\s*[\[\(][^\[\]\(\)]*[\]\)]\s*$", "", name)
         if cleaned == name:
             break
@@ -251,7 +300,7 @@ def _list_pages(zf: zipfile.ZipFile) -> list[str]:
     for info in zf.infolist():
         if info.is_dir():
             continue
-        ext = Path(info.filename).suffix.lower()
+        ext = pathlib.Path(info.filename).suffix.lower()
         if ext in IMAGE_EXTENSIONS:
             pages.append(info.filename)
 

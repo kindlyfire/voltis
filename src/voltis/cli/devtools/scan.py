@@ -1,12 +1,12 @@
 import pathlib
+from urllib.parse import unquote
 
 import anyio
 import click
 from sqlalchemy import select
 
-from voltis.components.scanner.base import ContentItem
-from voltis.components.scanner.loader import ScannerType, get_scanner
-from voltis.db.models import Library
+from voltis.components.scanner.loader import get_scanner
+from voltis.db.models import Library, ScannerType
 from voltis.services.resource_broker import ResourceBroker
 from voltis.utils.misc import now_without_tz
 
@@ -28,19 +28,19 @@ from voltis.utils.misc import now_without_tz
     help="Library ID to use (if not provided, use in-memory library)",
 )
 @click.option(
-    "--save",
+    "--dry-run",
     is_flag=True,
-    help="Save the scan results to the database",
+    help="Show what would be done without saving to database",
 )
 def scan(
     directory: str | None,
     scanner_type: ScannerType | None,
     library: str | None,
-    save: bool,
+    dry_run: bool,
 ):
-    """Perform a test scan on a folder with a given scanner."""
+    """Perform a scan on a folder with a given scanner."""
     rb = ResourceBroker()
-    anyio.run(_scan, rb, directory, scanner_type, library, save)
+    anyio.run(_scan, rb, directory, scanner_type, library, dry_run)
 
 
 async def _scan(
@@ -48,15 +48,11 @@ async def _scan(
     directory: str | None,
     scanner_type: ScannerType | None,
     library_id: str | None,
-    save: bool,
+    dry_run: bool,
 ):
-    if not library_id:
-        if save:
-            click.echo("\nError: --save requires --library to be specified", err=True)
-            return
-        elif not scanner_type:
-            click.echo("\nError: --type is required when not using --library", err=True)
-            return
+    if not library_id and not scanner_type:
+        click.echo("\nError: --type is required when not using --library", err=True)
+        return
     if not directory and not library_id:
         click.echo("\nError: either directory argument or --library must be provided", err=True)
         return
@@ -64,20 +60,22 @@ async def _scan(
     # Get or create library
     if library_id:
         async with rb.get_asession() as session:
-            result = await session.scalar(select(Library).where(Library.id == library_id))
-            if not result:
+            lib = await session.scalar(select(Library).where(Library.id == library_id))
+            if not lib:
                 click.echo(f"Error: Library {library_id} not found", err=True)
                 return
-            lib = result
         if scanner_type and lib.type != scanner_type:
             click.echo(
-                f"Warning: Overriding Library type {lib.type} with specified type {scanner_type}"
+                f"Warning: Overriding library type {lib.type} with specified type {scanner_type}"
             )
             lib.type = scanner_type
     else:
         assert directory
+        assert scanner_type
+        dry_run = True
         lib = Library(
             id=Library.make_id(),
+            name="Dry-run Library",
             sources=[{"path_uri": pathlib.Path(directory).as_uri()}],
             type=scanner_type,
             scanned_at=None,
@@ -85,66 +83,44 @@ async def _scan(
             updated_at=now_without_tz(),
         )
 
-    # Create scanner
-    scanner = get_scanner(lib.type)
-    path_uris = [source.path_uri for source in lib.get_sources()]
+    # Create scanner and run scan
+    scanner = get_scanner(lib.type, lib, rb)
+    click.echo(f"Scanning library: {lib.name or lib.id}")
+    for source in lib.get_sources():
+        click.echo(f"  Source: {unquote(source.path_uri)}")
 
-    # Scan all paths and merge results
-    all_content_items: list[ContentItem] = []
-    for path_uri in path_uris:
-        # TODO: If the same item is present in more than one folder, it should
-        # be rejected. Maybe even reject both to be sure.
-        click.echo(f"Scanning: {path_uri}")
-        content_items = await scanner.scan(path_uri)
-        all_content_items.extend(content_items)
+    result = await scanner.scan(dry_run=dry_run)
 
-    # Match items
-    if library_id:
-        async with rb.get_asession() as session:
-            to_delete = await scanner.match_from_db(session, lib.id, all_content_items)
-    else:
-        to_delete = await scanner.match_from_instances(all_content_items, [])
+    # Display results
+    click.echo("")
+    if result.added:
+        click.echo(f"Added ({len(result.added)}):")
+        for item in result.added[:20]:
+            click.echo(f"  + {unquote(item.uri)}")
+        if len(result.added) > 20:
+            click.echo(f"  ... and {len(result.added) - 20} more")
+
+    if result.updated:
+        click.echo(f"\nUpdated ({len(result.updated)}):")
+        for item in result.updated[:20]:
+            click.echo(f"  ~ {unquote(item.uri)}")
+        if len(result.updated) > 20:
+            click.echo(f"  ... and {len(result.updated) - 20} more")
+
+    if result.removed:
+        click.echo(f"\nRemoved ({len(result.removed)}):")
+        for item, _ in result.removed[:20]:
+            click.echo(f"  - {unquote(item.uri)}")
+        if len(result.removed) > 20:
+            click.echo(f"  ... and {len(result.removed) - 20} more")
+
+    if not result.added and not result.updated and not result.removed:
+        click.echo("No changes detected.")
 
     click.echo("")
+    click.echo(
+        f"Summary: {len(result.added)} added, {len(result.updated)} updated, {len(result.removed)} removed"
+    )
 
-    to_not_delete = [
-        content
-        for content in ContentItem.flatten(all_content_items)
-        if content.content_inst not in to_delete
-    ]
-    for i, item in enumerate(to_not_delete):
-        click.echo(f"Updating metadata for {item.title} ({i + 1}/{len(to_not_delete)})")
-        assert item.content_inst
-        await scanner.scan_item(item.content_inst)
-
-    if not all_content_items:
-        click.echo("No content found.")
-    else:
-        click.echo(f"Found {len(all_content_items)} top-level item(s):\n")
-        for item in all_content_items:
-            _print_content_tree(item, indent=0)
-
-    if to_delete:
-        click.echo(f"Items to delete: {len(to_delete)}")
-        for content in to_delete:
-            click.echo(f"  - {content}")
-
-    if save:
-        async with rb.get_asession() as session:
-            await scanner.save(session, lib.id, all_content_items, to_delete)
-            await session.commit()
-        click.echo("\nScan results saved to database.")
-
-
-def _print_content_tree(item: ContentItem, indent: int = 0):
-    """Recursively print a ContentItem tree."""
-    prefix = "    " * indent
-
-    if item.content_inst:
-        click.echo(f"{prefix}{item.content_inst}")
-    else:
-        click.echo(f"{prefix}[No Content] {item.title} ({item.uri_part})")
-
-    if item.children:
-        for child in item.children:
-            _print_content_tree(child, indent + 1)
+    if dry_run:
+        click.echo("\n(dry-run mode, no changes saved)")

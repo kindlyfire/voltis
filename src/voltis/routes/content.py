@@ -19,12 +19,13 @@ class ContentDTO(BaseModel):
     title: str
     valid: bool
     file_uri: str
+    file_mtime: datetime.datetime | None
+    file_size: int | None
     cover_uri: str | None
     type: ContentType
     order: int | None
     order_parts: list[float]
     metadata_: dict[str, Any] | None
-    file_modified_at: datetime.datetime | None
     parent_id: str | None
     library_id: str
 
@@ -38,12 +39,13 @@ class ContentDTO(BaseModel):
             title=model.title,
             valid=model.valid,
             file_uri=model.file_uri,
+            file_mtime=model.file_mtime,
+            file_size=model.file_size,
             cover_uri=model.cover_uri,
             type=model.type,
             order=model.order,
             order_parts=model.order_parts,
             metadata_=model.metadata_,
-            file_modified_at=model.file_modified_at,
             parent_id=model.parent_id,
             library_id=model.library_id,
         )
