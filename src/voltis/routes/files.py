@@ -33,9 +33,7 @@ def _read_from_archive(archive_path: Path, inner_path: str) -> bytes:
         try:
             return zf.read(inner_path)
         except KeyError:
-            raise HTTPException(
-                status_code=404, detail=f"File not found in archive: {inner_path}"
-            )
+            raise HTTPException(status_code=404, detail=f"File not found in archive: {inner_path}")
 
 
 def _get_file_content(uri: str) -> tuple[bytes, str]:
@@ -77,4 +75,31 @@ async def get_cover(
             raise HTTPException(status_code=404, detail="Content has no cover")
 
         data, media_type = _get_file_content(content.cover_uri)
+        return Response(content=data, media_type=media_type)
+
+
+@router.get("/page/{content_id}/{page_index}")
+async def get_page(
+    rb: RbProvider,
+    _user: UserProvider,
+    content_id: str,
+    page_index: int,
+) -> Response:
+    async with rb.get_asession() as session:
+        content = await session.get(Content, content_id)
+        if not content:
+            raise HTTPException(status_code=404, detail="Content not found")
+
+        metadata = content.metadata_obj
+        if not metadata.pages:
+            raise HTTPException(status_code=404, detail="Content has no pages")
+
+        if page_index < 0 or page_index >= len(metadata.pages):
+            raise HTTPException(status_code=404, detail="Page index out of range")
+
+        page_name = metadata.pages[page_index]
+        file_path = Path.from_uri(content.file_uri)
+        page_uri = file_path / page_name
+
+        data, media_type = _get_file_content(page_uri.as_uri())
         return Response(content=data, media_type=media_type)
