@@ -5,6 +5,9 @@ import LibraryPage from './pages/LibraryPage.vue'
 import PageLogin from './pages/auth/PageLogin.vue'
 import PageRegister from './pages/auth/PageRegister.vue'
 import ContentPage from './pages/content/ContentPage.vue'
+import SettingsAccountPage from './pages/settings/AccountPage.vue'
+import SettingsUsersPage from './pages/settings/UsersPage.vue'
+import SettingsLibrariesPage from './pages/settings/LibrariesPage.vue'
 
 const router = createRouter({
 	history: createWebHistory(import.meta.env.BASE_URL),
@@ -27,6 +30,21 @@ const router = createRouter({
 					path: '/:id(c_[^/]+)',
 					name: 'content',
 					component: ContentPage,
+				},
+				{
+					path: '/settings/account',
+					name: 'settings-account',
+					component: SettingsAccountPage,
+				},
+				{
+					path: '/settings/users',
+					name: 'settings-users',
+					component: SettingsUsersPage,
+				},
+				{
+					path: '/settings/libraries',
+					name: 'settings-libraries',
+					component: SettingsLibrariesPage,
 				},
 			],
 		},

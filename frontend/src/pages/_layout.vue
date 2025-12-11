@@ -24,7 +24,23 @@
 			</template>
 		</VAppBar>
 		<VNavigationDrawer v-model="drawer" :permanent="mdAndUp" :temporary="!mdAndUp">
-			<VList nav>
+			<VList v-if="isSettings" nav>
+				<VListItem prepend-icon="mdi-arrow-left" @click="router.push('/')">
+					<VListItemTitle>Back</VListItemTitle>
+				</VListItem>
+				<VDivider class="my-2" />
+				<VListItem to="/settings/account" prepend-icon="mdi-account">
+					<VListItemTitle>Account</VListItemTitle>
+				</VListItem>
+				<VDivider class="my-2" />
+				<VListItem to="/settings/users" prepend-icon="mdi-account-group">
+					<VListItemTitle>Users</VListItemTitle>
+				</VListItem>
+				<VListItem to="/settings/libraries" prepend-icon="mdi-bookshelf">
+					<VListItemTitle>Libraries</VListItemTitle>
+				</VListItem>
+			</VList>
+			<VList v-else nav>
 				<VListItem to="/" exact prepend-icon="mdi-home">
 					<VListItemTitle>Home</VListItemTitle>
 				</VListItem>
@@ -39,7 +55,7 @@
 					<VListItemTitle>{{ library.name }}</VListItemTitle>
 				</VListItem>
 				<VDivider class="my-2" />
-				<VListItem to="/settings" prepend-icon="mdi-cog">
+				<VListItem to="/settings/account" prepend-icon="mdi-cog">
 					<VListItemTitle>Settings</VListItemTitle>
 				</VListItem>
 			</VList>
@@ -51,14 +67,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useDisplay } from 'vuetify'
 import { usersApi } from '@/utils/api/users'
 import { authApi } from '@/utils/api/auth'
 import { librariesApi } from '@/utils/api/libraries'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 
 const router = useRouter()
+const route = useRoute()
+const isSettings = computed(() => route.path.startsWith('/settings'))
 const { mdAndUp } = useDisplay()
 const drawer = ref(true)
 const me = usersApi.useMe()
