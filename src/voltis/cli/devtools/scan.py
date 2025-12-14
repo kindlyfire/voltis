@@ -1,7 +1,6 @@
 import pathlib
 from urllib.parse import unquote
 
-import anyio
 import click
 from sqlalchemy import select
 
@@ -9,38 +8,6 @@ from voltis.components.scanner.loader import get_scanner
 from voltis.db.models import Library, ScannerType
 from voltis.services.resource_broker import ResourceBroker
 from voltis.utils.misc import now_without_tz
-
-
-@click.command()
-@click.argument(
-    "directory", type=click.Path(exists=True, file_okay=False, dir_okay=True), required=False
-)
-@click.option(
-    "-t",
-    "--type",
-    "scanner_type",
-    type=click.Choice(["comics"]),
-    help="Type of scanner to use",
-)
-@click.option(
-    "--library",
-    type=str,
-    help="Library ID to use (if not provided, use in-memory library)",
-)
-@click.option(
-    "--dry-run",
-    is_flag=True,
-    help="Show what would be done without saving to database",
-)
-def scan(
-    directory: str | None,
-    scanner_type: ScannerType | None,
-    library: str | None,
-    dry_run: bool,
-):
-    """Perform a scan on a folder with a given scanner."""
-    rb = ResourceBroker()
-    anyio.run(_scan, rb, directory, scanner_type, library, dry_run)
 
 
 async def _scan(

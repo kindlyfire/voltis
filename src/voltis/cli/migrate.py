@@ -1,21 +1,12 @@
 import anyio
 import click
 
+from voltis.db.migrate import migrate_down, migrate_up
+from voltis.services.resource_broker import ResourceBroker
 from voltis.services.settings import settings
 
 
-@click.group()
-def migrate():
-    """Database migration commands."""
-    pass
-
-
-@migrate.command()
-def deploy():
-    """Run migrations."""
-    from ..db.migrate import migrate_up
-    from ..services.resource_broker import ResourceBroker
-
+def _deploy():
     async def _inner():
         rb = ResourceBroker()
         await migrate_up(rb)
@@ -23,12 +14,7 @@ def deploy():
     anyio.run(_inner)
 
 
-@migrate.command()
-def down():
-    """Drop all database tables."""
-    from ..db.migrate import migrate_down
-    from ..services.resource_broker import ResourceBroker
-
+def _down():
     async def _inner():
         rb = ResourceBroker()
         await migrate_down(rb)
@@ -36,12 +22,7 @@ def down():
     anyio.run(_inner)
 
 
-@migrate.command()
-def reset():
-    """Reset database (drop all tables and re-run migrations)."""
-    from ..db.migrate import migrate_down, migrate_up
-    from ..services.resource_broker import ResourceBroker
-
+def _reset():
     ans = click.prompt(
         f"Are you sure you want to reset the database? This will delete ALL DATA.\nDSN: {settings.DB_URL}\nType 'yes' to continue",
         default="no",
