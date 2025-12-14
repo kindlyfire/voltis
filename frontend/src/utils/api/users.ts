@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
-import { apiFetch } from '../fetch'
+import { apiFetch, RequestError } from '../fetch'
 import type { User, UserUpsert } from './types'
 
 export const usersApi = {
@@ -12,7 +12,13 @@ export const usersApi = {
 	useMe: () =>
 		useQuery({
 			queryKey: ['users', 'me'],
-			queryFn: async () => apiFetch<User>('/users/me'),
+			queryFn: async () =>
+				apiFetch<User>('/users/me').catch(e => {
+					if (e instanceof RequestError && e.response?.status === 401) {
+						return null
+					}
+					throw e
+				}),
 		}),
 
 	useUpsert: () => {

@@ -1,11 +1,15 @@
 <template>
-	<RouterView />
+	<div v-if="qMe.isLoading.value" class="loading-container">
+		<VProgressCircular indeterminate size="64" />
+	</div>
+	<RouterView v-else />
 </template>
 
 <script setup lang="ts">
-import { RouterView } from 'vue-router'
+import { RouterView, useRouter } from 'vue-router'
 import { useTheme } from 'vuetify'
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, watch } from 'vue'
+import { usersApi } from './utils/api/users'
 
 const theme = useTheme()
 
@@ -21,11 +25,31 @@ onMounted(() => {
 onUnmounted(() => {
 	mediaQuery.removeEventListener('change', updateTheme)
 })
+
+const router = useRouter()
+const qMe = usersApi.useMe()
+
+watch(
+	() => [qMe.data.value, qMe.isLoading.value, router.currentRoute.value] as const,
+	([me, isLoading, route]) => {
+		if (!isLoading && !me && !route.path.startsWith('/auth')) {
+			router.replace('/auth/login')
+		}
+	},
+	{ immediate: true }
+)
 </script>
 
 <style lang="css">
 .v-btn {
 	text-transform: none;
 	letter-spacing: normal;
+}
+
+.loading-container {
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	height: 100vh;
 }
 </style>
