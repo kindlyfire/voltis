@@ -27,9 +27,16 @@ import ComicDisplay from './ComicDisplay.vue'
 import ComicSeriesDisplay from './ComicSeriesDisplay.vue'
 import BookDisplay from './BookDisplay.vue'
 import BookSeriesDisplay from './BookSeriesDisplay.vue'
+import { useHead } from '@unhead/vue'
 
 const route = useRoute()
 const contentId = computed(() => route.params.id as string)
 
 const content = contentApi.useGet(contentId)
+
+useHead({
+	title() {
+		return content.data.value?.title ?? null
+	},
+})
 </script>

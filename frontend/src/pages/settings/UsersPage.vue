@@ -38,6 +38,11 @@
 import { ref } from 'vue'
 import { usersApi } from '@/utils/api/users'
 import UserModal from './UserModal.vue'
+import { useHead } from '@unhead/vue'
+
+useHead({
+	title: 'Users',
+})
 
 const users = usersApi.useList()
 const selectedUserId = ref<string | null>(null)

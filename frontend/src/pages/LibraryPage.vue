@@ -28,6 +28,7 @@ import { useRoute } from 'vue-router'
 import { contentApi } from '@/utils/api/content'
 import { librariesApi } from '@/utils/api/libraries'
 import { API_URL } from '@/utils/fetch'
+import { useHead } from '@unhead/vue'
 
 const route = useRoute()
 const libraryId = computed(() => route.params.id as string)
@@ -38,4 +39,10 @@ const library = computed(() => libraries.data?.value?.find(l => l.id === library
 const contents = contentApi.useList(
 	computed(() => ({ library_id: libraryId.value, parent_id: 'null' }))
 )
+
+useHead({
+	title() {
+		return library.value?.name ?? 'Library'
+	},
+})
 </script>

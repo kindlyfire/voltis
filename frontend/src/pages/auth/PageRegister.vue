@@ -46,6 +46,11 @@ import { authApi } from '@/utils/api/auth'
 import AInput from '@/components/AInput.vue'
 import AMutationError from '@/components/AMutationError.vue'
 import { useRouter } from 'vue-router'
+import { useHead } from '@unhead/vue'
+
+useHead({
+	title: 'Register',
+})
 
 const register = authApi.useRegister()
 const router = useRouter()

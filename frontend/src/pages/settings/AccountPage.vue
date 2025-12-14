@@ -51,6 +51,11 @@ import { useForm } from '@/utils/forms'
 import { usersApi } from '@/utils/api/users'
 import AInput from '@/components/AInput.vue'
 import AMutationError from '@/components/AMutationError.vue'
+import { useHead } from '@unhead/vue'
+
+useHead({
+	title: 'Account',
+})
 
 const me = usersApi.useMe()
 const upsert = usersApi.useUpsert()

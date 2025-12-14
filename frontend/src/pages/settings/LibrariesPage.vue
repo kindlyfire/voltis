@@ -46,6 +46,11 @@
 import { ref } from 'vue'
 import { librariesApi } from '@/utils/api/libraries'
 import LibraryModal from './LibraryModal.vue'
+import { useHead } from '@unhead/vue'
+
+useHead({
+	title: 'Libraries',
+})
 
 const libraries = librariesApi.useList()
 const selectedLibraryId = ref<string | null>(null)

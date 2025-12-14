@@ -10,6 +10,7 @@ import { RouterView, useRouter } from 'vue-router'
 import { useTheme } from 'vuetify'
 import { onMounted, onUnmounted, watch } from 'vue'
 import { usersApi } from './utils/api/users'
+import { useHead } from '@unhead/vue'
 
 const theme = useTheme()
 
@@ -38,6 +39,12 @@ watch(
 	},
 	{ immediate: true }
 )
+
+useHead({
+	titleTemplate(title) {
+		return title ? `${title} • Voltis` : 'Voltis'
+	},
+})
 </script>
 
 <style lang="css">
