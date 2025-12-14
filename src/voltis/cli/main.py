@@ -26,13 +26,13 @@ def run():
 
 @main.group()
 def migrate():
-    """Database migration commands."""
+    """Database migration commands"""
     pass
 
 
 @migrate.command()
 def deploy():
-    """Run migrations."""
+    """Run migrations"""
     from .migrate import _deploy
 
     _deploy()
@@ -40,7 +40,7 @@ def deploy():
 
 @migrate.command()
 def down():
-    """Drop all database tables."""
+    """Drop all database tables"""
     from .migrate import _down
 
     _down()
@@ -48,7 +48,7 @@ def down():
 
 @migrate.command()
 def reset():
-    """Reset database (drop all tables and re-run migrations)."""
+    """Reset database (drop all tables and re-run migrations)"""
     from .migrate import _reset
 
     _reset()
@@ -56,7 +56,7 @@ def reset():
 
 @main.group()
 def devtools():
-    """Development/testing tools."""
+    """Development/testing tools"""
 
 
 @devtools.command()
@@ -86,7 +86,7 @@ def scan(
     library: str | None,
     dry_run: bool,
 ):
-    """Perform a scan on a folder with a given scanner."""
+    """Perform a scan on a folder with a given scanner"""
     import anyio
 
     from ..services.resource_broker import ResourceBroker
@@ -94,6 +94,46 @@ def scan(
 
     rb = ResourceBroker()
     anyio.run(_scan, rb, directory, scanner_type, library, dry_run)
+
+
+@main.group()
+def users():
+    """User management commands"""
+
+
+@users.command()
+@click.argument("username")
+@click.option(
+    "--password",
+    required=True,
+    help="Password for the user ('-' to read stdin)",
+)
+@click.option("--admin/--no-admin", default=False, help="Grant admin permissions")
+def create(username: str, password: str, admin: bool):
+    """Create a new user"""
+    import anyio
+
+    from ..services.resource_broker import ResourceBroker
+    from .users import _create
+
+    rb = ResourceBroker()
+    anyio.run(_create, rb, username, password, admin)
+
+
+@users.command()
+@click.argument("name")
+@click.option("--username", help="New username")
+@click.option("--password", help="New password ('-' to read stdin)")
+@click.option("--admin/--no-admin", default=None, help="Grant or revoke admin permissions")
+def update(name: str, username: str | None, password: str | None, admin: bool | None):
+    """Update an existing user"""
+    import anyio
+
+    from ..services.resource_broker import ResourceBroker
+    from .users import _update
+
+    rb = ResourceBroker()
+    anyio.run(_update, rb, name, username, password, admin)
 
 
 if __name__ == "__main__":
