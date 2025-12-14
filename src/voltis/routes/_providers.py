@@ -71,3 +71,12 @@ async def _user_provider(user: MaybeUserProvider) -> User:
 
 
 UserProvider = Annotated[User, Depends(_user_provider)]
+
+
+async def _admin_user_provider(user: MaybeUserProvider) -> User:
+    if user is None or "ADMIN" not in user.permissions:
+        raise HTTPException(status_code=403)
+    return user
+
+
+AdminUserProvider = Annotated[User, Depends(_admin_user_provider)]

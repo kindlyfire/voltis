@@ -12,14 +12,31 @@ export const usersApi = {
 	useMe: () =>
 		useQuery({
 			queryKey: ['users', 'me'],
-			queryFn: async () =>
-				apiFetch<User>('/users/me').catch(e => {
+			queryFn: async () => {
+				console.log('useMe called')
+				return apiFetch<User>('/users/me').catch(e => {
 					if (e instanceof RequestError && e.response?.status === 401) {
 						return null
 					}
 					throw e
-				}),
+				})
+			},
 		}),
+
+	useUpdateMe: () => {
+		const queryClient = useQueryClient()
+		return useMutation({
+			mutationFn: async (body: UserUpsert) => {
+				return apiFetch<User>('/users/me', {
+					method: 'POST',
+					body: JSON.stringify(body),
+				})
+			},
+			onSuccess: () => {
+				queryClient.invalidateQueries({ queryKey: ['users', 'me'] })
+			},
+		})
+	},
 
 	useUpsert: () => {
 		const queryClient = useQueryClient()

@@ -58,7 +58,7 @@ useHead({
 })
 
 const me = usersApi.useMe()
-const upsert = usersApi.useUpsert()
+const upsert = usersApi.useUpdateMe()
 
 const detailsForm = useForm({
 	schema: z.object({

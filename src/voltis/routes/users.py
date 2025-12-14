@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from voltis.db.models import User
-from voltis.routes._providers import RbProvider, UserProvider
+from voltis.routes._providers import AdminUserProvider, RbProvider, UserProvider
 from voltis.utils.misc import now_without_tz
 
 router = APIRouter()
@@ -39,7 +39,7 @@ class UpsertRequest(BaseModel):
 @router.get("")
 async def list_users(
     rb: RbProvider,
-    _user: UserProvider,
+    _user: AdminUserProvider,
 ) -> list[UserDTO]:
     async with rb.get_asession() as session:
         result = await session.scalars(select(User))
@@ -53,10 +53,27 @@ async def get_current_user(
     return UserDTO.from_model(user)
 
 
+@router.post("/me")
+async def update_current_user(
+    rb: RbProvider,
+    user: UserProvider,
+    body: UpsertRequest,
+) -> UserDTO:
+    async with rb.get_asession() as session:
+        session.add(user)
+        user.username = body.username
+        if body.password:
+            user.password_hash = bcrypt.hashpw(body.password.encode(), bcrypt.gensalt()).decode()
+        user.updated_at = now_without_tz()
+        await session.commit()
+        await session.refresh(user)
+        return UserDTO.from_model(user)
+
+
 @router.post("/{id_or_new}")
 async def upsert_user(
     rb: RbProvider,
-    _user: UserProvider,
+    _user: AdminUserProvider,
     id_or_new: str,
     body: UpsertRequest,
 ) -> UserDTO:
@@ -81,7 +98,9 @@ async def upsert_user(
             user.username = body.username
             user.permissions = body.permissions
             if body.password:
-                user.password_hash = bcrypt.hashpw(body.password.encode(), bcrypt.gensalt()).decode()
+                user.password_hash = bcrypt.hashpw(
+                    body.password.encode(), bcrypt.gensalt()
+                ).decode()
             user.updated_at = now_without_tz()
 
         await session.commit()

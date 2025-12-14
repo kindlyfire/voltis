@@ -32,13 +32,15 @@
 				<VListItem to="/settings/account" prepend-icon="mdi-account">
 					<VListItemTitle>Account</VListItemTitle>
 				</VListItem>
-				<VDivider class="my-2" />
-				<VListItem to="/settings/users" prepend-icon="mdi-account-group">
-					<VListItemTitle>Users</VListItemTitle>
-				</VListItem>
-				<VListItem to="/settings/libraries" prepend-icon="mdi-bookshelf">
-					<VListItemTitle>Libraries</VListItemTitle>
-				</VListItem>
+				<template v-if="isAdmin">
+					<VDivider class="my-2" />
+					<VListItem to="/settings/users" prepend-icon="mdi-account-group">
+						<VListItemTitle>Users</VListItemTitle>
+					</VListItem>
+					<VListItem to="/settings/libraries" prepend-icon="mdi-bookshelf">
+						<VListItemTitle>Libraries</VListItemTitle>
+					</VListItem>
+				</template>
 			</VList>
 			<VList v-else nav>
 				<VListItem to="/" exact prepend-icon="mdi-home">
@@ -82,6 +84,8 @@ const drawer = ref(true)
 const me = usersApi.useMe()
 const logout = authApi.useLogout()
 const libraries = librariesApi.useList()
+
+const isAdmin = computed(() => me.data.value?.permissions.includes('ADMIN'))
 
 async function handleLogout() {
 	await logout.mutateAsync()

@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from voltis.components.scanner.loader import ScannerType
 from voltis.db.models import Library
-from voltis.routes._providers import RbProvider, UserProvider
+from voltis.routes._providers import AdminUserProvider, RbProvider, UserProvider
 from voltis.utils.misc import now_without_tz
 
 router = APIRouter()
@@ -57,7 +57,7 @@ async def list_libraries(
 @router.post("/{id_or_new}")
 async def upsert_library(
     rb: RbProvider,
-    _user: UserProvider,
+    _user: AdminUserProvider,
     id_or_new: str,
     body: UpsertRequest,
 ) -> LibraryDTO:
@@ -90,7 +90,7 @@ async def upsert_library(
 @router.delete("/{library_id}")
 async def delete_library(
     rb: RbProvider,
-    _user: UserProvider,
+    _user: AdminUserProvider,
     library_id: str,
 ) -> dict:
     async with rb.get_asession() as session:
