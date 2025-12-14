@@ -23,14 +23,14 @@
 							icon="mdi-pencil"
 							variant="text"
 							size="small"
-							@click="selectedUserId = user.id"
+							@click="((selectedUserId = user.id), (userModalOpen = true))"
 						/>
 					</td>
 				</tr>
 			</tbody>
 		</VTable>
 
-		<UserModal :user-id="selectedUserId" @close="selectedUserId = null" />
+		<UserModal :user-id="selectedUserId" v-model="userModalOpen" />
 	</VContainer>
 </template>
 
@@ -45,5 +45,6 @@ useHead({
 })
 
 const users = usersApi.useList()
+const userModalOpen = ref(false)
 const selectedUserId = ref<string | null>(null)
 </script>

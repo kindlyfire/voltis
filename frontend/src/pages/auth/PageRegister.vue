@@ -6,7 +6,7 @@
 					<VCardTitle class="text-h5">Register</VCardTitle>
 					<VCardText>
 						<VForm @submit="onSubmit" class="space-y-4!">
-							<AInput :input="getInputProps('username')" label="Username" />
+							<AInput :input="getInputProps('username')" label="Username" autofocus />
 							<AInput
 								:input="getInputProps('password')"
 								label="Password"
@@ -47,6 +47,7 @@ import AInput from '@/components/AInput.vue'
 import AMutationError from '@/components/AMutationError.vue'
 import { useRouter } from 'vue-router'
 import { useHead } from '@unhead/vue'
+import { useQueryClient } from '@tanstack/vue-query'
 
 useHead({
 	title: 'Register',
@@ -54,6 +55,7 @@ useHead({
 
 const register = authApi.useRegister()
 const router = useRouter()
+const queryClient = useQueryClient()
 
 const schema = z
 	.object({
@@ -77,6 +79,9 @@ const { getInputProps, onSubmit, mutation } = useForm({
 		await register.mutateAsync({
 			username: values.username,
 			password: values.password,
+		})
+		await queryClient.refetchQueries({
+			queryKey: ['users', 'me'],
 		})
 		router.push('/')
 	},

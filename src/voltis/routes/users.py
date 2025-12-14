@@ -73,16 +73,19 @@ async def update_current_user(
 @router.post("/{id_or_new}")
 async def upsert_user(
     rb: RbProvider,
-    _user: AdminUserProvider,
+    user: AdminUserProvider,
     id_or_new: str,
     body: UpsertRequest,
 ) -> UserDTO:
+    if user.id == id_or_new and "ADMIN" not in body.permissions:
+        raise HTTPException(status_code=403, detail="Cannot remove admin permission from yourself")
+
     async with rb.get_asession() as session:
         if id_or_new == "new":
             if not body.password:
                 raise HTTPException(status_code=400, detail="Password is required for new users")
             password_hash = bcrypt.hashpw(body.password.encode(), bcrypt.gensalt()).decode()
-            user = User(
+            user_ = User(
                 id=User.make_id(),
                 username=body.username,
                 password_hash=password_hash,
@@ -90,22 +93,22 @@ async def upsert_user(
                 created_at=now_without_tz(),
                 updated_at=now_without_tz(),
             )
-            session.add(user)
+            session.add(user_)
         else:
-            user = await session.get(User, id_or_new)
-            if not user:
+            user_ = await session.get(User, id_or_new)
+            if not user_:
                 raise HTTPException(status_code=404, detail="User not found")
-            user.username = body.username
-            user.permissions = body.permissions
+            user_.username = body.username
+            user_.permissions = body.permissions
             if body.password:
-                user.password_hash = bcrypt.hashpw(
+                user_.password_hash = bcrypt.hashpw(
                     body.password.encode(), bcrypt.gensalt()
                 ).decode()
-            user.updated_at = now_without_tz()
+            user_.updated_at = now_without_tz()
 
         await session.commit()
-        await session.refresh(user)
-        return UserDTO.from_model(user)
+        await session.refresh(user_)
+        return UserDTO.from_model(user_)
 
 
 @router.delete("/{user_id}")

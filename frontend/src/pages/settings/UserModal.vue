@@ -1,5 +1,9 @@
 <template>
-	<VDialog :model-value="!!userId" @update:model-value="$emit('close')" max-width="500">
+	<VDialog
+		:model-value="modelValue"
+		@update:model-value="$emit('update:modelValue', $event)"
+		max-width="500"
+	>
 		<VCard>
 			<VCardTitle>{{ isNew ? 'Create User' : 'Edit User' }}</VCardTitle>
 			<VCardText>
@@ -10,6 +14,12 @@
 						:label="isNew ? 'Password' : 'New Password (leave blank to keep current)'"
 						type="password"
 					/>
+					<VCheckbox
+						:model-value="form.values.value.isAdmin"
+						@update:model-value="form.setValue('isAdmin', $event || false)"
+						label="Admin"
+						hide-details
+					/>
 					<AMutationError :mutation="form.mutation" />
 					<div class="flex gap-2">
 						<VBtn
@@ -19,7 +29,9 @@
 						>
 							{{ isNew ? 'Create' : 'Update' }}
 						</VBtn>
-						<VBtn variant="text" @click="$emit('close')">Cancel</VBtn>
+						<VBtn variant="text" @click="$emit('update:modelValue', false)"
+							>Cancel</VBtn
+						>
 						<VSpacer />
 						<VBtn
 							v-if="!isNew"
@@ -47,10 +59,11 @@ import AMutationError from '@/components/AMutationError.vue'
 
 const props = defineProps<{
 	userId: string | null
+	modelValue: boolean
 }>()
 
 const emit = defineEmits<{
-	close: []
+	'update:modelValue': [boolean]
 }>()
 
 const isNew = computed(() => props.userId === 'new')
@@ -74,19 +87,21 @@ const form = useForm({
 					})
 				}
 			}),
+		isAdmin: z.boolean(),
 	}),
 	initialValues: {
 		username: '',
 		password: '',
+		isAdmin: true,
 	},
 	onSubmit: async values => {
 		await upsert.mutateAsync({
 			id: isNew.value ? undefined : props.userId!,
 			username: values.username,
 			password: values.password || undefined,
-			permissions: user.value?.permissions ?? [],
+			permissions: values.isAdmin ? ['ADMIN'] : [],
 		})
-		emit('close')
+		emit('update:modelValue', false)
 	},
 })
 
@@ -95,9 +110,13 @@ watch(
 	() => {
 		form.reset()
 		if (props.userId === 'new') {
-			form.setValues({ username: '', password: '' })
+			form.setValues({ username: '', password: '', isAdmin: false })
 		} else if (user.value) {
-			form.setValues({ username: user.value.username, password: '' })
+			form.setValues({
+				username: user.value.username,
+				password: '',
+				isAdmin: user.value.permissions.includes('ADMIN'),
+			})
 		}
 	},
 	{ immediate: true }
@@ -107,7 +126,11 @@ watch(
 	() => user.value,
 	u => {
 		if (u && props.userId !== 'new') {
-			form.setValues({ username: u.username, password: '' })
+			form.setValues({
+				username: u.username,
+				password: '',
+				isAdmin: u.permissions.includes('ADMIN'),
+			})
 		}
 	}
 )
@@ -115,6 +138,6 @@ watch(
 async function handleDelete() {
 	if (!props.userId || isNew.value) return
 	await deleteUser.mutateAsync(props.userId)
-	emit('close')
+	emit('update:modelValue', false)
 }
 </script>
