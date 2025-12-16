@@ -1,6 +1,5 @@
 import datetime
 
-import anyio
 import structlog
 from anyio import Path
 from fastapi import APIRouter, HTTPException
@@ -137,7 +136,6 @@ async def upsert_library(
             if not library:
                 raise HTTPException(status_code=404, detail="Library not found")
             library.name = body.name
-            library.type = body.type
             library.sources = [s.model_dump() for s in body.sources]
             library.updated_at = now_without_tz()
 

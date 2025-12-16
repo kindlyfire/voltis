@@ -12,7 +12,9 @@
 							{ title: 'Comics', value: 'comics' },
 							{ title: 'Books', value: 'books' },
 						]"
-						hide-details
+						:hide-details="isNew"
+						:readonly="!isNew"
+						:messages="isNew ? [] : ['Type cannot be updated.']"
 					/>
 					<div>
 						<div class="text-sm font-medium mb-2">Sources</div>

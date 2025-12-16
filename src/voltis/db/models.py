@@ -45,7 +45,7 @@ class _Base(DeclarativeBase):
     def make_id(cls) -> str:
         if not hasattr(cls, "__idprefix__"):
             raise NotImplementedError("gen_id requires __idprefix__ to be set")
-        rand = "".join(random.choices(string.ascii_letters + string.digits, k=10))
+        rand = "".join(random.choices(string.ascii_letters + string.digits, k=8))
         return f"{getattr(cls, '__idprefix__')}_{rand}"
 
 
