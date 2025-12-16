@@ -4,7 +4,6 @@ from pydantic import BaseModel
 from sqlalchemy import event
 from sqlalchemy.orm import Mapped
 
-
 T = TypeVar("T", bound=BaseModel)
 
 

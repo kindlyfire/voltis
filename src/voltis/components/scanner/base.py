@@ -34,6 +34,7 @@ class ScannerResult:
     added: list[LibraryFile]
     updated: list[LibraryFile]
     removed: list[tuple[LibraryFile, Content]]
+    unchanged: list[LibraryFile]
 
 
 class ScannerBase(ABC):
@@ -95,13 +96,18 @@ class ScannerBase(ABC):
         fs_by_uri = {item.uri: item for item in fs_items}
         db_by_uri = {item[0].uri: item for item in db_items}
 
-        to_add = [item for uri, item in fs_by_uri.items() if uri not in db_by_uri]
-        to_update = [
-            item
-            for uri, item in fs_by_uri.items()
-            if uri in db_by_uri and item.has_changed(db_by_uri[uri][0])
-        ]
         self.to_remove = [item for uri, item in db_by_uri.items() if uri not in fs_by_uri]
+        to_add: list[LibraryFile] = []
+        to_update: list[LibraryFile] = []
+        unchanged: list[LibraryFile] = []
+        for uri, item in fs_by_uri.items():
+            if uri not in db_by_uri:
+                to_add.append(item)
+            else:
+                if item.has_changed(db_by_uri[uri][0]):
+                    to_update.append(item)
+                else:
+                    unchanged.append(item)
 
         if not dry_run:
             for item in to_add:
@@ -140,6 +146,7 @@ class ScannerBase(ABC):
             added=to_add,
             updated=to_update,
             removed=self.to_remove,
+            unchanged=unchanged,
         )
 
     async def _get_db_items(self) -> list[tuple[LibraryFile, Content]]:

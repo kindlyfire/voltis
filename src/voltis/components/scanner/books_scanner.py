@@ -1,4 +1,5 @@
 from voltis.db.models import Content
+
 from .base import LibraryFile, ScannerBase
 
 

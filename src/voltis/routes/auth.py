@@ -9,8 +9,8 @@ from sqlalchemy.exc import IntegrityError
 
 from voltis.db.models import Session, User
 from voltis.routes._providers import (
-    RbProvider,
     SESSION_DURATION_DAYS,
+    RbProvider,
     set_session_cookie,
 )
 from voltis.services.settings import settings

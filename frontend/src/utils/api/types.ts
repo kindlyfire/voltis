@@ -36,6 +36,14 @@ export interface LibraryUpsert {
 	sources: LibrarySource[]
 }
 
+export interface ScanResult {
+	library_id: string
+	added: number
+	updated: number
+	removed: number
+	unchanged: number
+}
+
 export type ContentType = 'comic' | 'comic_series' | 'book' | 'book_series'
 
 export interface Content {

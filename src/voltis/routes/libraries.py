@@ -1,12 +1,13 @@
 import datetime
 
+import anyio
 import structlog
 from anyio import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from voltis.components.scanner.loader import ScannerType
+from voltis.components.scanner.loader import ScannerType, get_scanner
 from voltis.db.models import Library
 from voltis.routes._providers import AdminUserProvider, RbProvider, UserProvider
 from voltis.utils.misc import now_without_tz
@@ -55,6 +56,45 @@ async def list_libraries(
     async with rb.get_asession() as session:
         result = await session.scalars(select(Library))
         return [LibraryDTO.from_model(lib) for lib in result.all()]
+
+
+class ScanResultDTO(BaseModel):
+    library_id: str
+    added: int
+    updated: int
+    removed: int
+    unchanged: int
+
+
+@router.post("/scan")
+async def scan_libraries(
+    rb: RbProvider,
+    _user: AdminUserProvider,
+    id: str | None = None,
+) -> list[ScanResultDTO]:
+    async with rb.get_asession() as session:
+        q = select(Library)
+        if id:
+            library_ids = [lib_id.strip() for lib_id in id.split(",")]
+            q = q.where(Library.id.in_(library_ids))
+        libraries = list(await session.scalars(q))
+
+    results = []
+    for library in libraries:
+        logger.info("Scanning library", library_id=library.id, library_name=library.name)
+        scanner = get_scanner(library.type, library, rb)
+        scan_result = await scanner.scan()
+        results.append(
+            ScanResultDTO(
+                library_id=library.id,
+                added=len(scan_result.added),
+                updated=len(scan_result.updated),
+                removed=len(scan_result.removed),
+                unchanged=len(scan_result.unchanged),
+            )
+        )
+
+    return results
 
 
 @router.post("/{id_or_new}")

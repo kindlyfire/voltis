@@ -28,6 +28,12 @@
 					</td>
 					<td>
 						<VBtn
+							icon="mdi-magnify-scan"
+							variant="text"
+							size="small"
+							@click="((scanLibraryIds = [library.id]), (scanModalOpen = true))"
+						/>
+						<VBtn
 							icon="mdi-pencil"
 							variant="text"
 							size="small"
@@ -38,7 +44,18 @@
 			</tbody>
 		</VTable>
 
+		<div class="mt-4">
+			<VBtn
+				variant="tonal"
+				prepend-icon="mdi-magnify-scan"
+				@click="((scanLibraryIds = []), (scanModalOpen = true))"
+			>
+				Scan All
+			</VBtn>
+		</div>
+
 		<LibraryModal :library-id="selectedLibraryId" @close="selectedLibraryId = null" />
+		<ScanModal :library-ids="scanLibraryIds" v-model="scanModalOpen" />
 	</VContainer>
 </template>
 
@@ -46,6 +63,7 @@
 import { ref } from 'vue'
 import { librariesApi } from '@/utils/api/libraries'
 import LibraryModal from './LibraryModal.vue'
+import ScanModal from './ScanModal.vue'
 import { useHead } from '@unhead/vue'
 
 useHead({
@@ -54,4 +72,6 @@ useHead({
 
 const libraries = librariesApi.useList()
 const selectedLibraryId = ref<string | null>(null)
+const scanModalOpen = ref(false)
+const scanLibraryIds = ref<string[]>([])
 </script>
