@@ -1,5 +1,7 @@
 import datetime
 
+import structlog
+from anyio import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -10,6 +12,7 @@ from voltis.routes._providers import AdminUserProvider, RbProvider, UserProvider
 from voltis.utils.misc import now_without_tz
 
 router = APIRouter()
+logger = structlog.stdlib.get_logger()
 
 
 class LibrarySourceDTO(BaseModel):
@@ -61,6 +64,22 @@ async def upsert_library(
     id_or_new: str,
     body: UpsertRequest,
 ) -> LibraryDTO:
+    for source in body.sources:
+        try:
+            path = Path.from_uri(source.path_uri)
+        except Exception as e:
+            logger.warning("Invalid file URI", error=str(e))
+            raise HTTPException(
+                status_code=400,
+                detail=f"Source path is not a valid file URI: {source.path_uri}",
+            )
+
+        if not await path.is_dir():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Source path does not exist or is not a directory: {source.path_uri}",
+            )
+
     async with rb.get_asession() as session:
         if id_or_new == "new":
             library = Library(

@@ -2,6 +2,8 @@ import mimetypes
 import zipfile
 from pathlib import Path
 
+import anyio
+import anyio.to_thread
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
@@ -74,7 +76,7 @@ async def get_cover(
         if not content.cover_uri:
             raise HTTPException(status_code=404, detail="Content has no cover")
 
-        data, media_type = _get_file_content(content.cover_uri)
+        data, media_type = await anyio.to_thread.run_sync(_get_file_content, content.cover_uri)
         return Response(content=data, media_type=media_type)
 
 
@@ -101,5 +103,5 @@ async def get_page(
         file_path = Path.from_uri(content.file_uri)
         page_uri = file_path / page_name
 
-        data, media_type = _get_file_content(page_uri.as_uri())
+        data, media_type = await anyio.to_thread.run_sync(_get_file_content, page_uri.as_uri())
         return Response(content=data, media_type=media_type)
