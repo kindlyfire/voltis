@@ -46,6 +46,11 @@ export interface ScanResult {
 
 export type ContentType = 'comic' | 'comic_series' | 'book' | 'book_series'
 
+export interface ContentMetadata {
+	/** [filename, width, height] */
+	pages: Array<[string, number, number]>
+}
+
 export interface Content {
 	id: string
 	created_at: string
@@ -58,7 +63,7 @@ export interface Content {
 	type: ContentType
 	order: number | null
 	order_parts: number[]
-	metadata_: Record<string, unknown> | null
+	meta: ContentMetadata
 	file_modified_at: string | null
 	parent_id: string | null
 	library_id: string

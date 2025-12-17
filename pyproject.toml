@@ -10,6 +10,7 @@ dependencies = [
     "colorama>=0.4.6",
     "fastapi[standard]>=0.118.3",
     "httpx>=0.28.1",
+    "imagesize>=1.4.1",
     "lxml>=6.0.2",
     "orjson>=3.11.3",
     "psycopg[binary]>=3.2.10",

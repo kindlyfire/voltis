@@ -92,16 +92,16 @@ async def get_page(
         if not content:
             raise HTTPException(status_code=404, detail="Content not found")
 
-        metadata = content.metadata_obj
-        if not metadata.pages:
+        metadata = content.meta
+        if not metadata or "pages" not in metadata:
             raise HTTPException(status_code=404, detail="Content has no pages")
 
-        if page_index < 0 or page_index >= len(metadata.pages):
+        if page_index < 0 or page_index >= len(metadata["pages"]):
             raise HTTPException(status_code=404, detail="Page index out of range")
 
-        page_name = metadata.pages[page_index]
+        page_name = metadata["pages"][page_index]
         file_path = Path.from_uri(content.file_uri)
-        page_uri = file_path / page_name
+        page_uri = file_path / page_name[0]
 
         data, media_type = await anyio.to_thread.run_sync(_get_file_content, page_uri.as_uri())
         return Response(content=data, media_type=media_type)

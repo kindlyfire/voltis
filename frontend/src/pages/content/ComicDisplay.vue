@@ -26,5 +26,5 @@ const props = defineProps<{
 	content: Content
 }>()
 
-const pages = computed(() => (props.content.metadata_ as { pages?: string[] })?.pages ?? [])
+const pages = computed(() => props.content.meta?.pages ?? [])
 </script>

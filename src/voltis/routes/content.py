@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from voltis.db.models import Content, ContentType
+from voltis.db.models import Content, ContentMetadata, ContentType
 from voltis.routes._providers import RbProvider, UserProvider
 
 router = APIRouter()
@@ -25,7 +25,7 @@ class ContentDTO(BaseModel):
     type: ContentType
     order: int | None
     order_parts: list[float]
-    metadata_: dict[str, Any] | None
+    meta: ContentMetadata
     parent_id: str | None
     library_id: str
 
@@ -45,7 +45,7 @@ class ContentDTO(BaseModel):
             type=model.type,
             order=model.order,
             order_parts=model.order_parts,
-            metadata_=model.metadata_,
+            meta=model.meta,
             parent_id=model.parent_id,
             library_id=model.library_id,
         )

@@ -1,7 +1,7 @@
 import datetime
 import random
 import string
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
 from colorama import Fore, Style
 from pydantic import BaseModel
@@ -17,7 +17,6 @@ from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP
 from sqlalchemy.orm import DeclarativeBase, Mapped, relationship
 from sqlalchemy.orm import mapped_column as col
 
-from voltis.db.utils import JSONMetadataMixin
 from voltis.utils.misc import now_without_tz
 
 ContentType = Literal["comic", "comic_series", "book", "book_series"]
@@ -106,14 +105,13 @@ class Library(_Base, _DefaultColumns):
         self.sources = [source.model_dump(mode="json") for source in sources]
 
 
-class ContentMetadata(BaseModel):
-    file_size: int | None = None
-    """Size of the content file."""
-    pages: list[str] | None = None
-    """Names, including extension, of the page files of a comic."""
+class ContentMetadata(TypedDict, total=False):
+    pages: list[tuple[str, int, int]]
+    """Names, including extension, of the page files of a comic, with the image
+    width and height."""
 
 
-class Content(_Base, _DefaultColumns, JSONMetadataMixin[ContentMetadata]):
+class Content(_Base, _DefaultColumns):
     """
     Individual pieces of content as well as groups of content (e.g. a series)
     each have a line in this table, in a tree-like structure.
@@ -129,7 +127,6 @@ class Content(_Base, _DefaultColumns, JSONMetadataMixin[ContentMetadata]):
 
     __tablename__ = "content"
     __idprefix__ = "c"
-    _metadata_class = ContentMetadata
 
     uri_part: Mapped[str] = col(Text)
     """
@@ -164,7 +161,7 @@ class Content(_Base, _DefaultColumns, JSONMetadataMixin[ContentMetadata]):
     type: Mapped[ContentType] = col(Text)
     order: Mapped[int | None] = col()
     order_parts: Mapped[list[float]] = col(ARRAY(REAL))
-    metadata_: Mapped[dict[str, Any] | None] = col("metadata", JSONB, server_default="{}")
+    meta: Mapped[ContentMetadata] = col("meta", JSONB, server_default="{}")
 
     parent_id: Mapped[str | None] = col(Text, ForeignKey("content.id"))
     parent: Mapped["Content | None"] = relationship(
@@ -174,3 +171,7 @@ class Content(_Base, _DefaultColumns, JSONMetadataMixin[ContentMetadata]):
 
     library_id: Mapped[str] = col(Text, ForeignKey("libraries.id"))
     library: Mapped["Library"] = relationship()
+
+    def mutate_meta(self) -> ContentMetadata:
+        meta = self.meta = self.meta or {}
+        return meta

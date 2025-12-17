@@ -1,7 +1,9 @@
+from io import BytesIO
 import pathlib
 import re
 import zipfile
 
+import imagesize
 import structlog
 from anyio import Path
 
@@ -202,8 +204,8 @@ class ComicScanner(ScannerBase):
                 if not pages:
                     content.valid = False
                     return
-                content.metadata_obj.pages = pages
-                content.cover_uri = f"{content.file_uri}/{pages[0]}"
+                content.mutate_meta()["pages"] = pages
+                content.cover_uri = f"{content.file_uri}/{pages[0][0]}"
         except (zipfile.BadZipFile, OSError):
             content.valid = False
 
@@ -291,20 +293,23 @@ def _clean_series_name(name: str) -> str:
     return name.strip()
 
 
-def _list_pages(zf: zipfile.ZipFile) -> list[str]:
+def _list_pages(zf: zipfile.ZipFile) -> list[tuple[str, int, int]]:
     """
     List image files in a zip archive, sorted naturally by filename.
     Returns paths relative to the archive root.
     """
-    pages: list[str] = []
+    pages: list[tuple[str, int, int]] = []
     for info in zf.infolist():
         if info.is_dir():
             continue
         ext = pathlib.Path(info.filename).suffix.lower()
         if ext in IMAGE_EXTENSIONS:
-            pages.append(info.filename)
+            width, height = imagesize.get(BytesIO(zf.read(info.filename)))
+            if not isinstance(width, int) or not isinstance(height, int):
+                continue
+            pages.append((info.filename, width, height))
 
-    pages.sort(key=_natural_sort_key)
+    pages.sort(key=lambda x: _natural_sort_key(x[0]))
     return pages
 
 
