@@ -23,7 +23,7 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { contentApi } from '@/utils/api/content'
-import ComicDisplay from './ComicDisplay.vue'
+import ComicDisplay from './ComicDisplay/ComicDisplay.vue'
 import ComicSeriesDisplay from './ComicSeriesDisplay.vue'
 import BookDisplay from './BookDisplay.vue'
 import BookSeriesDisplay from './BookSeriesDisplay.vue'

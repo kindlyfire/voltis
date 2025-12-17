@@ -13,7 +13,6 @@ export const usersApi = {
 		useQuery({
 			queryKey: ['users', 'me'],
 			queryFn: async () => {
-				console.log('useMe called')
 				return apiFetch<User>('/users/me').catch(e => {
 					if (e instanceof RequestError && e.response?.status === 401) {
 						return null
