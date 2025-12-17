@@ -10,7 +10,7 @@ async def client(rb):
     from voltis.routes._app import create_app
 
     app = create_app(rb)
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test/api") as ac:
         yield ac
 
 
@@ -24,7 +24,7 @@ async def test_register_and_login(client):
 
     # Register a new user
     register_response = await client.post(
-        "/auth/register",
+        "auth/register",
         json={"username": username, "password": password},
     )
     assert register_response.status_code == 200
@@ -33,7 +33,7 @@ async def test_register_and_login(client):
 
     # Login with the same credentials
     login_response = await client.post(
-        "/auth/login",
+        "auth/login",
         json={"username": username, "password": password},
     )
     assert login_response.status_code == 200

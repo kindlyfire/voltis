@@ -18,6 +18,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, relationship
 from sqlalchemy.orm import mapped_column as col
 
 from voltis.db.utils import JSONMetadataMixin
+from voltis.utils.misc import now_without_tz
 
 ContentType = Literal["comic", "comic_series", "book", "book_series"]
 ScannerType = Literal["comics", "books"]
@@ -35,12 +36,6 @@ class _Base(DeclarativeBase):
         d_str = ", ".join(parts)
         return f"<{Fore.CYAN}{self.__class__.__name__}{Style.RESET_ALL} {d_str}>"
 
-    def has_changes(self) -> bool:
-        # Unfortunately, can't use .modified. Maybe doing `inst.something =
-        # inst.something` sets it to modified even though it isn't?
-        insp = inspect(self)
-        return any(attr.history.has_changes() for attr in insp.attrs)
-
     @classmethod
     def make_id(cls) -> str:
         if not hasattr(cls, "__idprefix__"):
@@ -55,7 +50,7 @@ class _DefaultColumns:
     updated_at: Mapped[datetime.datetime] = col(
         TIMESTAMP,
         server_default="",
-        onupdate=datetime.datetime.utcnow,
+        onupdate=now_without_tz,
     )
 
 
