@@ -8,6 +8,7 @@ from .collections import router as collections_router
 from .content import router as content_router
 from .files import router as files_router
 from .libraries import router as libraries_router
+from .static import router as static_router
 from .users import router as users_router
 
 
@@ -29,5 +30,6 @@ def create_app(rb: ResourceBroker):
     app.include_router(users_router, prefix="/api/users")
     app.include_router(libraries_router, prefix="/api/libraries")
     app.include_router(collections_router, prefix="/api/collections")
+    app.include_router(static_router)
 
     return app

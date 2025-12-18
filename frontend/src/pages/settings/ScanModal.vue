@@ -67,7 +67,7 @@ const title = computed(() => {
 		return 'Scan All Libraries'
 	}
 	if (props.libraryIds.length === 1) {
-		return `Scan ${getLibraryName(props.libraryIds[0])}`
+		return `Scan ${getLibraryName(props.libraryIds[0]!)}`
 	}
 	return `Scan ${props.libraryIds.length} Libraries`
 })
