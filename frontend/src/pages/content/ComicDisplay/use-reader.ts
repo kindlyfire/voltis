@@ -4,11 +4,13 @@ import {
 	computed,
 	watch,
 	onUnmounted,
+	toValue,
 	type InjectionKey,
+	type MaybeRefOrGetter,
 	type Ref,
 	type ShallowRef,
 } from 'vue'
-import type { PageInfo, ReaderMode } from './types'
+import type { PageInfo, ReaderMode, SiblingsInfo, SiblingContent } from './types'
 import { createPageLoader, getPagesInPreloadOrder, type PageLoaderState } from './use-page-loader'
 import { useRouter } from 'vue-router'
 
@@ -25,10 +27,14 @@ export interface ReaderState {
 	scrollRef: Ref<HTMLElement | null>
 	progress: Ref<number>
 	sidebarOpen: Ref<boolean>
+	siblings: Ref<SiblingsInfo | null>
+	prevSibling: Ref<SiblingContent | null>
+	nextSibling: Ref<SiblingContent | null>
 	handleNext: () => void
 	handlePrev: () => void
 	goToPage: (page: number) => void
 	getLoader: (index: number) => PageLoaderState | undefined
+	goToSibling: (id: string, fromEnd?: boolean) => void
 }
 
 export const readerKey = Symbol('reader') as InjectionKey<ReaderState>
@@ -36,22 +42,28 @@ export const readerKey = Symbol('reader') as InjectionKey<ReaderState>
 export interface UseReaderOptions {
 	contentId: string
 	pages: PageInfo[]
+	siblings?: MaybeRefOrGetter<SiblingsInfo | null>
 	initialMode?: ReaderMode
 	getPageUrl: (index: number) => string
 	onPageChange?: (page: number) => void
 	onReachStart?: () => void
 	onReachEnd?: () => void
+	onGoToSibling?: (id: string, fromEnd?: boolean) => void
 }
 
 export function useReader(options: UseReaderOptions): ReaderState {
+	console.log('useReader initialized with options:', options)
+
 	const {
 		contentId,
 		pages,
+		siblings: siblingsOption,
 		initialMode = 'paged',
 		getPageUrl,
 		onPageChange,
 		onReachStart,
 		onReachEnd,
+		onGoToSibling,
 	} = options
 
 	const router = useRouter()
@@ -91,6 +103,20 @@ export function useReader(options: UseReaderOptions): ReaderState {
 	const progress = computed(() => {
 		if (pages.length === 0) return 0
 		return ((currentPage.value + 1) / pages.length) * 100
+	})
+
+	const siblings = computed(() => toValue(siblingsOption) ?? null)
+
+	const prevSibling = computed(() => {
+		const s = siblings.value
+		if (!s || s.currentIndex <= 0) return null
+		return s.items[s.currentIndex - 1] ?? null
+	})
+
+	const nextSibling = computed(() => {
+		const s = siblings.value
+		if (!s || s.currentIndex >= s.items.length - 1) return null
+		return s.items[s.currentIndex + 1] ?? null
 	})
 
 	// Initialize loaders for all pages
@@ -205,6 +231,10 @@ export function useReader(options: UseReaderOptions): ReaderState {
 		return loaders.value[index]
 	}
 
+	function goToSibling(id: string, fromEnd = false) {
+		onGoToSibling?.(id, fromEnd)
+	}
+
 	return {
 		contentId,
 		pages,
@@ -214,9 +244,13 @@ export function useReader(options: UseReaderOptions): ReaderState {
 		scrollRef,
 		progress,
 		sidebarOpen: ref(false),
+		siblings,
+		prevSibling,
+		nextSibling,
 		handleNext,
 		handlePrev,
 		goToPage,
 		getLoader,
+		goToSibling,
 	}
 }

@@ -22,9 +22,15 @@ const HEIGHT_ZONE = 0.2
 function getClickZone(e: MouseEvent): ClickZone {
 	const target = e.currentTarget as HTMLElement
 	const rect = target.getBoundingClientRect()
-	const relativeY = e.clientY - rect.top
-	const heightPercent = relativeY / rect.height
 
+	// Vertical: use visible viewport portion (accounts for navbar/scroll)
+	const visibleTop = Math.max(0, rect.top)
+	const visibleBottom = Math.min(window.innerHeight, rect.bottom)
+	const visibleHeight = visibleBottom - visibleTop
+	const relativeY = e.clientY - visibleTop
+	const heightPercent = relativeY / visibleHeight
+
+	// Horizontal: use element bounds (accounts for sidebar)
 	const centerWidth = Math.min(rect.width / 3, 300)
 	const widthZone1 = (rect.width - centerWidth) / 2
 	const widthZone2 = widthZone1 + centerWidth

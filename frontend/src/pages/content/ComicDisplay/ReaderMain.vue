@@ -15,8 +15,8 @@
 </template>
 
 <script setup lang="ts">
-import { provide } from 'vue'
-import type { PageInfo } from './types'
+import { provide, toRef } from 'vue'
+import type { PageInfo, SiblingsInfo } from './types'
 import { useReader, readerKey } from './use-reader'
 import ReaderModePaged from './ReaderModePaged.vue'
 import ReaderModeLongstrip from './ReaderModeLongstrip.vue'
@@ -26,20 +26,24 @@ import { useReaderControls } from './use-reader-controls'
 const props = defineProps<{
 	contentId: string
 	pages: PageInfo[]
+	siblings?: SiblingsInfo | null
 	getPageUrl: (index: number) => string
 }>()
 
 const emit = defineEmits<{
 	reachStart: []
 	reachEnd: []
+	goToSibling: [id: string, fromEnd?: boolean]
 }>()
 
 const reader = useReader({
 	contentId: props.contentId,
 	pages: props.pages,
+	siblings: toRef(() => props.siblings ?? null),
 	getPageUrl: props.getPageUrl,
 	onReachStart: () => emit('reachStart'),
 	onReachEnd: () => emit('reachEnd'),
+	onGoToSibling: (id, fromEnd) => emit('goToSibling', id, fromEnd),
 })
 
 provide(readerKey, reader)
