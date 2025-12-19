@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 import structlog
 from anyio import Path
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from voltis.db.models import (
     Content,
@@ -110,9 +110,13 @@ class ScannerBase(ABC):
                     unchanged.append(item)
 
         if not dry_run:
+            parents_with_updates: set[str] = set()
+
             for item in to_add:
                 content = await self.scan_file(item, None)
                 if content is not None:
+                    if content.parent_id:
+                        parents_with_updates.add(content.parent_id)
                     async with self.rb.get_asession() as session:
                         session.add(content)
                         await session.commit()
@@ -120,12 +124,39 @@ class ScannerBase(ABC):
             for item in to_update:
                 content = await self.scan_file(item, db_by_uri[item.uri][1])
                 if content is not None:
+                    if content.parent_id:
+                        parents_with_updates.add(content.parent_id)
                     async with self.rb.get_asession() as session:
                         session.add(content)
                         await session.commit()
 
-            # Clean up removed content + series without children
             async with self.rb.get_asession() as session:
+                # Update order of all items within parents that had changes
+                if parents_with_updates:
+                    result = await session.execute(
+                        select(Content.id, Content.parent_id, Content.order_parts).where(
+                            Content.parent_id.in_(parents_with_updates)
+                        )
+                    )
+                    rows = result.all()
+
+                    # Group by parent and sort by order_parts
+                    by_parent: dict[str, list[tuple[str, list[float]]]] = {}
+                    for row in rows:
+                        by_parent.setdefault(row.parent_id, []).append((row.id, row.order_parts))
+
+                    # Sort each group and compute new order values
+                    updates = []
+                    for items in by_parent.values():
+                        items.sort(key=lambda x: x[1])
+                        for order, (content_id, _) in enumerate(items):
+                            updates.append({"id": content_id, "order": order})
+
+                    if updates:
+                        await session.execute(update(Content), updates)
+                        await session.commit()
+
+                # Clean up removed content + series without children
                 await session.execute(
                     delete(Content).where(Content.id.in_([item[1].id for item in self.to_remove]))
                 )
