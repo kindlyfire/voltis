@@ -21,6 +21,7 @@ import ReaderMain from './ReaderMain.vue'
 
 const props = defineProps<{
 	content: Content
+	siblings: Content[]
 }>()
 
 const router = useRouter()
@@ -29,14 +30,10 @@ const pages = computed<PageInfo[]>(() =>
 	(props.content.meta?.pages ?? []).map(([, width, height]) => ({ width, height }))
 )
 
-const siblingsQuery = contentApi.useList(
-	computed(() => (props.content.parent_id ? { parent_id: props.content.parent_id } : {}))
-)
-
 const siblings = computed<SiblingsInfo | null>(() => {
-	if (!props.content.parent_id || !siblingsQuery.data.value) return null
+	if (!props.content.parent_id || !props.siblings) return null
 
-	const items = [...siblingsQuery.data.value]
+	const items = [...props.siblings]
 		.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 		.map(c => ({ id: c.id, title: c.title, order: c.order }))
 

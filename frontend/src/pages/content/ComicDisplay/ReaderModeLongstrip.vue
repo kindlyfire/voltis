@@ -1,6 +1,6 @@
 <template>
 	<div ref="containerRef" class="reader-longstrip d-flex flex-column align-center">
-		<template v-for="(loader, index) in reader.loaders.value" :key="index">
+		<template v-for="(loader, index) in reader.loaders" :key="index">
 			<div class="reader-longstrip__page" :style="getPageStyle(index)">
 				<div
 					v-if="loader.error.value"
@@ -22,11 +22,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, inject, onMounted, onUnmounted, watchEffect } from 'vue'
+import { ref, onMounted, onUnmounted, watchEffect } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
-import { readerKey } from './use-reader'
+import { useReaderStore } from './use-reader-store'
 
-const reader = inject(readerKey)!
+const reader = useReaderStore()
 const containerRef = ref<HTMLElement | null>(null)
 
 function getPageStyle(index: number) {
@@ -51,8 +51,8 @@ const updateCurrentPage = useDebounceFn(
 		for (let i = children.length - 1; i >= 0; i--) {
 			const el = children[i]!
 			if (el.offsetTop <= viewportCenter) {
-				if (reader.currentPage.value !== i) {
-					reader.currentPage.value = i
+				if (reader.currentPage !== i) {
+					reader.currentPage = i
 				}
 				break
 			}
@@ -75,7 +75,7 @@ watchEffect(
 	() => {
 		if (!containerRef.value) return
 		const children = Array.from(containerRef.value.children) as HTMLElement[]
-		const target = children[reader.currentPage.value]
+		const target = children[reader.currentPage]
 		if (target) {
 			target.scrollIntoView({ behavior: 'instant', block: 'start' })
 		}

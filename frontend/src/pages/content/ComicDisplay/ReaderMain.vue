@@ -1,13 +1,13 @@
 <template>
 	<div class="reader-main select-none" @click="controls.handleClick">
-		<ReaderModePaged v-if="reader.mode.value === 'paged'" />
+		<ReaderModePaged v-if="reader.mode === 'paged'" />
 		<ReaderModeLongstrip v-else />
 	</div>
 
 	<ReaderSidebar @prev="reader.handlePrev" @next="reader.handleNext" />
 
 	<VProgressLinear
-		:model-value="reader.progress.value"
+		:model-value="reader.progress"
 		class="reader-progress"
 		height="3"
 		color="primary"
@@ -15,9 +15,9 @@
 </template>
 
 <script setup lang="ts">
-import { provide, toRef } from 'vue'
+import { watch, onUnmounted } from 'vue'
 import type { PageInfo, SiblingsInfo } from './types'
-import { useReader, readerKey } from './use-reader'
+import { useReaderStore } from './use-reader-store'
 import ReaderModePaged from './ReaderModePaged.vue'
 import ReaderModeLongstrip from './ReaderModeLongstrip.vue'
 import ReaderSidebar from './ReaderSidebar.vue'
@@ -36,19 +36,30 @@ const emit = defineEmits<{
 	goToSibling: [id: string, fromEnd?: boolean]
 }>()
 
-const reader = useReader({
-	contentId: props.contentId,
-	pages: props.pages,
-	siblings: toRef(() => props.siblings ?? null),
-	getPageUrl: props.getPageUrl,
-	onReachStart: () => emit('reachStart'),
-	onReachEnd: () => emit('reachEnd'),
-	onGoToSibling: (id, fromEnd) => emit('goToSibling', id, fromEnd),
+const reader = useReaderStore()
+
+// Set content when props change
+watch(
+	() => props.contentId,
+	() => {
+		reader.setContent({
+			contentId: props.contentId,
+			pages: props.pages,
+			siblings: props.siblings,
+			getPageUrl: props.getPageUrl,
+			onReachStart: () => emit('reachStart'),
+			onReachEnd: () => emit('reachEnd'),
+			onGoToSibling: (id, fromEnd) => emit('goToSibling', id, fromEnd),
+		})
+	},
+	{ immediate: true }
+)
+
+onUnmounted(() => {
+	reader.disposeLoaders()
 })
 
-provide(readerKey, reader)
-
-const controls = useReaderControls(reader)
+const controls = useReaderControls()
 </script>
 
 <style scoped>

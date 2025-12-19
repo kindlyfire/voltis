@@ -1,8 +1,10 @@
-import { type ReaderState } from './use-reader'
+import { useReaderStore } from './use-reader-store'
 
 type ClickZone = 'prev' | 'next' | 'menu'
 
-export function useReaderControls(reader: ReaderState) {
+export function useReaderControls() {
+	const reader = useReaderStore()
+
 	return {
 		handleClick(e: MouseEvent) {
 			const zone = getClickZone(e)
@@ -11,7 +13,7 @@ export function useReaderControls(reader: ReaderState) {
 			} else if (zone === 'next') {
 				reader.handleNext()
 			} else {
-				reader.sidebarOpen.value = true
+				reader.sidebarOpen = true
 			}
 		},
 	}

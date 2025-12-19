@@ -22,14 +22,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, watch } from 'vue'
-import { readerKey } from './use-reader'
+import { computed } from 'vue'
+import { useReaderStore } from './use-reader-store'
 
-const reader = inject(readerKey)!
+const reader = useReaderStore()
 
-const loader = computed(() => reader.getLoader(reader.currentPage.value))
+const loader = computed(() => reader.getLoader(reader.currentPage))
 
-const pageInfo = computed(() => reader.pages[reader.currentPage.value])
+const pageInfo = computed(() => reader.pages[reader.currentPage])
 
 const imageStyle = computed(() => {
 	if (!pageInfo.value) return {}

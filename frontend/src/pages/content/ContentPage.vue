@@ -1,20 +1,29 @@
 <template>
-	<VContainer v-if="content.isLoading.value">
+	<VContainer v-if="qContent.isLoading.value || qSiblings.isLoading.value">
 		<VProgressCircular indeterminate />
 	</VContainer>
-	<VContainer v-else-if="content.error.value">
-		<VAlert type="error">{{ content.error.value.message }}</VAlert>
+	<VContainer v-else-if="qContent.error.value || qSiblings.error.value">
+		<VAlert type="error">{{
+			qContent.error.value?.message || qSiblings.error.value?.message
+		}}</VAlert>
 	</VContainer>
-	<template v-else-if="content.data.value">
-		<ComicDisplay v-if="content.data.value.type === 'comic'" :content="content.data.value" />
-		<ComicSeriesDisplay
-			v-else-if="content.data.value.type === 'comic_series'"
-			:content="content.data.value"
+	<template v-else-if="qContent.data.value && qSiblings.data.value">
+		<ComicDisplay
+			v-if="qContent.data.value.type === 'comic'"
+			:content="qContent.data.value"
+			:siblings="qSiblings.data.value"
 		/>
-		<BookDisplay v-else-if="content.data.value.type === 'book'" :content="content.data.value" />
+		<ComicSeriesDisplay
+			v-else-if="qContent.data.value.type === 'comic_series'"
+			:content="qContent.data.value"
+		/>
+		<BookDisplay
+			v-else-if="qContent.data.value.type === 'book'"
+			:content="qContent.data.value"
+		/>
 		<BookSeriesDisplay
-			v-else-if="content.data.value.type === 'book_series'"
-			:content="content.data.value"
+			v-else-if="qContent.data.value.type === 'book_series'"
+			:content="qContent.data.value"
 		/>
 	</template>
 </template>
@@ -32,11 +41,16 @@ import { useHead } from '@unhead/vue'
 const route = useRoute()
 const contentId = computed(() => route.params.id as string)
 
-const content = contentApi.useGet(contentId)
+const qContent = contentApi.useGet(contentId)
+const qSiblings = contentApi.useList(
+	computed(() =>
+		qContent.data.value?.parent_id ? { parent_id: qContent.data.value.parent_id } : {}
+	)
+)
 
 useHead({
 	title() {
-		return content.data.value?.title ?? null
+		return qContent.data.value?.title ?? null
 	},
 })
 </script>
