@@ -1,6 +1,6 @@
 <template>
 	<VApp>
-		<VAppBar>
+		<VAppBar :scroll-behavior="mdAndUp ? undefined : 'fully-hide'">
 			<VAppBarNavIcon class="d-md-none" @click="drawer = !drawer" />
 			<VAppBarTitle>Voltis</VAppBarTitle>
 			<VSpacer />

@@ -65,14 +65,14 @@
 					:max="reader.pages.length - 1"
 					:step="1"
 					hide-details
-					@update:model-value="reader.goToPage($event)"
+					@update:model-value="reader.setCurrentPage($event, SetPage.FOREGROUND)"
 				/>
 			</div>
 
 			<div class="mb-4">
 				<div class="text-body-2 text-medium-emphasis mb-2">Mode</div>
 				<VBtnToggle
-					v-model="reader.mode"
+					v-model="reader.settings.mode"
 					mandatory
 					variant="outlined"
 					divided
@@ -82,12 +82,47 @@
 					<VBtn value="longstrip" class="flex-1">Longstrip</VBtn>
 				</VBtnToggle>
 			</div>
+
+			<div v-if="reader.settings.mode === 'longstrip'" class="mb-4">
+				<div class="text-body-2 text-medium-emphasis mb-1">
+					Width: {{ reader.settings.longstripWidth }}%
+				</div>
+				<VSlider
+					:model-value="reader.settings.longstripWidth"
+					@update:model-value="setLongstripWidth"
+					:min="10"
+					:max="100"
+					:step="5"
+					hide-details
+				/>
+			</div>
 		</div>
 	</VNavigationDrawer>
 </template>
 
 <script setup lang="ts">
-import { useReaderStore } from './use-reader-store'
+import { onUnmounted } from 'vue'
+import { SetPage, useReaderStore } from './use-reader-store'
 
 const reader = useReaderStore()
+
+// Changing the width will change the scroll position, which means it changes
+// the page. We do this keep the position stable.
+let originalPage = null as number | null
+function setLongstripWidth(width: number) {
+	if (originalPage === null) {
+		originalPage = reader.currentPage
+	}
+	reader.settings.longstripWidth = width
+	requestAnimationFrame(() => {
+		if (originalPage !== null) {
+			reader.setCurrentPage(originalPage, SetPage.INITIAL)
+			originalPage = null
+		}
+	})
+}
+
+onUnmounted(() => {
+	originalPage = null
+})
 </script>

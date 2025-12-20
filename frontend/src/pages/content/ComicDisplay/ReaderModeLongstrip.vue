@@ -22,9 +22,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watchEffect } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
-import { useReaderStore } from './use-reader-store'
+import { SetPage, useReaderStore } from './use-reader-store'
+import { getScrollParent } from '@/utils/css'
 
 const reader = useReaderStore()
 const containerRef = ref<HTMLElement | null>(null)
@@ -32,8 +33,9 @@ const containerRef = ref<HTMLElement | null>(null)
 function getPageStyle(index: number) {
 	const page = reader.pages[index]
 	if (!page) return {}
+	const widthPercent = reader.settings.longstripWidth
 	return {
-		width: `min(100%, ${page.width}px)`,
+		width: `min(${widthPercent}%, ${page.width}px)`,
 		aspectRatio: `${page.width} / ${page.height}`,
 	}
 }
@@ -52,35 +54,60 @@ const updateCurrentPage = useDebounceFn(
 			const el = children[i]!
 			if (el.offsetTop <= viewportCenter) {
 				if (reader.currentPage !== i) {
-					reader.currentPage = i
+					reader.setCurrentPage(i, SetPage.BACKGROUND)
 				}
 				break
 			}
 		}
 	},
 	50,
-	{ maxWait: 100 }
+	{ maxWait: 5000 }
 )
+
+function scrollToPage(index: number, instant: boolean) {
+	if (!containerRef.value) return
+
+	const container = containerRef.value
+	const children = Array.from(container.children) as HTMLElement[]
+	const target = children[index]
+	if (target) {
+		const layoutTop = parseInt(
+			getComputedStyle(document.documentElement).getPropertyValue('--v-layout-top') || '0'
+		)
+		const scrollParent = getScrollParent(container)
+		if (index === reader.pages.length - 1) {
+			// Scroll to bottom for last page
+			;(scrollParent || window).scrollTo({
+				top: document.body.scrollHeight,
+				behavior: instant ? 'instant' : 'smooth',
+			})
+		} else {
+			;(scrollParent || window).scrollTo({
+				top: target.offsetTop - layoutTop,
+				behavior: instant ? 'instant' : 'smooth',
+			})
+		}
+	}
+}
 
 onMounted(() => {
 	window.addEventListener('scroll', updateCurrentPage)
+	reader.setOnScrollToPageFn(scrollToPage)
+
+	scrollToPage(reader.currentPage, true)
 })
 
 onUnmounted(() => {
 	window.removeEventListener('scroll', updateCurrentPage)
+	reader.setOnScrollToPageFn(undefined)
 })
 
-// Scroll to initial page on mount
-watchEffect(
-	() => {
-		if (!containerRef.value) return
-		const children = Array.from(containerRef.value.children) as HTMLElement[]
-		const target = children[reader.currentPage]
-		if (target) {
-			target.scrollIntoView({ behavior: 'instant', block: 'start' })
-		}
+watch(
+	() => containerRef.value,
+	newVal => {
+		if (newVal) reader.scrollRef = getScrollParent(newVal)
 	},
-	{ flush: 'post' }
+	{ immediate: true }
 )
 </script>
 

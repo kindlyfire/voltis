@@ -1,6 +1,6 @@
 <template>
 	<div class="reader-main select-none" @click="controls.handleClick">
-		<ReaderModePaged v-if="reader.mode === 'paged'" />
+		<ReaderModePaged v-if="reader.settings.mode === 'paged'" />
 		<ReaderModeLongstrip v-else />
 	</div>
 
