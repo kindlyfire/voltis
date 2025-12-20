@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/vue-query'
-import { toValue, type MaybeRefOrGetter } from 'vue'
+import { useQuery, type UseQueryOptions } from '@tanstack/vue-query'
+import { toValue, type MaybeRefOrGetter, type UnwrapRef } from 'vue'
 import { apiFetch } from '../fetch'
 import type { Content, ContentListParams } from './types'
 import { isEnabled } from './_utils'
@@ -12,11 +12,14 @@ export const contentApi = {
 			enabled: isEnabled(id),
 		}),
 
-	useList: (params: MaybeRefOrGetter<ContentListParams> = {}) =>
+	useList: (
+		params: MaybeRefOrGetter<ContentListParams | undefined> = {},
+		options?: Omit<UnwrapRef<UseQueryOptions<Content[]>>, 'queryKey' | 'queryFn'>
+	) =>
 		useQuery({
 			queryKey: ['content', 'list', params],
 			queryFn: async () => {
-				const p = toValue(params)
+				const p = toValue(params)!
 				const searchParams = new URLSearchParams()
 				if (p.parent_id) searchParams.append('parent_id', p.parent_id)
 				if (p.library_id) searchParams.append('library_id', p.library_id)
@@ -31,5 +34,6 @@ export const contentApi = {
 				return apiFetch<Content[]>(`/content${query ? `?${query}` : ''}`)
 			},
 			enabled: isEnabled(params),
+			...options,
 		}),
 }

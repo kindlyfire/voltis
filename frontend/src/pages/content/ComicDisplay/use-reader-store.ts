@@ -1,9 +1,10 @@
-import { ref, shallowRef, computed, watch } from 'vue'
-import { defineStore } from 'pinia'
+import { ref, shallowRef, computed, watch, toRaw } from 'vue'
+import { acceptHMRUpdate, defineStore } from 'pinia'
 import { useRouter } from 'vue-router'
 import type { PageInfo, ReaderMode, SiblingsInfo, SiblingContent } from './types'
 import { createPageLoader, getPagesInPreloadOrder, type PageLoaderState } from './use-page-loader'
 import { contentApi } from '@/utils/api/content'
+import { keepPreviousData } from '@tanstack/vue-query'
 
 const PAGE_CACHE_WINDOW = 5
 const PRELOAD_COUNT = 8
@@ -35,12 +36,17 @@ export const useReaderStore = defineStore('reader', () => {
 
 	const qContent = contentApi.useGet(contentId)
 	const content = qContent.data
-	const qSiblings = contentApi.useList(() => ({
-		parent_id: content.value?.parent_id ?? undefined,
-	}))
+	const qSiblings = contentApi.useList(
+		() => {
+			if (content.value?.parent_id) return { parent_id: content.value.parent_id }
+		},
+		{
+			placeholderData: keepPreviousData,
+		}
+	)
 	const siblings = computed<SiblingsInfo | null>(() => {
 		const siblings = qSiblings.data.value
-		if (!content.value?.parent_id || !siblings) return null
+		if ((content.value && !content.value?.parent_id) || !siblings) return null
 		const items = [...siblings]
 			.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 			.map(c => ({ id: c.id, title: c.title, order: c.order }))
@@ -275,3 +281,7 @@ export const useReaderStore = defineStore('reader', () => {
 })
 
 export type ReaderStore = ReturnType<typeof useReaderStore>
+
+if (import.meta.hot) {
+	import.meta.hot.accept(acceptHMRUpdate(useReaderStore, import.meta.hot))
+}
