@@ -75,7 +75,7 @@ export const useReaderStore = defineStore('reader', () => {
 			const pagesVal = pages.value
 			const page = router.currentRoute.value.query.page
 			if (page === 'last') {
-				return _setPageParam(pagesVal.length - 1)
+				return pagesVal.length - 1
 			} else if (page === '') {
 				return 0
 			}
