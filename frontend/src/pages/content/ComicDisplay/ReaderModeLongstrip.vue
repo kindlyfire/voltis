@@ -61,7 +61,7 @@ const updateCurrentPage = useDebounceFn(
 		}
 	},
 	50,
-	{ maxWait: 5000 }
+	{ maxWait: 150 }
 )
 
 function scrollToPage(index: number, instant: boolean) {

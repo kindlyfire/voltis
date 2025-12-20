@@ -1,9 +1,50 @@
+import { onMounted, onUnmounted } from 'vue'
 import { useReaderStore } from './use-reader-store'
 
 type ClickZone = 'prev' | 'next' | 'menu'
 
 export function useReaderControls() {
 	const reader = useReaderStore()
+
+	function handleKeydown(e: KeyboardEvent) {
+		// Ignore when an input element is focused
+		const active = document.activeElement
+		if (
+			active instanceof HTMLInputElement ||
+			active instanceof HTMLTextAreaElement ||
+			active instanceof HTMLSelectElement ||
+			(active instanceof HTMLElement && active.isContentEditable)
+		) {
+			return
+		}
+
+		switch (e.key) {
+			case 'ArrowLeft':
+				reader.handlePrev()
+				break
+			case 'ArrowRight':
+				reader.handleNext()
+				break
+			case ',':
+				if (reader.prevSibling) {
+					reader.goToSibling(reader.prevSibling.id, true)
+				}
+				break
+			case '.':
+				if (reader.nextSibling) {
+					reader.goToSibling(reader.nextSibling.id)
+				}
+				break
+		}
+	}
+
+	onMounted(() => {
+		window.addEventListener('keydown', handleKeydown)
+	})
+
+	onUnmounted(() => {
+		window.removeEventListener('keydown', handleKeydown)
+	})
 
 	return {
 		handleClick(e: MouseEvent) {

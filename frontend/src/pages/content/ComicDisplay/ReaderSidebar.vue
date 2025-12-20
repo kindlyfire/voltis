@@ -96,6 +96,16 @@
 					hide-details
 				/>
 			</div>
+
+			<div class="text-body-2 text-medium-emphasis">
+				<div class="mb-1">Keyboard shortcuts</div>
+				<div v-for="s in kbShortcuts" class="d-flex justify-space-between text-xs!">
+					<span>{{ s[1] }}</span>
+					<span>
+						<kbd>{{ s[0] }}</kbd>
+					</span>
+				</div>
+			</div>
 		</div>
 	</VNavigationDrawer>
 </template>
@@ -105,6 +115,13 @@ import { onUnmounted } from 'vue'
 import { SetPage, useReaderStore } from './use-reader-store'
 
 const reader = useReaderStore()
+
+const kbShortcuts = [
+	['Left arrow', 'Previous Page'],
+	['Right arrow', 'Next Page'],
+	['Comma', 'Previous Entry'],
+	['Period', 'Next Entry'],
+]
 
 // Changing the width will change the scroll position, which means it changes
 // the page. We do this keep the position stable.
