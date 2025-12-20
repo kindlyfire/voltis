@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import { useRouter } from 'vue-router'
 import type { PageInfo, ReaderMode, SiblingsInfo, SiblingContent } from './types'
 import { createPageLoader, getPagesInPreloadOrder, type PageLoaderState } from './use-page-loader'
+import { contentApi } from '@/utils/api/content'
 
 const PAGE_CACHE_WINDOW = 5
 const PRELOAD_COUNT = 8
@@ -10,9 +11,7 @@ const PRELOAD_CONCURRENCY = 3
 
 export interface ReaderContentOptions {
 	contentId: string
-	pages: PageInfo[]
-	siblings?: SiblingsInfo | null
-	getPageUrl: (index: number) => string
+	getPageImageUrl: (index: number) => string
 	onReachStart?: () => void
 	onReachEnd?: () => void
 	onGoToSibling?: (id: string, fromEnd?: boolean) => void
@@ -25,7 +24,6 @@ export const useReaderStore = defineStore('reader', () => {
 	const mode = ref<ReaderMode>('paged')
 	const contentId = ref<string>('')
 	const pages = shallowRef<PageInfo[]>([])
-	const siblings = shallowRef<SiblingsInfo | null>(null)
 	const getPageUrlFn = shallowRef<(index: number) => string>(() => '')
 	const onReachStartFn = shallowRef<(() => void) | undefined>()
 	const onReachEndFn = shallowRef<(() => void) | undefined>()
@@ -35,8 +33,45 @@ export const useReaderStore = defineStore('reader', () => {
 	const abortController = shallowRef<AbortController | null>(null)
 	const scrollRef = ref<HTMLElement | null>(null)
 
+	const qContent = contentApi.useGet(contentId)
+	const content = qContent.data
+	const qSiblings = contentApi.useList(() => ({
+		parent_id: content.value?.parent_id ?? undefined,
+	}))
+	const siblings = computed<SiblingsInfo | null>(() => {
+		const siblings = qSiblings.data.value
+		if (!content.value?.parent_id || !siblings) return null
+		const items = [...siblings]
+			.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+			.map(c => ({ id: c.id, title: c.title, order: c.order }))
+		const currentIndex = items.findIndex(item => item.id === content.value?.id)
+		return {
+			items,
+			currentIndex: currentIndex >= 0 ? currentIndex : 0,
+		}
+	})
+
+	watch(
+		() => content.value,
+		newContent => {
+			if (newContent) {
+				pages.value = newContent.meta.pages.map(p => ({
+					width: p[1],
+					height: p[2],
+				}))
+				_initializeLoaders()
+				_preloadPages()
+			}
+		},
+		{ immediate: true }
+	)
+
 	const currentPage = computed({
 		get() {
+			if (router.currentRoute.value.params.id !== contentId.value) {
+				return 0
+			}
+
 			const pagesVal = pages.value
 			const page = router.currentRoute.value.query.page
 			if (page === 'last') {
@@ -136,17 +171,15 @@ export const useReaderStore = defineStore('reader', () => {
 
 		// Set new content
 		contentId.value = options.contentId
-		pages.value = options.pages
-		siblings.value = options.siblings ?? null
-		getPageUrlFn.value = options.getPageUrl
+		getPageUrlFn.value = options.getPageImageUrl
 		onReachStartFn.value = options.onReachStart
 		onReachEndFn.value = options.onReachEnd
 		onGoToSiblingFn.value = options.onGoToSibling
 
 		// Initialize new loaders
 		abortController.value = new AbortController()
-		_initializeLoaders()
-		_preloadPages()
+		// _initializeLoaders()
+		// _preloadPages()
 	}
 
 	function disposeLoaders() {
@@ -240,3 +273,5 @@ export const useReaderStore = defineStore('reader', () => {
 		goToSibling,
 	}
 })
+
+export type ReaderStore = ReturnType<typeof useReaderStore>

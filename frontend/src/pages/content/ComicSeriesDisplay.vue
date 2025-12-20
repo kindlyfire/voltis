@@ -1,6 +1,6 @@
 <template>
 	<VContainer>
-		<div class="d-flex gap-6 mb-6">
+		<!-- <div class="d-flex gap-6 mb-6">
 			<div class="w-[225px] shrink-0">
 				<img
 					v-if="content.cover_uri"
@@ -12,7 +12,7 @@
 				<h1 class="text-h4 mb-2">{{ content.title }}</h1>
 				<div class="text-body-2 text-medium-emphasis">Comic Series</div>
 			</div>
-		</div>
+		</div> -->
 
 		<h2 class="text-h5 mb-4">Issues</h2>
 		<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-4">
@@ -37,14 +37,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import type { Content } from '@/utils/api/types'
 import { contentApi } from '@/utils/api/content'
 import { API_URL } from '@/utils/fetch'
 
 const props = defineProps<{
-	content: Content
+	contentId: string
 }>()
 
-const children = contentApi.useList(computed(() => ({ parent_id: props.content.id })))
+const children = contentApi.useList(() => ({ parent_id: props.contentId }))
 </script>

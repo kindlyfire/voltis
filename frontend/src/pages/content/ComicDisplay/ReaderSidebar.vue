@@ -16,7 +16,7 @@
 			</div>
 
 			<div v-if="reader.siblings" class="mb-4">
-				<div class="text-body-2 text-medium-emphasis mb-2">Chapter</div>
+				<div class="text-body-2 text-medium-emphasis mb-2">Entry</div>
 				<div class="d-flex align-center gap-2 mb-2">
 					<VBtn
 						icon
@@ -71,9 +71,15 @@
 
 			<div class="mb-4">
 				<div class="text-body-2 text-medium-emphasis mb-2">Mode</div>
-				<VBtnToggle v-model="reader.mode" mandatory variant="outlined" divided>
-					<VBtn value="paged">Single Page</VBtn>
-					<VBtn value="longstrip">Longstrip</VBtn>
+				<VBtnToggle
+					v-model="reader.mode"
+					mandatory
+					variant="outlined"
+					divided
+					class="w-full"
+				>
+					<VBtn value="paged" class="flex-1">Single Page</VBtn>
+					<VBtn value="longstrip" class="flex-1">Longstrip</VBtn>
 				</VBtnToggle>
 			</div>
 		</div>

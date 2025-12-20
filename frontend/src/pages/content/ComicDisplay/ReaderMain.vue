@@ -16,8 +16,7 @@
 
 <script setup lang="ts">
 import { watch, onUnmounted } from 'vue'
-import type { PageInfo, SiblingsInfo } from './types'
-import { useReaderStore } from './use-reader-store'
+import { useReaderStore, type ReaderStore } from './use-reader-store'
 import ReaderModePaged from './ReaderModePaged.vue'
 import ReaderModeLongstrip from './ReaderModeLongstrip.vue'
 import ReaderSidebar from './ReaderSidebar.vue'
@@ -25,14 +24,12 @@ import { useReaderControls } from './use-reader-controls'
 
 const props = defineProps<{
 	contentId: string
-	pages: PageInfo[]
-	siblings?: SiblingsInfo | null
-	getPageUrl: (index: number) => string
+	getPageImageUrl: (index: number) => string
 }>()
 
 const emit = defineEmits<{
-	reachStart: []
-	reachEnd: []
+	reachStart: [reader: ReaderStore]
+	reachEnd: [reader: ReaderStore]
 	goToSibling: [id: string, fromEnd?: boolean]
 }>()
 
@@ -44,11 +41,9 @@ watch(
 	() => {
 		reader.setContent({
 			contentId: props.contentId,
-			pages: props.pages,
-			siblings: props.siblings,
-			getPageUrl: props.getPageUrl,
-			onReachStart: () => emit('reachStart'),
-			onReachEnd: () => emit('reachEnd'),
+			getPageImageUrl: props.getPageImageUrl,
+			onReachStart: () => emit('reachStart', reader),
+			onReachEnd: () => emit('reachEnd', reader),
 			onGoToSibling: (id, fromEnd) => emit('goToSibling', id, fromEnd),
 		})
 	},

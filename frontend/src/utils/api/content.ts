@@ -1,16 +1,16 @@
 import { useQuery } from '@tanstack/vue-query'
-import { toValue, type MaybeRef } from 'vue'
+import { toValue, type MaybeRefOrGetter } from 'vue'
 import { apiFetch } from '../fetch'
 import type { Content, ContentListParams } from './types'
 
 export const contentApi = {
-	useGet: (id: MaybeRef<string>) =>
+	useGet: (id: MaybeRefOrGetter<string>) =>
 		useQuery({
 			queryKey: ['content', id],
 			queryFn: async () => apiFetch<Content>(`/content/${toValue(id)}`),
 		}),
 
-	useList: (params: MaybeRef<ContentListParams> = {}) =>
+	useList: (params: MaybeRefOrGetter<ContentListParams> = {}) =>
 		useQuery({
 			queryKey: ['content', 'list', params],
 			queryFn: async () => {
