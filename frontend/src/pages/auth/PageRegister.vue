@@ -48,6 +48,7 @@ import AMutationError from '@/components/AMutationError.vue'
 import { useRouter } from 'vue-router'
 import { useHead } from '@unhead/vue'
 import { useQueryClient } from '@tanstack/vue-query'
+import { useAlreadyLoggedInRedirect } from './PageLogin.vue'
 
 useHead({
 	title: 'Register',
@@ -56,6 +57,7 @@ useHead({
 const register = authApi.useRegister()
 const router = useRouter()
 const queryClient = useQueryClient()
+useAlreadyLoggedInRedirect()
 
 const schema = z
 	.object({

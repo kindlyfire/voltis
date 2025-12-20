@@ -43,6 +43,8 @@ import AMutationError from '@/components/AMutationError.vue'
 import { useRouter } from 'vue-router'
 import { useHead } from '@unhead/vue'
 import { useQueryClient } from '@tanstack/vue-query'
+import { usersApi } from '@/utils/api/users'
+import { watch } from 'vue'
 
 useHead({
 	title: 'Login',
@@ -51,6 +53,7 @@ useHead({
 const login = authApi.useLogin()
 const router = useRouter()
 const queryClient = useQueryClient()
+useAlreadyLoggedInRedirect()
 
 const schema = z.object({
 	username: z.string().min(1),
@@ -74,4 +77,20 @@ const { getInputProps, onSubmit, mutation } = useForm({
 		router.push('/')
 	},
 })
+</script>
+
+<script lang="ts">
+export function useAlreadyLoggedInRedirect() {
+	const router = useRouter()
+	const qMe = usersApi.useMe()
+	watch(
+		() => qMe.data.value,
+		me => {
+			if (me) {
+				router.push('/')
+			}
+		},
+		{ immediate: true }
+	)
+}
 </script>

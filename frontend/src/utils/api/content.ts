@@ -2,12 +2,14 @@ import { useQuery } from '@tanstack/vue-query'
 import { toValue, type MaybeRefOrGetter } from 'vue'
 import { apiFetch } from '../fetch'
 import type { Content, ContentListParams } from './types'
+import { isEnabled } from './_utils'
 
 export const contentApi = {
-	useGet: (id: MaybeRefOrGetter<string>) =>
+	useGet: (id: MaybeRefOrGetter<string | undefined | null>) =>
 		useQuery({
 			queryKey: ['content', id],
 			queryFn: async () => apiFetch<Content>(`/content/${toValue(id)}`),
+			enabled: isEnabled(id),
 		}),
 
 	useList: (params: MaybeRefOrGetter<ContentListParams> = {}) =>
@@ -28,5 +30,6 @@ export const contentApi = {
 				const query = searchParams.toString()
 				return apiFetch<Content[]>(`/content${query ? `?${query}` : ''}`)
 			},
+			enabled: isEnabled(params),
 		}),
 }

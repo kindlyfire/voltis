@@ -4,15 +4,15 @@
 			<VAppBarNavIcon class="d-md-none" @click="drawer = !drawer" />
 			<VAppBarTitle>Voltis</VAppBarTitle>
 			<VSpacer />
-			<VMenu v-if="me.data?.value">
+			<VMenu v-if="qMe.data?.value">
 				<template #activator="{ props }">
 					<VBtn v-bind="props" variant="text" class="me-5">
-						{{ me.data.value.username }}
+						{{ qMe.data.value.username }}
 						<VIcon end>mdi-chevron-down</VIcon>
 					</VBtn>
 				</template>
 				<VList>
-					<VListItem @click="handleLogout" :disabled="logout.isPending.value">
+					<VListItem @click="handleLogout" :disabled="mLogout.isPending.value">
 						<VListItemTitle>Logout</VListItemTitle>
 					</VListItem>
 				</VList>
@@ -49,7 +49,7 @@
 				<VDivider class="my-2" />
 				<VListSubheader>Libraries</VListSubheader>
 				<VListItem
-					v-for="library in libraries.data?.value"
+					v-for="library in qLibraries.data?.value"
 					:key="library.id"
 					:to="`/${library.id}`"
 					prepend-icon="mdi-bookshelf"
@@ -75,20 +75,23 @@ import { usersApi } from '@/utils/api/users'
 import { authApi } from '@/utils/api/auth'
 import { librariesApi } from '@/utils/api/libraries'
 import { useRouter, useRoute } from 'vue-router'
+import { useQueryClient } from '@tanstack/vue-query'
 
 const router = useRouter()
 const route = useRoute()
 const isSettings = computed(() => route.path.startsWith('/settings'))
 const { mdAndUp } = useDisplay()
 const drawer = ref(mdAndUp.value)
-const me = usersApi.useMe()
-const logout = authApi.useLogout()
-const libraries = librariesApi.useList()
+const qMe = usersApi.useMe()
+const mLogout = authApi.useLogout()
+const qLibraries = librariesApi.useList()
+const queryClient = useQueryClient()
 
-const isAdmin = computed(() => me.data.value?.permissions.includes('ADMIN'))
+const isAdmin = computed(() => qMe.data.value?.permissions.includes('ADMIN'))
 
 async function handleLogout() {
-	await logout.mutateAsync()
+	await mLogout.mutateAsync()
+	queryClient.invalidateQueries({ queryKey: ['users', 'me'] })
 	router.push('/auth/login')
 }
 </script>
