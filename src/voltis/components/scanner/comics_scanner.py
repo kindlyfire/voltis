@@ -46,7 +46,7 @@ class ComicScanner(ScannerBase):
         return file.uri.endswith(".cbz")
 
     async def scan_file(self, file: LibraryFile, content: Content | None) -> Content | None:
-        path = Path.from_uri(file.uri)
+        path = Path(file.uri)
         series = await self._get_or_create_series(path.parent)
 
         # Parse volume/chapter from filename
@@ -105,7 +105,7 @@ class ComicScanner(ScannerBase):
 
     async def _get_or_create_series(self, series_folder: Path) -> Content:
         """Find an existing series or create a new one based on the folder."""
-        folder_uri = series_folder.as_uri()
+        folder_uri = series_folder.as_posix()
 
         name, year = _parse_series_name(series_folder.name)
         uri_part = f"{name}_{year}" if year else name
@@ -145,7 +145,7 @@ class ComicScanner(ScannerBase):
 
     async def _update_series(self, series: Content):
         if not self.no_fs:
-            await self._scan_series_cover(series, Path.from_uri(series.file_uri))
+            await self._scan_series_cover(series, Path(series.file_uri))
 
         async with self.rb.get_asession() as session:
             series.updated_at = now_without_tz()
@@ -160,7 +160,7 @@ class ComicScanner(ScannerBase):
         for cover_name in COVER_NAMES:
             cover_path = folder / cover_name
             if await cover_path.is_file():
-                series.cover_uri = cover_path.as_uri()
+                series.cover_uri = cover_path.as_posix()
                 return
 
     def _find_reusable_content(self, uri_part: str, parent_id: str) -> tuple[Content | None, bool]:
@@ -196,7 +196,7 @@ class ComicScanner(ScannerBase):
 
     def _scan_comic(self, content: Content) -> None:
         """Scan a comic file (.cbz) for pages and cover."""
-        path = pathlib.Path.from_uri(content.file_uri)
+        path = pathlib.Path(content.file_uri)
 
         try:
             with zipfile.ZipFile(path, "r") as zf:

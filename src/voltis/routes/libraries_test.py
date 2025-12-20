@@ -1,12 +1,6 @@
 import pathlib
 import tempfile
 import pytest
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
-
-from voltis.db.models import User
-from voltis.routes._app import create_app
-from voltis.services.settings import settings
 
 
 @pytest.mark.anyio
@@ -20,14 +14,14 @@ async def test_library_crud(admin_client):
             json={
                 "name": "test",
                 "type": "comics",
-                "sources": [{"path_uri": pathlib.Path(temp_dir).as_uri()}],
+                "sources": [{"path_uri": pathlib.Path(temp_dir).as_posix()}],
             },
         )
         assert create_response.status_code == 200
         library = create_response.json()
         assert library["name"] == "test"
         assert library["type"] == "comics"
-        assert library["sources"] == [{"path_uri": pathlib.Path(temp_dir).as_uri()}]
+        assert library["sources"] == [{"path_uri": pathlib.Path(temp_dir).as_posix()}]
         library_id = library["id"]
 
         # List libraries
@@ -43,14 +37,14 @@ async def test_library_crud(admin_client):
             json={
                 "name": "test2",
                 "type": "books",
-                "sources": [{"path_uri": pathlib.Path(temp_dir2).as_uri()}],
+                "sources": [{"path_uri": pathlib.Path(temp_dir2).as_posix()}],
             },
         )
         assert update_response.status_code == 200
         updated = update_response.json()
         assert updated["name"] == "test2"
         assert updated["type"] == "comics"  # can't change
-        assert updated["sources"] == [{"path_uri": pathlib.Path(temp_dir2).as_uri()}]
+        assert updated["sources"] == [{"path_uri": pathlib.Path(temp_dir2).as_posix()}]
 
         # Delete the library
         delete_response = await admin_client.delete(f"libraries/{library_id}")

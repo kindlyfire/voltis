@@ -110,6 +110,12 @@ class ContentMetadata(TypedDict, total=False):
     """Names, including extension, of the page files of a comic, with the image
     width and height."""
 
+    authors: list[str]
+    description: str
+    publisher: str
+    language: str
+    publication_date: str
+
 
 class Content(_Base, _DefaultColumns):
     """

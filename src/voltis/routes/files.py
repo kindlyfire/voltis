@@ -12,7 +12,7 @@ from voltis.routes._providers import RbProvider, UserProvider
 
 router = APIRouter()
 
-ARCHIVE_EXTENSIONS = {".cbz", ".zip"}
+ARCHIVE_EXTENSIONS = {".cbz", ".zip", ".epub"}
 
 
 def _find_archive_and_inner_path(path: Path) -> tuple[Path, str] | None:
@@ -43,7 +43,7 @@ def _get_file_content(uri: str) -> tuple[bytes, str]:
     Get file content from a URI, handling archives transparently.
     Returns (content_bytes, media_type).
     """
-    path = Path.from_uri(uri)
+    path = Path(uri)
 
     # Check if the full path exists as a regular file
     if path.is_file():
@@ -100,8 +100,8 @@ async def get_page(
             raise HTTPException(status_code=404, detail="Page index out of range")
 
         page_name = metadata["pages"][page_index]
-        file_path = Path.from_uri(content.file_uri)
+        file_path = Path(content.file_uri)
         page_uri = file_path / page_name[0]
 
-        data, media_type = await anyio.to_thread.run_sync(_get_file_content, page_uri.as_uri())
+        data, media_type = await anyio.to_thread.run_sync(_get_file_content, page_uri.as_posix())
         return Response(content=data, media_type=media_type)

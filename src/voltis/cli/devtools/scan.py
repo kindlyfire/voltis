@@ -43,7 +43,7 @@ async def _scan(
         lib = Library(
             id=Library.make_id(),
             name="Dry-run Library",
-            sources=[{"path_uri": pathlib.Path(directory).as_uri()}],
+            sources=[{"path_uri": pathlib.Path(directory).as_posix()}],
             type=scanner_type,
             scanned_at=None,
             created_at=now_without_tz(),

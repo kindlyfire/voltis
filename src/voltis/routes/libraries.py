@@ -105,7 +105,7 @@ async def upsert_library(
 ) -> LibraryDTO:
     for source in body.sources:
         try:
-            path = Path.from_uri(source.path_uri)
+            path = Path(source.path_uri)
         except Exception as e:
             logger.warning("Invalid file URI", error=str(e))
             raise HTTPException(

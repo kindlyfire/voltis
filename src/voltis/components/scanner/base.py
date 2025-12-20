@@ -215,13 +215,13 @@ class ScannerBase(ABC):
         return [item for sublist in items for item in sublist if self.check_file_eligible(item)]
 
     async def _get_fs_items_source(self, source: LibrarySource):
-        path = Path.from_uri(source.path_uri)
+        path = Path(source.path_uri)
         files: list[LibraryFile] = []
         async for item in path.glob("**/*"):
             if await item.is_file():
                 stat = await item.stat()
                 mtime = datetime.datetime.fromtimestamp(stat.st_mtime)
-                files.append(LibraryFile(uri=item.as_uri(), mtime=mtime, size=stat.st_size))
+                files.append(LibraryFile(uri=item.as_posix(), mtime=mtime, size=stat.st_size))
         return files
 
     @abstractmethod
