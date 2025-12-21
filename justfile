@@ -15,3 +15,16 @@ check:
 [positional-arguments]
 test *args='':
     uv run pytest "$@"
+
+docker-push-release:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    version=$(grep '^version' pyproject.toml | sed 's/.*"\(.*\)"/\1/')
+    image="ghcr.io/kindlyfire/voltis:$version"
+    echo "Image: $image"
+    if docker manifest inspect "$image" > /dev/null 2>&1; then
+        echo "Image $image already exists, skipping push"
+        exit 0
+    fi
+    docker build -t "$image" .
+    docker push "$image"
