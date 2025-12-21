@@ -2,7 +2,7 @@ import { ref, shallowRef, computed, watch, toRaw } from 'vue'
 import { acceptHMRUpdate, defineStore } from 'pinia'
 import { useRouter } from 'vue-router'
 import type { PageInfo, ReaderMode, SiblingsInfo, SiblingContent } from './types'
-import { createPageLoader, getPagesInPreloadOrder, type PageLoaderState } from './use-page-loader'
+import { createPageLoader, getPagesInPreloadOrder, type PageLoaderState } from './usePageLoader'
 import { contentApi } from '@/utils/api/content'
 import { keepPreviousData } from '@tanstack/vue-query'
 import { useLocalStorage } from '@/utils/localStorage'
@@ -58,7 +58,7 @@ export const useReaderStore = defineStore('reader', () => {
 	const router = useRouter()
 
 	const sidebarOpen = ref(false)
-	const { value: settings } = useLocalStorage('reader-comic-settings', parseComicSettings)
+	const { value: settings } = useLocalStorage('reader:comics', parseComicSettings)
 	const contentId = ref<string>('')
 	const pages = shallowRef<PageInfo[]>([])
 	const getPageUrlFn = shallowRef<(index: number) => string>(() => '')
@@ -98,7 +98,7 @@ export const useReaderStore = defineStore('reader', () => {
 		() => content.value,
 		newContent => {
 			if (newContent) {
-				pages.value = newContent.meta.pages.map(p => ({
+				pages.value = (newContent.meta.pages ?? []).map(p => ({
 					width: p[1],
 					height: p[2],
 				}))

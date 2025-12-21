@@ -16,11 +16,11 @@
 
 <script setup lang="ts">
 import { watch, onUnmounted } from 'vue'
-import { useReaderStore, type ReaderStore } from './use-reader-store'
+import { useReaderStore, type ReaderStore } from './useComicDisplayStore'
 import ReaderModePaged from './ReaderModePaged.vue'
 import ReaderModeLongstrip from './ReaderModeLongstrip.vue'
 import ReaderSidebar from './ReaderSidebar.vue'
-import { useReaderControls } from './use-reader-controls'
+import { useReaderControls } from './useReaderControls'
 
 const props = defineProps<{
 	contentId: string

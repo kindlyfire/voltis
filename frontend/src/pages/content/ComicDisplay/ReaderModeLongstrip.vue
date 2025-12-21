@@ -24,7 +24,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
-import { SetPage, useReaderStore } from './use-reader-store'
+import { SetPage, useReaderStore } from './useComicDisplayStore'
 import { getScrollParent } from '@/utils/css'
 
 const reader = useReaderStore()

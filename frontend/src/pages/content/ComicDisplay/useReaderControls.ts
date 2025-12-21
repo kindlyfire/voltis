@@ -1,5 +1,5 @@
 import { onMounted, onUnmounted } from 'vue'
-import { useReaderStore } from './use-reader-store'
+import { useReaderStore } from './useComicDisplayStore'
 
 type ClickZone = 'prev' | 'next' | 'menu'
 

@@ -12,7 +12,7 @@
 import { useRouter } from 'vue-router'
 import { API_URL } from '@/utils/fetch'
 import ReaderMain from './ReaderMain.vue'
-import type { ReaderStore } from './use-reader-store'
+import type { ReaderStore } from './useComicDisplayStore'
 
 const props = defineProps<{
 	contentId: string
@@ -21,7 +21,7 @@ const props = defineProps<{
 const router = useRouter()
 
 function getPageUrl(index: number): string {
-	return `${API_URL}/files/page/${props.contentId}/${index}`
+	return `${API_URL}/files/comic-page/${props.contentId}/${index}`
 }
 
 function goToSibling(id: string, fromEnd = false) {

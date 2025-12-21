@@ -23,7 +23,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useReaderStore } from './use-reader-store'
+import { useReaderStore } from './useComicDisplayStore'
 
 const reader = useReaderStore()
 

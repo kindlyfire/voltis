@@ -112,7 +112,7 @@
 
 <script setup lang="ts">
 import { onUnmounted } from 'vue'
-import { SetPage, useReaderStore } from './use-reader-store'
+import { SetPage, useReaderStore } from './useComicDisplayStore'
 
 const reader = useReaderStore()
 

@@ -1,7 +1,7 @@
 import { useQuery, type UseQueryOptions } from '@tanstack/vue-query'
 import { toValue, type MaybeRefOrGetter, type UnwrapRef } from 'vue'
-import { apiFetch } from '../fetch'
-import type { Content, ContentListParams } from './types'
+import { API_URL, apiFetch } from '../fetch'
+import type { BookChapter, Content, ContentListParams } from './types'
 import { isEnabled } from './_utils'
 
 export const contentApi = {
@@ -35,5 +35,29 @@ export const contentApi = {
 			},
 			enabled: isEnabled(params),
 			...options,
+		}),
+
+	useBookChapters: (id: MaybeRefOrGetter<string | undefined | null>) =>
+		useQuery({
+			queryKey: ['content', 'book-chapters', id],
+			queryFn: async () => apiFetch<BookChapter[]>(`/files/book-chapters/${toValue(id)}`),
+			enabled: isEnabled(id),
+		}),
+
+	useBookChapter: (
+		id: MaybeRefOrGetter<string | undefined | null>,
+		href: MaybeRefOrGetter<string | undefined | null>
+	) =>
+		useQuery({
+			queryKey: ['content', 'book-chapter', id, href],
+			queryFn: async () => {
+				const params = new URLSearchParams({ href: toValue(href)! })
+				const res = await fetch(`${API_URL}/files/book-chapter/${toValue(id)}?${params}`, {
+					credentials: 'include',
+				})
+				if (!res.ok) throw new Error('Failed to fetch chapter')
+				return res.text()
+			},
+			enabled: isEnabled([id, href]),
 		}),
 }

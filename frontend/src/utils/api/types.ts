@@ -48,7 +48,12 @@ export type ContentType = 'comic' | 'comic_series' | 'book' | 'book_series'
 
 export interface ContentMetadata {
 	/** [filename, width, height] */
-	pages: Array<[string, number, number]>
+	pages?: Array<[string, number, number]>
+	authors?: string[]
+	description?: string
+	publisher?: string
+	language?: string
+	publication_date?: string
 }
 
 export interface Content {
@@ -74,4 +79,11 @@ export interface ContentListParams {
 	library_id?: string
 	type?: ContentType[]
 	valid?: boolean
+}
+
+export interface BookChapter {
+	id: string
+	href: string
+	title: string | null
+	linear: boolean
 }

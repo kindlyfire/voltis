@@ -6,7 +6,9 @@ import anyio
 import anyio.to_thread
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
+from pydantic import BaseModel
 
+from voltis.components.epub import list_chapters, read_chapter
 from voltis.db.models import Content
 from voltis.routes._providers import RbProvider, UserProvider
 
@@ -80,7 +82,7 @@ async def get_cover(
         return Response(content=data, media_type=media_type)
 
 
-@router.get("/page/{content_id}/{page_index}")
+@router.get("/comic-page/{content_id}/{page_index}")
 async def get_page(
     rb: RbProvider,
     _user: UserProvider,
@@ -104,4 +106,83 @@ async def get_page(
         page_uri = file_path / page_name[0]
 
         data, media_type = await anyio.to_thread.run_sync(_get_file_content, page_uri.as_posix())
+        return Response(content=data, media_type=media_type)
+
+
+class ChapterResponse(BaseModel):
+    id: str
+    href: str
+    title: str | None
+    linear: bool
+
+
+@router.get("/book-chapters/{content_id}")
+async def get_book_chapters(
+    rb: RbProvider,
+    _user: UserProvider,
+    content_id: str,
+) -> list[ChapterResponse]:
+    async with rb.get_asession() as session:
+        content = await session.get(Content, content_id)
+        if not content:
+            raise HTTPException(status_code=404, detail="Content not found")
+
+        file_path = Path(content.file_uri)
+        if not file_path.suffix.lower() == ".epub":
+            raise HTTPException(status_code=400, detail="Content is not an EPUB")
+
+        try:
+            chapters = await anyio.to_thread.run_sync(list_chapters, file_path)
+        except (ValueError, FileNotFoundError) as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+        return [
+            ChapterResponse(id=ch.id, href=ch.href, title=ch.title, linear=ch.linear)
+            for ch in chapters
+        ]
+
+
+@router.get("/book-chapter/{content_id}")
+async def get_book_chapter(
+    rb: RbProvider,
+    _user: UserProvider,
+    content_id: str,
+    href: str,
+) -> Response:
+    async with rb.get_asession() as session:
+        content = await session.get(Content, content_id)
+        if not content:
+            raise HTTPException(status_code=404, detail="Content not found")
+
+        file_path = Path(content.file_uri)
+        if not file_path.suffix.lower() == ".epub":
+            raise HTTPException(status_code=400, detail="Content is not an EPUB")
+
+        try:
+            chapter_content = await anyio.to_thread.run_sync(read_chapter, file_path, href)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="Chapter not found")
+
+        return Response(content=chapter_content, media_type="application/xhtml+xml")
+
+
+@router.get("/book-resource/{content_id}")
+async def get_book_resource(
+    rb: RbProvider,
+    _user: UserProvider,
+    content_id: str,
+    path: str,
+) -> Response:
+    """Serve a resource (image, CSS, etc.) from inside an EPUB file."""
+    async with rb.get_asession() as session:
+        content = await session.get(Content, content_id)
+        if not content:
+            raise HTTPException(status_code=404, detail="Content not found")
+
+        file_path = Path(content.file_uri)
+        if not file_path.suffix.lower() == ".epub":
+            raise HTTPException(status_code=400, detail="Content is not an EPUB")
+
+        data = await anyio.to_thread.run_sync(_read_from_archive, file_path, path)
+        media_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
         return Response(content=data, media_type=media_type)
