@@ -11,7 +11,19 @@ def main(): ...
 
 
 @main.command()
-def run():
+@click.option(
+    "--host",
+    default="127.0.0.1",
+    show_default=True,
+    help="Host address to bind the server",
+)
+@click.option(
+    "--port",
+    default=8000,
+    show_default=True,
+    help="Port to bind the server",
+)
+def run(host: str, port: int):
     """Run the app backend"""
     import logging
 
@@ -21,7 +33,7 @@ def run():
     from ..services.resource_broker import ResourceBroker
 
     app = create_app(ResourceBroker())
-    uvicorn.run(app, host="127.0.0.1", port=8000, log_level=logging.INFO)
+    uvicorn.run(app, host=host, port=port, log_level=logging.INFO)
 
 
 @main.group()

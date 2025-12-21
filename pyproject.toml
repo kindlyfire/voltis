@@ -4,23 +4,23 @@ version = "0.1.0"
 description = "Library for ebooks and comics (& co)"
 requires-python = ">=3.14"
 dependencies = [
-    "anyio>=4.11.0",
+    "anyio>=4.12.0",
     "bcrypt>=5.0.0",
-    "click>=8.3.0",
+    "click>=8.3.1",
     "colorama>=0.4.6",
-    "fastapi[standard]>=0.118.3",
+    "fastapi[standard]>=0.126.0",
     "httpx>=0.28.1",
     "imagesize>=1.4.1",
     "lxml>=6.0.2",
-    "orjson>=3.11.3",
-    "psycopg[binary]>=3.2.10",
-    "pydantic>=2.12.0",
-    "pydantic-settings>=2.11.0",
-    "python-dotenv>=1.1.1",
-    "sqlalchemy>=2.0.44",
-    "structlog>=25.4.0",
+    "orjson>=3.11.5",
+    "psycopg[binary]>=3.3.2",
+    "pydantic>=2.12.5",
+    "pydantic-settings>=2.12.0",
+    "python-dotenv>=1.2.1",
+    "sqlalchemy>=2.0.45",
+    "structlog>=25.5.0",
     "unidecode>=1.4.0",
-    "uvicorn>=0.37.0",
+    "uvicorn>=0.40.0",
 ]
 
 [project.scripts]
@@ -39,4 +39,4 @@ typeCheckingMode = "standard"
 include = ["src"]
 
 [dependency-groups]
-dev = ["pyright>=1.1.406", "pytest>=8.4.2", "ruff>=0.14.0"]
+dev = ["pyright>=1.1.407", "pytest>=9.0.2", "ruff>=0.14.10"]
