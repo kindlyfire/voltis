@@ -9,6 +9,7 @@ __pycache__
 
 frontend/node_modules
 frontend/dist
+frontend/.env
 
 .env
 .claude
