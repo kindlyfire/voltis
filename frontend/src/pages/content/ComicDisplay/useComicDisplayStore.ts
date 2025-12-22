@@ -6,6 +6,7 @@ import { createPageLoader, getPagesInPreloadOrder, type PageLoaderState } from '
 import { contentApi } from '@/utils/api/content'
 import { keepPreviousData } from '@tanstack/vue-query'
 import { useLocalStorage } from '@/utils/localStorage'
+import { getLayoutTop } from '@/utils/misc'
 
 interface ComicSettings {
 	longstripWidth: number
@@ -210,7 +211,7 @@ export const useReaderStore = defineStore('reader', () => {
 	function _scrollByViewport(factor: number) {
 		const el = scrollRef.value
 		if (!el) return
-		el.scrollBy({ top: el.clientHeight * factor, behavior: 'smooth' })
+		el.scrollBy({ top: (el.clientHeight - getLayoutTop()) * factor, behavior: 'smooth' })
 	}
 
 	function setContent(options: ReaderContentOptions) {

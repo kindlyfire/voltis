@@ -26,6 +26,7 @@ import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
 import { SetPage, useReaderStore } from './useComicDisplayStore'
 import { getScrollParent } from '@/utils/css'
+import { getLayoutTop } from '@/utils/misc'
 
 const reader = useReaderStore()
 const containerRef = ref<HTMLElement | null>(null)
@@ -71,9 +72,6 @@ function scrollToPage(index: number, instant: boolean) {
 	const children = Array.from(container.children) as HTMLElement[]
 	const target = children[index]
 	if (target) {
-		const layoutTop = parseInt(
-			getComputedStyle(document.documentElement).getPropertyValue('--v-layout-top') || '0'
-		)
 		const scrollParent = getScrollParent(container)
 		if (index === reader.pages.length - 1) {
 			// Scroll to bottom for last page
@@ -83,7 +81,7 @@ function scrollToPage(index: number, instant: boolean) {
 			})
 		} else {
 			;(scrollParent || window).scrollTo({
-				top: target.offsetTop - layoutTop,
+				top: target.offsetTop - getLayoutTop(),
 				behavior: instant ? 'instant' : 'smooth',
 			})
 		}
