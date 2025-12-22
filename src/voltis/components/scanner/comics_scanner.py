@@ -1,8 +1,10 @@
-from io import BytesIO
 import pathlib
 import re
 import zipfile
+from io import BytesIO
 
+import anyio
+import anyio.to_thread
 import imagesize
 import structlog
 from anyio import Path
@@ -42,6 +44,10 @@ class ComicScanner(ScannerBase):
     volume.
     """
 
+    def __init__(self, library, rb, no_fs=False):
+        super().__init__(library, rb, no_fs)
+        self._resolved_parents: dict[Path, Content] = {}
+
     def check_file_eligible(self, file: LibraryFile) -> bool:
         return file.uri.endswith(".cbz")
 
@@ -52,7 +58,7 @@ class ComicScanner(ScannerBase):
         # Parse volume/chapter from filename
         filename = path.stem
         vol_num = _parse_volume_number(filename)
-        ch_num = _parse_chapter_number(filename)
+        ch_num: int | float | None = _parse_chapter_number(filename)
         if vol_num is None and ch_num is None:
             ch_num = _parse_fallback_chapter_number(filename)
 
@@ -68,7 +74,7 @@ class ComicScanner(ScannerBase):
 
         # Create or update content
         if content is None:
-            content, should_skip = self._find_reusable_content(uri_part, series.id)
+            content, should_skip = self.find_reusable_content(uri_part, series.id)
             if should_skip:
                 return None
             if content is None:
@@ -94,54 +100,61 @@ class ComicScanner(ScannerBase):
             content.parent_id = series.id
             content.updated_at = now_without_tz()
 
-        content.file_mtime = file.mtime
-        content.file_size = file.size
         content.order_parts = [vol_num or 0, ch_num or 0]
 
         if not self.no_fs:
-            self._scan_comic(content)
+            await anyio.to_thread.run_sync(self._scan_comic, content)
 
         return content
 
     async def _get_or_create_series(self, series_folder: Path) -> Content:
         """Find an existing series or create a new one based on the folder."""
-        folder_uri = series_folder.as_posix()
+        async with self.lock:
+            if series_folder in self._resolved_parents:
+                return self._resolved_parents[series_folder]
 
-        name, year = _parse_series_name(series_folder.name)
-        uri_part = f"{name}_{year}" if year else name
+            folder_uri = series_folder.as_posix()
 
-        for series in self.series:
-            if series.file_uri == folder_uri:
+            name, year = _parse_series_name(series_folder.name)
+            uri_part = f"{name}_{year}" if year else name
+
+            for series in self.series:
+                if series.file_uri == folder_uri:
+                    self._resolved_parents[series_folder] = series
+                    return series
+                if series.uri_part != uri_part or series.parent_id is not None:
+                    continue
+
+                # Same series but different folder. Check if files still exist
+                # in the old folder - if so, keep the old file_uri. Otherwise,
+                # update to the new folder location.
+                old_folder_uri = series.file_uri
+                files_in_old_folder = any(
+                    item.uri.startswith(old_folder_uri) for item in self.fs_items
+                )
+
+                if not files_in_old_folder:
+                    series.file_uri = folder_uri
+                    await self._update_series(series)
+
+                self._resolved_parents[series_folder] = series
                 return series
-            if series.uri_part != uri_part or series.parent_id is not None:
-                continue
 
-            # Same series but different folder. Check if files still exist
-            # in the old folder - if so, keep the old file_uri. Otherwise,
-            # update to the new folder location.
-            old_folder_uri = series.file_uri
-            files_in_old_folder = any(item.uri.startswith(old_folder_uri) for item in self.fs_items)
-
-            if not files_in_old_folder:
-                series.file_uri = folder_uri
-                await self._update_series(series)
-
+            # Create new series
+            series = Content(
+                id=Content.make_id(),
+                library_id=self.library.id,
+                uri_part=uri_part,
+                type="comic_series",
+                title=name,
+                file_uri=folder_uri,
+                order_parts=[],
+                created_at=now_without_tz(),
+                updated_at=now_without_tz(),
+            )
+            await self._update_series(series)
+            self._resolved_parents[series_folder] = series
             return series
-
-        # Create new series
-        series = Content(
-            id=Content.make_id(),
-            library_id=self.library.id,
-            uri_part=uri_part,
-            type="comic_series",
-            title=name,
-            file_uri=folder_uri,
-            order_parts=[],
-            created_at=now_without_tz(),
-            updated_at=now_without_tz(),
-        )
-        await self._update_series(series)
-        return series
 
     async def _update_series(self, series: Content):
         if not self.no_fs:
@@ -162,37 +175,6 @@ class ComicScanner(ScannerBase):
             if await cover_path.is_file():
                 series.cover_uri = cover_path.as_posix()
                 return
-
-    def _find_reusable_content(self, uri_part: str, parent_id: str) -> tuple[Content | None, bool]:
-        """
-        Find a content instance in to_remove with the same uri_part and parent.
-        If found and its file no longer exists, remove it from to_remove and
-        return it. If the file still exists, log a warning.
-
-        Returns:
-            (content, should_skip): content if reusable, None otherwise.
-                should_skip is True if we should skip this file entirely
-                (duplicate).
-        """
-        for i, (lib_file, content) in enumerate(self.to_remove):
-            if content.uri_part != uri_part or content.parent_id != parent_id:
-                continue
-
-            # Check if the old file still exists
-            file_exists = any(item.uri == lib_file.uri for item in self.fs_items)
-            if file_exists:
-                logger.warning(
-                    "Duplicate content detected, ignoring new file",
-                    uri_part=uri_part,
-                    existing_file=lib_file.uri,
-                )
-                return None, True
-
-            # Reuse this content - remove from to_remove list
-            self.to_remove.pop(i)
-            return content, False
-
-        return None, False
 
     def _scan_comic(self, content: Content) -> None:
         """Scan a comic file (.cbz) for pages and cover."""

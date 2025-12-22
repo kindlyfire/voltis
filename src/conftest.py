@@ -1,7 +1,7 @@
 import os
 
-from httpx import ASGITransport, AsyncClient
 import pytest
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from voltis.db.migrate import migrate_down, migrate_up

@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 import structlog
-from anyio import Path
+from anyio import CapacityLimiter, Path, create_task_group
 from sqlalchemy import delete, select, update
 
 from voltis.db.models import (
@@ -86,6 +86,10 @@ class ScannerBase(ABC):
         uri_part but a different folder should have its file_uri updated. If
         files still exist in the old folder, it should not be updated."""
 
+        self.lock = asyncio.Lock()
+        """Lock that can be used in scan_file() to protect critical sections.
+        Namely when looking up/creating the parent series."""
+
     async def scan(self, dry_run: bool = False):
         return await self.scan_direct(await self._get_fs_items(), dry_run=dry_run)
 
@@ -111,24 +115,26 @@ class ScannerBase(ABC):
 
         if not dry_run:
             parents_with_updates: set[str] = set()
+            limiter = CapacityLimiter(5)
 
-            for item in to_add:
-                content = await self.scan_file(item, None)
-                if content is not None:
-                    if content.parent_id:
-                        parents_with_updates.add(content.parent_id)
-                    async with self.rb.get_asession() as session:
-                        session.add(content)
-                        await session.commit()
+            async def _scan_wrapper(item: LibraryFile, content: Content | None):
+                async with limiter:
+                    content = await self.scan_file(item, content)
+                    if content is not None:
+                        content.file_mtime = item.mtime
+                        content.file_size = item.size
+                        content.file_uri = item.uri
+                        if content.parent_id:
+                            parents_with_updates.add(content.parent_id)
+                        async with self.rb.get_asession() as session:
+                            session.add(content)
+                            await session.commit()
 
-            for item in to_update:
-                content = await self.scan_file(item, db_by_uri[item.uri][1])
-                if content is not None:
-                    if content.parent_id:
-                        parents_with_updates.add(content.parent_id)
-                    async with self.rb.get_asession() as session:
-                        session.add(content)
-                        await session.commit()
+            async with create_task_group() as tg:
+                for item in to_add:
+                    tg.start_soon(_scan_wrapper, item, None)
+                for item in to_update:
+                    tg.start_soon(_scan_wrapper, item, db_by_uri[item.uri][1])
 
             async with self.rb.get_asession() as session:
                 # Update order of all items within parents that had changes
@@ -216,13 +222,56 @@ class ScannerBase(ABC):
 
     async def _get_fs_items_source(self, source: LibrarySource):
         path = Path(source.path_uri)
+        limiter = CapacityLimiter(10)
         files: list[LibraryFile] = []
-        async for item in path.glob("**/*"):
-            if await item.is_file():
-                stat = await item.stat()
-                mtime = datetime.datetime.fromtimestamp(stat.st_mtime)
-                files.append(LibraryFile(uri=item.as_posix(), mtime=mtime, size=stat.st_size))
+
+        async def get_file_info(item: Path) -> None:
+            async with limiter:
+                if await item.is_file():
+                    stat = await item.stat()
+                    mtime = datetime.datetime.fromtimestamp(stat.st_mtime)
+                    files.append(LibraryFile(uri=item.as_posix(), mtime=mtime, size=stat.st_size))
+
+        async with create_task_group() as tg:
+            async for item in path.glob("**/*"):
+                tg.start_soon(get_file_info, item)
+
         return files
+
+    def find_reusable_content(
+        self, uri_part: str, parent_id: str | None
+    ) -> tuple[Content | None, bool]:
+        """
+        Find a content instance in to_remove with the same uri_part and parent.
+        If found and its file no longer exists, remove it from to_remove and
+        return it. If the file still exists, log a warning.
+
+        Returns:
+            (content, should_skip): content if reusable, None otherwise.
+                should_skip is True if we should skip this file entirely
+                (duplicate).
+        """
+        # TODO: If the uri_part changes, but the file URI is the same, we should
+        # reuse it too.
+        for i, (lib_file, content) in enumerate(self.to_remove):
+            if content.uri_part != uri_part or content.parent_id != parent_id:
+                continue
+
+            # Check if the old file still exists
+            file_exists = any(item.uri == lib_file.uri for item in self.fs_items)
+            if file_exists:
+                logger.warning(
+                    "Duplicate content detected, ignoring new file",
+                    uri_part=uri_part,
+                    existing_file=lib_file.uri,
+                )
+                return None, True
+
+            # Reuse this content - remove from to_remove list
+            self.to_remove.pop(i)
+            return content, False
+
+        return None, False
 
     @abstractmethod
     def check_file_eligible(self, file: LibraryFile) -> bool:
