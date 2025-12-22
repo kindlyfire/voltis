@@ -64,12 +64,13 @@ export interface Content {
 	title: string
 	valid: boolean
 	file_uri: string
+	file_mtime: string | null
+	file_size: number | null
 	cover_uri: string | null
 	type: ContentType
 	order: number | null
 	order_parts: number[]
 	meta: ContentMetadata
-	file_modified_at: string | null
 	parent_id: string | null
 	library_id: string
 }

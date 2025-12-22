@@ -4,7 +4,7 @@
 			<div class="w-[200px] shrink-0">
 				<VImg
 					v-if="store.content?.cover_uri"
-					:src="`${API_URL}/files/cover/${store.contentId}`"
+					:src="`${API_URL}/files/cover/${store.content.id}?v=${store.content.file_mtime}`"
 					:aspect-ratio="2 / 3"
 					cover
 					class="rounded"

@@ -19,6 +19,7 @@ async def get_cover(
     rb: RbProvider,
     _user: UserProvider,
     content_id: str,
+    v: str | None = None,
 ) -> Response:
     async with rb.get_asession() as session:
         content = await session.get(Content, content_id)
@@ -29,7 +30,11 @@ async def get_cover(
             raise HTTPException(status_code=404, detail="Content has no cover")
 
         data, media_type = await anyio.to_thread.run_sync(read_content_cover, content)
-        return Response(content=data, media_type=media_type)
+
+        headers = {}
+        if v:
+            headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return Response(content=data, media_type=media_type, headers=headers)
 
 
 @router.get("/comic-page/{content_id}/{page_index}")
@@ -38,6 +43,7 @@ async def get_page(
     _user: UserProvider,
     content_id: str,
     page_index: int,
+    v: str | None = None,
 ) -> Response:
     async with rb.get_asession() as session:
         content = await session.get(Content, content_id)
@@ -56,7 +62,11 @@ async def get_page(
         page_uri = file_path / page_name[0]
 
         data, media_type = await anyio.to_thread.run_sync(read_content_file, page_uri.as_posix())
-        return Response(content=data, media_type=media_type)
+
+        headers = {}
+        if v:
+            headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return Response(content=data, media_type=media_type, headers=headers)
 
 
 class ChapterResponse(BaseModel):

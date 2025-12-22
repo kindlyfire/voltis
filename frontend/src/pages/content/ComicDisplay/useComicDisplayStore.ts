@@ -1,4 +1,4 @@
-import { ref, shallowRef, computed, watch, toRaw } from 'vue'
+import { ref, shallowRef, computed, watch, toRaw, readonly } from 'vue'
 import { acceptHMRUpdate, defineStore } from 'pinia'
 import { useRouter } from 'vue-router'
 import type { PageInfo, ReaderMode, SiblingsInfo, SiblingContent } from './types'
@@ -299,7 +299,8 @@ export const useReaderStore = defineStore('reader', () => {
 		settings,
 
 		// Content state (readonly)
-		contentId: computed(() => contentId.value),
+		contentId: readonly(contentId),
+		content,
 		pages,
 		siblings,
 		prevSibling,

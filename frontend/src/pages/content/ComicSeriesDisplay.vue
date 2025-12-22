@@ -20,7 +20,7 @@
 				<VCard>
 					<VImg
 						v-if="item.cover_uri"
-						:src="`${API_URL}/files/cover/${item.id}`"
+						:src="`${API_URL}/files/cover/${item.id}?v=${item.file_mtime}`"
 						:aspect-ratio="2 / 3"
 						cover
 					/>
