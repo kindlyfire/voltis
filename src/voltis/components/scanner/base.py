@@ -15,6 +15,7 @@ from voltis.db.models import (
     LibrarySource,
 )
 from voltis.services.resource_broker import ResourceBroker
+from voltis.utils.time import LogTime, log_time
 
 logger = structlog.stdlib.get_logger()
 
@@ -90,21 +91,29 @@ class ScannerBase(ABC):
         """Lock that can be used in scan_file() to protect critical sections.
         Namely when looking up/creating the parent series."""
 
-    async def scan(self, dry_run: bool = False):
-        return await self.scan_direct(await self._get_fs_items(), dry_run=dry_run)
+    async def scan(self, dry_run: bool = False, filter_paths: list[str] | None = None):
+        return await self.scan_direct(
+            await self._get_fs_items(), dry_run=dry_run, filter_paths=filter_paths
+        )
 
-    async def scan_direct(self, fs_items: list[LibraryFile], dry_run: bool = False):
+    async def scan_direct(
+        self,
+        fs_items: list[LibraryFile],
+        dry_run: bool = False,
+        filter_paths: list[str] | None = None,
+    ):
         self.fs_items = fs_items
         db_items, self.series = await asyncio.gather(self._get_db_items(), self._get_db_series())
 
         fs_by_uri = {item.uri: item for item in fs_items}
         db_by_uri = {item[0].uri: item for item in db_items}
 
-        self.to_remove = [item for uri, item in db_by_uri.items() if uri not in fs_by_uri]
         to_add: list[LibraryFile] = []
         to_update: list[LibraryFile] = []
         unchanged: list[LibraryFile] = []
         for uri, item in fs_by_uri.items():
+            if filter_paths and not any(uri.startswith(fp) for fp in filter_paths):
+                continue
             if uri not in db_by_uri:
                 to_add.append(item)
             else:
@@ -112,6 +121,14 @@ class ScannerBase(ABC):
                     to_update.append(item)
                 else:
                     unchanged.append(item)
+
+        self.to_remove = [item for uri, item in db_by_uri.items() if uri not in fs_by_uri]
+        if filter_paths:
+            self.to_remove = [
+                item
+                for item in self.to_remove
+                if any(item[0].uri.startswith(fp) for fp in filter_paths)
+            ]
 
         if not dry_run:
             parents_with_updates: set[str] = set()
@@ -130,7 +147,7 @@ class ScannerBase(ABC):
                             session.add(content)
                             await session.commit()
 
-            async with create_task_group() as tg:
+            async with LogTime(logger, "calling scan_file"), create_task_group() as tg:
                 for item in to_add:
                     tg.start_soon(_scan_wrapper, item, None)
                 for item in to_update:
@@ -139,44 +156,52 @@ class ScannerBase(ABC):
             async with self.rb.get_asession() as session:
                 # Update order of all items within parents that had changes
                 if parents_with_updates:
-                    result = await session.execute(
-                        select(Content.id, Content.parent_id, Content.order_parts).where(
-                            Content.parent_id.in_(parents_with_updates)
+                    async with LogTime(logger, "updating content order"):
+                        result = await session.execute(
+                            select(Content.id, Content.parent_id, Content.order_parts).where(
+                                Content.parent_id.in_(parents_with_updates)
+                            )
                         )
-                    )
-                    rows = result.all()
+                        rows = result.all()
 
-                    # Group by parent and sort by order_parts
-                    by_parent: dict[str, list[tuple[str, list[float]]]] = {}
-                    for row in rows:
-                        by_parent.setdefault(row.parent_id, []).append((row.id, row.order_parts))
+                        # Group by parent and sort by order_parts
+                        by_parent: dict[str, list[tuple[str, list[float]]]] = {}
+                        for row in rows:
+                            by_parent.setdefault(row.parent_id, []).append(
+                                (row.id, row.order_parts)
+                            )
 
-                    # Sort each group and compute new order values
-                    updates = []
-                    for items in by_parent.values():
-                        items.sort(key=lambda x: x[1])
-                        for order, (content_id, _) in enumerate(items):
-                            updates.append({"id": content_id, "order": order})
+                        # Sort each group and compute new order values
+                        updates = []
+                        for items in by_parent.values():
+                            items.sort(key=lambda x: x[1])
+                            for order, (content_id, _) in enumerate(items):
+                                updates.append({"id": content_id, "order": order})
 
-                    if updates:
-                        await session.execute(update(Content), updates)
-                        await session.commit()
+                        if updates:
+                            await session.execute(update(Content), updates)
+                            await session.commit()
 
                 # Clean up removed content + series without children
-                await session.execute(
-                    delete(Content).where(Content.id.in_([item[1].id for item in self.to_remove]))
-                )
-
-                parent_ids_with_children = (
-                    select(Content.parent_id).where(Content.parent_id.isnot(None)).distinct()
-                )
-                await session.execute(
-                    delete(Content).where(
-                        Content.library_id == self.library.id,
-                        Content.type.in_(GroupingContentTypes),
-                        Content.id.notin_(parent_ids_with_children),
+                async with LogTime(
+                    logger, "cleaning up removed content and series without children"
+                ):
+                    await session.execute(
+                        delete(Content).where(
+                            Content.id.in_([item[1].id for item in self.to_remove])
+                        )
                     )
-                )
+
+                    parent_ids_with_children = (
+                        select(Content.parent_id).where(Content.parent_id.isnot(None)).distinct()
+                    )
+                    await session.execute(
+                        delete(Content).where(
+                            Content.library_id == self.library.id,
+                            Content.type.in_(GroupingContentTypes),
+                            Content.id.notin_(parent_ids_with_children),
+                        )
+                    )
                 await session.commit()
 
         return ScannerResult(
@@ -186,6 +211,7 @@ class ScannerBase(ABC):
             unchanged=unchanged,
         )
 
+    @log_time(logger)
     async def _get_db_items(self) -> list[tuple[LibraryFile, Content]]:
         async with self.rb.get_asession() as session:
             result = await session.scalars(
@@ -205,6 +231,7 @@ class ScannerBase(ABC):
                 for c in result.all()
             ]
 
+    @log_time(logger)
     async def _get_db_series(self) -> list[Content]:
         async with self.rb.get_asession() as session:
             cursor = await session.execute(
@@ -214,15 +241,18 @@ class ScannerBase(ABC):
             )
             return list(cursor.scalars().all())
 
+    @log_time(logger)
     async def _get_fs_items(self) -> list[LibraryFile]:
         sources = self.library.get_sources()
-        tasks = [self._get_fs_items_source(source) for source in sources]
-        items = await asyncio.gather(*tasks)
+        items = await asyncio.gather(
+            *[self._get_fs_items_source(source) for source in sources],
+        )
         return [item for sublist in items for item in sublist if self.check_file_eligible(item)]
 
+    @log_time(logger)
     async def _get_fs_items_source(self, source: LibrarySource):
         path = Path(source.path_uri)
-        limiter = CapacityLimiter(10)
+        limiter = CapacityLimiter(20)
         files: list[LibraryFile] = []
 
         async def get_file_info(item: Path) -> None:

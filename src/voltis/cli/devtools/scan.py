@@ -3,11 +3,15 @@ from urllib.parse import unquote
 
 import click
 from sqlalchemy import select
+import structlog
 
 from voltis.components.scanner.loader import get_scanner
 from voltis.db.models import Library, ScannerType
 from voltis.services.resource_broker import ResourceBroker
 from voltis.utils.misc import now_without_tz
+from voltis.utils.time import LogTime
+
+logger = structlog.stdlib.get_logger()
 
 
 async def _scan(
@@ -16,6 +20,7 @@ async def _scan(
     scanner_type: ScannerType | None,
     library_id: str | None,
     dry_run: bool,
+    filter_paths: list[str] | None,
 ):
     if not library_id and not scanner_type:
         click.echo("\nError: --type is required when not using --library", err=True)
@@ -56,7 +61,8 @@ async def _scan(
     for source in lib.get_sources():
         click.echo(f"  Source: {unquote(source.path_uri)}")
 
-    result = await scanner.scan(dry_run=dry_run)
+    async with LogTime(logger, "Library scan"):
+        result = await scanner.scan(dry_run=dry_run, filter_paths=filter_paths)
 
     # Display results
     click.echo("")
@@ -86,7 +92,7 @@ async def _scan(
 
     click.echo("")
     click.echo(
-        f"Summary: {len(result.added)} added, {len(result.updated)} updated, {len(result.removed)} removed"
+        f"Summary: {len(result.added)} added, {len(result.updated)} updated, {len(result.removed)} removed, {len(result.unchanged)} unchanged"
     )
 
     if dry_run:

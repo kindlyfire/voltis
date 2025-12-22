@@ -92,11 +92,18 @@ def devtools():
     is_flag=True,
     help="Show what would be done without saving to database",
 )
+@click.option(
+    "--filter-path",
+    "filter_paths",
+    multiple=True,
+    help="Only scan files under this path (can be repeated)",
+)
 def scan(
     directory: str | None,
     scanner_type: ScannerType | None,
     library: str | None,
     dry_run: bool,
+    filter_paths: typing.Sequence[str],
 ):
     """Perform a scan on a folder with a given scanner"""
     import anyio
@@ -105,7 +112,7 @@ def scan(
     from .devtools.scan import _scan
 
     rb = ResourceBroker()
-    anyio.run(_scan, rb, directory, scanner_type, library, dry_run)
+    anyio.run(_scan, rb, directory, scanner_type, library, dry_run, list(filter_paths) or None)
 
 
 @main.group()

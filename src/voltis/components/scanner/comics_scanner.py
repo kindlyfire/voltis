@@ -49,7 +49,7 @@ class ComicScanner(ScannerBase):
         self._resolved_parents: dict[Path, Content] = {}
 
     def check_file_eligible(self, file: LibraryFile) -> bool:
-        return file.uri.endswith(".cbz")
+        return file.uri.lower().endswith(".cbz") or file.uri.lower().endswith(".zip")
 
     async def scan_file(self, file: LibraryFile, content: Content | None) -> Content | None:
         path = Path(file.uri)
