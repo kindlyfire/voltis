@@ -25,49 +25,49 @@ def create_mock_files() -> list[LibraryFile]:
     return [
         # Series Name (2020), 3 issues
         LibraryFile(
-            uri="file:///library/Series%20Name%20(2020)/Series%20Name%20(2020)%20%2301.cbz",
+            uri="/library/Series Name (2020)/Series Name (2020) #01.cbz",
             mtime=base_time,
             size=1000,
         ),
         LibraryFile(
-            uri="file:///library/Series%20Name%20(2020)/Series%20Name%20(2020)%20%2302.cbz",
+            uri="/library/Series Name (2020)/Series Name (2020) #02.cbz",
             mtime=base_time,
             size=1000,
         ),
         LibraryFile(
-            uri="file:///library/Series%20Name%20(2020)/Series%20Name%20(2020)%20%2303.cbz",
+            uri="/library/Series Name (2020)/Series Name (2020) #03.cbz",
             mtime=base_time,
             size=1000,
         ),
         # Series Name 2 (2021), 3 issues
         LibraryFile(
-            uri="file:///library/Series%20Name%202%20(2021)/Series%20Name%202%20%2301.cbz",
+            uri="/library/Series Name 2 (2021)/Series Name 2 #01.cbz",
             mtime=base_time,
             size=1000,
         ),
         LibraryFile(
-            uri="file:///library/Series%20Name%202%20(2021)/Series%20Name%202%20%2302.cbz",
+            uri="/library/Series Name 2 (2021)/Series Name 2 #02.cbz",
             mtime=base_time,
             size=1000,
         ),
         LibraryFile(
-            uri="file:///library/Series%20Name%202%20(2021)/Series%20Name%202%20%23102.cbz",
+            uri="/library/Series Name 2 (2021)/Series Name 2 #102.cbz",
             mtime=base_time,
             size=1000,
         ),
         # Same series in different folder, 3 issues
         LibraryFile(
-            uri="file:///library/Some%20Other%20Folder/Series%20Name%202%20(2021)/Series%20Name%202%20%2303.cbz",
+            uri="/library/Some Other Folder/Series Name 2 (2021)/Series Name 2 #03.cbz",
             mtime=base_time,
             size=1000,
         ),
         LibraryFile(
-            uri="file:///library/Some%20Other%20Folder/Series%20Name%202%20(2021)/Series%20Name%202%20%2304.cbz",
+            uri="/library/Some Other Folder/Series Name 2 (2021)/Series Name 2 #04.cbz",
             mtime=base_time,
             size=1000,
         ),
         LibraryFile(
-            uri="file:///library/Some%20Other%20Folder/Series%20Name%202%20(2021)/Series%20Name%202%20%2305.cbz",
+            uri="/library/Some Other Folder/Series Name 2 (2021)/Series Name 2 #05.cbz",
             mtime=base_time,
             size=1000,
         ),
@@ -82,7 +82,7 @@ async def test_comic_scanner_example_structure(rb: ResourceBroker):
         id=Library.make_id(),
         name="Test Library",
         type="comics",
-        sources=[{"path_uri": "file:///library"}],
+        sources=[{"path_uri": "/library"}],
         created_at=now_without_tz(),
         updated_at=now_without_tz(),
     )
@@ -142,13 +142,13 @@ async def test_comic_scanner_example_structure(rb: ResourceBroker):
     updated_files = [
         # Keep only #102 from Series Name 2
         LibraryFile(
-            uri="file:///library/Series%20Name%202%20(2021)/Series%20Name%202%20%23102.cbz",
+            uri="/library/Series Name 2 (2021)/Series Name 2 #102.cbz",
             mtime=base_time,
             size=1000,
         ),
         # New series
         LibraryFile(
-            uri="file:///library/New%20Series%20(2024)/New%20Series%20%2301.cbz",
+            uri="/library/New Series (2024)/New Series #01.cbz",
             mtime=base_time,
             size=1000,
         ),

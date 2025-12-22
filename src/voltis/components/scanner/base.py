@@ -15,6 +15,7 @@ from voltis.db.models import (
     LibrarySource,
 )
 from voltis.services.resource_broker import ResourceBroker
+from voltis.utils.misc import notnone
 from voltis.utils.time import LogTime, log_time
 
 logger = structlog.stdlib.get_logger()
@@ -134,7 +135,7 @@ class ScannerBase(ABC):
             parents_with_updates: set[str] = set()
             limiter = CapacityLimiter(5)
 
-            async def _scan_wrapper(item: LibraryFile, content: Content | None):
+            async def _scan_file_wrapper(item: LibraryFile, content: Content | None):
                 async with limiter:
                     content = await self.scan_file(item, content)
                     if content is not None:
@@ -147,40 +148,52 @@ class ScannerBase(ABC):
                             session.add(content)
                             await session.commit()
 
+            async def _scan_series_wrapper(content: Content, items: list[Content]):
+                async with limiter:
+                    await self.scan_series(content, items)
+
             async with LogTime(logger, "calling scan_file"), create_task_group() as tg:
                 for item in to_add:
-                    tg.start_soon(_scan_wrapper, item, None)
+                    tg.start_soon(_scan_file_wrapper, item, None)
                 for item in to_update:
-                    tg.start_soon(_scan_wrapper, item, db_by_uri[item.uri][1])
+                    tg.start_soon(_scan_file_wrapper, item, db_by_uri[item.uri][1])
 
             async with self.rb.get_asession() as session:
                 # Update order of all items within parents that had changes
                 if parents_with_updates:
                     async with LogTime(logger, "updating content order"):
-                        result = await session.execute(
-                            select(Content.id, Content.parent_id, Content.order_parts).where(
-                                Content.parent_id.in_(parents_with_updates)
+                        parent_children = (
+                            await session.scalars(
+                                select(Content).where(Content.parent_id.in_(parents_with_updates))
                             )
-                        )
-                        rows = result.all()
+                        ).all()
+                        parents = (
+                            await session.scalars(
+                                select(Content).where(Content.id.in_(parents_with_updates))
+                            )
+                        ).all()
 
                         # Group by parent and sort by order_parts
-                        by_parent: dict[str, list[tuple[str, list[float]]]] = {}
-                        for row in rows:
-                            by_parent.setdefault(row.parent_id, []).append(
-                                (row.id, row.order_parts)
-                            )
+                        by_parent: dict[str, list[Content]] = {}
+                        for row in parent_children:
+                            by_parent.setdefault(notnone(row.parent_id), []).append(row)
 
                         # Sort each group and compute new order values
                         updates = []
                         for items in by_parent.values():
-                            items.sort(key=lambda x: x[1])
-                            for order, (content_id, _) in enumerate(items):
-                                updates.append({"id": content_id, "order": order})
+                            items.sort(key=lambda x: x.order_parts)
+                            for order, content in enumerate(items):
+                                updates.append({"id": content.id, "order": order})
 
                         if updates:
                             await session.execute(update(Content), updates)
                             await session.commit()
+
+                        async with LogTime(logger, "scanning series"), create_task_group() as tg:
+                            for p in parents:
+                                tg.start_soon(_scan_series_wrapper, p, by_parent.get(p.id, []))
+
+                        await session.commit()
 
                 # Clean up removed content + series without children
                 async with LogTime(
@@ -222,7 +235,7 @@ class ScannerBase(ABC):
             return [
                 (
                     LibraryFile(
-                        uri=c.file_uri,
+                        uri=notnone(c.file_uri),
                         mtime=c.file_mtime,
                         size=c.file_size,
                     ),
@@ -313,3 +326,7 @@ class ScannerBase(ABC):
     @abstractmethod
     async def scan_file(self, file: LibraryFile, content: Content | None) -> Content | None:
         pass
+
+    async def scan_series(self, content: Content, items: list[Content]) -> None:
+        """Will be called on any series whose files have changed. Used to for
+        example set the cover to the cover of the first issue."""

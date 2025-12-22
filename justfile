@@ -28,3 +28,11 @@ docker-push-release:
     fi
     docker build -t "$image" .
     docker push "$image"
+
+docker-push-dev:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    image="ghcr.io/kindlyfire/voltis:dev"
+    echo "Image: $image"
+    docker build -t "$image" .
+    docker push "$image"

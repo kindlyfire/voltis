@@ -152,7 +152,7 @@ class Content(_Base, _DefaultColumns):
     """When a file is detected but metadata extraction fails, this is set to
     false. For example, a `My Comic/Ch.1.cbz` that isn't actually a zip."""
 
-    file_uri: Mapped[str] = col(Text)
+    file_uri: Mapped[str | None] = col(Text)
     """The URI referring to the file or folder on disk, e.g.
     `file:///path/to/file.cbz`. This could extended to other protocols in the
     future, for example S3 or webdav."""

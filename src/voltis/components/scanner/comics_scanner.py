@@ -10,7 +10,7 @@ import structlog
 from anyio import Path
 
 from voltis.db.models import Content
-from voltis.utils.misc import now_without_tz
+from voltis.utils.misc import notnone, now_without_tz
 
 from .base import LibraryFile, ScannerBase
 
@@ -128,7 +128,7 @@ class ComicScanner(ScannerBase):
                 # Same series but different folder. Check if files still exist
                 # in the old folder - if so, keep the old file_uri. Otherwise,
                 # update to the new folder location.
-                old_folder_uri = series.file_uri
+                old_folder_uri = notnone(series.file_uri)
                 files_in_old_folder = any(
                     item.uri.startswith(old_folder_uri) for item in self.fs_items
                 )
@@ -158,7 +158,7 @@ class ComicScanner(ScannerBase):
 
     async def _update_series(self, series: Content):
         if not self.no_fs:
-            await self._scan_series_cover(series, Path(series.file_uri))
+            await self._scan_series_cover(series, Path(notnone(series.file_uri)))
 
         async with self.rb.get_asession() as session:
             series.updated_at = now_without_tz()
@@ -178,7 +178,7 @@ class ComicScanner(ScannerBase):
 
     def _scan_comic(self, content: Content) -> None:
         """Scan a comic file (.cbz) for pages and cover."""
-        path = pathlib.Path(content.file_uri)
+        path = pathlib.Path(notnone(content.file_uri))
 
         try:
             with zipfile.ZipFile(path, "r") as zf:
@@ -216,10 +216,17 @@ def _parse_chapter_number(name: str) -> int | float | None:
 
 def _parse_fallback_chapter_number(name: str) -> int | float | None:
     """
-    As a last resort, parse the first number in the name as the chapter number.
+    As a last resort, parse the number with the most digits in the name as the chapter number.
     """
-    if match := re.search(r"(\d+(?:\.\d+)?)", name):
-        num = match.group(1)
+    name = _clean_series_name(name)
+    matches = list(re.finditer(r"(\d+(?:\.\d+)?)", name))
+    if matches:
+        # Find the match with the most digits (excluding the decimal point)
+        def digit_count(m: re.Match[str]):
+            return len(m.group(1).replace(".", ""))
+
+        best = max(matches, key=digit_count)
+        num = best.group(1)
         return float(num) if "." in num else int(num)
     return None
 

@@ -45,6 +45,8 @@ class BookScanner(ScannerBase):
         else:
             metadata = None
 
+        logger.info("Scanning book", file_uri=file.uri, metadata=metadata)
+
         # Determine series and order
         series: Content | None = None
         series_index: float | None = None
@@ -129,6 +131,7 @@ class BookScanner(ScannerBase):
 
     def _scan_book(self, content: Content, metadata: EpubMetadata | None) -> None:
         """Scan a book file (.epub) for cover and additional metadata."""
+        assert content.file_uri
         path = pathlib.Path(content.file_uri)
 
         try:
@@ -157,3 +160,8 @@ class BookScanner(ScannerBase):
 
         except (zipfile.BadZipFile, OSError):
             content.valid = False
+
+    async def scan_series(self, content, items):
+        if items:
+            content.file_uri = items[0].file_uri
+            content.cover_uri = items[0].cover_uri

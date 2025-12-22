@@ -31,7 +31,7 @@ CREATE TABLE content (
     uri_part TEXT NOT NULL,
     title TEXT NOT NULL,
     valid BOOLEAN NOT NULL DEFAULT TRUE,
-    file_uri TEXT NOT NULL,
+    file_uri TEXT,
     file_mtime TIMESTAMP,
     file_size INTEGER,
     cover_uri TEXT,

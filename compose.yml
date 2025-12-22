@@ -1,4 +1,13 @@
 services:
+  # app:
+  #   build: .
+  #   ports:
+  #     - "8000:8000"
+  #   environment:
+  #     APP_DB_URL: postgresql+psycopg://postgres:postgres@postgres:5432/voltis
+  #   depends_on:
+  #     - postgres
+
   postgres:
     image: postgres:18
     environment:

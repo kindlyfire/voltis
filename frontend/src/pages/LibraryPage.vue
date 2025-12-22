@@ -7,6 +7,7 @@
 				:key="item.id"
 				:to="`/${item.id}`"
 				class="block"
+				:title="item.title"
 			>
 				<VCard>
 					<VImg
