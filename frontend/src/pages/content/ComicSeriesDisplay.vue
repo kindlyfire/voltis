@@ -16,12 +16,7 @@
 
 		<h2 class="text-h5 mb-4">Issues</h2>
 		<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-4">
-			<RouterLink
-				v-for="item in children.data?.value"
-				:key="item.id"
-				:to="`/${item.id}`"
-				class="block"
-			>
+			<RouterLink v-for="item in children" :key="item.id" :to="`/${item.id}`" class="block">
 				<VCard>
 					<VImg
 						v-if="item.cover_uri"
@@ -39,10 +34,16 @@
 <script setup lang="ts">
 import { contentApi } from '@/utils/api/content'
 import { API_URL } from '@/utils/fetch'
+import { computed } from 'vue'
 
 const props = defineProps<{
 	contentId: string
 }>()
 
-const children = contentApi.useList(() => ({ parent_id: props.contentId }))
+const qChildren = contentApi.useList(() => ({ parent_id: props.contentId }))
+const children = computed(() => {
+	return (qChildren.data?.value || []).slice().sort((a, b) => {
+		return (a.order || 0) - (b.order || 0)
+	})
+})
 </script>
