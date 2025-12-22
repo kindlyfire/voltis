@@ -2,8 +2,8 @@ import pathlib
 from urllib.parse import unquote
 
 import click
-from sqlalchemy import select
 import structlog
+from sqlalchemy import select
 
 from voltis.components.scanner.loader import get_scanner
 from voltis.db.models import Library, ScannerType

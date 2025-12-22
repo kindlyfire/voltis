@@ -11,6 +11,7 @@ class Settings(BaseSettings):
 
     DB_URL: str = ""
     TESTS_DB_URL: str = ""
+    CACHE_DIR: str = "/tmp/voltis_cache"
 
     REGISTRATION_ENABLED: bool = False
 

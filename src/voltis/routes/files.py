@@ -1,5 +1,3 @@
-import mimetypes
-import zipfile
 from pathlib import Path
 
 import anyio
@@ -11,57 +9,9 @@ from pydantic import BaseModel
 from voltis.components.epub import list_chapters, read_chapter
 from voltis.db.models import Content
 from voltis.routes._providers import RbProvider, UserProvider
+from voltis.utils.cover_cache import read_content_cover, read_content_file
 
 router = APIRouter()
-
-ARCHIVE_EXTENSIONS = {".cbz", ".zip", ".epub"}
-
-
-def _find_archive_and_inner_path(path: Path) -> tuple[Path, str] | None:
-    """
-    Walk up the path to find an archive file.
-    Returns (archive_path, inner_path) if found, None otherwise.
-    """
-    parts = path.parts
-    for i in range(len(parts) - 1, 0, -1):
-        candidate = Path(*parts[:i])
-        if candidate.is_file() and candidate.suffix.lower() in ARCHIVE_EXTENSIONS:
-            inner_path = "/".join(parts[i:])
-            return candidate, inner_path
-    return None
-
-
-def _read_from_archive(archive_path: Path, inner_path: str) -> bytes:
-    """Read a file from inside a zip-based archive."""
-    with zipfile.ZipFile(archive_path, "r") as zf:
-        try:
-            return zf.read(inner_path)
-        except KeyError:
-            raise HTTPException(status_code=404, detail=f"File not found in archive: {inner_path}")
-
-
-def _get_file_content(uri: str) -> tuple[bytes, str]:
-    """
-    Get file content from a URI, handling archives transparently.
-    Returns (content_bytes, media_type).
-    """
-    path = Path(uri)
-
-    # Check if the full path exists as a regular file
-    if path.is_file():
-        content = path.read_bytes()
-        media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-        return content, media_type
-
-    # Try to find an archive in the path
-    result = _find_archive_and_inner_path(path)
-    if result is None:
-        raise HTTPException(status_code=404, detail="File not found")
-
-    archive_path, inner_path = result
-    content = _read_from_archive(archive_path, inner_path)
-    media_type = mimetypes.guess_type(inner_path)[0] or "application/octet-stream"
-    return content, media_type
 
 
 @router.get("/cover/{content_id}")
@@ -78,7 +28,7 @@ async def get_cover(
         if not content.cover_uri:
             raise HTTPException(status_code=404, detail="Content has no cover")
 
-        data, media_type = await anyio.to_thread.run_sync(_get_file_content, content.cover_uri)
+        data, media_type = await anyio.to_thread.run_sync(read_content_cover, content)
         return Response(content=data, media_type=media_type)
 
 
@@ -105,7 +55,7 @@ async def get_page(
         file_path = Path(content.file_uri)
         page_uri = file_path / page_name[0]
 
-        data, media_type = await anyio.to_thread.run_sync(_get_file_content, page_uri.as_posix())
+        data, media_type = await anyio.to_thread.run_sync(read_content_file, page_uri.as_posix())
         return Response(content=data, media_type=media_type)
 
 
@@ -179,10 +129,13 @@ async def get_book_resource(
         if not content:
             raise HTTPException(status_code=404, detail="Content not found")
 
-        file_path = Path(content.file_uri)
+        file_path = Path(content.file_uri).resolve()
         if not file_path.suffix.lower() == ".epub":
             raise HTTPException(status_code=400, detail="Content is not an EPUB")
 
-        data = await anyio.to_thread.run_sync(_read_from_archive, file_path, path)
-        media_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
+        final_path = (file_path / path).resolve().as_posix()
+        if not final_path.startswith(file_path.as_posix() + "/"):
+            raise HTTPException(status_code=400, detail="Invalid resource path")
+
+        data, media_type = await anyio.to_thread.run_sync(read_content_file, final_path)
         return Response(content=data, media_type=media_type)
