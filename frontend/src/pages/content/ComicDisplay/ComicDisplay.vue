@@ -13,6 +13,7 @@ import { useRouter } from 'vue-router'
 import { API_URL } from '@/utils/fetch'
 import ReaderMain from './ReaderMain.vue'
 import { useReaderStore, type ReaderStore } from './useComicDisplayStore'
+import { useStaticNavbar } from '@/pages/useLayoutStore'
 
 const props = defineProps<{
 	contentId: string
@@ -20,6 +21,8 @@ const props = defineProps<{
 
 const reader = useReaderStore()
 const router = useRouter()
+
+useStaticNavbar()
 
 function getPageUrl(index: number): string {
 	return `${API_URL}/files/comic-page/${props.contentId}/${index}?v=${reader.content?.file_mtime ?? ''}`

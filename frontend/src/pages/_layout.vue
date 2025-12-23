@@ -1,6 +1,6 @@
 <template>
 	<VApp>
-		<VAppBar :scroll-behavior="mdAndUp ? undefined : 'fully-hide'">
+		<VAppBar :class="store.staticNavbar ? 'static!' : ''">
 			<VAppBarNavIcon class="d-md-none" @click="drawer = !drawer" />
 			<VAppBarTitle>Voltis</VAppBarTitle>
 			<VSpacer />
@@ -23,7 +23,24 @@
 				</RouterLink>
 			</template>
 		</VAppBar>
-		<VNavigationDrawer v-model="drawer" :permanent="mdAndUp" :temporary="!mdAndUp">
+		<VNavigationDrawer
+			v-model="drawer"
+			:permanent="mdAndUp"
+			:temporary="!mdAndUp"
+			:style="
+				store.staticNavbar && {
+					top: '0',
+					height: '100vh',
+				}
+			"
+		>
+			<template v-if="store.staticNavbar">
+				<div class="h-16 flex items-center ms-5!">
+					<VAppBarTitle>Voltis</VAppBarTitle>
+				</div>
+				<VDivider class="mx-2" />
+			</template>
+
 			<VList v-if="isSettings" nav>
 				<VListItem prepend-icon="mdi-arrow-left" @click="router.push('/')">
 					<VListItemTitle>Back</VListItemTitle>
@@ -62,7 +79,7 @@
 				</VListItem>
 			</VList>
 		</VNavigationDrawer>
-		<VMain>
+		<VMain :style="store.staticNavbar && { '--v-layout-top': '0px' }">
 			<RouterView />
 		</VMain>
 	</VApp>
@@ -76,7 +93,9 @@ import { authApi } from '@/utils/api/auth'
 import { librariesApi } from '@/utils/api/libraries'
 import { useRouter, useRoute } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
+import { useLayoutStore } from './useLayoutStore'
 
+const store = useLayoutStore()
 const router = useRouter()
 const route = useRoute()
 const isSettings = computed(() => route.path.startsWith('/settings'))

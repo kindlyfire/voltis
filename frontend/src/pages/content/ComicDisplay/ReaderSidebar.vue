@@ -5,6 +5,11 @@
 		disable-route-watcher
 		location="right"
 		width="300"
+		:style="{
+			top: '0',
+			height: '100vh',
+			zIndex: 1010,
+		}"
 	>
 		<div class="pa-4">
 			<div class="d-flex align-center mb-4">
