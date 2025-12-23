@@ -76,24 +76,15 @@ class BookScanner(ScannerBase):
                     library_id=self.library.id,
                     uri_part=uri_part,
                     type="book",
-                    title=title,
-                    file_uri=file.uri,
-                    parent_id=series.id if series else None,
-                    valid=True,
                     created_at=now_without_tz(),
-                    updated_at=now_without_tz(),
                 )
-            else:
-                content.title = title
-                content.file_uri = file.uri
-                content.parent_id = series.id if series else None
-                content.valid = True
-                content.updated_at = now_without_tz()
-        else:
-            content.title = title
-            content.parent_id = series.id if series else None
-            content.updated_at = now_without_tz()
-
+        content.title = title
+        content.file_uri = file.uri
+        content.uri_part = uri_part
+        content.uri = f"{series.uri}/{uri_part}" if series else uri_part
+        content.parent_id = series.id if series else None
+        content.valid = True
+        content.updated_at = now_without_tz()
         content.order_parts = [series_index or 0]
 
         if not self.no_fs:
@@ -115,6 +106,7 @@ class BookScanner(ScannerBase):
                 id=Content.make_id(),
                 library_id=self.library.id,
                 uri_part=uri_part,
+                uri=uri_part,
                 type="book_series",
                 title=series_name,
                 order_parts=[],

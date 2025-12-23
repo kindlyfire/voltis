@@ -81,25 +81,17 @@ class ComicScanner(ScannerBase):
                 content = Content(
                     id=Content.make_id(),
                     library_id=self.library.id,
-                    uri_part=uri_part,
                     type="comic",
-                    title=title,
-                    file_uri=file.uri,
-                    parent_id=series.id,
-                    valid=True,
                     created_at=now_without_tz(),
-                    updated_at=now_without_tz(),
                 )
-            else:
-                content.title = title
-                content.file_uri = file.uri
-                content.valid = True
-                content.updated_at = now_without_tz()
-        else:
-            content.title = title
-            content.parent_id = series.id
-            content.updated_at = now_without_tz()
 
+        content.file_uri = file.uri
+        content.uri_part = uri_part
+        content.uri = f"{series.uri}/{uri_part}"
+        content.valid = True
+        content.title = title
+        content.parent_id = series.id
+        content.updated_at = now_without_tz()
         content.order_parts = [vol_num or 0, ch_num or 0]
 
         if not self.no_fs:
@@ -145,6 +137,7 @@ class ComicScanner(ScannerBase):
                 id=Content.make_id(),
                 library_id=self.library.id,
                 uri_part=uri_part,
+                uri=uri_part,
                 type="comic_series",
                 title=name,
                 file_uri=folder_uri,

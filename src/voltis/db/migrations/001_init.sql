@@ -29,6 +29,7 @@ CREATE TABLE content (
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
     uri_part TEXT NOT NULL,
+    uri TEXT NOT NULL,
     title TEXT NOT NULL,
     valid BOOLEAN NOT NULL DEFAULT TRUE,
     file_uri TEXT,
@@ -44,3 +45,4 @@ CREATE TABLE content (
 );
 
 CREATE UNIQUE INDEX idx_content_unique ON content(uri_part, COALESCE(parent_id, ''), library_id);
+CREATE UNIQUE INDEX idx_content_uri_unique ON content(uri, library_id);

@@ -141,6 +141,9 @@ class Content(_Base, _DefaultColumns):
     present.
     """
 
+    uri: Mapped[str] = col(Text, unique=True)
+    """The full URI, including parents, separated by a `/`. Example: My Comic/v0_ch1"""
+
     title: Mapped[str] = col(Text)
     """
     The title. This typically does not repeat the title given in the parent
