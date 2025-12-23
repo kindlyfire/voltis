@@ -12,9 +12,10 @@
 							{ title: 'Comics', value: 'comics' },
 							{ title: 'Books', value: 'books' },
 						]"
-						:hide-details="isNew"
+						:hide-details="isNew && !form.getInputProps('type').errors.length"
 						:readonly="!isNew"
 						:messages="isNew ? [] : ['Type cannot be updated.']"
+						:error-messages="form.getInputProps('type').errors.map(e => e.message)"
 					/>
 					<div>
 						<div class="text-sm font-medium mb-2">Sources</div>
@@ -100,7 +101,10 @@ const deleteLibrary = librariesApi.useDelete()
 const form = useForm({
 	schema: z.object({
 		name: z.string().min(1),
-		type: z.enum(['comics', 'books']),
+		type: z
+			.enum(['comics', 'books'])
+			.nullable()
+			.refine(val => val !== null, 'Type is required'),
 		sources: z.array(
 			z.object({
 				path_uri: z.string(),
@@ -109,14 +113,14 @@ const form = useForm({
 	}),
 	initialValues: {
 		name: '',
-		type: 'comics' as const,
+		type: null,
 		sources: [],
 	},
 	onSubmit: async values => {
 		await upsert.mutateAsync({
 			id: isNew.value ? undefined : props.libraryId!,
 			name: values.name,
-			type: values.type,
+			type: values.type!,
 			sources: values.sources.filter(s => s.path_uri.trim() !== ''),
 		})
 		emit('close')
@@ -145,7 +149,7 @@ watch(
 	() => {
 		form.reset()
 		if (props.libraryId === 'new') {
-			form.setValues({ name: '', type: 'comics', sources: [] })
+			form.setValues({ name: '', type: null, sources: [] })
 		} else if (library.value) {
 			form.setValues({
 				name: library.value.name,
