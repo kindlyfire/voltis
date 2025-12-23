@@ -61,7 +61,7 @@ useHead({
 	width: 100vw;
 }
 
-.v-card-title {
+.v-overlay__content > .v-card > .v-card-title {
 	padding: 16px 24px 0;
 }
 </style>

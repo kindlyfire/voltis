@@ -16,7 +16,7 @@
 		</div> -->
 
 		<h2 class="text-h5 mb-4">Books</h2>
-		<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-4">
+		<div :class="LIBRARY_GRID_CLASSES">
 			<RouterLink
 				v-for="item in children"
 				:key="item.id"
@@ -41,6 +41,7 @@
 <script setup lang="ts">
 import { contentApi } from '@/utils/api/content'
 import { API_URL } from '@/utils/fetch'
+import { LIBRARY_GRID_CLASSES } from '@/utils/misc'
 import { computed } from 'vue'
 
 const props = defineProps<{

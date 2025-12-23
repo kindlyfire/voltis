@@ -3,7 +3,9 @@
 		<div class="d-flex align-center mb-6">
 			<h1 class="text-h4">Users</h1>
 			<VSpacer />
-			<VBtn color="primary" @click="selectedUserId = 'new'">Create User</VBtn>
+			<VBtn color="primary" @click="((selectedUserId = 'new'), (userModalOpen = true))"
+				>Create User</VBtn
+			>
 		</div>
 
 		<VTable>

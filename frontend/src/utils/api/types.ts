@@ -65,7 +65,7 @@ export interface Content {
 	uri_part: string
 	title: string
 	valid: boolean
-	file_uri: string
+	file_uri: string | null
 	file_mtime: string | null
 	file_size: number | null
 	cover_uri: string | null
@@ -75,6 +75,7 @@ export interface Content {
 	meta: ContentMetadata
 	parent_id: string | null
 	library_id: string
+	children_count: number | null
 }
 
 export interface ContentListParams {

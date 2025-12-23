@@ -3,7 +3,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.orm import aliased
 
 from voltis.db.models import Content, ContentMetadata, ContentType
 from voltis.routes._providers import RbProvider, UserProvider
@@ -18,7 +19,7 @@ class ContentDTO(BaseModel):
     uri_part: str
     title: str
     valid: bool
-    file_uri: str
+    file_uri: str | None
     file_mtime: datetime.datetime | None
     file_size: int | None
     cover_uri: str | None
@@ -28,9 +29,10 @@ class ContentDTO(BaseModel):
     meta: ContentMetadata
     parent_id: str | None
     library_id: str
+    children_count: int | None = None
 
     @classmethod
-    def from_model(cls, model: Content) -> "ContentDTO":
+    def from_model(cls, model: Content, children_count: int | None = None) -> "ContentDTO":
         return cls(
             id=model.id,
             created_at=model.created_at,
@@ -48,6 +50,7 @@ class ContentDTO(BaseModel):
             meta=model.meta,
             parent_id=model.parent_id,
             library_id=model.library_id,
+            children_count=children_count,
         )
 
 
@@ -74,7 +77,13 @@ async def list_content(
     valid: Annotated[bool, Query()] = True,
 ) -> list[ContentDTO]:
     async with rb.get_asession() as session:
-        query = select(Content).where(Content.valid == valid)
+        ChildContent = aliased(Content)
+        count_subq = (
+            select(func.count(ChildContent.id).label("children_count"))
+            .where(ChildContent.parent_id == Content.id)
+            .lateral()
+        )
+        query = select(Content, count_subq.c.children_count).where(Content.valid == valid)
 
         if parent_id is not None:
             if parent_id == "null":
@@ -86,5 +95,5 @@ async def list_content(
         if type:
             query = query.where(Content.type.in_(type))
 
-        result = await session.scalars(query)
-        return [ContentDTO.from_model(c) for c in result.all()]
+        result = await session.execute(query)
+        return [ContentDTO.from_model(row[0], children_count=row[1]) for row in result.all()]
