@@ -8,17 +8,40 @@
 		<VCard>
 			<VCardTitle>{{ title }}</VCardTitle>
 			<VCardText>
-				<div v-if="scan.isPending.value" class="text-center py-4">
-					<VProgressCircular indeterminate class="mb-4" />
-					<div>Scanning libraries...</div>
-				</div>
-				<div v-else-if="scan.isError.value">
-					<VAlert type="error" class="mb-4">
+				<!-- Form -->
+				<template
+					v-if="!scan.isPending.value && !scan.isSuccess.value && !scan.isError.value"
+				>
+					<VCheckbox
+						class="force-scan-checkbox"
+						v-model="forceScan"
+						label="Force scan"
+						:messages="[
+							'Force scanning will re-scan all files, even if they have not changed since the last scan.',
+						]"
+					/>
+					<div class="flex justify-end mt-6 gap-2">
+						<VBtn variant="text" @click="$emit('update:modelValue', false)"
+							>Cancel</VBtn
+						>
+						<VBtn color="primary" @click="startScan">Start Scan</VBtn>
+					</div>
+				</template>
+
+				<!-- Scanning -->
+				<template v-else-if="scan.isPending.value">
+					<div class="text-center py-4">
+						<VProgressCircular indeterminate class="mb-4" />
+						<div>Scanning libraries...</div>
+					</div>
+				</template>
+
+				<!-- Results -->
+				<template v-else>
+					<VAlert v-if="scan.isError.value" type="error" class="mb-4">
 						{{ scan.error.value?.message || 'An error occurred during scanning' }}
 					</VAlert>
-				</div>
-				<div v-else-if="scan.data.value">
-					<div class="space-y-2!">
+					<div v-else class="space-y-2!">
 						<div
 							v-for="result in scan.data.value"
 							:key="result.library_id"
@@ -31,23 +54,17 @@
 							</div>
 						</div>
 					</div>
-				</div>
-				<div class="flex justify-end mt-4">
-					<VBtn
-						variant="text"
-						@click="$emit('update:modelValue', false)"
-						:disabled="scan.isPending.value"
-					>
-						Close
-					</VBtn>
-				</div>
+					<div class="flex justify-end mt-4">
+						<VBtn variant="text" @click="$emit('update:modelValue', false)">Close</VBtn>
+					</div>
+				</template>
 			</VCardText>
 		</VCard>
 	</VDialog>
 </template>
 
 <script setup lang="ts">
-import { watch, computed } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { librariesApi } from '@/utils/api/libraries'
 
 const props = defineProps<{
@@ -61,6 +78,7 @@ defineEmits<{
 
 const libraries = librariesApi.useList()
 const scan = librariesApi.useScan()
+const forceScan = ref(false)
 
 const title = computed(() => {
 	if (props.libraryIds.length === 0) {
@@ -76,13 +94,31 @@ function getLibraryName(id: string): string {
 	return libraries.data?.value?.find(l => l.id === id)?.name ?? id
 }
 
+function startScan() {
+	scan.mutate({
+		ids: props.libraryIds.length > 0 ? props.libraryIds : undefined,
+		force: forceScan.value,
+	})
+}
+
 watch(
 	() => props.modelValue,
 	open => {
 		if (open) {
 			scan.reset()
-			scan.mutate(props.libraryIds.length > 0 ? props.libraryIds : undefined)
+			forceScan.value = false
 		}
 	}
 )
 </script>
+
+<style lang="css" scoped>
+:deep(.force-scan-checkbox .v-input__details) {
+	margin-left: 40px;
+	margin-top: -15px;
+}
+
+:deep(.force-scan-checkbox .v-messages__message) {
+	line-height: 15px;
+}
+</style>

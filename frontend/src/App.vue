@@ -60,4 +60,8 @@ useHead({
 	height: 100vh;
 	width: 100vw;
 }
+
+.v-card-title {
+	padding: 16px 24px 0;
+}
 </style>

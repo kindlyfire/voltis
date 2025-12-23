@@ -92,9 +92,11 @@ class ScannerBase(ABC):
         """Lock that can be used in scan_file() to protect critical sections.
         Namely when looking up/creating the parent series."""
 
-    async def scan(self, dry_run: bool = False, filter_paths: list[str] | None = None):
+    async def scan(
+        self, dry_run: bool = False, filter_paths: list[str] | None = None, force: bool = False
+    ):
         return await self.scan_direct(
-            await self._get_fs_items(), dry_run=dry_run, filter_paths=filter_paths
+            await self._get_fs_items(), dry_run=dry_run, filter_paths=filter_paths, force=force
         )
 
     async def scan_direct(
@@ -102,6 +104,7 @@ class ScannerBase(ABC):
         fs_items: list[LibraryFile],
         dry_run: bool = False,
         filter_paths: list[str] | None = None,
+        force: bool = False,
     ):
         self.fs_items = fs_items
         db_items, self.series = await asyncio.gather(self._get_db_items(), self._get_db_series())
@@ -122,6 +125,10 @@ class ScannerBase(ABC):
                     to_update.append(item)
                 else:
                     unchanged.append(item)
+
+        if force:
+            to_update.extend(unchanged)
+            unchanged = []
 
         self.to_remove = [item for uri, item in db_by_uri.items() if uri not in fs_by_uri]
         if filter_paths:

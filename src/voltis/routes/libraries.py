@@ -70,6 +70,7 @@ async def scan_libraries(
     rb: RbProvider,
     _user: AdminUserProvider,
     id: str | None = None,
+    force: bool = False,
 ) -> list[ScanResultDTO]:
     async with rb.get_asession() as session:
         q = select(Library)
@@ -82,7 +83,7 @@ async def scan_libraries(
     for library in libraries:
         logger.info("Scanning library", library_id=library.id, library_name=library.name)
         scanner = get_scanner(library.type, library, rb)
-        scan_result = await scanner.scan()
+        scan_result = await scanner.scan(force=force)
         results.append(
             ScanResultDTO(
                 library_id=library.id,
