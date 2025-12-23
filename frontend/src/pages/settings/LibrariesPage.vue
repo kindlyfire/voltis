@@ -11,6 +11,7 @@
 				<tr>
 					<th>Name</th>
 					<th>Type</th>
+					<th>Library Entries</th>
 					<th>Last Scanned</th>
 					<th></th>
 				</tr>
@@ -19,6 +20,12 @@
 				<tr v-for="library in libraries.data?.value" :key="library.id">
 					<td>{{ library.name }}</td>
 					<td>{{ library.type }}</td>
+					<td>
+						<abbr title="Without/with children">
+							{{ library.root_content_count ?? 0 }}
+							/ {{ library.content_count ?? 0 }}
+						</abbr>
+					</td>
 					<td>
 						{{
 							library.scanned_at

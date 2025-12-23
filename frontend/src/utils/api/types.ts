@@ -25,6 +25,8 @@ export interface Library {
 	updated_at: string
 	name: string
 	type: ScannerType
+	content_count: number | null
+	root_content_count: number | null
 	scanned_at: string | null
 	sources: LibrarySource[]
 }

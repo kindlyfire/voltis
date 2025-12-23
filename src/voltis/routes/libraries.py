@@ -4,10 +4,10 @@ import structlog
 from anyio import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from voltis.components.scanner.loader import ScannerType, get_scanner
-from voltis.db.models import Library
+from voltis.db.models import Content, Library
 from voltis.routes._providers import AdminUserProvider, RbProvider, UserProvider
 from voltis.utils.misc import now_without_tz
 
@@ -25,17 +25,23 @@ class LibraryDTO(BaseModel):
     updated_at: datetime.datetime
     name: str
     type: ScannerType
+    content_count: int | None = None
+    root_content_count: int | None = None
     scanned_at: datetime.datetime | None
     sources: list[LibrarySourceDTO]
 
     @classmethod
-    def from_model(cls, model: Library) -> "LibraryDTO":
+    def from_model(
+        cls, model: Library, content_count: int | None = None, root_content_count: int | None = None
+    ) -> "LibraryDTO":
         return cls(
             id=model.id,
             created_at=model.created_at,
             updated_at=model.updated_at,
             name=model.name,
             type=model.type,
+            content_count=content_count,
+            root_content_count=root_content_count,
             scanned_at=model.scanned_at,
             sources=[LibrarySourceDTO(path_uri=s.path_uri) for s in model.get_sources()],
         )
@@ -53,8 +59,23 @@ async def list_libraries(
     _user: UserProvider,
 ) -> list[LibraryDTO]:
     async with rb.get_asession() as session:
-        result = await session.scalars(select(Library))
-        return [LibraryDTO.from_model(lib) for lib in result.all()]
+        count_subq = (
+            select(
+                func.count(Content.id).label("content_count"),
+                func.count(Content.id)
+                .filter(Content.parent_id.is_(None))
+                .label("root_content_count"),
+            )
+            .where(Content.library_id == Library.id)
+            .lateral()
+        )
+        result = await session.execute(
+            select(Library, count_subq.c.content_count, count_subq.c.root_content_count)
+        )
+        return [
+            LibraryDTO.from_model(v[0], content_count=v[1], root_content_count=v[2])
+            for v in result.all()
+        ]
 
 
 class ScanResultDTO(BaseModel):
