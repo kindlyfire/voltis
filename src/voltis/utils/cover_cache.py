@@ -101,3 +101,12 @@ def _resize_image(data: bytes, max_width: int) -> bytes:
         scale = max_width / image.width
         image = image.resize(scale)
     return image.write_to_buffer(".jpg[Q=85]")
+
+
+def delete_content_cover_cached(content_id: str) -> None:
+    """Delete cached cover for content ID."""
+    cache_path = Path(settings.CACHE_DIR) / "covers" / f"{content_id}.jpg"
+    try:
+        cache_path.unlink()
+    except FileNotFoundError, NotADirectoryError:
+        pass

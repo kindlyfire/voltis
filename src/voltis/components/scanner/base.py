@@ -3,6 +3,8 @@ import datetime
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+import anyio
+import anyio.to_thread
 import structlog
 from anyio import CapacityLimiter, Path, create_task_group
 from sqlalchemy import delete, select, update
@@ -15,6 +17,7 @@ from voltis.db.models import (
     LibrarySource,
 )
 from voltis.services.resource_broker import ResourceBroker
+from voltis.utils.cover_cache import delete_content_cover_cached
 from voltis.utils.misc import notnone
 from voltis.utils.time import LogTime, log_time
 
@@ -159,6 +162,10 @@ class ScannerBase(ABC):
                 async with limiter:
                     await self.scan_series(content, items)
 
+            async def _delete_content_cover_cached_wrapper(content_id: str):
+                async with limiter:
+                    await anyio.to_thread.run_sync(delete_content_cover_cached, content_id)
+
             async with LogTime(logger, "calling scan_file"), create_task_group() as tg:
                 for item in to_add:
                     tg.start_soon(_scan_file_wrapper, item, None)
@@ -203,14 +210,21 @@ class ScannerBase(ABC):
                         await session.commit()
 
                 # Clean up removed content + series without children
-                async with LogTime(
-                    logger, "cleaning up removed content and series without children"
+                async with (
+                    LogTime(logger, "cleaning up removed content and series without children"),
+                    create_task_group() as tg,
                 ):
                     await session.execute(
                         delete(Content).where(
                             Content.id.in_([item[1].id for item in self.to_remove])
                         )
                     )
+
+                    for _, content in self.to_remove:
+                        tg.start_soon(
+                            _delete_content_cover_cached_wrapper,
+                            content.id,
+                        )
 
                     parent_ids_with_children = (
                         select(Content.parent_id).where(Content.parent_id.isnot(None)).distinct()
