@@ -16,3 +16,14 @@ export function getScrollParent(element: HTMLElement): HTMLElement | null {
 	}
 	return null
 }
+
+export function getViewportHeight(unit = 'lvh') {
+	const el = document.createElement('div')
+	el.style.height = `100${unit}`
+	el.style.position = 'fixed'
+	el.style.pointerEvents = 'none'
+	document.body.appendChild(el)
+	const height = el.offsetHeight
+	document.body.removeChild(el)
+	return height
+}

@@ -7,6 +7,7 @@ import { contentApi } from '@/utils/api/content'
 import { keepPreviousData } from '@tanstack/vue-query'
 import { useLocalStorage } from '@/utils/localStorage'
 import { getLayoutTop } from '@/utils/misc'
+import { getViewportHeight } from '@/utils/css'
 
 interface ComicSettings {
 	longstripWidth: number
@@ -198,8 +199,8 @@ export const useReaderStore = defineStore('reader', () => {
 
 	function _isAtBottom(): boolean {
 		const el = scrollRef.value
-		if (!el) return true
-		return el.scrollTop + el.clientHeight >= el.scrollHeight - 10
+		if (!el) return false
+		return window.scrollY + getViewportHeight() > el.scrollHeight - 1
 	}
 
 	function _isAtTop(): boolean {
