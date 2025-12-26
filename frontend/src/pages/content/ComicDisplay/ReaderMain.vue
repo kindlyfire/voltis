@@ -70,7 +70,7 @@ const controls = useReaderControls()
 	top: auto !important;
 	left: 0;
 	right: 0;
-	z-index: 20;
+	z-index: 10000;
 	pointer-events: none;
 }
 </style>

@@ -1,4 +1,4 @@
-import { ref, shallowRef, computed, watch, toRaw, readonly } from 'vue'
+import { ref, shallowRef, computed, watch, readonly } from 'vue'
 import { acceptHMRUpdate, defineStore } from 'pinia'
 import { useRouter } from 'vue-router'
 import type { PageInfo, ReaderMode, SiblingsInfo, SiblingContent } from './types'
@@ -89,27 +89,25 @@ export const useReaderStore = defineStore('reader', () => {
 		const items = [...siblings]
 			.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 			.map(c => ({ id: c.id, title: c.title, order: c.order }))
-		const currentIndex = items.findIndex(item => item.id === content.value?.id)
+		const currentIndex = items.findIndex(item => item.id === contentId.value)
 		return {
 			items,
 			currentIndex: currentIndex >= 0 ? currentIndex : 0,
 		}
 	})
 
-	watch(
-		() => content.value,
-		newContent => {
-			if (newContent) {
-				pages.value = (newContent.meta.pages ?? []).map(p => ({
-					width: p[1],
-					height: p[2],
-				}))
-				_initializeLoaders()
-				_preloadPages()
-			}
-		},
-		{ immediate: true }
-	)
+	function _updatePages() {
+		const _content = content.value
+		if (_content) {
+			pages.value = (_content.meta.pages ?? []).map(p => ({
+				width: p[1],
+				height: p[2],
+			}))
+			_initializeLoaders()
+			_preloadPages()
+		}
+	}
+	watch(() => content.value, _updatePages, { immediate: true })
 
 	const currentPage = ref(0)
 	watch(
@@ -226,6 +224,10 @@ export const useReaderStore = defineStore('reader', () => {
 		onReachEndFn.value = options.onReachEnd
 		onGoToSiblingFn.value = options.onGoToSibling
 		abortController.value = new AbortController()
+
+		if (content.value?.id === options.contentId) {
+			_updatePages()
+		}
 	}
 
 	function setCurrentPage(page: number, mode: SetPage) {
@@ -301,6 +303,8 @@ export const useReaderStore = defineStore('reader', () => {
 		settings,
 
 		// Content state (readonly)
+		qSiblings,
+		qContent,
 		contentId: readonly(contentId),
 		content,
 		pages,

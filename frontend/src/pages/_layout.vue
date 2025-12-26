@@ -79,7 +79,7 @@
 				</VListItem>
 			</VList>
 		</VNavigationDrawer>
-		<VMain :style="store.staticNavbar && { '--v-layout-top': '0px' }">
+		<VMain :style="store.staticNavbar && { '--v-layout-top': '0px' }" class="relative">
 			<RouterView />
 		</VMain>
 	</VApp>

@@ -21,7 +21,6 @@
 			</div>
 
 			<div v-if="reader.siblings" class="mb-4">
-				<div class="text-body-2 text-medium-emphasis mb-2">Entry</div>
 				<div class="d-flex align-center gap-2 mb-2">
 					<VBtn
 						icon
@@ -43,6 +42,7 @@
 						hide-details
 						class="grow"
 						@update:model-value="reader.goToSibling($event)"
+						:loading="reader.qContent.isLoading || reader.qSiblings.isLoading"
 					/>
 					<VBtn
 						icon
