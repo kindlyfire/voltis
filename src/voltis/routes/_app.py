@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from voltis.services.resource_broker import ResourceBroker
 
@@ -23,6 +24,7 @@ def create_app(rb: ResourceBroker):
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(GZipMiddleware)
 
     app.include_router(auth_router, prefix="/api/auth")
     app.include_router(content_router, prefix="/api/content")

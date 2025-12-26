@@ -200,7 +200,7 @@ export const useReaderStore = defineStore('reader', () => {
 	function _isAtBottom(): boolean {
 		const el = scrollRef.value
 		if (!el) return false
-		return window.scrollY + getViewportHeight() > el.scrollHeight - 1
+		return window.scrollY + getViewportHeight() > el.scrollHeight - 10
 	}
 
 	function _isAtTop(): boolean {
@@ -262,7 +262,7 @@ export const useReaderStore = defineStore('reader', () => {
 			if (_isAtBottom()) {
 				onReachEndFn.value?.()
 			} else {
-				_scrollByViewport(0.9)
+				_scrollByViewport(0.85)
 			}
 		}
 	}
@@ -278,7 +278,7 @@ export const useReaderStore = defineStore('reader', () => {
 			if (_isAtTop()) {
 				onReachStartFn.value?.()
 			} else {
-				_scrollByViewport(-0.9)
+				_scrollByViewport(-0.85)
 			}
 		}
 	}
