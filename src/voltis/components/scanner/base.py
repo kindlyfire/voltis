@@ -18,7 +18,7 @@ from voltis.db.models import (
 )
 from voltis.services.resource_broker import ResourceBroker
 from voltis.utils.cover_cache import delete_content_cover_cached
-from voltis.utils.misc import notnone
+from voltis.utils.misc import notnone, now_without_tz
 from voltis.utils.time import LogTime, log_time
 
 logger = structlog.stdlib.get_logger()
@@ -236,6 +236,10 @@ class ScannerBase(ABC):
                             Content.id.notin_(parent_ids_with_children),
                         )
                     )
+
+                session.add(self.library)
+                self.library.scanned_at = now_without_tz()
+
                 await session.commit()
 
         return ScannerResult(

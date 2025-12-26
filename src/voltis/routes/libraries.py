@@ -70,7 +70,9 @@ async def list_libraries(
             .lateral()
         )
         result = await session.execute(
-            select(Library, count_subq.c.content_count, count_subq.c.root_content_count)
+            select(Library, count_subq.c.content_count, count_subq.c.root_content_count).order_by(
+                Library.name
+            )
         )
         return [
             LibraryDTO.from_model(v[0], content_count=v[1], root_content_count=v[2])
