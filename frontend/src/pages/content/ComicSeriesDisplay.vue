@@ -1,51 +1,55 @@
 <template>
-	<VContainer>
-		<!-- <div class="d-flex gap-6 mb-6">
-			<div class="w-[225px] shrink-0">
+	<div
+		:style="{
+			backgroundImage: content?.cover_uri
+				? `url(${API_URL}/files/cover/${content.id}?v=${content.file_mtime})`
+				: 'none',
+			backgroundSize: 'cover',
+			backgroundPosition: 'center',
+			filter: 'blur(10px) brightness(0.7)',
+			height: '400px',
+			position: 'absolute',
+			top: '-24px',
+			left: '-24px',
+			right: '-24px',
+		}"
+	></div>
+
+	<VContainer class="relative xl:pt-20!">
+		<div class="d-flex gap-3 md:gap-6 mb-6">
+			<div class="w-[100px] sm:w-[125px] md:w-[200px] shrink-0">
 				<img
-					v-if="content.cover_uri"
+					v-if="content?.cover_uri"
 					:src="`${API_URL}/files/cover/${content.id}`"
 					class="w-full rounded aspect-2/3"
 				/>
 			</div>
 			<div>
-				<h1 class="text-h4 mb-2">{{ content.title }}</h1>
-				<div class="text-body-2 text-medium-emphasis">Comic Series</div>
+				<h1
+					class="text-xl sm:text-2xl md:text-3xl xl:text-5xl mb-2 font-bold! text-shadow-md/40! text-white!"
+				>
+					{{ content?.title }}
+				</h1>
+				<div class="text-shadow-md/40! text-white!">Comic Series</div>
 			</div>
-		</div> -->
-
-		<h2 class="text-h5 mb-4">Issues</h2>
-		<div :class="LIBRARY_GRID_CLASSES">
-			<RouterLink
-				v-for="item in children"
-				:key="item.id"
-				:to="`/${item.id}`"
-				class="block"
-				:title="item.title"
-			>
-				<VCard>
-					<VImg
-						v-if="item.cover_uri"
-						:src="`${API_URL}/files/cover/${item.id}?v=${item.file_mtime}`"
-						:aspect-ratio="2 / 3"
-						cover
-					/>
-					<VCardTitle class="text-body-2">{{ item.title }}</VCardTitle>
-				</VCard>
-			</RouterLink>
 		</div>
+
+		<AContentGrid :items="children" :loading="qChildren.isLoading.value" />
 	</VContainer>
 </template>
 
 <script setup lang="ts">
+import AContentGrid from '@/components/AContentGrid.vue'
 import { contentApi } from '@/utils/api/content'
 import { API_URL } from '@/utils/fetch'
-import { LIBRARY_GRID_CLASSES } from '@/utils/misc'
 import { computed } from 'vue'
 
 const props = defineProps<{
 	contentId: string
 }>()
+
+const qContent = contentApi.useGet(() => props.contentId)
+const content = qContent.data
 
 const qChildren = contentApi.useList(() => ({ parent_id: props.contentId }))
 const children = computed(() => {
