@@ -23,7 +23,12 @@ def main(): ...
     show_default=True,
     help="Port to bind the server",
 )
-def run(host: str, port: int):
+@click.option(
+    "--migrate",
+    is_flag=True,
+    help="Run database migrations before starting the server",
+)
+def run(host: str, port: int, migrate: bool):
     """Run the app backend"""
     import logging
 
@@ -31,6 +36,10 @@ def run(host: str, port: int):
 
     from ..routes._app import create_app
     from ..services.resource_broker import ResourceBroker
+    from .migrate import _deploy
+
+    if migrate:
+        _deploy()
 
     app = create_app(ResourceBroker())
     uvicorn.run(app, host=host, port=port, log_level=logging.INFO)

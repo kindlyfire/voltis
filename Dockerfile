@@ -26,4 +26,4 @@ ENV PATH="/app/.venv/bin:$PATH"
 LABEL org.opencontainers.image.source=https://github.com/kindlyfire/voltis
 
 EXPOSE 8000
-CMD ["uv", "run", "--no-sync", "--offline", "voltis", "run", "--host", "0.0.0.0"]
+CMD ["uv", "run", "--no-sync", "--offline", "voltis", "run", "--host", "0.0.0.0", "--migrate"]
