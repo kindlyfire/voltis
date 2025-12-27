@@ -1,13 +1,12 @@
-import { ref, shallowRef, computed, watch, readonly } from 'vue'
+import { ref, shallowRef, computed, type Ref } from 'vue'
 import { acceptHMRUpdate, defineStore } from 'pinia'
 import { useRouter } from 'vue-router'
-import type { PageInfo, ReaderMode, SiblingsInfo, SiblingContent } from './types'
-import { createPageLoader, getPagesInPreloadOrder, type PageLoaderState } from './usePageLoader'
+import type { ReaderMode, SiblingsInfo } from './types'
 import { contentApi } from '@/utils/api/content'
 import { keepPreviousData } from '@tanstack/vue-query'
 import { useLocalStorage } from '@/utils/localStorage'
-import { getLayoutTop } from '@/utils/misc'
-import { getViewportHeight } from '@/utils/css'
+import { arrayAtNowrap, getLayoutTop } from '@/utils/misc'
+import { createComicState, type ComicState } from './createComicState'
 
 interface ComicSettings {
 	longstripWidth: number
@@ -29,31 +28,9 @@ function parseComicSettings(v: unknown): ComicSettings {
 	}
 }
 
-/**
- * There's a problem in longstrip mode, where we use the currentPage to scroll,
- * but we also use the scroll position to set the currentPage. To prevent loop,
- * we differentiate between the two.
- */
-export const SetPage = {
-	// Initial, will scroll instantly (not smooth)
-	INITIAL: 'initial',
-	// Will scroll to the page in longstrip mode
-	FOREGROUND: 'active',
-	// Will not scroll in longstrip mode
-	BACKGROUND: 'passive',
-} as const
-export type SetPage = (typeof SetPage)[keyof typeof SetPage]
-
-const PAGE_CACHE_WINDOW = 5
-const PRELOAD_COUNT = 8
-const PRELOAD_CONCURRENCY = 3
-
 export interface ReaderContentOptions {
 	contentId: string
-	getPageImageUrl: (index: number) => string
-	onReachStart?: () => void
-	onReachEnd?: () => void
-	onGoToSibling?: (id: string, fromEnd?: boolean) => void
+	initialPage: number | 'last'
 }
 
 export const useReaderStore = defineStore('reader', () => {
@@ -61,20 +38,10 @@ export const useReaderStore = defineStore('reader', () => {
 
 	const sidebarOpen = ref(false)
 	const { value: settings } = useLocalStorage('reader:comics', parseComicSettings)
-	const contentId = ref<string>('')
-	const pages = shallowRef<PageInfo[]>([])
-	const getPageUrlFn = shallowRef<(index: number) => string>(() => '')
-	const onReachStartFn = shallowRef<(() => void) | undefined>()
-	const onReachEndFn = shallowRef<(() => void) | undefined>()
-	const onScrollToPageFn = shallowRef<((index: number, instant: boolean) => void) | undefined>()
-	const onGoToSiblingFn = shallowRef<((id: string, fromEnd?: boolean) => void) | undefined>()
 
-	const loaders = shallowRef<PageLoaderState[]>([])
-	const abortController = shallowRef<AbortController | null>(null)
-	const scrollRef = ref<HTMLElement | null>(null)
+	const state: Ref<ComicState | null> = ref(null)
+	const content = computed(() => state.value?.content || null)
 
-	const qContent = contentApi.useGet(contentId)
-	const content = qContent.data
 	const qSiblings = contentApi.useList(
 		() => {
 			if (content.value?.parent_id) return { parent_id: content.value.parent_id }
@@ -83,218 +50,92 @@ export const useReaderStore = defineStore('reader', () => {
 			placeholderData: keepPreviousData,
 		}
 	)
-	const siblings = computed<SiblingsInfo | null>(() => {
+	const siblings = computed<SiblingsInfo>(() => {
 		const siblings = qSiblings.data.value
-		if ((content.value && !content.value?.parent_id) || !siblings) return null
+		if ((content.value && !content.value?.parent_id) || !siblings)
+			return {
+				items: [],
+				currentIndex: 0,
+			}
 		const items = [...siblings]
 			.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 			.map(c => ({ id: c.id, title: c.title, order: c.order }))
-		const currentIndex = items.findIndex(item => item.id === contentId.value)
+		const currentIndex = items.findIndex(item => item.id === state.value?.contentId)
 		return {
 			items,
 			currentIndex: currentIndex >= 0 ? currentIndex : 0,
 		}
 	})
 
-	function _updatePages() {
-		const _content = content.value
-		if (_content) {
-			pages.value = (_content.meta.pages ?? []).map(p => ({
-				width: p[1],
-				height: p[2],
-			}))
-			_initializeLoaders()
-			_preloadPages()
-		}
-	}
-	watch(() => content.value, _updatePages, { immediate: true })
-
-	const currentPage = ref(0)
-	watch(
-		() => [router.currentRoute.value.query.page, pages.value, onScrollToPageFn.value] as const,
-		([page, pages, onScrollToPageFn]) => {
-			if (!pages.length) return
-			if (settings.value.mode === 'longstrip' && !onScrollToPageFn) return
-
-			let newPage: number
-			if (page === 'last') {
-				newPage = Math.max(0, pages.length - 1)
-			} else if (page === '') {
-				newPage = 0
-			} else {
-				const parsed = typeof page === 'string' ? parseInt(page, 10) : NaN
-				if (isNaN(parsed) || parsed < 0 || parsed >= pages.length) {
-					newPage = _setPageParam(0)
-				} else {
-					newPage = parsed
-				}
-			}
-			if (newPage !== currentPage.value) {
-				setCurrentPage(newPage, SetPage.INITIAL)
-			}
-			_cleanupDistantLoaders()
-			_preloadPages()
-		},
-		{
-			immediate: true,
-		}
-	)
-
 	const progress = computed(() => {
-		const pagesVal = pages.value
-		if (pagesVal.length === 0) return 0
-		return ((currentPage.value + 1) / pagesVal.length) * 100
+		const pagesVal = state.value?.pageDimensions
+		if (!pagesVal?.length) return 0
+		return (((state.value?.page ?? 0) + 1) / pagesVal.length) * 100
 	})
 
-	const prevSibling = computed<SiblingContent | null>(() => {
-		const s = siblings.value
-		if (!s || s.currentIndex <= 0) return null
-		return s.items[s.currentIndex - 1] ?? null
-	})
-
-	const nextSibling = computed<SiblingContent | null>(() => {
-		const s = siblings.value
-		if (!s || s.currentIndex >= s.items.length - 1) return null
-		return s.items[s.currentIndex + 1] ?? null
-	})
-
-	function _setPageParam(page: number) {
-		router.replace({ query: page === 0 ? {} : { page } })
-		return page
-	}
-
-	function _initializeLoaders() {
-		const pagesVal = pages.value
-		const signal = abortController.value?.signal
-		if (!signal) return
-
-		loaders.value = pagesVal.map((_, index) =>
-			createPageLoader(index, getPageUrlFn.value(index), signal)
-		)
-	}
-
-	function _cleanupDistantLoaders() {
-		for (const loader of loaders.value) {
-			if (Math.abs(loader.index - currentPage.value) > PAGE_CACHE_WINDOW) {
-				loader.dispose()
-			}
+	function dispose() {
+		const s = state.value
+		if (s) {
+			s.dispose()
+			state.value = null
 		}
-	}
-
-	function _preloadPages() {
-		const pagesVal = pages.value
-		const order = getPagesInPreloadOrder(pagesVal.length, currentPage.value)
-		let loading = 0
-		for (const index of order.slice(0, PRELOAD_COUNT)) {
-			const loader = loaders.value[index]
-			if (!loader) continue
-			if (loader.blobUrl.value) continue
-			if (loading >= PRELOAD_CONCURRENCY) break
-			loader.load()
-			loading++
-		}
-	}
-
-	function _isAtBottom(): boolean {
-		const el = scrollRef.value
-		if (!el) return false
-		return window.scrollY + getViewportHeight() > el.scrollHeight - 10
-	}
-
-	function _isAtTop(): boolean {
-		const el = scrollRef.value
-		if (!el) return true
-		return el.scrollTop <= 10
-	}
-
-	function _scrollByViewport(factor: number) {
-		const el = scrollRef.value
-		if (!el) return
-		el.scrollBy({ top: (el.clientHeight - getLayoutTop()) * factor, behavior: 'smooth' })
 	}
 
 	function setContent(options: ReaderContentOptions) {
-		// Cleanup previous content
-		disposeLoaders()
-
-		// Set new content
-		contentId.value = options.contentId
-		getPageUrlFn.value = options.getPageImageUrl
-		onReachStartFn.value = options.onReachStart
-		onReachEndFn.value = options.onReachEnd
-		onGoToSiblingFn.value = options.onGoToSibling
-		abortController.value = new AbortController()
-
-		if (content.value?.id === options.contentId) {
-			_updatePages()
+		if (options.contentId === state.value?.contentId) {
+			return
 		}
+		dispose()
+		state.value = createComicState(options.contentId, options.initialPage)
+		state.value.setHandlers({
+			onReady: () => {
+				if (settings.value.mode === 'longstrip') {
+					requestAnimationFrame(() => {
+						goToPage(state.value!.page, 'instant')
+					})
+				}
+			},
+		})
 	}
 
-	function setCurrentPage(page: number, mode: SetPage) {
-		const pagesVal = pages.value
-		const clamped = Math.min(Math.max(0, page), pagesVal.length - 1)
-		_setPageParam(clamped)
-		currentPage.value = clamped
-		if (mode === SetPage.FOREGROUND || mode === SetPage.INITIAL) {
-			onScrollToPageFn.value?.(clamped, mode === SetPage.INITIAL)
+	function setPage(page: number) {
+		router.replace({ query: page === 0 ? {} : { page: page + 1 } })
+		state.value?.setPage(page)
+	}
+
+	function goToPage(page: number | null = null, behavior: ScrollBehavior = 'instant') {
+		if (page === null) {
+			page = state.value?.page ?? 0
 		}
-	}
-
-	function disposeLoaders() {
-		abortController.value?.abort()
-		for (const loader of loaders.value) {
-			loader.dispose()
-		}
-		loaders.value = []
-	}
-
-	function goToPage(page: number) {
-		setCurrentPage(page, SetPage.FOREGROUND)
-	}
-
-	function handleNext() {
-		const pagesVal = pages.value
-		if (settings.value.mode === 'paged') {
-			if (currentPage.value >= pagesVal.length - 1) {
-				onReachEndFn.value?.()
-			} else {
-				setCurrentPage(currentPage.value + 1, SetPage.FOREGROUND)
-			}
-		} else {
-			if (_isAtBottom()) {
-				onReachEndFn.value?.()
-			} else {
-				_scrollByViewport(0.85)
+		setPage(page)
+		if (settings.value.mode === 'longstrip') {
+			const pageEl = document.getElementById(`longstrip-page-${page}`)
+			if (pageEl) {
+				window.scrollTo({
+					top: pageEl.offsetTop - getLayoutTop(),
+					behavior,
+				})
 			}
 		}
 	}
 
-	function handlePrev() {
-		if (settings.value.mode === 'paged') {
-			if (currentPage.value <= 0) {
-				onReachStartFn.value?.()
+	function goToSibling(id: (string & {}) | 'next' | 'prev', fromEnd = false) {
+		if (id === 'next' || id === 'prev') {
+			const sibling = arrayAtNowrap(
+				siblings.value.items,
+				siblings.value.currentIndex + (id === 'next' ? 1 : -1)
+			)
+			if (sibling) {
+				id = sibling.id
 			} else {
-				setCurrentPage(currentPage.value - 1, SetPage.FOREGROUND)
-			}
-		} else {
-			if (_isAtTop()) {
-				onReachStartFn.value?.()
-			} else {
-				_scrollByViewport(-0.85)
+				return
 			}
 		}
-	}
-
-	function getLoader(index: number): PageLoaderState | undefined {
-		return loaders.value[index]
-	}
-
-	function goToSibling(id: string, fromEnd = false) {
-		onGoToSiblingFn.value?.(id, fromEnd)
-	}
-
-	function setOnScrollToPageFn(fn: undefined | ((index: number, instant: boolean) => void)) {
-		onScrollToPageFn.value = fn
+		router.push({
+			name: 'content',
+			params: { id },
+			query: fromEnd ? { page: 'last' } : {},
+		})
 	}
 
 	return {
@@ -303,31 +144,17 @@ export const useReaderStore = defineStore('reader', () => {
 		settings,
 
 		// Content state (readonly)
+		state,
 		qSiblings,
-		qContent,
-		contentId: readonly(contentId),
-		content,
-		pages,
 		siblings,
-		prevSibling,
-		nextSibling,
-
-		// Derived state
-		currentPage,
 		progress,
-		loaders,
-		scrollRef,
 
 		// Actions
 		setContent,
-		setOnScrollToPageFn,
-		setCurrentPage,
-		disposeLoaders,
 		goToPage,
-		handleNext,
-		handlePrev,
-		getLoader,
 		goToSibling,
+		dispose,
+		setPage,
 	}
 })
 

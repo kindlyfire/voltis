@@ -1,10 +1,67 @@
 import { onMounted, onUnmounted } from 'vue'
 import { useReaderStore } from './useComicDisplayStore'
+import { getScrollParent, getViewportHeight } from '@/utils/css'
+import { getLayoutTop } from '@/utils/misc'
 
 type ClickZone = 'prev' | 'next' | 'menu'
 
+const scrollParent = () => getScrollParent(document.getElementById('longstrip-container')!)
+
+function isAtBottom(): boolean {
+	const el = scrollParent()
+	if (!el) return false
+	return window.scrollY + getViewportHeight() > el.scrollHeight - 10
+}
+
+function isAtTop(): boolean {
+	const el = scrollParent()
+	if (!el) return true
+	return el.scrollTop <= 10
+}
+
+function scrollByViewport(factor: number) {
+	const el = scrollParent()
+	if (!el) return
+	el.scrollBy({ top: (el.clientHeight - getLayoutTop()) * factor, behavior: 'smooth' })
+}
+
 export function useReaderControls() {
 	const reader = useReaderStore()
+
+	function handleMove(direction: 'next' | 'prev') {
+		let switchToSibling = false
+		const mode = reader.settings.mode
+		if (mode === 'longstrip') {
+			if (direction === 'next') {
+				if (isAtBottom()) {
+					switchToSibling = true
+				} else {
+					scrollByViewport(0.85)
+				}
+			} else {
+				if (isAtTop()) {
+					switchToSibling = true
+				} else {
+					scrollByViewport(-0.85)
+				}
+			}
+		} else {
+			// Paged mode
+			const currentPage = reader.state?.page ?? 0
+			const pages = reader.state?.pageDimensions ?? []
+
+			const newPage = direction === 'next' ? currentPage + 1 : currentPage - 1
+			if (newPage >= 0 && newPage < pages.length) {
+				reader.setPage(newPage)
+			} else {
+				switchToSibling = true
+			}
+		}
+
+		if (switchToSibling) {
+			reader.goToSibling(direction)
+		}
+	}
 
 	function handleKeydown(e: KeyboardEvent) {
 		// Ignore when an input element is focused
@@ -20,20 +77,16 @@ export function useReaderControls() {
 
 		switch (e.key) {
 			case 'ArrowLeft':
-				reader.handlePrev()
+				handleMove('prev')
 				break
 			case 'ArrowRight':
-				reader.handleNext()
+				handleMove('next')
 				break
 			case ',':
-				if (reader.prevSibling) {
-					reader.goToSibling(reader.prevSibling.id, true)
-				}
+				reader.goToSibling('prev', true)
 				break
 			case '.':
-				if (reader.nextSibling) {
-					reader.goToSibling(reader.nextSibling.id)
-				}
+				reader.goToSibling('next', true)
 				break
 		}
 	}
@@ -50,9 +103,9 @@ export function useReaderControls() {
 		handleClick(e: MouseEvent) {
 			const zone = getClickZone(e)
 			if (zone === 'prev') {
-				reader.handlePrev()
+				handleMove('prev')
 			} else if (zone === 'next') {
-				reader.handleNext()
+				handleMove('next')
 			} else {
 				reader.sidebarOpen = true
 			}

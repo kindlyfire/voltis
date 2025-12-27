@@ -1,38 +1,44 @@
 <template>
-	<div ref="containerRef" class="reader-longstrip d-flex flex-column align-center">
-		<template v-for="(loader, index) in reader.loaders" :key="index">
-			<div class="reader-longstrip__page" :style="getPageStyle(index)">
+	<div
+		ref="containerRef"
+		id="longstrip-container"
+		class="reader-longstrip d-flex flex-column align-center"
+	>
+		<template v-for="(loader, index) in reader.state?.loaders ?? []" :key="index">
+			<div
+				class="reader-longstrip__page"
+				:id="`longstrip-page-${index}`"
+				:style="getPageStyle(index)"
+			>
 				<div
-					v-if="loader.error.value"
+					v-if="loader.error"
 					class="reader-longstrip__placeholder d-flex flex-column align-center justify-center gap-2"
 				>
-					<div class="text-error">{{ loader.error.value }}</div>
+					<div class="text-error">{{ loader.error }}</div>
 					<VBtn size="small" @click="loader.load()">Retry</VBtn>
 				</div>
 				<div
-					v-else-if="loader.loading.value || !loader.blobUrl.value"
+					v-else-if="loader.loading || !loader.blobUrl"
 					class="reader-longstrip__placeholder d-flex align-center justify-center"
 				>
 					<VProgressCircular indeterminate size="32" />
 				</div>
-				<img v-else :src="loader.blobUrl.value" class="reader-longstrip__image" />
+				<img v-else :src="loader.blobUrl" class="reader-longstrip__image" />
 			</div>
 		</template>
 	</div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
-import { SetPage, useReaderStore } from './useComicDisplayStore'
-import { getScrollParent } from '@/utils/css'
-import { getLayoutTop } from '@/utils/misc'
+import { useReaderStore } from './useComicDisplayStore'
 
 const reader = useReaderStore()
 const containerRef = ref<HTMLElement | null>(null)
 
 function getPageStyle(index: number) {
-	const page = reader.pages[index]
+	const page = reader.state?.pageDimensions[index]
 	if (!page) return {}
 	const widthPercent = reader.settings.longstripWidth
 	return {
@@ -54,9 +60,7 @@ const updateCurrentPage = useDebounceFn(
 		for (let i = children.length - 1; i >= 0; i--) {
 			const el = children[i]!
 			if (el.offsetTop <= viewportCenter) {
-				if (reader.currentPage !== i) {
-					reader.setCurrentPage(i, SetPage.BACKGROUND)
-				}
+				reader.setPage(i)
 				break
 			}
 		}
@@ -65,48 +69,14 @@ const updateCurrentPage = useDebounceFn(
 	{ maxWait: 150 }
 )
 
-function scrollToPage(index: number, instant: boolean) {
-	if (!containerRef.value) return
-
-	const container = containerRef.value
-	const children = Array.from(container.children) as HTMLElement[]
-	const target = children[index]
-	if (target) {
-		const scrollParent = getScrollParent(container)
-		if (index === reader.pages.length - 1) {
-			// Scroll to bottom for last page
-			;(scrollParent || window).scrollTo({
-				top: document.body.scrollHeight,
-				behavior: instant ? 'instant' : 'smooth',
-			})
-		} else {
-			;(scrollParent || window).scrollTo({
-				top: target.offsetTop - getLayoutTop(),
-				behavior: instant ? 'instant' : 'smooth',
-			})
-		}
-	}
-}
-
 onMounted(() => {
 	window.addEventListener('scroll', updateCurrentPage)
-	reader.setOnScrollToPageFn(scrollToPage)
-
-	scrollToPage(reader.currentPage, true)
+	reader.goToPage()
 })
 
 onUnmounted(() => {
 	window.removeEventListener('scroll', updateCurrentPage)
-	reader.setOnScrollToPageFn(undefined)
 })
-
-watch(
-	() => containerRef.value,
-	newVal => {
-		if (newVal) reader.scrollRef = getScrollParent(newVal)
-	},
-	{ immediate: true }
-)
 </script>
 
 <style scoped>

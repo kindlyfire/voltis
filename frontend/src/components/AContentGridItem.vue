@@ -1,7 +1,15 @@
 <template>
 	<RouterLink :to="to" class="block" :title="title">
-		<VCard class="relative aspect-2/3">
-			<VImg v-if="coverUri" :src="coverUri" :aspect-ratio="2 / 3" cover />
+		<VCard class="relative">
+			<img
+				v-if="coverUri"
+				:src="coverUri"
+				:style="{
+					aspectRatio: '2 / 3',
+					objectFit: 'cover',
+					width: '100%',
+				}"
+			/>
 
 			<span
 				v-if="userData?.status"
@@ -28,6 +36,7 @@ import type { ReadingStatus, UserToContent } from '@/utils/api/types'
 import { computed } from 'vue'
 
 const props = defineProps<{
+	id: string
 	to: string
 	title: string
 	coverUri: string | null

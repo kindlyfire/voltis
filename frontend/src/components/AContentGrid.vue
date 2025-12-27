@@ -11,6 +11,7 @@
 				v-for="item in items"
 				:key="item.id"
 				:to="`/${item.id}`"
+				:id="item.id"
 				:title="item.title"
 				:cover-uri="
 					item.cover_uri ? `${API_URL}/files/cover/${item.id}?v=${item.file_mtime}` : null

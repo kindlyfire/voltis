@@ -11,7 +11,7 @@
 			zIndex: 1010,
 		}"
 	>
-		<div class="pa-4">
+		<div class="pa-4" v-if="reader.state">
 			<div class="d-flex align-center mb-4">
 				<span class="text-h6">Reader</span>
 				<VSpacer />
@@ -26,10 +26,8 @@
 						icon
 						size="small"
 						variant="tonal"
-						:disabled="!reader.prevSibling"
-						@click="
-							reader.prevSibling && reader.goToSibling(reader.prevSibling.id, true)
-						"
+						:disabled="reader.siblings.currentIndex === 0"
+						@click="reader.goToSibling('prev', true)"
 					>
 						<VIcon>mdi-chevron-left</VIcon>
 					</VBtn>
@@ -42,14 +40,14 @@
 						hide-details
 						class="grow"
 						@update:model-value="reader.goToSibling($event)"
-						:loading="reader.qContent.isLoading || reader.qSiblings.isLoading"
+						:loading="reader.state.loading || reader.qSiblings.isLoading"
 					/>
 					<VBtn
 						icon
 						size="small"
 						variant="tonal"
-						:disabled="!reader.nextSibling"
-						@click="reader.nextSibling && reader.goToSibling(reader.nextSibling.id)"
+						:disabled="reader.siblings.currentIndex >= reader.siblings.items.length - 1"
+						@click="reader.goToSibling('next')"
 					>
 						<VIcon>mdi-chevron-right</VIcon>
 					</VBtn>
@@ -62,15 +60,16 @@
 
 			<div class="mb-4">
 				<div class="text-body-2 text-medium-emphasis mb-1">
-					Page {{ reader.currentPage + 1 }} of {{ reader.pages.length }}
+					Page {{ reader.state.page + 1 }} of
+					{{ reader.state.pageDimensions.length }}
 				</div>
 				<VSlider
-					:model-value="reader.currentPage"
+					:model-value="reader.state.page"
 					:min="0"
-					:max="reader.pages.length - 1"
+					:max="Math.max(0, reader.state.pageDimensions.length - 1)"
 					:step="1"
 					hide-details
-					@update:model-value="reader.setCurrentPage($event, SetPage.FOREGROUND)"
+					@update:model-value="reader.goToPage($event)"
 				/>
 			</div>
 
@@ -117,7 +116,7 @@
 
 <script setup lang="ts">
 import { onUnmounted } from 'vue'
-import { SetPage, useReaderStore } from './useComicDisplayStore'
+import { useReaderStore } from './useComicDisplayStore'
 
 const reader = useReaderStore()
 
@@ -133,12 +132,12 @@ const kbShortcuts = [
 let originalPage = null as number | null
 function setLongstripWidth(width: number) {
 	if (originalPage === null) {
-		originalPage = reader.currentPage
+		originalPage = reader.state?.page ?? null
 	}
 	reader.settings.longstripWidth = width
 	requestAnimationFrame(() => {
 		if (originalPage !== null) {
-			reader.setCurrentPage(originalPage, SetPage.INITIAL)
+			reader.goToPage(originalPage, 'instant')
 			originalPage = null
 		}
 	})

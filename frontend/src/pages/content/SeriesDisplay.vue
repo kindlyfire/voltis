@@ -4,26 +4,21 @@
 			backgroundImage: content?.cover_uri
 				? `url(${API_URL}/files/cover/${content.id}?v=${content.file_mtime})`
 				: 'none',
-			backgroundSize: 'cover',
-			backgroundPosition: 'center',
-			filter: 'blur(10px) brightness(0.7)',
-			height: '400px',
-			position: 'absolute',
-			top: '-24px',
-			left: '-24px',
-			right: '-24px',
 		}"
+		class="top-background"
 	></div>
 
 	<VContainer class="relative xl:pt-20!">
 		<div class="d-flex gap-3 md:gap-6 mb-6">
-			<div class="w-[100px] sm:w-[125px] md:w-[200px] shrink-0">
-				<img
-					v-if="content?.cover_uri"
-					:src="`${API_URL}/files/cover/${content.id}`"
-					class="w-full rounded aspect-2/3"
-				/>
-			</div>
+			<VCard>
+				<div class="w-[100px] sm:w-[125px] md:w-[200px] shrink-0">
+					<img
+						v-if="content?.cover_uri"
+						:src="`${API_URL}/files/cover/${content.id}`"
+						class="w-full rounded aspect-2/3"
+					/>
+				</div>
+			</VCard>
 			<div class="space-y-2!">
 				<h1
 					class="text-xl sm:text-2xl md:text-3xl xl:text-5xl font-bold! text-shadow-md/40! text-white!"
@@ -65,3 +60,16 @@ const children = computed(() => {
 	})
 })
 </script>
+
+<style scoped>
+.top-background {
+	background-size: cover;
+	background-position: center;
+	filter: blur(10px) brightness(0.7);
+	height: 400px;
+	position: absolute;
+	top: -24px;
+	left: -24px;
+	right: -24px;
+}
+</style>

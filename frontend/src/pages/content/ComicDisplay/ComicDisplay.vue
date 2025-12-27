@@ -1,54 +1,80 @@
 <template>
-	<ReaderMain
-		:content-id="contentId"
-		:getPageImageUrl="getPageUrl"
-		@reach-start="onReachStart"
-		@reach-end="onReachEnd"
-		@go-to-sibling="goToSibling"
+	<div class="reader-main select-none" @click="controls.handleClick">
+		<ReaderModePaged v-if="reader.settings.mode === 'paged'" />
+		<ReaderModeLongstrip v-else />
+	</div>
+
+	<ReaderSidebar />
+
+	<VProgressLinear
+		:model-value="reader.progress"
+		class="reader-progress"
+		height="3"
+		color="primary"
 	/>
 </template>
 
 <script setup lang="ts">
-import { useRouter } from 'vue-router'
-import { API_URL } from '@/utils/fetch'
-import ReaderMain from './ReaderMain.vue'
+import { watch, onUnmounted } from 'vue'
 import { useReaderStore, type ReaderStore } from './useComicDisplayStore'
+import ReaderModePaged from './ReaderModePaged.vue'
+import ReaderModeLongstrip from './ReaderModeLongstrip.vue'
+import ReaderSidebar from './ReaderSidebar.vue'
+import { useReaderControls } from './useReaderControls'
+import { useRouter } from 'vue-router'
 import { useStaticNavbar } from '@/pages/useLayoutStore'
 
 const props = defineProps<{
 	contentId: string
 }>()
 
-const reader = useReaderStore()
-const router = useRouter()
+const emit = defineEmits<{
+	reachStart: [reader: ReaderStore]
+	reachEnd: [reader: ReaderStore]
+	goToSibling: [id: string, fromEnd?: boolean]
+}>()
 
+const router = useRouter()
+const reader = useReaderStore()
 useStaticNavbar()
 
-function getPageUrl(index: number): string {
-	return `${API_URL}/files/comic-page/${props.contentId}/${index}?v=${reader.content?.file_mtime ?? ''}`
-}
+// Set content when props change
+watch(
+	() => props.contentId,
+	() => {
+		const _page = router.currentRoute.value.query.page
+		const _pageN = parseInt(_page as string)
+		const initialPage = _page === 'last' ? 'last' : isNaN(_pageN) ? 0 : _pageN - 1
 
-function goToSibling(id: string, fromEnd = false) {
-	router.push({
-		name: 'content',
-		params: { id },
-		query: fromEnd ? { page: 'last' } : {},
-	})
-}
+		reader.setContent({
+			contentId: props.contentId,
+			initialPage,
+		})
+	},
+	{ immediate: true }
+)
 
-function onReachStart(reader: ReaderStore) {
-	const s = reader.siblings
-	if (s && s.currentIndex > 0) {
-		const prev = s.items[s.currentIndex - 1]
-		if (prev) goToSibling(prev.id, true)
-	}
-}
+onUnmounted(() => {
+	reader.dispose()
+})
 
-function onReachEnd(reader: ReaderStore) {
-	const s = reader.siblings
-	if (s && s.currentIndex < s.items.length - 1) {
-		const next = s.items[s.currentIndex + 1]
-		if (next) goToSibling(next.id)
-	}
-}
+const controls = useReaderControls()
 </script>
+
+<style scoped>
+.reader-main {
+	position: relative;
+	width: 100%;
+	min-height: calc(100dvh - var(--v-layout-top, 0px));
+}
+
+.reader-progress {
+	position: fixed;
+	bottom: 0 !important;
+	top: auto !important;
+	left: 0;
+	right: 0;
+	z-index: 10000;
+	pointer-events: none;
+}
+</style>

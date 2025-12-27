@@ -12,3 +12,9 @@ export function getLayoutTop() {
 		return 0
 	}
 }
+
+/** Like `Array.at` but without looking backwards for negative indexes */
+export function arrayAtNowrap<T>(arr: T[], index: number): T | undefined {
+	if (index < 0 || index >= arr.length) return undefined
+	return arr[index]
+}

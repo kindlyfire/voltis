@@ -50,14 +50,15 @@ export function createPageLoader(index: number, url: string, signal: AbortSignal
 	return { index, blobUrl, loading, error, load, dispose }
 }
 
-/** Returns page indices in preload order: current, then alternating forward/backward */
+/** Returns page indices in preload order: current, then alternating
+ * forward/backward. Max two pages backwards. */
 export function getPagesInPreloadOrder(pageCount: number, currentPage: number): number[] {
 	const result: number[] = []
 	for (let i = 0; i < pageCount; i++) {
 		const forward = currentPage + i
 		const backward = currentPage - i
 		if (forward < pageCount) result.push(forward)
-		if (backward !== forward && backward >= 0) result.push(backward)
+		if (i <= 2 && backward !== forward && backward >= 0) result.push(backward)
 	}
 	return result
 }

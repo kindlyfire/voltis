@@ -1,4 +1,4 @@
-export interface PageInfo {
+export interface PageDimensions {
 	width: number
 	height: number
 }

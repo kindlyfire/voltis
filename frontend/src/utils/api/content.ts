@@ -14,9 +14,13 @@ export const contentApi = {
 	useGet: (id: MaybeRefOrGetter<string | undefined | null>) =>
 		useQuery({
 			queryKey: ['content', id],
-			queryFn: async () => apiFetch<Content>(`/content/${toValue(id)}`),
+			queryFn: async () => contentApi.get(toValue(id)!),
 			enabled: isEnabled(id),
 		}),
+
+	get: async (id: string) => {
+		return apiFetch<Content>(`/content/${id}`)
+	},
 
 	useList: (
 		params: MaybeRefOrGetter<ContentListParams | undefined> = {},
