@@ -1,6 +1,9 @@
 <template>
 	<VApp>
-		<VAppBar :class="store.staticNavbar ? 'static!' : ''">
+		<VAppBar
+			:flat="store.navbarHidden"
+			:style="store.navbarHidden && { transform: 'translateY(-64px)' }"
+		>
 			<VAppBarNavIcon class="d-md-none" @click="drawer = !drawer" />
 			<VAppBarTitle>Voltis</VAppBarTitle>
 			<VSpacer />
@@ -27,19 +30,15 @@
 			v-model="drawer"
 			:permanent="mdAndUp"
 			:temporary="!mdAndUp"
-			:style="
-				store.staticNavbar && {
-					top: '0',
-					height: '100vh',
-				}
-			"
+			:style="{
+				top: '0',
+				height: '100vh',
+			}"
 		>
-			<template v-if="store.staticNavbar">
-				<div class="h-16 flex items-center ms-5!">
-					<VAppBarTitle>Voltis</VAppBarTitle>
-				</div>
-				<VDivider class="mx-2" />
-			</template>
+			<div class="h-16 flex items-center ms-5!">
+				<VAppBarTitle>Voltis</VAppBarTitle>
+			</div>
+			<VDivider class="mx-2" />
 
 			<VList v-if="isSettings" nav>
 				<VListItem prepend-icon="mdi-arrow-left" @click="router.push('/')">
@@ -79,7 +78,7 @@
 				</VListItem>
 			</VList>
 		</VNavigationDrawer>
-		<VMain :style="store.staticNavbar && { '--v-layout-top': '0px' }" class="relative">
+		<VMain>
 			<RouterView />
 		</VMain>
 	</VApp>

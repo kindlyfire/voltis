@@ -1,12 +1,14 @@
 <template>
-	<div
-		:style="{
-			backgroundImage: content?.cover_uri
-				? `url(${API_URL}/files/cover/${content.id}?v=${content.file_mtime})`
-				: 'none',
-		}"
-		class="top-background"
-	></div>
+	<div class="top-background-wrapper">
+		<div
+			:style="{
+				backgroundImage: content?.cover_uri
+					? `url(${API_URL}/files/cover/${content.id}?v=${content.file_mtime})`
+					: 'none',
+			}"
+			class="top-background"
+		></div>
+	</div>
 
 	<VContainer class="relative xl:pt-20!">
 		<div class="d-flex gap-3 md:gap-6 mb-6">
@@ -62,14 +64,23 @@ const children = computed(() => {
 </script>
 
 <style scoped>
+/* Wrapper needed for the "overflow: hidden", so that the scaleX of the actual
+background doesn't cause the page to widen. */
+.top-background-wrapper {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	height: 450px;
+	overflow: hidden;
+}
+
 .top-background {
 	background-size: cover;
 	background-position: center;
 	filter: blur(10px) brightness(0.7);
 	height: 400px;
-	position: absolute;
-	top: -24px;
-	left: -24px;
-	right: -24px;
+	width: 100%;
+	transform: scaleX(1.1);
 }
 </style>

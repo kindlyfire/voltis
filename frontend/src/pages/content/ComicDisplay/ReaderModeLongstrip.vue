@@ -30,8 +30,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
-import { useDebounceFn } from '@vueuse/core'
+import { ref, onMounted } from 'vue'
+import { useDebounceFn, useEventListener } from '@vueuse/core'
 import { useReaderStore } from './useComicDisplayStore'
 
 const reader = useReaderStore()
@@ -69,13 +69,10 @@ const updateCurrentPage = useDebounceFn(
 	{ maxWait: 150 }
 )
 
-onMounted(() => {
-	window.addEventListener('scroll', updateCurrentPage)
-	reader.goToPage()
-})
+useEventListener(window, 'scroll', updateCurrentPage)
 
-onUnmounted(() => {
-	window.removeEventListener('scroll', updateCurrentPage)
+onMounted(() => {
+	reader.goToPage()
 })
 </script>
 
