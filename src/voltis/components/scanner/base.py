@@ -15,6 +15,7 @@ from voltis.db.models import (
     LeafContentTypes,
     Library,
     LibrarySource,
+    UserToContent,
 )
 from voltis.services.resource_broker import ResourceBroker
 from voltis.utils.cover_cache import delete_content_cover_cached
@@ -147,6 +148,7 @@ class ScannerBase(ABC):
 
             async def _scan_file_wrapper(item: LibraryFile, content: Content | None):
                 async with limiter:
+                    original_uri = content.uri if content else None
                     content = await self.scan_file(item, content)
                     if content is not None:
                         content.file_mtime = item.mtime
@@ -156,6 +158,16 @@ class ScannerBase(ABC):
                             parents_with_updates.add(content.parent_id)
                         async with self.rb.get_asession() as session:
                             session.add(content)
+                            if original_uri and original_uri != content.uri:
+                                # Update all UserToContent entries to point to the new URI
+                                await session.execute(
+                                    update(UserToContent)
+                                    .where(
+                                        UserToContent.library_id == self.library.id,
+                                        UserToContent.uri == original_uri,
+                                    )
+                                    .values(uri=content.uri)
+                                )
                             await session.commit()
 
             async def _scan_series_wrapper(content: Content, items: list[Content]):

@@ -15,7 +15,7 @@ from voltis.db.models import (
     UserToContent,
 )
 from voltis.routes._providers import RbProvider, UserProvider
-from voltis.utils.misc import Unset, UnsetType
+from voltis.utils.misc import Unset, UnsetType, now_without_tz
 
 router = APIRouter()
 
@@ -103,7 +103,9 @@ async def get_content(
             select(Content, UserToContent)
             .outerjoin(
                 UserToContent,
-                (UserToContent.content_id == Content.id) & (UserToContent.user_id == user.id),
+                (UserToContent.library_id == Content.library_id)
+                & (UserToContent.uri == Content.uri)
+                & (UserToContent.user_id == user.id),
             )
             .where(Content.id == content_id)
         )
@@ -134,7 +136,9 @@ async def list_content(
             select(Content, count_subq.c.children_count, UserToContent)
             .outerjoin(
                 UserToContent,
-                (UserToContent.content_id == Content.id) & (UserToContent.user_id == user.id),
+                (UserToContent.library_id == Content.library_id)
+                & (UserToContent.uri == Content.uri)
+                & (UserToContent.user_id == user.id),
             )
             .where(Content.valid == valid)
         )
@@ -168,16 +172,27 @@ async def update_user_data(
         if not content:
             raise HTTPException(status_code=404, detail="Content not found")
 
-        user_to_content = await session.get(UserToContent, (user.id, content_id))
+        result = await session.execute(
+            select(UserToContent).where(
+                (UserToContent.user_id == user.id)
+                & (UserToContent.library_id == content.library_id)
+                & (UserToContent.uri == content.uri)
+            )
+        )
+        user_to_content = result.scalar_one_or_none()
+
         if user_to_content is None:
             user_to_content = UserToContent(
+                id=UserToContent.make_id(),
                 user_id=user.id,
-                content_id=content_id,
+                library_id=content.library_id,
+                uri=content.uri,
             )
             session.add(user_to_content)
 
         if body.status is not Unset:
             user_to_content.status = body.status
+            user_to_content.status_updated_at = now_without_tz()
         if body.notes is not Unset:
             user_to_content.notes = body.notes
         if body.rating is not Unset:

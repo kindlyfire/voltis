@@ -137,7 +137,7 @@ class ComicScanner(ScannerBase):
                 id=Content.make_id(),
                 library_id=self.library.id,
                 uri_part=uri_part,
-                uri=uri_part,
+                uri=f"comic/{uri_part}",
                 type="comic_series",
                 title=name,
                 file_uri=folder_uri,

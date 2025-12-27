@@ -106,7 +106,7 @@ class BookScanner(ScannerBase):
                 id=Content.make_id(),
                 library_id=self.library.id,
                 uri_part=uri_part,
-                uri=uri_part,
+                uri=f"book/{uri_part}",
                 type="book_series",
                 title=series_name,
                 order_parts=[],

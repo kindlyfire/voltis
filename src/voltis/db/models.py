@@ -198,14 +198,18 @@ class ReadingProgress(TypedDict, total=False):
 
 class UserToContent(_Base):
     __tablename__ = "user_to_content"
+    __idprefix__ = "utc"
 
-    user_id: Mapped[str] = col(Text, ForeignKey("users.id"), primary_key=True)
-    content_id: Mapped[str] = col(Text, ForeignKey("content.id"), primary_key=True)
+    id: Mapped[str] = col(Text, primary_key=True)
+    user_id: Mapped[str] = col(Text, ForeignKey("users.id"))
+    library_id: Mapped[str | None] = col(Text, ForeignKey("libraries.id"))
+    uri: Mapped[str] = col(Text)
 
     status: Mapped[ReadingStatus | None] = col(Text)
+    status_updated_at: Mapped[datetime.datetime | None] = col(TIMESTAMP)
     notes: Mapped[str | None] = col(Text)
     rating: Mapped[int | None] = col(Integer)
     progress: Mapped[ReadingProgress] = col("progress", JSONB, server_default="{}")
 
     user: Mapped["User"] = relationship()
-    content: Mapped["Content"] = relationship()
+    library: Mapped["Library | None"] = relationship()
