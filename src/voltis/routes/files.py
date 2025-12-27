@@ -51,7 +51,7 @@ async def get_page(
             raise HTTPException(status_code=404, detail="Content not found")
 
         metadata = content.meta
-        if not metadata or "pages" not in metadata:
+        if not content.file_uri or not metadata or "pages" not in metadata:
             raise HTTPException(status_code=404, detail="Content has no pages")
 
         if page_index < 0 or page_index >= len(metadata["pages"]):
@@ -84,7 +84,7 @@ async def get_book_chapters(
 ) -> list[ChapterResponse]:
     async with rb.get_asession() as session:
         content = await session.get(Content, content_id)
-        if not content:
+        if not content or not content.file_uri:
             raise HTTPException(status_code=404, detail="Content not found")
 
         file_path = Path(content.file_uri)
@@ -111,7 +111,7 @@ async def get_book_chapter(
 ) -> Response:
     async with rb.get_asession() as session:
         content = await session.get(Content, content_id)
-        if not content:
+        if not content or not content.file_uri:
             raise HTTPException(status_code=404, detail="Content not found")
 
         file_path = Path(content.file_uri)
@@ -136,7 +136,7 @@ async def get_book_resource(
     """Serve a resource (image, CSS, etc.) from inside an EPUB file."""
     async with rb.get_asession() as session:
         content = await session.get(Content, content_id)
-        if not content:
+        if not content or not content.file_uri:
             raise HTTPException(status_code=404, detail="Content not found")
 
         file_path = Path(content.file_uri).resolve()

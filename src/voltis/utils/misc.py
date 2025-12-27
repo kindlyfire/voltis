@@ -1,15 +1,18 @@
 import datetime
+from enum import Enum
+from typing import Literal
 
 
 def now_without_tz():
     return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
 
-class UnsetType:
-    pass
+class _Unset(Enum):
+    token = object()
 
 
-Unset = UnsetType()
+Unset = _Unset.token
+UnsetType = Literal[_Unset.token]
 
 
 def notnone[T](value: T | None) -> T:

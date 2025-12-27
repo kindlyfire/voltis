@@ -48,6 +48,27 @@ export interface ScanResult {
 
 export type ContentType = 'comic' | 'comic_series' | 'book' | 'book_series'
 
+export type ReadingStatus = 'reading' | 'completed' | 'on_hold' | 'dropped' | 'plan_to_read'
+
+export interface ReadingProgress {
+	current_page?: number
+	progress_percent?: number
+}
+
+export interface UserToContent {
+	status: ReadingStatus | null
+	notes: string | null
+	rating: number | null
+	progress: ReadingProgress
+}
+
+export interface UserToContentUpdate {
+	status?: ReadingStatus | null
+	notes?: string | null
+	rating?: number | null
+	progress?: ReadingProgress
+}
+
 export interface ContentMetadata {
 	/** [filename, width, height] */
 	pages?: Array<[string, number, number]>
@@ -76,6 +97,7 @@ export interface Content {
 	parent_id: string | null
 	library_id: string
 	children_count: number | null
+	user_data: UserToContent | null
 }
 
 export interface ContentListParams {

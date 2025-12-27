@@ -6,10 +6,12 @@
 		<VProgressCircular indeterminate size="64" />
 	</div>
 	<template v-else>
-		<ComicDisplay v-if="contentType === 'comic'" :contentId="contentId" />
-		<ComicSeriesDisplay v-else-if="contentType === 'comic_series'" :content-id="contentId" />
+		<SeriesDisplay
+			v-if="contentType === 'comic_series' || contentType === 'book_series'"
+			:content-id="contentId"
+		/>
+		<ComicDisplay v-else-if="contentType === 'comic'" :contentId="contentId" />
 		<BookDisplay v-else-if="contentType === 'book'" :content-id="contentId" />
-		<BookSeriesDisplay v-else-if="contentType === 'book_series'" :content-id="contentId" />
 	</template>
 </template>
 
@@ -18,11 +20,10 @@ import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { contentApi } from '@/utils/api/content'
 import ComicDisplay from './ComicDisplay/ComicDisplay.vue'
-import ComicSeriesDisplay from './ComicSeriesDisplay.vue'
 import BookDisplay from './BookDisplay/BookDisplay.vue'
-import BookSeriesDisplay from './BookSeriesDisplay.vue'
 import { useHead } from '@unhead/vue'
 import type { ContentType } from '@/utils/api/types'
+import SeriesDisplay from './SeriesDisplay.vue'
 
 const route = useRoute()
 const contentId = computed(() => route.params.id as string)

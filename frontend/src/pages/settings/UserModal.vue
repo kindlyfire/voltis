@@ -29,9 +29,9 @@
 						>
 							{{ isNew ? 'Create' : 'Update' }}
 						</VBtn>
-						<VBtn variant="text" @click="$emit('update:modelValue', false)"
-							>Cancel</VBtn
-						>
+						<VBtn variant="text" @click="$emit('update:modelValue', false)">
+							Cancel
+						</VBtn>
 						<VSpacer />
 						<VBtn
 							v-if="!isNew"

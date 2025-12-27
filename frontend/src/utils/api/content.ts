@@ -1,7 +1,13 @@
-import { useQuery, type UseQueryOptions } from '@tanstack/vue-query'
+import { useMutation, useQuery, type UseQueryOptions } from '@tanstack/vue-query'
 import { toValue, type MaybeRefOrGetter, type UnwrapRef } from 'vue'
 import { API_URL, apiFetch } from '../fetch'
-import type { BookChapter, Content, ContentListParams } from './types'
+import type {
+	BookChapter,
+	Content,
+	ContentListParams,
+	UserToContent,
+	UserToContentUpdate,
+} from './types'
 import { isEnabled } from './_utils'
 
 export const contentApi = {
@@ -59,5 +65,17 @@ export const contentApi = {
 				return res.text()
 			},
 			enabled: isEnabled([id, href]),
+		}),
+
+	useUpdateUserData: () =>
+		useMutation({
+			mutationFn: (data: UserToContentUpdate & { contentId: string }) =>
+				apiFetch<UserToContent>(`/content/${data.contentId}/user-data`, {
+					method: 'POST',
+					body: JSON.stringify({
+						...data,
+						contentId: undefined,
+					}),
+				}),
 		}),
 }

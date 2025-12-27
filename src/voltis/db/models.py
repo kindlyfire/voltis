@@ -184,3 +184,28 @@ class Content(_Base, _DefaultColumns):
     def mutate_meta(self) -> ContentMetadata:
         meta = self.meta = self.meta or {}
         return meta
+
+
+ReadingStatus = Literal["reading", "completed", "on_hold", "dropped", "plan_to_read"]
+
+
+class ReadingProgress(TypedDict, total=False):
+    current_page: int
+    """Used by the paged comics reader."""
+    progress_percent: float
+    """Used by the longstrip comics reader."""
+
+
+class UserToContent(_Base):
+    __tablename__ = "user_to_content"
+
+    user_id: Mapped[str] = col(Text, ForeignKey("users.id"), primary_key=True)
+    content_id: Mapped[str] = col(Text, ForeignKey("content.id"), primary_key=True)
+
+    status: Mapped[ReadingStatus | None] = col(Text)
+    notes: Mapped[str | None] = col(Text)
+    rating: Mapped[int | None] = col(Integer)
+    progress: Mapped[ReadingProgress] = col("progress", JSONB, server_default="{}")
+
+    user: Mapped["User"] = relationship()
+    content: Mapped["Content"] = relationship()
