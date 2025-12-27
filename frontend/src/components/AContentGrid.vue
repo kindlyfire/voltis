@@ -15,7 +15,12 @@
 				:cover-uri="
 					item.cover_uri ? `${API_URL}/files/cover/${item.id}?v=${item.file_mtime}` : null
 				"
-				:children-count="item.type === 'book_series' ? item.children_count : null"
+				:children-count="
+					item.type === 'book_series' || item.type === 'comic_series'
+						? item.children_count
+						: null
+				"
+				:user-data="item.user_data ?? null"
 			/>
 		</template>
 	</div>
