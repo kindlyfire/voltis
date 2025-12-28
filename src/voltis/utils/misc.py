@@ -2,6 +2,8 @@ import datetime
 from enum import Enum
 from typing import Literal
 
+from pydantic import BaseModel
+
 
 def now_without_tz():
     return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
@@ -20,3 +22,8 @@ def notnone[T](value: T | None) -> T:
     if value is None:
         raise ValueError("Expected value to be not None")
     return value
+
+
+class PaginatedResponse[T](BaseModel):
+    data: list[T]
+    total: int

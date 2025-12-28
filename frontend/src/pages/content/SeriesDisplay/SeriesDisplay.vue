@@ -47,6 +47,7 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import AContentGrid from '@/components/AContentGrid.vue'
 import { contentApi } from '@/utils/api/content'
 import { API_URL } from '@/utils/fetch'
@@ -62,8 +63,12 @@ const props = defineProps<{
 const qContent = contentApi.useGet(() => props.contentId)
 const content = qContent.data
 
-const qChildren = contentApi.useList(() => ({ parent_id: props.contentId, sort: true }))
-const children = qChildren.data
+const qChildren = contentApi.useList(() => ({
+	parent_id: props.contentId,
+	sort: 'order',
+	sort_order: 'asc',
+}))
+const children = computed(() => qChildren.data.value?.data)
 </script>
 
 <style scoped>

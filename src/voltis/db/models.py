@@ -193,7 +193,7 @@ class ReadingProgress(TypedDict, total=False):
     current_page: int
     """Used by the paged comics reader."""
     progress_percent: float
-    """Used by the longstrip comics reader."""
+    """Not currently used. Maybe by the ebook reader in the future."""
 
 
 class UserToContent(_Base):
@@ -210,6 +210,7 @@ class UserToContent(_Base):
     notes: Mapped[str | None] = col(Text)
     rating: Mapped[int | None] = col(Integer)
     progress: Mapped[ReadingProgress] = col("progress", JSONB, server_default="{}")
+    progress_updated_at: Mapped[datetime.datetime | None] = col(TIMESTAMP)
 
     user: Mapped["User"] = relationship()
     library: Mapped["Library | None"] = relationship()

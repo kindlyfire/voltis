@@ -1,9 +1,9 @@
 import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import func, select, tuple_, update
+from sqlalchemy import func, select, tuple_, update, asc, desc
 from sqlalchemy.orm import aliased
 
 from voltis.db.models import (
@@ -15,24 +15,28 @@ from voltis.db.models import (
     UserToContent,
 )
 from voltis.routes._providers import RbProvider, UserProvider
-from voltis.utils.misc import Unset, UnsetType, now_without_tz
+from voltis.utils.misc import PaginatedResponse, Unset, UnsetType, now_without_tz
 
 router = APIRouter()
 
 
 class UserToContentDTO(BaseModel):
     status: ReadingStatus | None
+    status_updated_at: datetime.datetime | None
     notes: str | None
     rating: int | None
     progress: ReadingProgress
+    progress_updated_at: datetime.datetime | None
 
     @classmethod
     def from_model(cls, model: UserToContent) -> "UserToContentDTO":
         return cls(
             status=model.status,
+            status_updated_at=model.status_updated_at,
             notes=model.notes,
             rating=model.rating,
             progress=model.progress,
+            progress_updated_at=model.progress_updated_at,
         )
 
 
@@ -124,7 +128,12 @@ async def list_content(
     library_id: Annotated[str | None, Query()] = None,
     type: Annotated[list[ContentType] | None, Query()] = None,
     valid: Annotated[bool, Query()] = True,
-) -> list[ContentDTO]:
+    reading_status: Annotated[ReadingStatus | None, Query()] = None,
+    limit: Annotated[int | None, Query(gt=0)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    sort: Annotated[Literal["order", "created_at", "progress_updated_at"] | None, Query()] = None,
+    sort_order: Annotated[Literal["asc", "desc"], Query()] = "desc",
+) -> PaginatedResponse[ContentDTO]:
     async with rb.get_asession() as session:
         ChildContent = aliased(Content)
         count_subq = (
@@ -132,7 +141,7 @@ async def list_content(
             .where(ChildContent.parent_id == Content.id)
             .lateral()
         )
-        query = (
+        base_query = (
             select(Content, count_subq.c.children_count, UserToContent)
             .outerjoin(
                 UserToContent,
@@ -145,19 +154,42 @@ async def list_content(
 
         if parent_id is not None:
             if parent_id == "null":
-                query = query.where(Content.parent_id.is_(None))
+                base_query = base_query.where(Content.parent_id.is_(None))
             else:
-                query = query.where(Content.parent_id == parent_id)
+                base_query = base_query.where(Content.parent_id == parent_id)
         if library_id is not None:
-            query = query.where(Content.library_id == library_id)
+            base_query = base_query.where(Content.library_id == library_id)
         if type:
-            query = query.where(Content.type.in_(type))
+            base_query = base_query.where(Content.type.in_(type))
+        if reading_status is not None:
+            base_query = base_query.where(UserToContent.status == reading_status)
 
-        result = await session.execute(query)
-        return [
-            ContentDTO.from_model(row[0], children_count=row[1], user_to_content=row[2])
-            for row in result.all()
-        ]
+        sorting = desc if sort_order == "desc" else asc
+        data_query = base_query
+        if sort == "progress_updated_at":
+            data_query = data_query.where(
+                UserToContent.user_id.is_not(None), UserToContent.progress_updated_at.is_not(None)
+            ).order_by(sorting(UserToContent.progress_updated_at))
+        elif sort == "created_at":
+            data_query = data_query.order_by(sorting(Content.created_at))
+        elif sort == "order":
+            data_query = data_query.order_by(sorting(Content.order))
+
+        if offset:
+            data_query = data_query.offset(offset)
+        if limit:
+            data_query = data_query.limit(limit)
+
+        total_r = await session.execute(select(func.count()).select_from(base_query.subquery()))
+        data_r = await session.execute(data_query)
+
+        return PaginatedResponse(
+            data=[
+                ContentDTO.from_model(row[0], children_count=row[1], user_to_content=row[2])
+                for row in data_r.all()
+            ],
+            total=total_r.scalar_one(),
+        )
 
 
 @router.post("/{content_id}/user-data")
@@ -199,6 +231,7 @@ async def update_user_data(
             user_to_content.rating = body.rating
         if body.progress is not Unset:
             user_to_content.progress = body.progress
+            user_to_content.progress_updated_at = now_without_tz() if body.progress else None
 
         await session.commit()
         await session.refresh(user_to_content)

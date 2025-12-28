@@ -5,6 +5,7 @@ import type {
 	BookChapter,
 	Content,
 	ContentListParams,
+	Paginated,
 	UserToContent,
 	UserToContentUpdate,
 } from './types'
@@ -24,7 +25,7 @@ export const contentApi = {
 
 	useList: (
 		params: MaybeRefOrGetter<ContentListParams | undefined> = {},
-		options?: Omit<UnwrapRef<UseQueryOptions<Content[]>>, 'queryKey' | 'queryFn'>
+		options?: Omit<UnwrapRef<UseQueryOptions<Paginated<Content>>>, 'queryKey' | 'queryFn'>
 	) =>
 		useQuery({
 			queryKey: ['content', 'list', params],
@@ -39,16 +40,14 @@ export const contentApi = {
 					}
 				}
 				if (p.valid !== undefined) searchParams.append('valid', String(p.valid))
+				if (p.reading_status) searchParams.append('reading_status', p.reading_status)
+				if (p.limit !== undefined) searchParams.append('limit', String(p.limit))
+				if (p.offset !== undefined) searchParams.append('offset', String(p.offset))
+				if (p.sort) searchParams.append('sort', p.sort)
+				if (p.sort_order) searchParams.append('sort_order', p.sort_order)
 
 				const query = searchParams.toString()
-				const items = await apiFetch<Content[]>(`/content${query ? `?${query}` : ''}`)
-				if (p.sort) {
-					return items.sort((a, b) => {
-						return (a.order || 0) - (b.order || 0)
-					})
-				} else {
-					return items
-				}
+				return apiFetch<Paginated<Content>>(`/content${query ? `?${query}` : ''}`)
 			},
 			enabled: isEnabled(params),
 			...options,

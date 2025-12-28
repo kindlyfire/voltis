@@ -25,10 +25,14 @@ const showResetModal = ref(false)
 
 const router = useRouter()
 const qContent = contentApi.useGet(() => props.contentId)
-const qChildren = contentApi.useList(() => ({ parent_id: props.contentId, sort: true }))
+const qChildren = contentApi.useList(() => ({
+	parent_id: props.contentId,
+	sort: 'order',
+	sort_order: 'asc',
+}))
 
 const nextStatus = computed(() => {
-	const children = qChildren.data.value ?? []
+	const children = qChildren.data.value?.data ?? []
 	if (!children.length || !qChildren.data.value) return null
 
 	const firstUnread = children.findIndex(child => {
@@ -54,7 +58,7 @@ function onClick() {
 		return
 	}
 
-	const firstUnread = qChildren.data.value!.find(child => {
+	const firstUnread = qChildren.data.value!.data.find(child => {
 		return child.user_data?.status !== 'completed'
 	})
 	if (!firstUnread) return

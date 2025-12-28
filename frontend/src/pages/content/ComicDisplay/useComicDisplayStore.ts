@@ -44,22 +44,21 @@ export const useReaderStore = defineStore('reader', () => {
 
 	const qSiblings = contentApi.useList(
 		() => {
-			if (content.value?.parent_id) return { parent_id: content.value.parent_id }
+			if (content.value?.parent_id)
+				return { parent_id: content.value.parent_id, sort: 'order', sort_order: 'asc' }
 		},
 		{
 			placeholderData: keepPreviousData,
 		}
 	)
 	const siblings = computed<SiblingsInfo>(() => {
-		const siblings = qSiblings.data.value
+		const siblings = qSiblings.data.value?.data
 		if ((content.value && !content.value?.parent_id) || !siblings)
 			return {
 				items: [],
 				currentIndex: 0,
 			}
-		const items = [...siblings]
-			.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-			.map(c => ({ id: c.id, title: c.title, order: c.order }))
+		const items = siblings.map(c => ({ id: c.id, title: c.title, order: c.order }))
 		const currentIndex = items.findIndex(item => item.id === state.value?.contentId)
 		return {
 			items,

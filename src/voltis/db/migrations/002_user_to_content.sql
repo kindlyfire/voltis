@@ -8,5 +8,6 @@ CREATE TABLE user_to_content (
     notes TEXT,
     rating INTEGER,
     progress JSONB NOT NULL DEFAULT '{}',
+    progress_updated_at TIMESTAMP,
     UNIQUE (user_id, library_id, uri)
 );

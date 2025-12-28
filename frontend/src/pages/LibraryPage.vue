@@ -1,7 +1,10 @@
 <template>
 	<VContainer>
 		<h1 class="text-h4 mb-4">{{ library?.name }}</h1>
-		<AContentGrid :items="qContents.data.value ?? []" :loading="qContents.isLoading.value" />
+		<AContentGrid
+			:items="qContents.data.value?.data ?? []"
+			:loading="qContents.isLoading.value"
+		/>
 	</VContainer>
 </template>
 

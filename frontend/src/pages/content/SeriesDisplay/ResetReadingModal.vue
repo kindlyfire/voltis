@@ -51,14 +51,18 @@ const emit = defineEmits<{
 }>()
 
 const router = useRouter()
-const qChildren = contentApi.useList(() => ({ parent_id: props.contentId, sort: true }))
+const qChildren = contentApi.useList(() => ({
+	parent_id: props.contentId,
+	sort: 'order',
+	sort_order: 'asc',
+}))
 
 const mResetReading = useMutation({
 	mutationFn: async () => {
 		await contentApi.resetSeriesProgress(props.contentId)
 		await contentApi.updateUserData(props.contentId, { status: 'reading' })
 
-		const firstChild = qChildren.data.value?.[0]
+		const firstChild = qChildren.data.value?.data[0]
 		if (firstChild) {
 			router.push('/' + firstChild.id)
 		}

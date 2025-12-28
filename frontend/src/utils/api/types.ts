@@ -100,12 +100,21 @@ export interface Content {
 	user_data: UserToContent | null
 }
 
+export interface Paginated<T> {
+	data: T[]
+	total: number
+}
+
 export interface ContentListParams {
 	parent_id?: string
 	library_id?: string
 	type?: ContentType[]
 	valid?: boolean
-	sort?: boolean
+	reading_status?: ReadingStatus
+	limit?: number
+	offset?: number
+	sort?: 'order' | 'created_at' | 'progress_updated_at'
+	sort_order?: 'asc' | 'desc'
 }
 
 export interface BookChapter {
