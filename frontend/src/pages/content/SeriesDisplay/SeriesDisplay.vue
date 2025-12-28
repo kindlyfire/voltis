@@ -37,6 +37,7 @@
 					<ReadingStatusButton :content-id="contentId" />
 					<ContinueReadingButton :content-id="contentId" />
 				</div>
+				<RatingButton :content-id="contentId" />
 			</div>
 		</div>
 
@@ -50,6 +51,7 @@ import { contentApi } from '@/utils/api/content'
 import { API_URL } from '@/utils/fetch'
 import ReadingStatusButton from './ReadingStatusButton.vue'
 import ContinueReadingButton from './ContinueReadingButton.vue'
+import RatingButton from './RatingButton.vue'
 
 const props = defineProps<{
 	contentId: string

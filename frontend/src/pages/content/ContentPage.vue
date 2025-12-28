@@ -23,7 +23,7 @@ import ComicDisplay from './ComicDisplay/ComicDisplay.vue'
 import BookDisplay from './BookDisplay/BookDisplay.vue'
 import { useHead } from '@unhead/vue'
 import type { ContentType } from '@/utils/api/types'
-import SeriesDisplay from './SeriesDisplay.vue'
+import SeriesDisplay from './SeriesDisplay/SeriesDisplay.vue'
 
 const route = useRoute()
 const contentId = computed(() => route.params.id as string)
