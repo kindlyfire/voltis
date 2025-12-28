@@ -5,7 +5,9 @@
 			:style="store.navbarHidden && { transform: 'translateY(-64px)' }"
 		>
 			<VAppBarNavIcon class="d-md-none" @click="drawer = !drawer" />
-			<VAppBarTitle>Voltis</VAppBarTitle>
+			<VAppBarTitle>
+				<RouterLink to="/">Voltis</RouterLink>
+			</VAppBarTitle>
 			<VSpacer />
 			<VMenu v-if="qMe.data?.value">
 				<template #activator="{ props }">
@@ -36,7 +38,9 @@
 			}"
 		>
 			<div class="h-16 flex items-center ms-5!">
-				<VAppBarTitle>Voltis</VAppBarTitle>
+				<VAppBarTitle>
+					<RouterLink to="/">Voltis</RouterLink>
+				</VAppBarTitle>
 			</div>
 			<VDivider class="mx-2" />
 

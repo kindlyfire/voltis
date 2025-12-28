@@ -27,7 +27,7 @@
 			</span>
 		</VCard>
 
-		<div class="text-body-2 pt-2">{{ title }}</div>
+		<div class="text-body-2 pt-2 line-clamp-2">{{ title }}</div>
 	</RouterLink>
 </template>
 
