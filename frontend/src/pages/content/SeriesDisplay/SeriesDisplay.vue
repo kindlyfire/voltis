@@ -36,6 +36,7 @@
 				<div class="flex gap-3 flex-col sm:flex-row mt-4 w-full">
 					<ReadingStatusButton :content-id="contentId" />
 					<ContinueReadingButton :content-id="contentId" />
+					<OptionsButton :content-id="contentId" />
 				</div>
 				<RatingButton :content-id="contentId" />
 			</div>
@@ -52,6 +53,7 @@ import { API_URL } from '@/utils/fetch'
 import ReadingStatusButton from './ReadingStatusButton.vue'
 import ContinueReadingButton from './ContinueReadingButton.vue'
 import RatingButton from './RatingButton.vue'
+import OptionsButton from './OptionsButton.vue'
 
 const props = defineProps<{
 	contentId: string
