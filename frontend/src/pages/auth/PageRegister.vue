@@ -1,33 +1,49 @@
 <template>
-	<VContainer class="fill-height" fluid>
+	<VContainer>
 		<VRow justify="center">
 			<VCol cols="12" sm="8" md="4">
 				<VCard>
 					<VCardTitle class="text-h5">Register</VCardTitle>
 					<VCardText>
-						<VForm @submit="onSubmit" class="space-y-4!">
-							<AInput :input="getInputProps('username')" label="Username" autofocus />
-							<AInput
-								:input="getInputProps('password')"
-								label="Password"
-								type="password"
-							/>
-							<AInput
-								:input="getInputProps('confirmPassword')"
-								label="Confirm Password"
-								type="password"
-							/>
-							<AMutationError :mutation="mutation" />
-							<VBtn
-								type="submit"
-								color="primary"
-								block
-								:loading="mutation.isPending.value"
-								class="mt-4"
-							>
-								Register
-							</VBtn>
-						</VForm>
+						<div
+							v-if="infoQuery.isLoading.value"
+							class="flex items-center justify-center my-4"
+						>
+							<VProgressCircular indeterminate size="64" />
+						</div>
+						<div v-else-if="registrationsEnabled">
+							<VForm @submit="onSubmit" class="space-y-4!">
+								<AInput
+									:input="getInputProps('username')"
+									label="Username"
+									autofocus
+								/>
+								<AInput
+									:input="getInputProps('password')"
+									label="Password"
+									type="password"
+								/>
+								<AInput
+									:input="getInputProps('confirmPassword')"
+									label="Confirm Password"
+									type="password"
+								/>
+								<AMutationError :mutation="mutation" />
+								<VBtn
+									type="submit"
+									color="primary"
+									block
+									:loading="mutation.isPending.value"
+									class="mt-4"
+								>
+									Register
+								</VBtn>
+							</VForm>
+						</div>
+						<div v-else class="text-body-2">
+							Registrations are currently disabled. Please contact an administrator
+							for access.
+						</div>
 					</VCardText>
 					<VCardActions>
 						<VSpacer />
@@ -40,9 +56,11 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { z } from 'zod'
 import { useForm } from '@/utils/forms'
 import { authApi } from '@/utils/api/auth'
+import { miscApi } from '@/utils/api/misc'
 import AInput from '@/components/AInput.vue'
 import AMutationError from '@/components/AMutationError.vue'
 import { useRouter } from 'vue-router'
@@ -58,6 +76,9 @@ const register = authApi.useRegister()
 const router = useRouter()
 const queryClient = useQueryClient()
 useAlreadyLoggedInRedirect()
+
+const infoQuery = miscApi.useInfo()
+const registrationsEnabled = computed(() => infoQuery.data.value?.registration_enabled ?? false)
 
 const schema = z
 	.object({

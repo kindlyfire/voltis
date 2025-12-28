@@ -1,7 +1,11 @@
+from importlib.metadata import PackageNotFoundError, version as pkg_version
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from pydantic import BaseModel
 
+from voltis.services.settings import settings
 from voltis.services.resource_broker import ResourceBroker
 
 from .auth import router as auth_router
@@ -11,6 +15,16 @@ from .files import router as files_router
 from .libraries import router as libraries_router
 from .static import router as static_router
 from .users import router as users_router
+
+try:
+    APP_VERSION = pkg_version("voltis")
+except PackageNotFoundError:
+    APP_VERSION = "dev"
+
+
+class InfoDTO(BaseModel):
+    version: str
+    registration_enabled: bool
 
 
 def create_app(rb: ResourceBroker):
@@ -32,6 +46,11 @@ def create_app(rb: ResourceBroker):
     app.include_router(users_router, prefix="/api/users")
     app.include_router(libraries_router, prefix="/api/libraries")
     app.include_router(collections_router, prefix="/api/collections")
+
+    @app.get("/api/info")
+    async def get_info() -> InfoDTO:
+        return InfoDTO(version=APP_VERSION, registration_enabled=settings.REGISTRATION_ENABLED)
+
     app.include_router(static_router)
 
     return app

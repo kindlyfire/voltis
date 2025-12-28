@@ -55,12 +55,14 @@ export function useForm<TSchema extends z.ZodTypeAny, TMutationReturn>(
 		return reactive({
 			modelValue: computed(() => getByPath(state.values as any, name)),
 			'onUpdate:modelValue': (value: any) => {
+				state.touched.add(name)
 				setByPath(state.values as any, name, value)
 				if (errors.value.length) validatePath(name)
 			},
 			onBlur: () => {
-				state.touched.add(name)
-				validatePath(name)
+				if (state.touched.has(name)) {
+					validatePath(name)
+				}
 			},
 			errors,
 			isTouched,
