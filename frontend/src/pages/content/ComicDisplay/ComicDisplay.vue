@@ -44,8 +44,11 @@ watch(
 	() => {
 		const _page = router.currentRoute.value.query.page
 		const _pageN = parseInt(_page as string)
-		const initialPage = _page === 'last' ? 'last' : isNaN(_pageN) ? 0 : _pageN - 1
-
+		const initialPage = ['last', 'resume'].includes(_page as string)
+			? (_page as 'last' | 'resume')
+			: isNaN(_pageN)
+				? 0
+				: _pageN - 1
 		reader.setContent({
 			contentId: props.contentId,
 			initialPage,

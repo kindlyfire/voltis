@@ -30,7 +30,7 @@ function parseComicSettings(v: unknown): ComicSettings {
 
 export interface ReaderContentOptions {
 	contentId: string
-	initialPage: number | 'last'
+	initialPage: number | 'last' | 'resume'
 }
 
 export const useReaderStore = defineStore('reader', () => {
@@ -74,6 +74,7 @@ export const useReaderStore = defineStore('reader', () => {
 	})
 
 	function dispose() {
+		sidebarOpen.value = false
 		const s = state.value
 		if (s) {
 			s.dispose()
@@ -94,11 +95,19 @@ export const useReaderStore = defineStore('reader', () => {
 						goToPage(state.value!.page, 'instant')
 					})
 				}
+
+				// This is to replace "last" or "resume" in the URL with the
+				// actual page number
+				const page = state.value!.page
+				router.replace({ query: page === 0 ? {} : { page: page + 1 } })
 			},
 		})
 	}
 
 	function setPage(page: number) {
+		if (page === state.value?.page) {
+			return
+		}
 		router.replace({ query: page === 0 ? {} : { page: page + 1 } })
 		state.value?.setPage(page)
 	}

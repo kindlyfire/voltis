@@ -10,7 +10,7 @@
 			<AContentGridItem
 				v-for="item in items"
 				:key="item.id"
-				:to="`/${item.id}`"
+				:to="`/${item.id}?page=resume`"
 				:id="item.id"
 				:title="item.title"
 				:cover-uri="

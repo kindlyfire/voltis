@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, select, tuple_, update
 from sqlalchemy.orm import aliased
 
 from voltis.db.models import (
@@ -203,3 +203,33 @@ async def update_user_data(
         await session.commit()
         await session.refresh(user_to_content)
         return UserToContentDTO.from_model(user_to_content)
+
+
+@router.post("/{content_id}/reset-series-progress")
+async def reset_series_progress(
+    rb: RbProvider,
+    user: UserProvider,
+    content_id: str,
+) -> None:
+    async with rb.get_asession() as session:
+        content = await session.get(Content, content_id)
+        if not content:
+            raise HTTPException(status_code=404, detail="Content not found")
+
+        children = await session.execute(
+            select(Content.library_id, Content.uri).where(Content.parent_id == content_id)
+        )
+        child_keys = [(row.library_id, row.uri) for row in children.all()]
+
+        if not child_keys:
+            return
+
+        await session.execute(
+            update(UserToContent)
+            .where(
+                (UserToContent.user_id == user.id)
+                & tuple_(UserToContent.library_id, UserToContent.uri).in_(child_keys)
+            )
+            .values(status=None, progress={})
+        )
+        await session.commit()

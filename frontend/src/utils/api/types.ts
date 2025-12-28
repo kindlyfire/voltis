@@ -105,6 +105,7 @@ export interface ContentListParams {
 	library_id?: string
 	type?: ContentType[]
 	valid?: boolean
+	sort?: boolean
 }
 
 export interface BookChapter {

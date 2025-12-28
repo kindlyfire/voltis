@@ -9,7 +9,7 @@
 		hide-details
 		clearable
 		@update:model-value="updateStatus"
-		class="mt-4 max-w-60"
+		class="sm:max-w-60 grow!"
 	/>
 </template>
 

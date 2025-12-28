@@ -41,7 +41,14 @@ export const contentApi = {
 				if (p.valid !== undefined) searchParams.append('valid', String(p.valid))
 
 				const query = searchParams.toString()
-				return apiFetch<Content[]>(`/content${query ? `?${query}` : ''}`)
+				const items = await apiFetch<Content[]>(`/content${query ? `?${query}` : ''}`)
+				if (p.sort) {
+					return items.sort((a, b) => {
+						return (a.order || 0) - (b.order || 0)
+					})
+				} else {
+					return items
+				}
 			},
 			enabled: isEnabled(params),
 			...options,
@@ -74,12 +81,22 @@ export const contentApi = {
 	useUpdateUserData: () =>
 		useMutation({
 			mutationFn: (data: UserToContentUpdate & { contentId: string }) =>
-				apiFetch<UserToContent>(`/content/${data.contentId}/user-data`, {
-					method: 'POST',
-					body: JSON.stringify({
-						...data,
-						contentId: undefined,
-					}),
-				}),
+				contentApi.updateUserData(data.contentId, data),
 		}),
+
+	updateUserData: async (
+		contentId: string,
+		data: UserToContentUpdate
+	): Promise<UserToContent> => {
+		return apiFetch<UserToContent>(`/content/${contentId}/user-data`, {
+			method: 'POST',
+			body: JSON.stringify(data),
+		})
+	},
+
+	resetSeriesProgress: async (contentId: string): Promise<void> => {
+		await apiFetch(`/content/${contentId}/reset-series-progress`, {
+			method: 'POST',
+		})
+	},
 }
