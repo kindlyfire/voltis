@@ -11,8 +11,8 @@
 			zIndex: 1010,
 		}"
 	>
-		<div class="pa-4" v-if="reader.state">
-			<div class="d-flex align-center mb-4">
+		<div class="pa-4 space-y-4!" v-if="reader.state">
+			<div class="d-flex align-center">
 				<span class="text-h6">Reader</span>
 				<VSpacer />
 				<VBtn icon variant="text" @click="reader.sidebarOpen = false">
@@ -20,7 +20,19 @@
 				</VBtn>
 			</div>
 
-			<div v-if="reader.siblings" class="mb-4">
+			<div v-if="parentId" class="flex items-center justify-center">
+				<VSkeletonLoader v-if="parent.isLoading.value" width="80%" height="1.5rem" />
+				<template v-else-if="parent.data.value">
+					<RouterLink
+						:to="`/${parentId}`"
+						class="font-weight-medium text-blue-400 hover:underline"
+					>
+						{{ parent.data.value.title }}
+					</RouterLink>
+				</template>
+			</div>
+
+			<div v-if="reader.siblings">
 				<div class="d-flex align-center gap-2 mb-2">
 					<VBtn
 						icon
@@ -58,7 +70,7 @@
 				</div>
 			</div>
 
-			<div class="mb-4">
+			<div>
 				<div class="text-body-2 text-medium-emphasis mb-1">
 					Page {{ reader.state.page + 1 }} of
 					{{ reader.state.pageDimensions.length }}
@@ -73,7 +85,7 @@
 				/>
 			</div>
 
-			<div class="mb-4">
+			<div>
 				<div class="text-body-2 text-medium-emphasis mb-2">Mode</div>
 				<VBtnToggle
 					v-model="reader.settings.mode"
@@ -87,7 +99,7 @@
 				</VBtnToggle>
 			</div>
 
-			<div v-if="reader.settings.mode === 'longstrip'" class="mb-4">
+			<div v-if="reader.settings.mode === 'longstrip'">
 				<div class="text-body-2 text-medium-emphasis mb-1">
 					Width: {{ reader.settings.longstripWidth }}%
 				</div>
@@ -115,8 +127,9 @@
 </template>
 
 <script setup lang="ts">
-import { onUnmounted } from 'vue'
+import { computed, onUnmounted } from 'vue'
 import { useReaderStore } from './useComicDisplayStore'
+import { contentApi } from '@/utils/api/content'
 
 const reader = useReaderStore()
 
@@ -126,6 +139,9 @@ const kbShortcuts = [
 	['Comma', 'Previous Entry'],
 	['Period', 'Next Entry'],
 ]
+
+const parentId = computed(() => reader.state?.content?.parent_id)
+const parent = contentApi.useGet(parentId)
 
 // Changing the width will change the scroll position, which means it changes
 // the page. We do this keep the position stable.
