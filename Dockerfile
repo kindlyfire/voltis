@@ -22,6 +22,8 @@ RUN uv sync --frozen --no-dev
 
 COPY --from=frontend /app/frontend/dist /app/frontend/dist
 
+RUN echo -e '#!/bin/sh\nexec uv run --no-sync voltis "$@"' > ./voltis && chmod +x ./voltis
+
 ENV PATH="/app/.venv/bin:$PATH"
 LABEL org.opencontainers.image.source=https://github.com/kindlyfire/voltis
 

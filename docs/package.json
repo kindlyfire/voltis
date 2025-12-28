@@ -1,0 +1,28 @@
+{
+	"name": "docs",
+	"version": "1.0.0",
+	"description": "",
+	"type": "module",
+	"scripts": {
+		"dev": "vitepress dev",
+		"build": "vitepress build",
+		"preview": "vitepress preview"
+	},
+	"keywords": [],
+	"author": "",
+	"license": "ISC",
+	"packageManager": "pnpm@10.6.5",
+	"devDependencies": {
+		"vitepress": "2.0.0-alpha.15"
+	},
+	"prettier": {
+		"printWidth": 100,
+		"singleQuote": true,
+		"semi": false,
+		"useTabs": true,
+		"tabWidth": 4,
+		"arrowParens": "avoid",
+		"endOfLine": "lf",
+		"trailingComma": "es5"
+	}
+}

@@ -14,3 +14,5 @@ frontend/.env
 .env
 .claude
 .vscode
+
+docs
