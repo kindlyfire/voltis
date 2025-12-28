@@ -39,13 +39,16 @@
 							variant="text"
 							size="small"
 							@click="((scanLibraryIds = [library.id]), (scanModalOpen = true))"
+							title="Scan library"
 						/>
 						<VBtn
 							icon="mdi-pencil"
 							variant="text"
 							size="small"
 							@click="selectedLibraryId = library.id"
+							title="Edit library"
 						/>
+						<CopyIdButton :id="library.id" />
 					</td>
 				</tr>
 			</tbody>
@@ -71,6 +74,7 @@ import { ref } from 'vue'
 import { librariesApi } from '@/utils/api/libraries'
 import LibraryModal from './LibraryModal.vue'
 import ScanModal from './ScanModal.vue'
+import CopyIdButton from './CopyIdButton.vue'
 import { useHead } from '@unhead/vue'
 
 useHead({
