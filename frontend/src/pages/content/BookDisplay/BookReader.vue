@@ -23,9 +23,11 @@
 			<div v-if="store.qChapterContent.isLoading" class="d-flex justify-center py-8">
 				<VProgressCircular indeterminate />
 			</div>
-			<VAlert v-else-if="store.qChapterContent.error" type="error" class="ma-4">
-				{{ store.qChapterContent.error.message }}
-			</VAlert>
+			<AQueryError
+				v-else-if="store.qChapterContent.error"
+				:query="store.qChapterContent"
+				class="ma-4"
+			/>
 			<div v-else ref="chapterContainer" class="book-chapter-container" />
 
 			<div v-if="nextChapter">
@@ -45,6 +47,7 @@ import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { renderChapter } from './renderChapterHtml'
 import { useBookDisplayStore } from './useBookDisplayStore'
+import AQueryError from '@/components/AQueryError.vue'
 
 const router = useRouter()
 const chapterContainer = ref<HTMLDivElement>()

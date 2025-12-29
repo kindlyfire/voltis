@@ -1,8 +1,6 @@
 <template>
 	<VContainer>
-		<VAlert v-if="qList.error.value" type="error" class="mb-4">
-			{{ qList.error.value?.message }}
-		</VAlert>
+		<AQueryError :query="qList" class="mb-4" />
 
 		<div v-if="!list" class="flex items-center justify-center py-16">
 			<VProgressCircular indeterminate size="64" />
@@ -108,6 +106,7 @@ import { useRoute, RouterLink } from 'vue-router'
 import { useHead } from '@unhead/vue'
 import { customListsApi } from '@/utils/api/custom-lists'
 import CopyIdButton from '@/pages/settings/CopyIdButton.vue'
+import AQueryError from '@/components/AQueryError.vue'
 
 const route = useRoute()
 const listId = computed(() => route.params.id as string)

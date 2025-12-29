@@ -1,6 +1,6 @@
 <template>
 	<VContainer v-if="qContent.error.value">
-		<VAlert type="error">{{ qContent.error.value?.message }}</VAlert>
+		<AQueryError :query="qContent" />
 	</VContainer>
 	<div v-else-if="!contentType" class="absolute inset-0 flex items-center justify-center">
 		<VProgressCircular indeterminate size="64" />
@@ -24,6 +24,7 @@ import BookDisplay from './BookDisplay/BookDisplay.vue'
 import { useHead } from '@unhead/vue'
 import type { ContentType } from '@/utils/api/types'
 import SeriesDisplay from './SeriesDisplay/SeriesDisplay.vue'
+import AQueryError from '@/components/AQueryError.vue'
 
 const route = useRoute()
 const contentId = computed(() => route.params.id as string)

@@ -38,10 +38,8 @@
 
 				<!-- Results -->
 				<template v-else>
-					<VAlert v-if="scan.isError.value" type="error" class="mb-4">
-						{{ scan.error.value?.message || 'An error occurred during scanning' }}
-					</VAlert>
-					<div v-else class="space-y-2!">
+					<AQueryError :mutation="scan" />
+					<div v-if="scan.isSuccess.value" class="space-y-2!">
 						<div
 							v-for="result in scan.data.value"
 							:key="result.library_id"
@@ -66,6 +64,7 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import { librariesApi } from '@/utils/api/libraries'
+import AQueryError from '@/components/AQueryError.vue'
 
 const props = defineProps<{
 	libraryIds: string[]

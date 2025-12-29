@@ -12,7 +12,7 @@
 								label="Password"
 								type="password"
 							/>
-							<AMutationError :mutation="mutation" />
+							<AQueryError :mutation="mutation" />
 							<VBtn
 								type="submit"
 								color="primary"
@@ -39,7 +39,7 @@ import { z } from 'zod'
 import { useForm } from '@/utils/forms'
 import { authApi } from '@/utils/api/auth'
 import AInput from '@/components/AInput.vue'
-import AMutationError from '@/components/AMutationError.vue'
+import AQueryError from '@/components/AQueryError.vue'
 import { useRouter } from 'vue-router'
 import { useHead } from '@unhead/vue'
 import { useQueryClient } from '@tanstack/vue-query'

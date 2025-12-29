@@ -1,7 +1,7 @@
 import { contentApi } from '@/utils/api/content'
 import { useLocalStorage } from '@/utils/localStorage'
 import { acceptHMRUpdate, defineStore } from 'pinia'
-import { computed, readonly, ref } from 'vue'
+import { computed, markRaw, readonly, ref } from 'vue'
 
 interface BookDisplaySettings {
 	showHidden: Array<{
@@ -81,11 +81,11 @@ export const useBookDisplayStore = defineStore('book-display', () => {
 		settings,
 		contentId: readonly(contentId),
 		chapterHref: readonly(chapterHref),
-		qChapters,
+		qChapters: markRaw(qChapters),
 		chapters: qChapters.data,
-		qContent,
+		qContent: markRaw(qContent),
 		content: qContent.data,
-		qChapterContent,
+		qChapterContent: markRaw(qChapterContent),
 		chapterContent: qChapterContent.data,
 		setContentId,
 		setChapterHref,

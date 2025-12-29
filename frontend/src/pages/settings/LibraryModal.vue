@@ -49,7 +49,7 @@
 							</VBtn>
 						</div>
 					</div>
-					<AMutationError :mutation="form.mutation" />
+					<AQueryError :mutation="form.mutation" />
 					<div class="flex gap-2">
 						<VBtn
 							type="submit"
@@ -82,7 +82,7 @@ import { z } from 'zod'
 import { useForm } from '@/utils/forms'
 import { librariesApi } from '@/utils/api/libraries'
 import AInput from '@/components/AInput.vue'
-import AMutationError from '@/components/AMutationError.vue'
+import AQueryError from '@/components/AQueryError.vue'
 
 const props = defineProps<{
 	libraryId: string | null

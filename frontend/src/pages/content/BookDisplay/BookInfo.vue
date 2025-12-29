@@ -62,9 +62,7 @@
 		<div v-else-if="store.qChapters.isLoading" class="d-flex justify-center py-8">
 			<VProgressCircular indeterminate />
 		</div>
-		<VAlert v-else-if="store.qChapters.error" type="error">
-			{{ store.qChapters.error.message }}
-		</VAlert>
+		<AQueryError v-else-if="store.qChapters.error" :query="store.qChapters" />
 		<VCheckbox
 			v-if="store.hasHiddenChapters"
 			:model-value="store.showHiddenChapters"
@@ -81,6 +79,7 @@
 import { computed, ref } from 'vue'
 import { API_URL } from '@/utils/fetch'
 import { useBookDisplayStore } from './useBookDisplayStore'
+import AQueryError from '@/components/AQueryError.vue'
 
 const store = useBookDisplayStore()
 const MAX_DESC_LENGTH = 400

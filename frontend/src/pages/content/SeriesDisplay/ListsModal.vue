@@ -6,13 +6,9 @@
 	>
 		<VCard>
 			<VCardTitle>Add to list</VCardTitle>
-			<VCardText>
-				<VAlert v-if="qLists.error.value" type="error" class="mb-4">
-					{{ qLists.error.value?.message }}
-				</VAlert>
-				<VAlert v-if="qInLists.error.value" type="error" class="mb-4">
-					{{ qInLists.error.value?.message }}
-				</VAlert>
+			<VCardText class="space-y-4!">
+				<AQueryError :query="qLists" />
+				<AQueryError :query="qInLists" />
 
 				<div
 					v-if="qLists.isLoading.value || qInLists.isLoading.value"
@@ -21,7 +17,7 @@
 					<VProgressCircular indeterminate />
 				</div>
 
-				<VList v-else>
+				<VList v-else-if="qLists.isSuccess.value && qInLists.isSuccess.value">
 					<VListItem
 						v-for="list in qLists.data?.value ?? []"
 						:key="list.id"
@@ -48,9 +44,7 @@
 					</div>
 				</VList>
 
-				<VAlert v-if="errorMessage" type="error" class="mt-4">
-					{{ errorMessage }}
-				</VAlert>
+				<AQueryError :mutation="mToggle" />
 			</VCardText>
 			<VCardActions>
 				<VSpacer />
@@ -62,9 +56,10 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useQueryClient } from '@tanstack/vue-query'
+import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import { customListsApi } from '@/utils/api/custom-lists'
 import { contentApi } from '@/utils/api/content'
+import AQueryError from '@/components/AQueryError.vue'
 
 const props = defineProps<{
 	modelValue: boolean
@@ -86,13 +81,9 @@ const mCreateEntry = customListsApi.useCreateEntry()
 const mDeleteEntry = customListsApi.useDeleteEntry()
 
 const pendingListIds = ref(new Set<string>())
-const errorMessage = ref<string | null>(null)
 
-async function toggleList(listId: string) {
-	errorMessage.value = null
-	pendingListIds.value.add(listId)
-
-	try {
+const mToggle = useMutation({
+	mutationFn: async (listId: string) => {
 		if (!inListIds.value.has(listId)) {
 			await mCreateEntry.mutateAsync({ listId, content_id: props.contentId })
 		} else {
@@ -104,11 +95,16 @@ async function toggleList(listId: string) {
 			await mDeleteEntry.mutateAsync({ listId, entryId: entry.id })
 		}
 
-		queryClient.invalidateQueries({ queryKey: ['content', 'lists', props.contentId] })
-		queryClient.invalidateQueries({ queryKey: ['custom-lists'] })
-		queryClient.invalidateQueries({ queryKey: ['custom-lists', listId] })
-	} catch (err) {
-		errorMessage.value = err instanceof Error ? err.message : String(err)
+		await queryClient.invalidateQueries({ queryKey: ['content', 'lists', props.contentId] })
+		await queryClient.invalidateQueries({ queryKey: ['custom-lists'] })
+		await queryClient.invalidateQueries({ queryKey: ['custom-lists', listId] })
+	},
+})
+
+async function toggleList(listId: string) {
+	pendingListIds.value.add(listId)
+	try {
+		await mToggle.mutateAsync(listId)
 	} finally {
 		pendingListIds.value.delete(listId)
 	}

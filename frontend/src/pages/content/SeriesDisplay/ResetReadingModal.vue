@@ -10,9 +10,7 @@
 			<VCardTitle>You've completed this series</VCardTitle>
 			<VCardText>
 				<div>Do you want to start again? This will mark all chapters as unread.</div>
-				<VAlert v-if="mResetReading.error.value" type="error" class="mt-4">
-					{{ mResetReading.error.value }}
-				</VAlert>
+				<AQueryError :mutation="mResetReading" class="mt-4" />
 			</VCardText>
 
 			<VCardActions>
@@ -40,6 +38,7 @@
 import { contentApi } from '@/utils/api/content'
 import { useMutation } from '@tanstack/vue-query'
 import { useRouter } from 'vue-router'
+import AQueryError from '@/components/AQueryError.vue'
 
 const props = defineProps<{
 	modelValue: boolean

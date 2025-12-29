@@ -7,7 +7,7 @@
 			<VCardText>
 				<VForm @submit="detailsForm.onSubmit">
 					<AInput :input="detailsForm.getInputProps('username')" label="Username" />
-					<AMutationError :mutation="detailsForm.mutation" />
+					<AQueryError :mutation="detailsForm.mutation" />
 					<VBtn
 						type="submit"
 						color="primary"
@@ -29,7 +29,7 @@
 						label="New Password"
 						type="password"
 					/>
-					<AMutationError :mutation="passwordForm.mutation" />
+					<AQueryError :mutation="passwordForm.mutation" />
 					<VBtn
 						type="submit"
 						color="primary"
@@ -50,7 +50,7 @@ import { watch } from 'vue'
 import { useForm } from '@/utils/forms'
 import { usersApi } from '@/utils/api/users'
 import AInput from '@/components/AInput.vue'
-import AMutationError from '@/components/AMutationError.vue'
+import AQueryError from '@/components/AQueryError.vue'
 import { useHead } from '@unhead/vue'
 
 useHead({
