@@ -146,10 +146,12 @@ def _parse_volume_number(name: str) -> int | float | None:
     """
     Parse volume number from a name.
 
-    Supports formats: #01, v01, v.01, vol.1, v1.5
+    Supports formats: #01, v01, v.01, vol.1, v1.5, volume 1 (any prefix of "volume",
+    with optional leading/trailing dot and spaces).
     """
-    if match := re.search(r"(?:#|v\.?|vol\.)\s*(\d+(?:\.\d+)?)", name, re.IGNORECASE):
-        num = match.group(1)
+    volume_pattern = r"(?:\#|(?:v|vo|vol|volu|volum|volume)\.?)\s*(?P<num>\d+(?:\.\d+)?)"
+    if match := re.search(volume_pattern, name, re.IGNORECASE):
+        num = match.group("num")
         return float(num) if "." in num else int(num)
 
 
@@ -157,10 +159,12 @@ def _parse_chapter_number(name: str) -> int | float | None:
     """
     Parse chapter number from a name.
 
-    Supports formats: c01, ch01, ch.01, chap.01, ch1.5
+    Supports formats: c01, ch01, ch.01, chap.01, ch1.5, chapter 1 (any prefix of
+    "chapter" with optional trailing dot and spaces).
     """
-    if match := re.search(r"(?:c|ch|chap)\.?\s*(\d+(?:\.\d+)?)", name, re.IGNORECASE):
-        num = match.group(1)
+    chapter_pattern = r"(?:c|ch|chap|chapt|chapte|chapter)\.?\s*(?P<num>\d+(?:\.\d+)?)"
+    if match := re.search(chapter_pattern, name, re.IGNORECASE):
+        num = match.group("num")
         return float(num) if "." in num else int(num)
 
 
