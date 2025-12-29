@@ -7,29 +7,13 @@
 		</template>
 
 		<template v-else>
-			<AContentGridItem
-				v-for="item in items"
-				:key="item.id"
-				:to="`/${item.id}?page=resume`"
-				:id="item.id"
-				:title="item.title"
-				:cover-uri="
-					item.cover_uri ? `${API_URL}/files/cover/${item.id}?v=${item.file_mtime}` : null
-				"
-				:children-count="
-					item.type === 'book_series' || item.type === 'comic_series'
-						? item.children_count
-						: null
-				"
-				:user-data="item.user_data ?? null"
-			/>
+			<AContentGridItem v-for="item in items" :key="item.id" :content="item" />
 		</template>
 	</div>
 </template>
 
 <script setup lang="ts">
 import type { Content } from '@/utils/api/types'
-import { API_URL } from '@/utils/fetch'
 import { LIBRARY_GRID_CLASSES } from '@/utils/misc'
 import AContentGridItemSkeleton from './AContentGridItemSkeleton.vue'
 import AContentGridItem from './AContentGridItem.vue'

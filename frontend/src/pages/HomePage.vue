@@ -10,22 +10,7 @@
 					</template>
 					<template v-else>
 						<ACarouselItem v-for="item in lastRead" :key="item.id">
-							<AContentGridItem
-								:to="`/${item.id}?page=resume`"
-								:id="item.id"
-								:title="item.title"
-								:cover-uri="
-									item.cover_uri
-										? `${API_URL}/files/cover/${item.id}?v=${item.file_mtime}`
-										: null
-								"
-								:children-count="
-									item.type === 'book_series' || item.type === 'comic_series'
-										? item.children_count
-										: null
-								"
-								:user-data="item.user_data ?? null"
-							/>
+							<AContentGridItem :content="item" />
 						</ACarouselItem>
 					</template>
 				</ACarousel>
@@ -40,22 +25,7 @@
 					</template>
 					<template v-else>
 						<ACarouselItem v-for="item in newest?.data ?? []" :key="item.id">
-							<AContentGridItem
-								:to="`/${item.id}?page=resume`"
-								:id="item.id"
-								:title="item.title"
-								:cover-uri="
-									item.cover_uri
-										? `${API_URL}/files/cover/${item.id}?v=${item.file_mtime}`
-										: null
-								"
-								:children-count="
-									item.type === 'book_series' || item.type === 'comic_series'
-										? item.children_count
-										: null
-								"
-								:user-data="item.user_data ?? null"
-							/>
+							<AContentGridItem :content="item" />
 						</ACarouselItem>
 					</template>
 				</ACarousel>
@@ -72,7 +42,6 @@ import ACarouselItem from '@/components/ACarouselItem.vue'
 import AContentGridItem from '@/components/AContentGridItem.vue'
 import AContentGridItemSkeleton from '@/components/AContentGridItemSkeleton.vue'
 import { contentApi } from '@/utils/api/content'
-import { API_URL } from '@/utils/fetch'
 
 useHead({
 	title: 'Home',

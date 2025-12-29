@@ -44,7 +44,9 @@ export const librariesApi = {
 				if (opts?.ids?.length) params.set('id', opts.ids.join(','))
 				if (opts?.force) params.set('force', 'true')
 				const qs = params.toString()
-				return apiFetch<ScanResult[]>(`/libraries/scan${qs ? `?${qs}` : ''}`, { method: 'POST' })
+				return apiFetch<ScanResult[]>(`/libraries/scan${qs ? `?${qs}` : ''}`, {
+					method: 'POST',
+				})
 			},
 			onSuccess: () => {
 				queryClient.invalidateQueries({ queryKey: ['libraries'] })

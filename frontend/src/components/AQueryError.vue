@@ -1,11 +1,5 @@
 <template>
-	<VAlert
-		v-if="hasError"
-		type="error"
-		variant="tonal"
-		class="text-sm!"
-		:closable="closable"
-	>
+	<VAlert v-if="hasError" type="error" variant="tonal" class="text-sm!" :closable="closable">
 		{{ errorMessage }}
 	</VAlert>
 </template>

@@ -1,9 +1,8 @@
 <template>
-	<RouterLink :to="to" class="block" :title="title">
+	<RouterLink :to="to" class="block" :title="content.title">
 		<VCard class="relative">
 			<img
-				v-if="coverUri"
-				:src="coverUri"
+				:src="coverUri ?? ''"
 				:style="{
 					aspectRatio: '2 / 3',
 					objectFit: 'cover',
@@ -12,9 +11,9 @@
 			/>
 
 			<span
-				v-if="userData?.status"
+				v-if="content.user_data?.status"
 				class="absolute top-2 left-2 bg-black/70 text-white p-1 rounded-full aspect-square w-[18px] flex items-center justify-center"
-				:title="`Status: ${STATUS_TITLES[userData.status]}`"
+				:title="`Status: ${STATUS_TITLES[content.user_data.status]}`"
 			>
 				<VIcon :icon="statusIcon" size="12" />
 			</span>
@@ -27,21 +26,18 @@
 			</span>
 		</VCard>
 
-		<div class="text-body-2 pt-2 line-clamp-2">{{ title }}</div>
+		<div class="text-body-2 pt-2 line-clamp-2">{{ content.title }}</div>
 	</RouterLink>
 </template>
 
 <script setup lang="ts">
-import type { ReadingStatus, UserToContent } from '@/utils/api/types'
+import type { Content, ReadingStatus } from '@/utils/api/types'
 import { computed } from 'vue'
+import { API_URL } from '@/utils/fetch'
 
 const props = defineProps<{
-	id: string
-	to: string
-	title: string
-	coverUri: string | null
-	childrenCount?: number | null
-	userData?: UserToContent | null
+	content: Content
+	to?: string
 }>()
 
 const STATUS_ICONS: Record<ReadingStatus, string> = {
@@ -60,8 +56,21 @@ const STATUS_TITLES: Record<ReadingStatus, string> = {
 	plan_to_read: 'Plan to Read',
 }
 
+const to = computed(() => props.to ?? `/${props.content.id}?page=resume`)
+
+const coverUri = computed(() => {
+	if (!props.content.cover_uri) return null
+	return `${API_URL}/files/cover/${props.content.id}?v=${props.content.file_mtime}`
+})
+
+const childrenCount = computed(() => {
+	return props.content.type === 'book_series' || props.content.type === 'comic_series'
+		? props.content.children_count
+		: null
+})
+
 const statusIcon = computed(() => {
-	if (!props.userData?.status) return
-	return STATUS_ICONS[props.userData.status]
+	if (!props.content.user_data?.status) return
+	return STATUS_ICONS[props.content.user_data.status]
 })
 </script>
