@@ -1,3 +1,4 @@
+import datetime
 import pathlib
 import re
 import zipfile
@@ -127,7 +128,6 @@ class ComicScanner(ScannerBase):
 
                 if not files_in_old_folder:
                     series.file_uri = folder_uri
-                    await self._update_series(series)
 
                 self._resolved_parents[series_folder] = series
                 return series
@@ -145,29 +145,12 @@ class ComicScanner(ScannerBase):
                 created_at=now_without_tz(),
                 updated_at=now_without_tz(),
             )
-            await self._update_series(series)
+            async with self.rb.get_asession() as session:
+                session.add(series)
+                await session.commit()
+            self.series.append(series)
             self._resolved_parents[series_folder] = series
             return series
-
-    async def _update_series(self, series: Content):
-        if not self.no_fs:
-            await self._scan_series_cover(series, Path(notnone(series.file_uri)))
-
-        async with self.rb.get_asession() as session:
-            series.updated_at = now_without_tz()
-            session.add(series)
-            await session.commit()
-
-        if series not in self.series:
-            self.series.append(series)
-
-    async def _scan_series_cover(self, series: Content, folder: Path) -> None:
-        """Scan a comic series folder for a cover image."""
-        for cover_name in COVER_NAMES:
-            cover_path = folder / cover_name
-            if await cover_path.is_file():
-                series.cover_uri = cover_path.as_posix()
-                return
 
     def _scan_comic(self, content: Content) -> None:
         """Scan a comic file (.cbz) for pages and cover."""
@@ -183,6 +166,24 @@ class ComicScanner(ScannerBase):
                 content.cover_uri = f"{content.file_uri}/{pages[0][0]}"
         except (zipfile.BadZipFile, OSError):
             content.valid = False
+
+    async def _scan_series_cover(self, series: Content, folder: Path) -> None:
+        """Scan a comic series folder for a cover image."""
+        for cover_name in COVER_NAMES:
+            cover_path = folder / cover_name
+            if await cover_path.is_file():
+                series.cover_uri = cover_path.as_posix()
+                stat = await cover_path.stat()
+                series.file_mtime = datetime.datetime.fromtimestamp(stat.st_mtime)
+                return
+
+    async def scan_series(self, content, items):
+        content.cover_uri = None
+        content.file_mtime = None
+        await self._scan_series_cover(content, Path(notnone(content.file_uri)))
+        if not content.cover_uri and items:
+            content.cover_uri = items[0].cover_uri
+            content.file_mtime = items[0].file_mtime
 
 
 def _parse_volume_number(name: str) -> int | float | None:

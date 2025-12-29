@@ -154,6 +154,9 @@ class BookScanner(ScannerBase):
             content.valid = False
 
     async def scan_series(self, content, items):
+        content.cover_uri = None
+        content.file_mtime = None
         if items:
             content.file_uri = items[0].file_uri
             content.cover_uri = items[0].cover_uri
+            content.file_mtime = items[0].file_mtime
