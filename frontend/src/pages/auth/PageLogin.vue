@@ -1,37 +1,37 @@
 <template>
-	<VContainer>
-		<VRow justify="center">
-			<VCol cols="12" sm="8" md="4">
-				<VCard>
-					<VCardTitle class="text-h5">Login</VCardTitle>
-					<VCardText>
-						<VForm @submit="onSubmit" class="space-y-4!">
-							<AInput :input="getInputProps('username')" label="Username" autofocus />
-							<AInput
-								:input="getInputProps('password')"
-								label="Password"
-								type="password"
-							/>
-							<AQueryError :mutation="mutation" />
-							<VBtn
-								type="submit"
-								color="primary"
-								block
-								:loading="mutation.isPending.value"
-								class="mt-4"
-							>
-								Login
-							</VBtn>
-						</VForm>
-					</VCardText>
-					<VCardActions>
-						<VSpacer />
-						<RouterLink to="/auth/register">Don't have an account?</RouterLink>
-					</VCardActions>
-				</VCard>
-			</VCol>
-		</VRow>
-	</VContainer>
+    <VContainer>
+        <VRow justify="center">
+            <VCol cols="12" sm="8" md="4">
+                <VCard>
+                    <VCardTitle class="text-h5">Login</VCardTitle>
+                    <VCardText>
+                        <VForm @submit="onSubmit" class="space-y-4!">
+                            <AInput :input="getInputProps('username')" label="Username" autofocus />
+                            <AInput
+                                :input="getInputProps('password')"
+                                label="Password"
+                                type="password"
+                            />
+                            <AQueryError :mutation="mutation" />
+                            <VBtn
+                                type="submit"
+                                color="primary"
+                                block
+                                :loading="mutation.isPending.value"
+                                class="mt-4"
+                            >
+                                Login
+                            </VBtn>
+                        </VForm>
+                    </VCardText>
+                    <VCardActions>
+                        <VSpacer />
+                        <RouterLink to="/auth/register">Don't have an account?</RouterLink>
+                    </VCardActions>
+                </VCard>
+            </VCol>
+        </VRow>
+    </VContainer>
 </template>
 
 <script setup lang="ts">
@@ -47,7 +47,7 @@ import { usersApi } from '@/utils/api/users'
 import { watch } from 'vue'
 
 useHead({
-	title: 'Login',
+    title: 'Login',
 })
 
 const login = authApi.useLogin()
@@ -56,41 +56,41 @@ const queryClient = useQueryClient()
 useAlreadyLoggedInRedirect()
 
 const schema = z.object({
-	username: z.string().min(1),
-	password: z.string().min(1),
+    username: z.string().min(1),
+    password: z.string().min(1),
 })
 
 const { getInputProps, onSubmit, mutation } = useForm({
-	schema,
-	initialValues: {
-		username: '',
-		password: '',
-	},
-	onSubmit: async values => {
-		await login.mutateAsync({
-			username: values.username,
-			password: values.password,
-		})
-		await queryClient.refetchQueries({
-			queryKey: ['users', 'me'],
-		})
-		router.push('/')
-	},
+    schema,
+    initialValues: {
+        username: '',
+        password: '',
+    },
+    onSubmit: async values => {
+        await login.mutateAsync({
+            username: values.username,
+            password: values.password,
+        })
+        await queryClient.refetchQueries({
+            queryKey: ['users', 'me'],
+        })
+        router.push('/')
+    },
 })
 </script>
 
 <script lang="ts">
 export function useAlreadyLoggedInRedirect() {
-	const router = useRouter()
-	const qMe = usersApi.useMe()
-	watch(
-		() => qMe.data.value,
-		me => {
-			if (me) {
-				router.push('/')
-			}
-		},
-		{ immediate: true }
-	)
+    const router = useRouter()
+    const qMe = usersApi.useMe()
+    watch(
+        () => qMe.data.value,
+        me => {
+            if (me) {
+                router.push('/')
+            }
+        },
+        { immediate: true }
+    )
 }
 </script>

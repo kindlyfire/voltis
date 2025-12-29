@@ -17,14 +17,14 @@ const app = createApp(App)
 app.use(createPinia())
 app.use(router)
 app.use(
-	createVuetify({
-		components,
-		theme: {
-			defaultTheme: window.matchMedia('(prefers-color-scheme: dark)').matches
-				? 'dark'
-				: 'light',
-		},
-	})
+    createVuetify({
+        components,
+        theme: {
+            defaultTheme: window.matchMedia('(prefers-color-scheme: dark)').matches
+                ? 'dark'
+                : 'light',
+        },
+    })
 )
 app.use(VueQueryPlugin)
 app.use(createHead())

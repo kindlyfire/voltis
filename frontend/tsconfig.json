@@ -1,12 +1,12 @@
 {
-	"extends": "@vue/tsconfig/tsconfig.dom.json",
-	"include": ["env.d.ts", "src/**/*", "src/**/*.vue", "vite.config.*"],
-	"exclude": ["src/**/__tests__/*"],
-	"compilerOptions": {
-		"paths": {
-			"@/*": ["./src/*"]
-		},
-		"types": ["node"],
-		"lib": ["ESNext", "DOM", "DOM.Iterable"]
-	}
+    "extends": "@vue/tsconfig/tsconfig.dom.json",
+    "include": ["env.d.ts", "src/**/*", "src/**/*.vue", "vite.config.*"],
+    "exclude": ["src/**/__tests__/*"],
+    "compilerOptions": {
+        "paths": {
+            "@/*": ["./src/*"]
+        },
+        "types": ["node"],
+        "lib": ["ESNext", "DOM", "DOM.Iterable"]
+    }
 }

@@ -4,19 +4,19 @@ import { apiFetch } from '../fetch'
 import { isEnabled } from './_utils'
 
 export interface Info {
-	version: string
-	registration_enabled: boolean
+    version: string
+    registration_enabled: boolean
 }
 
 export const miscApi = {
-	useInfo: (enabled: MaybeRefOrGetter<boolean> = true) =>
-		useQuery({
-			queryKey: ['misc', 'info'],
-			queryFn: () => miscApi.info(),
-			enabled: isEnabled(enabled),
-		}),
+    useInfo: (enabled: MaybeRefOrGetter<boolean> = true) =>
+        useQuery({
+            queryKey: ['misc', 'info'],
+            queryFn: () => miscApi.info(),
+            enabled: isEnabled(enabled),
+        }),
 
-	info: async (): Promise<Info> => {
-		return apiFetch<Info>('/info')
-	},
+    info: async (): Promise<Info> => {
+        return apiFetch<Info>('/info')
+    },
 }
