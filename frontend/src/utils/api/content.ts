@@ -83,6 +83,17 @@ export const contentApi = {
 			enabled: isEnabled([id, href]),
 		}),
 
+	useLists: (id: MaybeRefOrGetter<string | undefined | null>) =>
+		useQuery({
+			queryKey: ['content', 'lists', id],
+			queryFn: async () => contentApi.lists(toValue(id)!),
+			enabled: isEnabled(id),
+		}),
+
+	lists: async (contentId: string) => {
+		return apiFetch<string[]>(`/content/${contentId}/lists`)
+	},
+
 	useUpdateUserData: () =>
 		useMutation({
 			mutationFn: (data: UserToContentUpdate & { contentId: string }) =>

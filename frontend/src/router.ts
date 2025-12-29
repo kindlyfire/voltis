@@ -8,6 +8,8 @@ import ContentPage from './pages/content/ContentPage.vue'
 import SettingsAccountPage from './pages/settings/AccountPage.vue'
 import SettingsUsersPage from './pages/settings/UsersPage.vue'
 import SettingsLibrariesPage from './pages/settings/LibrariesPage.vue'
+import ListsPage from './pages/lists/ListsPage.vue'
+import ListPage from './pages/lists/ListPage.vue'
 
 const router = createRouter({
 	history: createWebHistory(import.meta.env.BASE_URL),
@@ -30,6 +32,16 @@ const router = createRouter({
 					path: '/:id(c_[^/]+)',
 					name: 'content',
 					component: ContentPage,
+				},
+				{
+					path: '/lists',
+					name: 'lists',
+					component: ListsPage,
+				},
+				{
+					path: '/:id(cl_[^/]+)',
+					name: 'list',
+					component: ListPage,
 				},
 				{
 					path: '/settings/account',

@@ -66,6 +66,9 @@
 				<VListItem to="/" exact prepend-icon="mdi-home">
 					<VListItemTitle>Home</VListItemTitle>
 				</VListItem>
+				<VListItem to="/lists" exact prepend-icon="mdi-format-list-bulleted">
+					<VListItemTitle>Lists</VListItemTitle>
+				</VListItem>
 				<VDivider class="my-2" />
 				<VListSubheader>Libraries</VListSubheader>
 				<VListItem

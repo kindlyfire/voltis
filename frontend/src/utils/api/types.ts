@@ -123,3 +123,55 @@ export interface BookChapter {
 	title: string | null
 	linear: boolean
 }
+
+export type CustomListVisibility = 'public' | 'private' | 'unlisted'
+
+export interface CustomList {
+	id: string
+	created_at: string
+	updated_at: string
+	name: string
+	description: string | null
+	visibility: CustomListVisibility
+	user_id: string
+	entry_count: number | null
+}
+
+export interface CustomListEntry {
+	id: string
+	created_at: string
+	updated_at: string
+	library_id: string
+	uri: string
+	content_id: string | null
+	notes: string | null
+	order: number | null
+}
+
+export interface CustomListDetail extends CustomList {
+	entries: CustomListEntry[]
+}
+
+export interface CustomListUpsert {
+	name: string
+	description?: string | null
+	visibility: CustomListVisibility
+}
+
+export interface CustomListEntryCreate {
+	content_id: string
+	notes?: string | null
+}
+
+export interface CustomListEntryUpdate {
+	notes?: string | null
+	order?: number | null
+}
+
+export interface CustomListReorderRequest {
+	ctc_ids: string[]
+}
+
+export interface OkResponse {
+	success: boolean
+}
