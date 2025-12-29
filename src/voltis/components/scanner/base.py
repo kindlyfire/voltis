@@ -27,6 +27,10 @@ from voltis.utils.time import LogTime, log_time
 logger = structlog.stdlib.get_logger()
 
 
+class LibrarySourceMissing(Exception):
+    pass
+
+
 @dataclass(slots=True)
 class LibraryFile:
     uri: str
@@ -316,6 +320,9 @@ class ScannerBase(ABC):
                     stat = await item.stat()
                     mtime = datetime.datetime.fromtimestamp(stat.st_mtime)
                     files.append(LibraryFile(uri=item.as_posix(), mtime=mtime, size=stat.st_size))
+
+        if not await path.is_dir():
+            raise LibrarySourceMissing(f"Source path does not exist: {path}")
 
         async with create_task_group() as tg:
             async for item in path.glob("**/*"):
