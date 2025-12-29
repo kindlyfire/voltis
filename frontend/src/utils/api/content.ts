@@ -11,12 +11,18 @@ import type {
 } from './types'
 import { isEnabled } from './_utils'
 
+type QueryOptions<T> = Omit<UnwrapRef<UseQueryOptions<T>>, 'queryKey' | 'queryFn'>
+
 export const contentApi = {
-	useGet: (id: MaybeRefOrGetter<string | undefined | null>) =>
+	useGet: (
+		id: MaybeRefOrGetter<string | undefined | null>,
+		options: QueryOptions<Content> = {}
+	) =>
 		useQuery({
 			queryKey: ['content', id],
 			queryFn: async () => contentApi.get(toValue(id)!),
 			enabled: isEnabled(id),
+			...options,
 		}),
 
 	get: async (id: string) => {
@@ -25,7 +31,7 @@ export const contentApi = {
 
 	useList: (
 		params: MaybeRefOrGetter<ContentListParams | undefined> = {},
-		options?: Omit<UnwrapRef<UseQueryOptions<Paginated<Content>>>, 'queryKey' | 'queryFn'>
+		options: QueryOptions<Paginated<Content>> = {}
 	) =>
 		useQuery({
 			queryKey: ['content', 'list', params],

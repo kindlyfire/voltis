@@ -1,6 +1,6 @@
 <template>
 	<div class="reader-main select-none" @click="controls.handleClick">
-		<ReaderModePaged v-if="reader.settings.mode === 'paged'" />
+		<ReaderModePaged v-if="reader.mode === 'paged'" />
 		<ReaderModeLongstrip v-else />
 	</div>
 
@@ -16,7 +16,7 @@
 
 <script setup lang="ts">
 import { watch, onUnmounted } from 'vue'
-import { useReaderStore, type ReaderStore } from './useComicDisplayStore'
+import { useReaderStore } from './useComicDisplayStore'
 import ReaderModePaged from './ReaderModePaged.vue'
 import ReaderModeLongstrip from './ReaderModeLongstrip.vue'
 import ReaderSidebar from './ReaderSidebar.vue'
@@ -26,12 +26,6 @@ import { useNavbarScrollHide } from '@/pages/useLayoutStore'
 
 const props = defineProps<{
 	contentId: string
-}>()
-
-const emit = defineEmits<{
-	reachStart: [reader: ReaderStore]
-	reachEnd: [reader: ReaderStore]
-	goToSibling: [id: string, fromEnd?: boolean]
 }>()
 
 const router = useRouter()

@@ -20,14 +20,14 @@
 				</VBtn>
 			</div>
 
-			<div v-if="parentId" class="flex items-center justify-center">
-				<VSkeletonLoader v-if="parent.isLoading.value" width="80%" height="1.5rem" />
-				<template v-else-if="parent.data.value">
+			<div class="flex items-center justify-center">
+				<VSkeletonLoader v-if="!parent" width="80%" height="1.5rem" />
+				<template v-else>
 					<RouterLink
-						:to="`/${parentId}`"
+						:to="`/${parent.id}`"
 						class="font-weight-medium text-blue-400 hover:underline"
 					>
-						{{ parent.data.value.title }}
+						{{ parent.title }}
 					</RouterLink>
 				</template>
 			</div>
@@ -88,18 +88,25 @@
 			<div>
 				<div class="text-body-2 text-medium-emphasis mb-2">Mode</div>
 				<VBtnToggle
-					v-model="reader.settings.mode"
+					:model-value="(reader.seriesSettings.mode ?? 'null') as ReaderMode | 'null'"
+					@update:model-value="reader.setMode($event == 'null' ? null : $event)"
 					mandatory
 					variant="outlined"
 					divided
 					class="w-full"
 				>
-					<VBtn value="paged" class="flex-1">Single Page</VBtn>
+					<VBtn value="paged" class="flex-1">Paged</VBtn>
 					<VBtn value="longstrip" class="flex-1">Longstrip</VBtn>
+					<VBtn value="null" class="flex-1">Auto</VBtn>
 				</VBtnToggle>
+				<template v-if="reader.seriesSettings.mode == null">
+					<div class="text-xs text-medium-emphasis mt-1">
+						Auto: {{ reader.mode === 'longstrip' ? 'Longstrip' : 'Paged' }}
+					</div>
+				</template>
 			</div>
 
-			<div v-if="reader.settings.mode === 'longstrip'">
+			<div v-if="reader.mode === 'longstrip'">
 				<div class="text-body-2 text-medium-emphasis mb-1">
 					Width: {{ reader.settings.longstripWidth }}%
 				</div>
@@ -127,9 +134,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch, type Ref } from 'vue'
 import { useReaderStore } from './useComicDisplayStore'
 import { contentApi } from '@/utils/api/content'
+import type { Content } from '@/utils/api/types'
+import type { ReaderMode } from './types'
 
 const reader = useReaderStore()
 
@@ -140,8 +149,21 @@ const kbShortcuts = [
 	['Period', 'Next Entry'],
 ]
 
-const parentId = computed(() => reader.state?.content?.parent_id)
-const parent = contentApi.useGet(parentId)
+const parent = ref(null) as Ref<Content | null>
+watch(
+	() => reader.state?.content,
+	async content => {
+		if (!content) return
+		if (content.parent_id) {
+			parent.value = await contentApi.get(content.parent_id)
+		} else {
+			parent.value = null
+		}
+	},
+	{
+		immediate: true,
+	}
+)
 
 // Changing the width will change the scroll position, which means it changes
 // the page. We do this keep the position stable.
@@ -161,5 +183,9 @@ function setLongstripWidth(width: number) {
 
 onUnmounted(() => {
 	originalPage = null
+})
+
+onMounted(() => {
+	console.log('Onmounted called')
 })
 </script>

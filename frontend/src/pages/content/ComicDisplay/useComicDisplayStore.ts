@@ -1,4 +1,4 @@
-import { ref, shallowRef, computed, type Ref } from 'vue'
+import { ref, computed, type Ref } from 'vue'
 import { acceptHMRUpdate, defineStore } from 'pinia'
 import { useRouter } from 'vue-router'
 import type { ReaderMode, SiblingsInfo } from './types'
@@ -7,26 +7,19 @@ import { keepPreviousData } from '@tanstack/vue-query'
 import { useLocalStorage } from '@/utils/localStorage'
 import { arrayAtNowrap, getLayoutTop } from '@/utils/misc'
 import { createComicState, type ComicState } from './createComicState'
+import z from 'zod'
 
-interface ComicSettings {
-	longstripWidth: number
-	mode: ReaderMode
-}
-
-function parseComicSettings(v: unknown): ComicSettings {
-	const defaults: ComicSettings = { longstripWidth: 100, mode: 'paged' }
-	if (typeof v !== 'object' || v === null) return defaults
-	const obj = v as Record<string, unknown>
-	return {
-		mode: obj.mode === 'paged' || obj.mode === 'longstrip' ? obj.mode : defaults.mode,
-		longstripWidth:
-			typeof obj.longstripWidth === 'number' &&
-			obj.longstripWidth >= 10 &&
-			obj.longstripWidth <= 100
-				? obj.longstripWidth
-				: defaults.longstripWidth,
-	}
-}
+const zComicSettings = z.object({
+	longstripWidth: z.number().min(10).max(100).default(100),
+	seriesSettings: z
+		.record(
+			z.string(),
+			z.object({
+				mode: z.enum(['paged', 'longstrip']).nullable().default(null),
+			})
+		)
+		.default({}),
+})
 
 export interface ReaderContentOptions {
 	contentId: string
@@ -37,7 +30,37 @@ export const useReaderStore = defineStore('reader', () => {
 	const router = useRouter()
 
 	const sidebarOpen = ref(false)
-	const { value: settings } = useLocalStorage('reader:comics', parseComicSettings)
+	const { value: settings } = useLocalStorage('reader:comics', v => {
+		try {
+			return zComicSettings.parse(v)
+		} catch {
+			return zComicSettings.parse({})
+		}
+	})
+	const seriesSettings = computed(() => {
+		const c = state.value?.content
+		if (!c)
+			return {
+				mode: null,
+			}
+		const s = settings.value.seriesSettings[c.parent_id || ''] || {
+			mode: null,
+		}
+		return s
+	})
+	const mode = computed<ReaderMode>(() => {
+		const s = seriesSettings.value
+		if (!s) return 'paged'
+		if (s.mode) return s.mode
+
+		// We detect longstrips by taking the average aspect ratio of pages
+		const pages = state.value?.pageDimensions || []
+		if (pages.length === 0) return 'paged'
+		const totalAspectRatio = pages.reduce((sum, p) => sum + p.height / p.width, 0)
+		const avgAspectRatio = totalAspectRatio / pages.length
+		console.log('Avg aspect ratio:', avgAspectRatio)
+		return avgAspectRatio > 1.6 ? 'longstrip' : 'paged'
+	})
 
 	const state: Ref<ComicState | null> = ref(null)
 	const content = computed(() => state.value?.content || null)
@@ -81,16 +104,43 @@ export const useReaderStore = defineStore('reader', () => {
 		}
 	}
 
+	function setMode(mode: ReaderMode | null) {
+		const c = state.value?.content
+		if (!c) return
+
+		if (mode == null) {
+			if (settings.value.seriesSettings[c.parent_id || '']) {
+				delete settings.value.seriesSettings[c.parent_id || '']
+			}
+			return
+		}
+
+		const s = settings.value.seriesSettings[c.parent_id || ''] || {
+			mode: null,
+		}
+		s.mode = mode
+		settings.value.seriesSettings[c.parent_id || ''] = s
+	}
+
 	function setContent(options: ReaderContentOptions) {
 		if (options.contentId === state.value?.contentId) {
 			return
 		}
-		dispose()
+		if (state.value) {
+			state.value.dispose()
+		}
 		state.value = createComicState(options.contentId, options.initialPage)
 		state.value.setHandlers({
 			onReady: () => {
-				if (settings.value.mode === 'longstrip') {
+				if (mode.value === 'longstrip') {
 					requestAnimationFrame(() => {
+						if (state.value!.initialPage === 'last') {
+							window.scrollTo({
+								top: document.body.scrollHeight,
+								behavior: 'instant',
+							})
+							return
+						}
 						goToPage(state.value!.page, 'instant')
 					})
 				}
@@ -116,7 +166,7 @@ export const useReaderStore = defineStore('reader', () => {
 			page = state.value?.page ?? 0
 		}
 		setPage(page)
-		if (settings.value.mode === 'longstrip') {
+		if (mode.value === 'longstrip') {
 			const pageEl = document.getElementById(`longstrip-page-${page}`)
 			if (pageEl) {
 				window.scrollTo({
@@ -150,6 +200,9 @@ export const useReaderStore = defineStore('reader', () => {
 		// Persistent state
 		sidebarOpen,
 		settings,
+		seriesSettings,
+		mode,
+		setMode,
 
 		// Content state (readonly)
 		state,

@@ -30,7 +30,7 @@ export function useReaderControls() {
 
 	function handleMove(direction: 'next' | 'prev') {
 		let switchToSibling = false
-		const mode = reader.settings.mode
+		const mode = reader.mode
 		if (mode === 'longstrip') {
 			if (direction === 'next') {
 				if (isAtBottom()) {
