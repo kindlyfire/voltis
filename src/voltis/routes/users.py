@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from voltis.db.models import User
+from voltis.routes._misc import OK_RESPONSE, OkResponse
 from voltis.routes._providers import AdminUserProvider, RbProvider, UserProvider
 from voltis.utils.misc import now_without_tz
 
@@ -116,11 +117,11 @@ async def delete_user(
     rb: RbProvider,
     _user: UserProvider,
     user_id: str,
-) -> dict:
+) -> OkResponse:
     async with rb.get_asession() as session:
         user = await session.get(User, user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         await session.delete(user)
         await session.commit()
-        return {"success": True}
+        return OK_RESPONSE

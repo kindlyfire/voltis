@@ -187,6 +187,7 @@ class Content(_Base, _DefaultColumns):
 
 
 ReadingStatus = Literal["reading", "completed", "on_hold", "dropped", "plan_to_read"]
+CustomListVisibility = Literal["public", "private", "unlisted"]
 
 
 class ReadingProgress(TypedDict, total=False):
@@ -214,3 +215,29 @@ class UserToContent(_Base):
 
     user: Mapped["User"] = relationship()
     library: Mapped["Library | None"] = relationship()
+
+
+class CustomList(_Base, _DefaultColumns):
+    __tablename__ = "custom_lists"
+    __idprefix__ = "cl"
+
+    name: Mapped[str] = col(Text)
+    description: Mapped[str | None] = col(Text)
+    visibility: Mapped[CustomListVisibility] = col(Text)
+    user_id: Mapped[str] = col(Text, ForeignKey("users.id"))
+
+    user: Mapped["User"] = relationship()
+    entries: Mapped[list["CustomListToContent"]] = relationship(back_populates="custom_list")
+
+
+class CustomListToContent(_Base, _DefaultColumns):
+    __tablename__ = "custom_list_to_content"
+    __idprefix__ = "clc"
+
+    custom_list_id: Mapped[str] = col(Text, ForeignKey("custom_lists.id"))
+    library_id: Mapped[str] = col(Text, ForeignKey("libraries.id"))
+    uri: Mapped[str] = col(Text)
+    notes: Mapped[str | None] = col(Text)
+    order: Mapped[int | None] = col(Integer)
+
+    custom_list: Mapped["CustomList"] = relationship(back_populates="entries")

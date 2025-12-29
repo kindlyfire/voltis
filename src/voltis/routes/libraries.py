@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 
 from voltis.components.scanner.loader import ScannerType, get_scanner
 from voltis.db.models import Content, Library
+from voltis.routes._misc import OK_RESPONSE, OkResponse
 from voltis.routes._providers import AdminUserProvider, RbProvider, UserProvider
 from voltis.utils.misc import now_without_tz
 
@@ -173,11 +174,11 @@ async def delete_library(
     rb: RbProvider,
     _user: AdminUserProvider,
     library_id: str,
-) -> dict:
+) -> OkResponse:
     async with rb.get_asession() as session:
         library = await session.get(Library, library_id)
         if not library:
             raise HTTPException(status_code=404, detail="Library not found")
         await session.delete(library)
         await session.commit()
-        return {"success": True}
+        return OK_RESPONSE

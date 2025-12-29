@@ -8,6 +8,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
 from voltis.db.models import Session, User
+from voltis.routes._misc import OK_RESPONSE, OkResponse
 from voltis.routes._providers import (
     SESSION_DURATION_DAYS,
     RbProvider,
@@ -25,7 +26,7 @@ async def route_auth_login(
     response: Response,
     username: Annotated[str, Body()],
     password: Annotated[str, Body()],
-):
+) -> OkResponse:
     async with rb.get_asession() as session:
         # Find user
         result = await session.execute(select(User).where(User.username == username))
@@ -48,7 +49,7 @@ async def route_auth_login(
 
     set_session_cookie(request, response, user_session.token)
 
-    return {"success": True}
+    return OK_RESPONSE
 
 
 @router.post("/register")
@@ -58,7 +59,7 @@ async def route_auth_register(
     response: Response,
     username: Annotated[str, Body(min_length=2)],
     password: Annotated[str, Body(min_length=8)],
-):
+) -> OkResponse:
     if settings.REGISTRATION_ENABLED is False:
         raise HTTPException(status_code=403, detail="Registration is disabled")
 
@@ -81,7 +82,7 @@ async def route_auth_register(
 
     set_session_cookie(request, response, user_session.token)
 
-    return {"success": True}
+    return OK_RESPONSE
 
 
 @router.post("/logout")
@@ -89,7 +90,7 @@ async def route_auth_logout(
     rb: RbProvider,
     request: Request,
     response: Response,
-):
+) -> OkResponse:
     session_token = request.cookies.get("voltis_session")
     if not session_token:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -100,4 +101,4 @@ async def route_auth_logout(
 
     response.delete_cookie(key="voltis_session")
 
-    return {"success": True}
+    return OK_RESPONSE

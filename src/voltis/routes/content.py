@@ -3,13 +3,15 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import func, select, tuple_, update, asc, desc
+from sqlalchemy import asc, desc, func, select, tuple_, update
 from sqlalchemy.orm import aliased
 
 from voltis.db.models import (
     Content,
     ContentMetadata,
     ContentType,
+    CustomList,
+    CustomListToContent,
     ReadingProgress,
     ReadingStatus,
     UserToContent,
@@ -118,6 +120,30 @@ async def get_content(
         if row is None:
             raise HTTPException(status_code=404, detail="Content not found")
         return ContentDTO.from_model(row[0], user_to_content=row[1])
+
+
+@router.get("/{content_id}/lists")
+async def list_lists_for_content(
+    rb: RbProvider,
+    user: UserProvider,
+    content_id: str,
+) -> list[str]:
+    async with rb.get_asession() as session:
+        content = await session.get(Content, content_id)
+        if not content:
+            raise HTTPException(status_code=404, detail="Content not found")
+
+        result = await session.scalars(
+            select(CustomList.id)
+            .join(CustomListToContent, CustomListToContent.custom_list_id == CustomList.id)
+            .where(
+                (CustomList.user_id == user.id)
+                & (CustomListToContent.library_id == content.library_id)
+                & (CustomListToContent.uri == content.uri)
+            )
+            .order_by(CustomList.created_at.desc())
+        )
+        return list(result.all())
 
 
 @router.get("")
