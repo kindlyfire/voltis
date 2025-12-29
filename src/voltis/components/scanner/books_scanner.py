@@ -51,7 +51,13 @@ class BookScanner(ScannerBase):
         series: Content | None = None
         series_index: float | None = None
         if metadata and metadata.series:
-            series = await self._get_or_create_series(metadata.series)
+            series = await self.find_or_create_series(
+                file_uri=None,
+                uri_part=metadata.series,
+                uri=f"book/{metadata.series}",
+                type="book_series",
+                title=metadata.series,
+            )
             series_index = metadata.series_index
 
         # Build title
@@ -92,35 +98,6 @@ class BookScanner(ScannerBase):
 
         return content
 
-    async def _get_or_create_series(self, series_name: str) -> Content:
-        """Find an existing series or create a new one based on the series name."""
-        async with self.lock:
-            uri_part = series_name
-
-            for series in self.series:
-                if series.uri_part == uri_part and series.parent_id is None:
-                    return series
-
-            # Create new series
-            series = Content(
-                id=Content.make_id(),
-                library_id=self.library.id,
-                uri_part=uri_part,
-                uri=f"book/{uri_part}",
-                type="book_series",
-                title=series_name,
-                order_parts=[],
-                created_at=now_without_tz(),
-                updated_at=now_without_tz(),
-            )
-
-            async with self.rb.get_asession() as session:
-                session.add(series)
-                await session.commit()
-
-            self.series.append(series)
-            return series
-
     def _scan_book(self, content: Content, metadata: EpubMetadata | None) -> None:
         """Scan a book file (.epub) for cover and additional metadata."""
         assert content.file_uri
@@ -157,6 +134,5 @@ class BookScanner(ScannerBase):
         content.cover_uri = None
         content.file_mtime = None
         if items:
-            content.file_uri = items[0].file_uri
             content.cover_uri = items[0].cover_uri
             content.file_mtime = items[0].file_mtime

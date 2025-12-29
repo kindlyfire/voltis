@@ -2,6 +2,7 @@ import asyncio
 import datetime
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Any
 
 import anyio
 import anyio.to_thread
@@ -11,6 +12,7 @@ from sqlalchemy import delete, select, update
 
 from voltis.db.models import (
     Content,
+    ContentType,
     GroupingContentTypes,
     LeafContentTypes,
     Library,
@@ -95,6 +97,9 @@ class ScannerBase(ABC):
         self.lock = asyncio.Lock()
         """Lock that can be used in scan_file() to protect critical sections.
         Namely when looking up/creating the parent series."""
+
+        self._resolved_parents: dict[Any, Content] = {}
+        """Used in find_or_create_series() to cache already resolved series."""
 
     async def scan(
         self, dry_run: bool = False, filter_paths: list[str] | None = None, force: bool = False
@@ -352,6 +357,45 @@ class ScannerBase(ABC):
             return content, False
 
         return None, False
+
+    async def find_or_create_series(
+        self,
+        *,
+        file_uri: str | None,
+        uri_part: str,
+        uri: str,
+        type: ContentType,
+        title: str,
+    ) -> Content:
+        """Find an existing series or create a new one based on the folder."""
+        async with self.lock:
+            if uri in self._resolved_parents:
+                return self._resolved_parents[uri]
+
+            for series in self.series:
+                if (file_uri and series.file_uri == file_uri) or series.uri == uri:
+                    self._resolved_parents[uri] = series
+                    return series
+
+            # Create new series
+            series = Content(
+                id=Content.make_id(),
+                library_id=self.library.id,
+                uri_part=uri_part,
+                uri=uri,
+                type=type,
+                title=title,
+                file_uri=file_uri,
+                order_parts=[],
+                created_at=now_without_tz(),
+                updated_at=now_without_tz(),
+            )
+            async with self.rb.get_asession() as session:
+                session.add(series)
+                await session.commit()
+            self.series.append(series)
+            self._resolved_parents[uri] = series
+            return series
 
     @abstractmethod
     def check_file_eligible(self, file: LibraryFile) -> bool:

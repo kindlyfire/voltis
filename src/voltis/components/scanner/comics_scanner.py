@@ -54,7 +54,15 @@ class ComicScanner(ScannerBase):
 
     async def scan_file(self, file: LibraryFile, content: Content | None) -> Content | None:
         path = Path(file.uri)
-        series = await self._get_or_create_series(path.parent)
+        name, year = _parse_series_name(path.parent.name)
+        uri_part = f"{name}_{year}" if year else name
+        series = await self.find_or_create_series(
+            file_uri=path.parent.as_posix(),
+            uri_part=uri_part,
+            uri=f"comic/{uri_part}",
+            type="comic_series",
+            title=name,
+        )
 
         # Parse volume/chapter from filename
         filename = path.stem
@@ -99,58 +107,6 @@ class ComicScanner(ScannerBase):
             await anyio.to_thread.run_sync(self._scan_comic, content)
 
         return content
-
-    async def _get_or_create_series(self, series_folder: Path) -> Content:
-        """Find an existing series or create a new one based on the folder."""
-        async with self.lock:
-            if series_folder in self._resolved_parents:
-                return self._resolved_parents[series_folder]
-
-            folder_uri = series_folder.as_posix()
-
-            name, year = _parse_series_name(series_folder.name)
-            uri_part = f"{name}_{year}" if year else name
-
-            for series in self.series:
-                if series.file_uri == folder_uri:
-                    self._resolved_parents[series_folder] = series
-                    return series
-                if series.uri_part != uri_part or series.parent_id is not None:
-                    continue
-
-                # Same series but different folder. Check if files still exist
-                # in the old folder - if so, keep the old file_uri. Otherwise,
-                # update to the new folder location.
-                old_folder_uri = notnone(series.file_uri)
-                files_in_old_folder = any(
-                    item.uri.startswith(old_folder_uri) for item in self.fs_items
-                )
-
-                if not files_in_old_folder:
-                    series.file_uri = folder_uri
-
-                self._resolved_parents[series_folder] = series
-                return series
-
-            # Create new series
-            series = Content(
-                id=Content.make_id(),
-                library_id=self.library.id,
-                uri_part=uri_part,
-                uri=f"comic/{uri_part}",
-                type="comic_series",
-                title=name,
-                file_uri=folder_uri,
-                order_parts=[],
-                created_at=now_without_tz(),
-                updated_at=now_without_tz(),
-            )
-            async with self.rb.get_asession() as session:
-                session.add(series)
-                await session.commit()
-            self.series.append(series)
-            self._resolved_parents[series_folder] = series
-            return series
 
     def _scan_comic(self, content: Content) -> None:
         """Scan a comic file (.cbz) for pages and cover."""
