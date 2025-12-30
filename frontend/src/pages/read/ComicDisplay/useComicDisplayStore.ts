@@ -190,7 +190,7 @@ export const useReaderStore = defineStore('reader', () => {
             }
         }
         router.push({
-            name: 'content',
+            name: 'read-content',
             params: { id },
             query: fromEnd ? { page: 'last' } : {},
         })

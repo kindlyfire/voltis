@@ -1,7 +1,8 @@
 import { contentApi } from '@/utils/api/content'
+import type { BookChapter } from '@/utils/api/types'
 import { useLocalStorage } from '@/utils/localStorage'
 import { acceptHMRUpdate, defineStore } from 'pinia'
-import { computed, markRaw, readonly, ref } from 'vue'
+import { computed, markRaw, readonly, ref, toValue, type MaybeRefOrGetter } from 'vue'
 
 interface BookDisplaySettings {
     showHidden: Array<{
@@ -40,6 +41,47 @@ function parseBookDisplaySettings(v: any): BookDisplaySettings {
     return final
 }
 
+export function getBookDisplaySettings(contentId: string) {
+    const { value: settings } = useLocalStorage('reader:books', parseBookDisplaySettings)
+    return {
+        showHidden: computed(() => {
+            return settings.value.showHidden.some(v => v.id === contentId)
+        }),
+        setShowHidden(show: boolean) {
+            const index = settings.value.showHidden.findIndex(item => item.id === contentId)
+            if (show && index === -1) {
+                settings.value.showHidden.push({ id: contentId, dt: new Date().toISOString() })
+            } else if (!show && index !== -1) {
+                settings.value.showHidden.splice(index, 1)
+            }
+        },
+    }
+}
+
+export function useBookDisplaySettings(contentId: MaybeRefOrGetter<string>) {
+    return computed(() => getBookDisplaySettings(toValue(contentId)))
+}
+
+export function useVisibleBookChapters(
+    contentId: MaybeRefOrGetter<string>,
+    chapters: MaybeRefOrGetter<BookChapter[] | undefined>
+) {
+    const settings = useBookDisplaySettings(contentId)
+    return computed(() => {
+        let items = toValue(chapters) ?? []
+        let len = items.length
+
+        if (!settings.value.showHidden) {
+            items = items.filter(ch => ch.linear)
+        }
+
+        return {
+            items,
+            hasHidden: len !== items.length,
+        }
+    })
+}
+
 export const useBookDisplayStore = defineStore('book-display', () => {
     const { value: settings } = useLocalStorage('reader:books', parseBookDisplaySettings)
     const contentId = ref(null as string | null)
@@ -48,34 +90,6 @@ export const useBookDisplayStore = defineStore('book-display', () => {
     const qContent = contentApi.useGet(() => contentId.value)
     const qChapters = contentApi.useBookChapters(() => contentId.value)
     const qChapterContent = contentApi.useBookChapter(() => contentId.value, chapterHref)
-
-    function setContentId(id: string) {
-        contentId.value = id
-    }
-
-    function setChapterHref(href: string | null) {
-        chapterHref.value = href
-    }
-
-    function setShowHidden(contentId: string, show: boolean) {
-        const index = settings.value.showHidden.findIndex(item => item.id === contentId)
-        if (show && index === -1) {
-            settings.value.showHidden.push({ id: contentId, dt: new Date().toISOString() })
-        } else if (!show && index !== -1) {
-            settings.value.showHidden.splice(index, 1)
-        }
-    }
-
-    const hasHiddenChapters = computed(() => qChapters.data.value?.some(ch => !ch.linear) ?? false)
-    const showHiddenChapters = computed(() => {
-        return settings.value.showHidden.some(v => v.id === contentId.value)
-    })
-
-    const visibleChapters = computed(() => {
-        if (!qChapters.data.value) return []
-        if (showHiddenChapters.value) return qChapters.data.value
-        return qChapters.data.value.filter(ch => ch.linear)
-    })
 
     return {
         settings,
@@ -87,13 +101,6 @@ export const useBookDisplayStore = defineStore('book-display', () => {
         content: qContent.data,
         qChapterContent: markRaw(qChapterContent),
         chapterContent: qChapterContent.data,
-        setContentId,
-        setChapterHref,
-
-        visibleChapters,
-        hasHiddenChapters,
-        showHiddenChapters,
-        setShowHidden,
     }
 })
 

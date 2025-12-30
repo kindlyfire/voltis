@@ -37,7 +37,7 @@ import { API_URL } from '@/utils/fetch'
 
 const props = defineProps<{
     content: Content
-    to?: string
+    toReadRoute?: boolean
 }>()
 
 const STATUS_ICONS: Record<ReadingStatus, string> = {
@@ -56,7 +56,9 @@ const STATUS_TITLES: Record<ReadingStatus, string> = {
     plan_to_read: 'Plan to Read',
 }
 
-const to = computed(() => props.to ?? `/${props.content.id}?page=resume`)
+const to = computed(() =>
+    props.toReadRoute ? `/r/${props.content.id}?page=resume` : `/${props.content.id}`
+)
 
 const coverUri = computed(() => {
     if (!props.content.cover_uri) return null

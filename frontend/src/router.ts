@@ -10,6 +10,7 @@ import SettingsUsersPage from './pages/settings/UsersPage.vue'
 import SettingsLibrariesPage from './pages/settings/LibrariesPage.vue'
 import ListsPage from './pages/lists/ListsPage.vue'
 import ListPage from './pages/lists/ListPage.vue'
+import ReadPage from './pages/read/ReadPage.vue'
 
 const router = createRouter({
     history: createWebHistory(import.meta.env.BASE_URL),
@@ -30,8 +31,13 @@ const router = createRouter({
                 },
                 {
                     path: '/:id(c_[^/]+)',
-                    name: 'content',
+                    name: 'info-page',
                     component: ContentPage,
+                },
+                {
+                    path: '/r/:id(c_[^/]+)',
+                    name: 'read-content',
+                    component: ReadPage,
                 },
                 {
                     path: '/lists',

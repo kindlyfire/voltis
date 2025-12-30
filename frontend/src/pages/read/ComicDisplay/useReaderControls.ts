@@ -59,7 +59,7 @@ export function useReaderControls() {
         }
 
         if (switchToSibling) {
-            reader.goToSibling(direction)
+            reader.goToSibling(direction, direction === 'prev')
         }
     }
 
@@ -86,7 +86,7 @@ export function useReaderControls() {
                 reader.goToSibling('prev', true)
                 break
             case '.':
-                reader.goToSibling('next', true)
+                reader.goToSibling('next', false)
                 break
         }
     }

@@ -7,7 +7,12 @@
         </template>
 
         <template v-else>
-            <AContentGridItem v-for="item in items" :key="item.id" :content="item" />
+            <AContentGridItem
+                v-for="item in items"
+                :key="item.id"
+                :content="item"
+                :to-read-route="toReadRoute"
+            />
         </template>
     </div>
 </template>
@@ -21,5 +26,6 @@ import AContentGridItem from './AContentGridItem.vue'
 const props = defineProps<{
     items: Content[]
     loading: boolean
+    toReadRoute?: boolean
 }>()
 </script>
