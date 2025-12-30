@@ -26,16 +26,24 @@ modify your files on disk.)
   - [ ] Library type: YT videos
   - [ ] Report scanning progress, allow cancelling
 - [ ] Search
-- [ ] Overview/dashboard page
+- [x] Overview/dashboard page
 - [ ] User accounts
   - [x] Register/login
-  - [ ] Reading statuses
-  - [ ] Custom lists
-  - [ ] Ratings
+  - [x] Custom lists
+  - [x] Ratings
+  - [x] Reading statuses
+  - [x] Progress tracking/resume reading
   - [ ] Reading history
+  - [ ] Reading time tracking
 - [ ] Admin dashboard
   - [x] Manage users
   - [x] Manage libraries
   - [x] Trigger library scans
+  - [ ] Remap dead content links
+    - Links to content, such as a users' rating, or list entries, are kept when
+      the associated content is deleted. We'll allow users to remap their own,
+      and admins to bulk remap
+    - It already links by resolved content URI, so if you delete a file, scan,
+      add the file again, scan again, the links will be restored automatically.
 - [x] Dark mode
 - [x] Mobile-friendly UI (mostly)
