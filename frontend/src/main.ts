@@ -11,6 +11,7 @@ import { createHead } from '@unhead/vue/client'
 
 import App from './App.vue'
 import router from './router.ts'
+import { queryClient } from './utils/misc.ts'
 
 const app = createApp(App)
 
@@ -26,7 +27,9 @@ app.use(
         },
     })
 )
-app.use(VueQueryPlugin)
+app.use(VueQueryPlugin, {
+    queryClient,
+})
 app.use(createHead())
 
 app.mount('#app')

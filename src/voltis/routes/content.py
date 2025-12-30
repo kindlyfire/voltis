@@ -23,6 +23,7 @@ router = APIRouter()
 
 
 class UserToContentDTO(BaseModel):
+    starred: bool
     status: ReadingStatus | None
     status_updated_at: datetime.datetime | None
     notes: str | None
@@ -33,6 +34,7 @@ class UserToContentDTO(BaseModel):
     @classmethod
     def from_model(cls, model: UserToContent) -> "UserToContentDTO":
         return cls(
+            starred=model.starred,
             status=model.status,
             status_updated_at=model.status_updated_at,
             notes=model.notes,
@@ -43,6 +45,7 @@ class UserToContentDTO(BaseModel):
 
 
 class UserToContentRequest(BaseModel):
+    starred: bool | UnsetType = Unset
     status: ReadingStatus | None | UnsetType = Unset
     notes: str | None | UnsetType = Unset
     rating: int | None | UnsetType = Unset
@@ -155,6 +158,7 @@ async def list_content(
     type: Annotated[list[ContentType] | None, Query()] = None,
     valid: Annotated[bool, Query()] = True,
     reading_status: Annotated[ReadingStatus | None, Query()] = None,
+    starred: Annotated[bool | None, Query()] = None,
     limit: Annotated[int | None, Query(gt=0)] = None,
     offset: Annotated[int, Query(ge=0)] = 0,
     sort: Annotated[Literal["order", "created_at", "progress_updated_at"] | None, Query()] = None,
@@ -189,6 +193,8 @@ async def list_content(
             base_query = base_query.where(Content.type.in_(type))
         if reading_status is not None:
             base_query = base_query.where(UserToContent.status == reading_status)
+        if starred is not None:
+            base_query = base_query.where(UserToContent.starred.is_(starred))
 
         sorting = desc if sort_order == "desc" else asc
         data_query = base_query
@@ -248,6 +254,8 @@ async def update_user_data(
             )
             session.add(user_to_content)
 
+        if body.starred is not Unset:
+            user_to_content.starred = body.starred
         if body.status is not Unset:
             user_to_content.status = body.status
             user_to_content.status_updated_at = now_without_tz()

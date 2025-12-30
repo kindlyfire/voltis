@@ -1,3 +1,7 @@
+import { QueryClient } from '@tanstack/vue-query'
+
+export const queryClient = new QueryClient({})
+
 export const LIBRARY_GRID_CLASSES =
     'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 3xl:grid-cols-8 gap-4'
 

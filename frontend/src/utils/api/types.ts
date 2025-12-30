@@ -56,6 +56,7 @@ export interface ReadingProgress {
 }
 
 export interface UserToContent {
+    starred: boolean
     status: ReadingStatus | null
     notes: string | null
     rating: number | null
@@ -63,6 +64,7 @@ export interface UserToContent {
 }
 
 export interface UserToContentUpdate {
+    starred?: boolean
     status?: ReadingStatus | null
     notes?: string | null
     rating?: number | null
@@ -111,6 +113,7 @@ export interface ContentListParams {
     type?: ContentType[]
     valid?: boolean
     reading_status?: ReadingStatus
+    starred?: boolean
     limit?: number
     offset?: number
     sort?: 'order' | 'created_at' | 'progress_updated_at'

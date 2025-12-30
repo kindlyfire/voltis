@@ -63,6 +63,19 @@
                             <ReadingStatusButton :content-id="content.id" />
                             <ContinueReadingButton :content-id="content.id" />
                             <OptionsButton :content-id="content.id" />
+                            <VBtn
+                                icon
+                                class="h-12!"
+                                :loading="mUpdateUserData.isPending.value"
+                                :title="isStarred ? 'Unstar' : 'Star'"
+                                :color="isStarred ? 'yellow-darken-2' : undefined"
+                                @click="toggleStar"
+                                variant="text"
+                            >
+                                <VIcon :color="isStarred ? 'yellow-darken-2' : 'white'">
+                                    {{ isStarred ? 'mdi-star' : 'mdi-star-outline' }}
+                                </VIcon>
+                            </VBtn>
                         </div>
                         <RatingButton :content-id="content.id" />
                     </div>
@@ -73,7 +86,9 @@
 </template>
 
 <script setup lang="ts">
+import { contentApi } from '@/utils/api/content'
 import { API_URL } from '@/utils/fetch'
+import { computed } from 'vue'
 import ReadingStatusButton from './components/ReadingStatusButton.vue'
 import ContinueReadingButton from './components/ContinueReadingButton.vue'
 import RatingButton from './components/RatingButton.vue'
@@ -83,6 +98,16 @@ import type { Content } from '@/utils/api/types'
 const props = defineProps<{
     content: Content
 }>()
+
+const mUpdateUserData = contentApi.useUpdateUserData()
+const isStarred = computed(() => props.content.user_data?.starred ?? false)
+
+async function toggleStar() {
+    mUpdateUserData.mutateAsync({
+        contentId: props.content.id,
+        starred: !isStarred.value,
+    })
+}
 </script>
 
 <style scoped>

@@ -3,7 +3,7 @@
         :model-value="currentStatus"
         :items="statusOptions"
         :loading="qContent.isLoading.value || mUpdateUserData.isPending.value"
-        :placeholder="'Add to Library'"
+        :placeholder="'Set status'"
         density="comfortable"
         variant="solo"
         hide-details

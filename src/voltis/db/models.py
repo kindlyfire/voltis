@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import (
     ARRAY,
     REAL,
+    Boolean,
     ForeignKey,
     Integer,
     Text,
@@ -206,6 +207,7 @@ class UserToContent(_Base):
     library_id: Mapped[str | None] = col(Text, ForeignKey("libraries.id"))
     uri: Mapped[str] = col(Text)
 
+    starred: Mapped[bool] = col(Boolean, default=False, server_default="false")
     status: Mapped[ReadingStatus | None] = col(Text)
     status_updated_at: Mapped[datetime.datetime | None] = col(TIMESTAMP)
     notes: Mapped[str | None] = col(Text)

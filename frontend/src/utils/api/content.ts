@@ -10,6 +10,7 @@ import type {
     UserToContentUpdate,
 } from './types'
 import { isEnabled } from './_utils'
+import { queryClient } from '../misc'
 
 type QueryOptions<T> = Omit<UnwrapRef<UseQueryOptions<T>>, 'queryKey' | 'queryFn'>
 
@@ -47,6 +48,7 @@ export const contentApi = {
                 }
                 if (p.valid !== undefined) searchParams.append('valid', String(p.valid))
                 if (p.reading_status) searchParams.append('reading_status', p.reading_status)
+                if (p.starred !== undefined) searchParams.append('starred', String(p.starred))
                 if (p.limit !== undefined) searchParams.append('limit', String(p.limit))
                 if (p.offset !== undefined) searchParams.append('offset', String(p.offset))
                 if (p.sort) searchParams.append('sort', p.sort)
@@ -98,6 +100,12 @@ export const contentApi = {
         useMutation({
             mutationFn: (data: UserToContentUpdate & { contentId: string }) =>
                 contentApi.updateUserData(data.contentId, data),
+            onSuccess(_data, variables) {
+                queryClient.invalidateQueries({ queryKey: ['content', variables.contentId] })
+                queryClient.invalidateQueries({
+                    queryKey: ['content', 'list'],
+                })
+            },
         }),
 
     updateUserData: async (
