@@ -1,5 +1,12 @@
 <template>
-    <VBtn size="large" class="h-12!" :disabled="nextStatus == null" @click="onClick">
+    <VBtn
+        size="large"
+        class="h-12!"
+        :class="class"
+        variant="tonal"
+        :disabled="nextStatus == null"
+        @click="onClick"
+    >
         <template
             v-if="nextStatus == null || nextStatus === 'all-completed' || nextStatus == 'starting'"
         >
@@ -19,6 +26,7 @@ import ResetReadingModal from './ResetReadingModal.vue'
 
 const props = defineProps<{
     contentId: string
+    class?: string
 }>()
 
 const showResetModal = ref(false)

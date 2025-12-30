@@ -1,7 +1,14 @@
 <template>
     <VMenu :offset="6">
         <template #activator="{ props: menuProps }">
-            <VBtn v-bind="menuProps" icon="mdi-dots-vertical" />
+            <VBtn
+                variant="tonal"
+                v-bind="menuProps"
+                size="large"
+                class="h-12! aspect-square! min-w-auto!"
+            >
+                <VIcon>mdi-dots-vertical</VIcon>
+            </VBtn>
         </template>
         <VList>
             <VListItem

@@ -1,10 +1,10 @@
 <template>
-    <div class="d-flex align-center text-white" @mouseleave="hoverRating = null">
+    <div class="d-flex align-center" @mouseleave="hoverRating = null">
         <VBtn
             v-for="star in 5"
             :key="star"
             :icon="getStarIcon(star)"
-            variant="text"
+            flat
             density="compact"
             @mouseenter="hoverRating = star"
             @click="setRating(star)"
@@ -12,7 +12,7 @@
         <VBtn
             v-if="currentRating || mUpdateUserData.isPending.value"
             icon="mdi-close"
-            variant="text"
+            flat
             density="compact"
             class="ml-1"
             :loading="mUpdateUserData.isPending.value"
