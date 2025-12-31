@@ -35,14 +35,14 @@
                         <td>
                             <div class="flex items-center gap-2">
                                 <RouterLink
-                                    v-if="entry.content_id"
-                                    :to="`/${entry.content_id}`"
+                                    v-if="entry.content?.id"
+                                    :to="`/${entry.content.id}`"
                                     class="text-primary"
                                 >
                                     {{ entry.uri }}
                                 </RouterLink>
                                 <span v-else>{{ entry.uri }}</span>
-                                <CopyIdButton v-if="entry.content_id" :id="entry.content_id" />
+                                <CopyIdButton v-if="entry.content?.id" :id="entry.content.id" />
                             </div>
                             <div class="text-caption text-medium-emphasis">
                                 {{ entry.library_id }}

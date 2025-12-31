@@ -3,8 +3,9 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy import Text, and_, delete, func, or_, select, text, true, update
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import ARRAY
 
 from voltis.db.models import (
     Content,
@@ -12,6 +13,7 @@ from voltis.db.models import (
     CustomListToContent,
     CustomListVisibility,
 )
+from voltis.routes.content import ContentDTO
 from voltis.routes._misc import OK_RESPONSE, OkResponse
 from voltis.routes._providers import RbProvider, UserProvider
 from voltis.utils.misc import Unset, UnsetType, now_without_tz
@@ -25,19 +27,19 @@ class CustomListEntryDTO(BaseModel):
     updated_at: datetime.datetime
     library_id: str
     uri: str
-    content_id: str | None
+    content: ContentDTO | None
     notes: str | None
     order: int | None
 
     @classmethod
-    def from_row(cls, entry: CustomListToContent, content_id: str | None) -> "CustomListEntryDTO":
+    def from_row(cls, entry: CustomListToContent, content: Content | None) -> "CustomListEntryDTO":
         return cls(
             id=entry.id,
             created_at=entry.created_at,
             updated_at=entry.updated_at,
             library_id=entry.library_id,
             uri=entry.uri,
-            content_id=content_id,
+            content=ContentDTO.from_model(content) if content else None,
             notes=entry.notes,
             order=entry.order,
         )
@@ -52,9 +54,15 @@ class CustomListDTO(BaseModel):
     visibility: CustomListVisibility
     user_id: str
     entry_count: int | None
+    cover_uris: list[str]
 
     @classmethod
-    def from_model(cls, model: CustomList, entry_count: int | None = None) -> "CustomListDTO":
+    def from_model(
+        cls,
+        model: CustomList,
+        entry_count: int | None = None,
+        cover_uris: list[str] | None = None,
+    ) -> "CustomListDTO":
         return cls(
             id=model.id,
             created_at=model.created_at,
@@ -64,6 +72,7 @@ class CustomListDTO(BaseModel):
             visibility=model.visibility,
             user_id=model.user_id,
             entry_count=entry_count,
+            cover_uris=cover_uris or [],
         )
 
 
@@ -80,7 +89,10 @@ class CustomListDetailDTO(BaseModel):
 
     @classmethod
     def from_model(
-        cls, model: CustomList, entries: list[CustomListEntryDTO], entry_count: int | None = None
+        cls,
+        model: CustomList,
+        entries: list[CustomListEntryDTO],
+        entry_count: int | None = None,
     ) -> "CustomListDetailDTO":
         return cls(
             id=model.id,
@@ -144,10 +156,35 @@ async def list_custom_lists(
             .lateral()
         )
 
+        cover_uris_subq = (
+            text(
+                """
+                SELECT (
+                    array_agg(
+                        c.cover_uri
+                        ORDER BY (clc."order" IS NULL), clc."order", clc.created_at
+                    ) FILTER (WHERE c.cover_uri IS NOT NULL)
+                )[1:4] AS cover_uris
+                FROM custom_list_to_content clc
+                LEFT JOIN content c
+                    ON c.library_id = clc.library_id
+                    AND c.uri = clc.uri
+                WHERE clc.custom_list_id = custom_lists.id
+                """
+            )
+            .columns(cover_uris=ARRAY(Text))
+            .lateral()
+        )
+
         owner_clause = CustomList.user_id == user.id
         others_clause = and_(CustomList.user_id != user.id, CustomList.visibility != "private")
 
-        query = select(CustomList, entry_count_subq.c.entry_count)
+        query = (
+            select(CustomList, entry_count_subq.c.entry_count, cover_uris_subq.c.cover_uris)
+            .select_from(CustomList)
+            .join(entry_count_subq, true())
+            .join(cover_uris_subq, true(), isouter=True)
+        )
         if user_filter == "me":
             query = query.where(owner_clause)
         elif user_filter == "others":
@@ -157,7 +194,10 @@ async def list_custom_lists(
 
         query = query.order_by(CustomList.created_at.desc())
         result = await session.execute(query)
-        return [CustomListDTO.from_model(row[0], entry_count=row[1]) for row in result.all()]
+        return [
+            CustomListDTO.from_model(row[0], entry_count=row[1], cover_uris=row[2])
+            for row in result.all()
+        ]
 
 
 @router.get("/{list_id}")
@@ -176,7 +216,7 @@ async def get_custom_list(
         )
 
         entry_rows = await session.execute(
-            select(CustomListToContent, Content.id)
+            select(CustomListToContent, Content)
             .join(
                 Content,
                 and_(
@@ -193,11 +233,13 @@ async def get_custom_list(
             )
         )
 
-        entries = [
-            CustomListEntryDTO.from_row(entry=row[0], content_id=row[1]) for row in entry_rows.all()
-        ]
+        entries = [CustomListEntryDTO.from_row(entry=row[0], content=row[1]) for row in entry_rows]
 
-        return CustomListDetailDTO.from_model(custom_list, entries=entries, entry_count=entry_count)
+        return CustomListDetailDTO.from_model(
+            custom_list,
+            entries=entries,
+            entry_count=entry_count,
+        )
 
 
 @router.post("")
@@ -223,7 +265,7 @@ async def create_custom_list(
         session.add(custom_list)
         await session.commit()
         await session.refresh(custom_list)
-        return CustomListDTO.from_model(custom_list, entry_count=0)
+        return CustomListDTO.from_model(custom_list, entry_count=0, cover_uris=[])
 
 
 @router.post("/{list_id}")
@@ -232,7 +274,7 @@ async def update_custom_list(
     user: UserProvider,
     list_id: str,
     body: CustomListUpsertRequest,
-) -> CustomListDTO:
+) -> OkResponse:
     name = body.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Name cannot be empty")
@@ -245,11 +287,7 @@ async def update_custom_list(
         custom_list.updated_at = now_without_tz()
 
         await session.commit()
-        await session.refresh(custom_list)
-        entry_count = await session.scalar(
-            select(func.count()).where(CustomListToContent.custom_list_id == list_id)
-        )
-        return CustomListDTO.from_model(custom_list, entry_count=entry_count)
+        return OK_RESPONSE
 
 
 @router.delete("/{list_id}")
@@ -306,7 +344,7 @@ async def create_custom_list_entry(
             raise HTTPException(status_code=400, detail="Content already in list")
 
         await session.refresh(entry)
-        return CustomListEntryDTO.from_row(entry=entry, content_id=content.id)
+        return CustomListEntryDTO.from_row(entry=entry, content=content)
 
 
 @router.post("/{list_id}/entries/reorder")
@@ -371,12 +409,10 @@ async def update_custom_list_entry(
         await session.commit()
         await session.refresh(entry)
 
-        content_id = await session.scalar(
-            select(Content.id).where(
-                Content.library_id == entry.library_id, Content.uri == entry.uri
-            )
+        content = await session.scalar(
+            select(Content).where(Content.library_id == entry.library_id, Content.uri == entry.uri)
         )
-        return CustomListEntryDTO.from_row(entry=entry, content_id=content_id)
+        return CustomListEntryDTO.from_row(entry=entry, content=content)
 
 
 @router.delete("/{list_id}/entries/{entry_id}")

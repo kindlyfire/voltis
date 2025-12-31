@@ -2,8 +2,8 @@ import { useMutation, useQuery, useQueryClient, type UseQueryOptions } from '@ta
 import { computed, toValue, type MaybeRefOrGetter, type UnwrapRef } from 'vue'
 import { apiFetch } from '../fetch'
 import type {
+    CustomListPartial,
     CustomList,
-    CustomListDetail,
     CustomListEntry,
     CustomListEntryCreate,
     CustomListEntryUpdate,
@@ -21,14 +21,14 @@ const detailKey = (id: string | undefined | null) => [...listsKey, id]
 export const customListsApi = {
     useList: (
         userFilter: MaybeRefOrGetter<'all' | 'me' | 'others'> = 'all',
-        options: QueryOptions<CustomList[]> = {}
+        options: QueryOptions<CustomListPartial[]> = {}
     ) =>
         useQuery({
             queryKey: [...listsKey, 'list', userFilter],
             queryFn: async () => {
                 const filter = toValue(userFilter) ?? 'all'
                 const params = filter ? `?user=${filter}` : ''
-                return apiFetch<CustomList[]>(`/custom-lists${params}`)
+                return apiFetch<CustomListPartial[]>(`/custom-lists${params}`)
             },
             enabled: isEnabled(userFilter),
             ...options,
@@ -36,7 +36,7 @@ export const customListsApi = {
 
     useGet: (
         id: MaybeRefOrGetter<string | undefined | null>,
-        options: QueryOptions<CustomListDetail> = {}
+        options: QueryOptions<CustomList> = {}
     ) =>
         useQuery({
             queryKey: computed(() => detailKey(toValue(id)!)),
@@ -46,14 +46,14 @@ export const customListsApi = {
         }),
 
     get: async (id: string) => {
-        return apiFetch<CustomListDetail>(`/custom-lists/${id}`)
+        return apiFetch<CustomList>(`/custom-lists/${id}`)
     },
 
     useCreate: () => {
         const queryClient = useQueryClient()
         return useMutation({
             mutationFn: async (body: CustomListUpsert) =>
-                apiFetch<CustomList>(`/custom-lists`, {
+                apiFetch<CustomListPartial>(`/custom-lists`, {
                     method: 'POST',
                     body: JSON.stringify(body),
                 }),
@@ -68,7 +68,7 @@ export const customListsApi = {
         return useMutation({
             mutationFn: async (data: CustomListUpsert & { id: string }) => {
                 const { id, ...body } = data
-                return apiFetch<CustomList>(`/custom-lists/${id}`, {
+                return apiFetch<OkResponse>(`/custom-lists/${id}`, {
                     method: 'POST',
                     body: JSON.stringify(body),
                 })

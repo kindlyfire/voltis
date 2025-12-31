@@ -129,7 +129,7 @@ export interface BookChapter {
 
 export type CustomListVisibility = 'public' | 'private' | 'unlisted'
 
-export interface CustomList {
+export interface CustomListPartial {
     id: string
     created_at: string
     updated_at: string
@@ -138,6 +138,7 @@ export interface CustomList {
     visibility: CustomListVisibility
     user_id: string
     entry_count: number | null
+    cover_uris: string[]
 }
 
 export interface CustomListEntry {
@@ -146,12 +147,12 @@ export interface CustomListEntry {
     updated_at: string
     library_id: string
     uri: string
-    content_id: string | null
+    content: Content | null
     notes: string | null
     order: number | null
 }
 
-export interface CustomListDetail extends CustomList {
+export type CustomList = Omit<CustomListPartial, 'cover_uris'> & {
     entries: CustomListEntry[]
 }
 
