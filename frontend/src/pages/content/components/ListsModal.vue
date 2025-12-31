@@ -88,7 +88,7 @@ const mToggle = useMutation({
             await mCreateEntry.mutateAsync({ listId, content_id: props.contentId })
         } else {
             const detail = await customListsApi.get(listId)
-            const entry = detail.entries.find(e => e.content_id === props.contentId)
+            const entry = detail.entries.find(e => e.content?.id === props.contentId)
             if (!entry) {
                 throw new Error('List entry not found')
             }
