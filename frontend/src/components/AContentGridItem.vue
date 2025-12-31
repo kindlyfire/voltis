@@ -1,18 +1,20 @@
 <template>
-    <RouterLink :to="to" class="block" :title="content.title">
-        <VCard class="relative">
-            <img
-                :src="coverUri ?? ''"
-                :style="{
-                    aspectRatio: '2 / 3',
-                    objectFit: 'cover',
-                    width: '100%',
-                }"
-            />
+    <div>
+        <VCard class="relative content-grid-item">
+            <RouterLink :to="to" class="block" :title="content.title">
+                <img
+                    :src="coverUri ?? ''"
+                    :style="{
+                        aspectRatio: '2 / 3',
+                        objectFit: 'cover',
+                        width: '100%',
+                    }"
+                />
+            </RouterLink>
 
             <span
                 v-if="content.user_data?.status"
-                class="absolute top-2 left-2 bg-black/70 text-white p-1 rounded-full aspect-square w-[18px] flex items-center justify-center"
+                class="absolute top-2 left-2 bg-black/80 text-white p-1 rounded-full aspect-square w-5 flex items-center justify-center"
                 :title="`Status: ${STATUS_TITLES[content.user_data.status]}`"
             >
                 <VIcon :icon="statusIcon" size="12" />
@@ -20,14 +22,27 @@
 
             <span
                 v-if="childrenCount != null"
-                class="absolute top-2 right-2 bg-black/70 text-white text-xs font-medium px-2 py-0.5 rounded-full"
+                class="absolute top-2 right-2 bg-black/80 text-white text-xs font-medium px-2 py-0.5 rounded-full"
             >
                 {{ childrenCount }}
+            </span>
+
+            <span
+                v-if="toReadRoute"
+                class="absolute bottom-2 right-2 bottom-actions flex items-center gap-1"
+            >
+                <RouterLink
+                    :to="`/${content.id}`"
+                    class="bg-black/80! p-1.5! rounded-full flex items-center justify-center"
+                    :title="`Go to content page`"
+                >
+                    <VIcon icon="mdi-information" size="16" />
+                </RouterLink>
             </span>
         </VCard>
 
         <div class="text-body-2 pt-2 line-clamp-2">{{ content.title }}</div>
-    </RouterLink>
+    </div>
 </template>
 
 <script setup lang="ts">
@@ -76,3 +91,14 @@ const statusIcon = computed(() => {
     return STATUS_ICONS[props.content.user_data.status]
 })
 </script>
+
+<style lang="css" scoped>
+.content-grid-item .bottom-actions {
+    transition: opacity 0.1s;
+    opacity: 0;
+}
+
+.content-grid-item:hover .bottom-actions {
+    opacity: 1;
+}
+</style>

@@ -4,11 +4,15 @@
         class="h-12!"
         :class="class"
         variant="tonal"
-        :disabled="nextStatus == null"
+        :disabled="readingStatus == null"
         @click="onClick"
     >
         <template
-            v-if="nextStatus == null || nextStatus === 'all-completed' || nextStatus == 'starting'"
+            v-if="
+                readingStatus == null ||
+                readingStatus === 'all-completed' ||
+                readingStatus == 'starting'
+            "
         >
             Start Reading
         </template>
@@ -39,37 +43,51 @@ const qChildren = contentApi.useList(() => ({
     sort_order: 'asc',
 }))
 
-const nextStatus = computed(() => {
+const readingStatus = computed(() => {
+    const content = qContent.data.value
+    if (!content) return null
     const children = qChildren.data.value?.data ?? []
-    if (!children.length || !qChildren.data.value) return null
+    if (!qChildren.data.value) return null
 
-    const firstUnread = children.findIndex(child => {
-        return child.user_data?.status !== 'completed'
-    })
-    if (firstUnread === -1) {
-        return 'all-completed'
-    } else if (firstUnread === 0 && children[firstUnread]!.user_data?.status != 'reading') {
-        return 'starting'
+    if (content.type.includes('series')) {
+        const firstUnread = children.findIndex(child => {
+            return child.user_data?.status !== 'completed'
+        })
+        if (firstUnread === -1) {
+            return 'all-completed'
+        } else if (firstUnread === 0 && children[firstUnread]!.user_data?.status != 'reading') {
+            return 'starting'
+        } else {
+            return 'resume'
+        }
     } else {
-        return 'resume'
+        if (content.user_data?.progress?.current_page) {
+            return 'resume'
+        } else {
+            return 'starting'
+        }
     }
 })
 
 const ctrlModifier = useKeyModifier('Control')
 
 function onClick() {
-    const ns = nextStatus.value
-    if (ns == null) return
+    const content = qContent.data.value
+    const rs = readingStatus.value
+    if (rs == null || !content) return
 
-    if (ns === 'all-completed') {
+    if (rs === 'all-completed') {
         showResetModal.value = true
         return
     }
 
-    const firstUnread = qChildren.data.value!.data.find(child => {
-        return child.user_data?.status !== 'completed'
-    })
-    if (!firstUnread) return
+    let targetId = props.contentId
+    if (content.type.includes('series')) {
+        const firstUnread = qChildren.data.value!.data.find(child => {
+            return child.user_data?.status !== 'completed'
+        })
+        if (!firstUnread) return
+    }
 
     const userData = qContent.data.value?.user_data
     if (!userData?.status) {
@@ -79,10 +97,10 @@ function onClick() {
     }
 
     if (ctrlModifier.value) {
-        window.open(`/${firstUnread.id}?page=resume`, '_blank')
+        window.open(`/r/${targetId}?page=resume`, '_blank')
     } else {
         router.push({
-            path: `/${firstUnread.id}`,
+            path: `/r/${targetId}`,
             query: {
                 page: 'resume',
             },
