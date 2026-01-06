@@ -87,6 +87,7 @@ function onClick() {
             return child.user_data?.status !== 'completed'
         })
         if (!firstUnread) return
+        targetId = firstUnread.id
     }
 
     const userData = qContent.data.value?.user_data

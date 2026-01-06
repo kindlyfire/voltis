@@ -10,6 +10,7 @@ const SCROLL_MIN_OFFSET = 100
 
 export const useLayoutStore = defineStore('layout', () => {
     const navbarScrollHideEnabled = ref(false)
+    const alwaysHideSidebar = ref(false)
     const scroll = useScroll(window)
 
     const anchorY = ref(0)
@@ -58,6 +59,7 @@ export const useLayoutStore = defineStore('layout', () => {
     return {
         navbarScrollHideEnabled,
         navbarHidden,
+        alwaysHideSidebar,
     }
 })
 
@@ -74,5 +76,17 @@ export function useNavbarScrollHide() {
 
     onUnmounted(() => {
         store.navbarScrollHideEnabled = false
+    })
+}
+
+export function useAlwaysHideSidebar() {
+    const store = useLayoutStore()
+
+    onBeforeMount(() => {
+        store.alwaysHideSidebar = true
+    })
+
+    onUnmounted(() => {
+        store.alwaysHideSidebar = false
     })
 }

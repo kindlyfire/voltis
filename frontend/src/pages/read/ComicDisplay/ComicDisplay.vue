@@ -22,7 +22,7 @@ import ReaderModeLongstrip from './ReaderModeLongstrip.vue'
 import ReaderSidebar from './ReaderSidebar.vue'
 import { useReaderControls } from './useReaderControls'
 import { useRouter } from 'vue-router'
-import { useNavbarScrollHide } from '@/pages/useLayoutStore'
+import { useAlwaysHideSidebar, useNavbarScrollHide } from '@/pages/useLayoutStore'
 
 const props = defineProps<{
     contentId: string
@@ -31,6 +31,7 @@ const props = defineProps<{
 const router = useRouter()
 const reader = useReaderStore()
 useNavbarScrollHide()
+useAlwaysHideSidebar()
 
 // Set content when props change
 watch(

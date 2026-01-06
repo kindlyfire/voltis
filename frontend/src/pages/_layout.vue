@@ -4,7 +4,10 @@
             :flat="store.navbarHidden"
             :style="store.navbarHidden && { transform: 'translateY(-64px)' }"
         >
-            <VAppBarNavIcon class="d-md-none" @click="drawer = !drawer" />
+            <VAppBarNavIcon
+                :class="{ 'd-md-none': !store.alwaysHideSidebar }"
+                @click="drawer = !drawer"
+            />
             <VAppBarTitle>
                 <RouterLink to="/">Voltis</RouterLink>
             </VAppBarTitle>
@@ -30,8 +33,8 @@
         </VAppBar>
         <VNavigationDrawer
             v-model="drawer"
-            :permanent="mdAndUp"
-            :temporary="!mdAndUp"
+            :permanent="!alwaysHideSidebar"
+            :temporary="alwaysHideSidebar"
             :style="{
                 top: '0',
                 height: '100vh',
@@ -92,7 +95,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useDisplay } from 'vuetify'
 import { usersApi } from '@/utils/api/users'
 import { authApi } from '@/utils/api/auth'
@@ -106,11 +109,22 @@ const router = useRouter()
 const route = useRoute()
 const isSettings = computed(() => route.path.startsWith('/settings'))
 const { mdAndUp } = useDisplay()
-const drawer = ref(mdAndUp.value)
 const qMe = usersApi.useMe()
 const mLogout = authApi.useLogout()
 const qLibraries = librariesApi.useList()
 const queryClient = useQueryClient()
+
+const alwaysHideSidebar = computed(() => store.alwaysHideSidebar || !mdAndUp.value)
+const drawer = ref(!alwaysHideSidebar.value)
+
+watch(
+    () => store.alwaysHideSidebar,
+    newVal => {
+        if (newVal) {
+            drawer.value = false
+        }
+    }
+)
 
 const isAdmin = computed(() => qMe.data.value?.permissions.includes('ADMIN'))
 
