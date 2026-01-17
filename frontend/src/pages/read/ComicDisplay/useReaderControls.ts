@@ -10,7 +10,7 @@ const scrollParent = () => getScrollParent(document.getElementById('longstrip-co
 function isAtBottom(): boolean {
     const el = scrollParent()
     if (!el) return false
-    return window.scrollY + getViewportHeight() > el.scrollHeight - 10
+    return window.scrollY + getViewportHeight() > el.scrollHeight - 20
 }
 
 function isAtTop(): boolean {
