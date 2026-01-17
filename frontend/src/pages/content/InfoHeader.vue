@@ -32,6 +32,11 @@
                     </VCard>
                 </div>
                 <div class="grow">
+                    <div v-if="parent">
+                        <RouterLink :to="`/${parent.id}`" class="text-shadow-md/10!">
+                            {{ parent.title }}
+                        </RouterLink>
+                    </div>
                     <h1 class="text-2xl md:text-5xl xl:text-5xl font-bold! text-shadow-md/10!">
                         {{ content?.title }}
                     </h1>
@@ -83,13 +88,21 @@
             <VContainer class="relative pt-30! min-h-60">
                 <div class="flex gap-6">
                     <div class="w-[200px] shrink-0"></div>
-                    <div class="space-y-4! grow">
+                    <div class="space-y-4! grow text-white!">
+                        <div v-if="parent">
+                            <RouterLink
+                                :to="`/${parent.id}`"
+                                class="text-shadow-md/10! font-bold text-lg"
+                            >
+                                {{ parent.title }}
+                            </RouterLink>
+                        </div>
                         <h1
-                            class="text-xl sm:text-2xl md:text-3xl xl:text-5xl font-bold! text-shadow-md/40! text-white!"
+                            class="text-xl sm:text-2xl md:text-3xl xl:text-5xl font-bold! text-shadow-md/40!"
                         >
                             {{ content?.title }}
                         </h1>
-                        <div class="text-shadow-md/40! text-white!">
+                        <div class="text-shadow-md/40!">
                             <template v-if="content?.type === 'comic_series'">
                                 Comic Series
                             </template>
@@ -183,6 +196,9 @@ const props = defineProps<{
     content: Content
 }>()
 
+const qParent = contentApi.useGet(() => props.content.parent_id || undefined)
+const parent = qParent.data
+
 const mUpdateUserData = contentApi.useUpdateUserData()
 const isStarred = computed(() => props.content.user_data?.starred ?? false)
 
@@ -200,7 +216,7 @@ async function toggleStar() {
     inset: 0;
     background-size: cover;
     background-position: center;
-    filter: brightness(0.7);
+    filter: brightness(0.6);
 }
 
 .banner-desktop-empty {
