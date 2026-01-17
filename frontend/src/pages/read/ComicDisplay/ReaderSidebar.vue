@@ -72,16 +72,16 @@
 
             <div>
                 <div class="text-body-2 text-medium-emphasis mb-1">
-                    Page {{ reader.state.page + 1 }} of
+                    Page {{ sliderPage + 1 }} of
                     {{ reader.state.pageDimensions.length }}
                 </div>
                 <VSlider
-                    :model-value="reader.state.page"
+                    :model-value="sliderPage"
                     :min="0"
                     :max="Math.max(0, reader.state.pageDimensions.length - 1)"
                     :step="1"
                     hide-details
-                    @update:model-value="reader.goToPage($event)"
+                    @update:model-value="onSliderChange"
                 />
             </div>
 
@@ -135,6 +135,7 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch, type Ref } from 'vue'
+import { useDebounceFn } from '@vueuse/core'
 import { useReaderStore } from './useComicDisplayStore'
 import { contentApi } from '@/utils/api/content'
 import type { Content } from '@/utils/api/types'
@@ -148,6 +149,22 @@ const kbShortcuts = [
     ['Comma', 'Previous Entry'],
     ['Period', 'Next Entry'],
 ]
+
+const sliderPage = ref(reader.state?.page ?? 0)
+watch(
+    () => reader.state?.page,
+    page => {
+        if (page !== undefined) sliderPage.value = page
+    }
+)
+const debouncedGoToPage = useDebounceFn((page: number) => {
+    reader.goToPage(page)
+    console.log('Debounced go to page:', page)
+}, 200)
+function onSliderChange(page: number) {
+    sliderPage.value = page
+    debouncedGoToPage(page)
+}
 
 const parent = ref(null) as Ref<Content | null>
 watch(
