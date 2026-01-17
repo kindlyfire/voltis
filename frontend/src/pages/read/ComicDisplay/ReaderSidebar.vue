@@ -124,8 +124,8 @@
                 <div class="mb-1">Keyboard shortcuts</div>
                 <div v-for="s in kbShortcuts" class="d-flex justify-space-between text-xs!">
                     <span>{{ s[1] }}</span>
-                    <span>
-                        <kbd>{{ s[0] }}</kbd>
+                    <span class="font-mono">
+                        {{ s[0] }}
                     </span>
                 </div>
             </div>
@@ -134,7 +134,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch, type Ref } from 'vue'
+import { onMounted, onUnmounted, ref, watch, type Ref } from 'vue'
 import { useReaderStore } from './useComicDisplayStore'
 import { contentApi } from '@/utils/api/content'
 import type { Content } from '@/utils/api/types'

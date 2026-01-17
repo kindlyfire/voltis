@@ -64,4 +64,12 @@ useHead({
 .v-overlay__content > .v-card > .v-card-title {
     padding: 16px 24px 0;
 }
+
+body {
+    touch-action: manipulation;
+}
+
+.v-navigation-drawer__scrim {
+    @apply select-none;
+}
 </style>
