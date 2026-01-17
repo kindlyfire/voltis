@@ -33,7 +33,7 @@
             >
                 <RouterLink
                     :to="`/${content.id}`"
-                    class="bg-black/80! p-1.5! rounded-full flex items-center justify-center"
+                    class="bg-black/80! p-1.5! rounded-full flex items-center justify-center text-white"
                     :title="`Go to content page`"
                 >
                     <VIcon icon="mdi-information" size="16" />
@@ -93,12 +93,14 @@ const statusIcon = computed(() => {
 </script>
 
 <style lang="css" scoped>
-.content-grid-item .bottom-actions {
-    transition: opacity 0.1s;
-    opacity: 0;
-}
+@media (hover: hover) and (pointer: fine) {
+    .content-grid-item .bottom-actions {
+        transition: opacity 0.1s;
+        opacity: 0;
+    }
 
-.content-grid-item:hover .bottom-actions {
-    opacity: 1;
+    .content-grid-item:hover .bottom-actions {
+        opacity: 1;
+    }
 }
 </style>
