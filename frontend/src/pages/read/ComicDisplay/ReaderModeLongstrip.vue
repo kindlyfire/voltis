@@ -15,7 +15,7 @@
                     class="reader-longstrip__placeholder d-flex flex-column align-center justify-center gap-2"
                 >
                     <div class="text-error">{{ loader.error }}</div>
-                    <VBtn size="small" @click="loader.load()">Retry</VBtn>
+                    <VBtn size="small" @click.stop="loader.load()">Retry</VBtn>
                 </div>
                 <div
                     v-else-if="loader.loading || !loader.blobUrl"
