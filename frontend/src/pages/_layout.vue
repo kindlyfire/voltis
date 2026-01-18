@@ -5,8 +5,7 @@
             :style="store.navbarHidden && { transform: 'translateY(-64px)' }"
         >
             <VAppBarNavIcon
-                :class="{ 'd-md-none': !store.alwaysHideSidebar }"
-                @click="drawer = !drawer"
+                @click="store.setSidebarState(store.sidebarState === 'show' ? 'hide' : 'show')"
             />
             <VAppBarTitle>
                 <RouterLink to="/">Voltis</RouterLink>
@@ -32,9 +31,10 @@
             </template>
         </VAppBar>
         <VNavigationDrawer
-            v-model="drawer"
-            :permanent="!alwaysHideSidebar"
-            :temporary="alwaysHideSidebar"
+            :model-value="store.sidebarState === 'show'"
+            :permanent="store.defaultSidebarState === 'show'"
+            :temporary="store.defaultSidebarState === 'hide'"
+            @update:model-value="val => store.setSidebarState(val ? 'show' : 'hide')"
             :style="{
                 top: '0',
                 height: '100vh',
@@ -95,8 +95,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
-import { useDisplay } from 'vuetify'
+import { computed } from 'vue'
 import { usersApi } from '@/utils/api/users'
 import { authApi } from '@/utils/api/auth'
 import { librariesApi } from '@/utils/api/libraries'
@@ -108,23 +107,10 @@ const store = useLayoutStore()
 const router = useRouter()
 const route = useRoute()
 const isSettings = computed(() => route.path.startsWith('/settings'))
-const { mdAndUp } = useDisplay()
 const qMe = usersApi.useMe()
 const mLogout = authApi.useLogout()
 const qLibraries = librariesApi.useList()
 const queryClient = useQueryClient()
-
-const alwaysHideSidebar = computed(() => store.alwaysHideSidebar || !mdAndUp.value)
-const drawer = ref(!alwaysHideSidebar.value)
-
-watch(
-    () => store.alwaysHideSidebar,
-    newVal => {
-        if (newVal) {
-            drawer.value = false
-        }
-    }
-)
 
 const isAdmin = computed(() => qMe.data.value?.permissions.includes('ADMIN'))
 

@@ -1,6 +1,7 @@
 import { useDebounceFn, useScroll } from '@vueuse/core'
 import { acceptHMRUpdate, defineStore } from 'pinia'
 import { computed, onBeforeMount, onUnmounted, ref, watch } from 'vue'
+import { useDisplay } from 'vuetify'
 
 // Amount of scroll (in pixels) before hiding/showing the navbar
 const SCROLL_HIDE_THRESHOLD = 200
@@ -9,8 +10,8 @@ const SCROLL_HIDE_THRESHOLD = 200
 const SCROLL_MIN_OFFSET = 100
 
 export const useLayoutStore = defineStore('layout', () => {
+    // Navbar stuff
     const navbarScrollHideEnabled = ref(false)
-    const alwaysHideSidebar = ref(false)
     const scroll = useScroll(window)
 
     const anchorY = ref(0)
@@ -56,10 +57,33 @@ export const useLayoutStore = defineStore('layout', () => {
         return hidden.value
     })
 
+    // Sidebar stuff
+    const { mdAndUp } = useDisplay()
+    const defaultSidebarState = computed(() => {
+        return mdAndUp.value ? 'show' : 'hide'
+    })
+    const defaultSidebarStateOverride = ref<'show' | 'hide' | null>(null)
+    const sidebarStateOverride = ref<'show' | 'hide' | null>(null)
+    const sidebarState = computed(() => {
+        return (
+            sidebarStateOverride.value ??
+            defaultSidebarStateOverride.value ??
+            defaultSidebarState.value
+        )
+    })
+
+    function setSidebarState(state: 'show' | 'hide' | null) {
+        sidebarStateOverride.value = state === defaultSidebarState.value ? null : state
+    }
+
     return {
         navbarScrollHideEnabled,
         navbarHidden,
-        alwaysHideSidebar,
+        defaultSidebarState,
+        defaultSidebarStateOverride,
+        sidebarStateOverride,
+        sidebarState,
+        setSidebarState,
     }
 })
 
@@ -83,10 +107,10 @@ export function useAlwaysHideSidebar() {
     const store = useLayoutStore()
 
     onBeforeMount(() => {
-        store.alwaysHideSidebar = true
+        store.defaultSidebarStateOverride = 'hide'
     })
 
     onUnmounted(() => {
-        store.alwaysHideSidebar = false
+        store.defaultSidebarStateOverride = null
     })
 }
