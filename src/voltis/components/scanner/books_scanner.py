@@ -91,7 +91,7 @@ class BookScanner(ScannerBase):
         content.parent_id = series.id if series else None
         content.valid = True
         content.updated_at = now_without_tz()
-        content.order_parts = [series_index or 0]
+        content.order_parts = [series_index or 0.0]
 
         if not self.no_fs:
             await anyio.to_thread.run_sync(self._scan_book, content, metadata)

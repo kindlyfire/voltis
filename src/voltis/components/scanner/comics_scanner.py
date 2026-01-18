@@ -101,7 +101,7 @@ class ComicScanner(ScannerBase):
         content.title = title
         content.parent_id = series.id
         content.updated_at = now_without_tz()
-        content.order_parts = [vol_num or 0, ch_num or 0]
+        content.order_parts = [vol_num or 0.0, ch_num or 0.0]
 
         if not self.no_fs:
             await anyio.to_thread.run_sync(self._scan_comic, content)
@@ -142,7 +142,7 @@ class ComicScanner(ScannerBase):
             content.file_mtime = items[0].file_mtime
 
 
-def _parse_volume_number(name: str) -> int | float | None:
+def _parse_volume_number(name: str) -> float | None:
     """
     Parse volume number from a name.
 
@@ -152,10 +152,10 @@ def _parse_volume_number(name: str) -> int | float | None:
     volume_pattern = r"(?:\#|(?:v|vo|vol|volu|volum|volume)\.?)\s*(?P<num>\d+(?:\.\d+)?)"
     if match := re.search(volume_pattern, name, re.IGNORECASE):
         num = match.group("num")
-        return float(num) if "." in num else int(num)
+        return float(num)
 
 
-def _parse_chapter_number(name: str) -> int | float | None:
+def _parse_chapter_number(name: str) -> float | None:
     """
     Parse chapter number from a name.
 
@@ -165,10 +165,10 @@ def _parse_chapter_number(name: str) -> int | float | None:
     chapter_pattern = r"(?:c|ch|chap|chapt|chapte|chapter)\.?\s*(?P<num>\d+(?:\.\d+)?)"
     if match := re.search(chapter_pattern, name, re.IGNORECASE):
         num = match.group("num")
-        return float(num) if "." in num else int(num)
+        return float(num)
 
 
-def _parse_fallback_chapter_number(name: str) -> int | float | None:
+def _parse_fallback_chapter_number(name: str) -> float | None:
     """
     As a last resort, parse the number with the most digits in the name as the chapter number.
     """
@@ -181,7 +181,7 @@ def _parse_fallback_chapter_number(name: str) -> int | float | None:
 
         best = max(matches, key=digit_count)
         num = best.group(1)
-        return float(num) if "." in num else int(num)
+        return float(num)
     return None
 
 
