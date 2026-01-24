@@ -170,7 +170,7 @@ class Content(_Base, _DefaultColumns):
 
     type: Mapped[ContentType] = col(Text)
     order: Mapped[int | None] = col()
-    order_parts: Mapped[list[float]] = col(ARRAY(REAL))
+    order_parts: Mapped[list[float | None]] = col(ARRAY(REAL))
     meta: Mapped[ContentMetadata] = col("meta", JSONB, server_default="{}")
 
     parent_id: Mapped[str | None] = col(Text, ForeignKey("content.id"))

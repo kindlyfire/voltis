@@ -2,6 +2,7 @@ import asyncio
 import datetime
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+import math
 from typing import Any
 
 import anyio
@@ -216,7 +217,11 @@ class ScannerBase(ABC):
                         # Sort each group and compute new order values
                         updates = []
                         for items in by_parent.values():
-                            items.sort(key=lambda x: x.order_parts)
+                            items.sort(
+                                key=lambda x: [
+                                    (math.inf if v is None else v) for v in x.order_parts
+                                ]
+                            )
                             for order, content in enumerate(items):
                                 updates.append({"id": content.id, "order": order})
 

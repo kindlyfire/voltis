@@ -18,7 +18,7 @@ from .base import LibraryFile, ScannerBase
 logger = structlog.stdlib.get_logger()
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
-COVER_NAMES = ["cover.jpg", "cover.jpeg", "cover.png"]
+COVER_NAMES = ["cover.jpg", "cover.jpeg", "cover.png", "cover.webp"]
 
 
 class ComicScanner(ScannerBase):
@@ -76,9 +76,9 @@ class ComicScanner(ScannerBase):
         # Build title from vol/chapter
         parts = []
         if vol_num is not None:
-            parts.append(f"Vol. {vol_num}")
+            parts.append(f"Vol. {vol_num:g}")
         if ch_num is not None:
-            parts.append(f"Ch. {ch_num}")
+            parts.append(f"Ch. {ch_num:g}")
         title = " ".join(parts) if parts else filename
 
         # Create or update content
@@ -101,7 +101,7 @@ class ComicScanner(ScannerBase):
         content.title = title
         content.parent_id = series.id
         content.updated_at = now_without_tz()
-        content.order_parts = [vol_num or 0.0, ch_num or 0.0]
+        content.order_parts = [vol_num, ch_num]
 
         if not self.no_fs:
             await anyio.to_thread.run_sync(self._scan_comic, content)

@@ -65,7 +65,7 @@ class ContentDTO(BaseModel):
     cover_uri: str | None
     type: ContentType
     order: int | None
-    order_parts: list[float]
+    order_parts: list[float | None]
     meta: ContentMetadata
     parent_id: str | None
     library_id: str
