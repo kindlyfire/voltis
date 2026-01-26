@@ -1,7 +1,72 @@
+import { createOverridableValue } from '@/utils/misc'
 import { useDebounceFn, useScroll } from '@vueuse/core'
 import { acceptHMRUpdate, defineStore } from 'pinia'
-import { computed, onBeforeMount, onUnmounted, ref, watch } from 'vue'
+import { onBeforeMount, onUnmounted, ref, watch } from 'vue'
 import { useDisplay } from 'vuetify'
+
+export const useLayoutStore = defineStore('layout', () => {
+    const { mdAndUp } = useDisplay(undefined, 'composables')
+
+    // Navbar stuff
+    const navbarScrollHide = {
+        enabled: ref(false),
+        hidden: useNavbarScrollHideState(),
+    }
+    const navbarHidden = createOverridableValue(false, [
+        // Hide when scrolling down a while
+        'scrollHide',
+        // Paged mode always hides sidebar
+        'comicReaderPaged',
+        // Opening the reader sidebar always shows the navbar
+        'comicReaderSidebar',
+    ])
+    watch(
+        () => [navbarScrollHide.enabled.value, navbarScrollHide.hidden.value],
+        ([enabled, hidden]) => {
+            navbarHidden.setLayer('scrollHide', enabled ? hidden : undefined)
+        }
+    )
+
+    /** sidebarTemporary has the default state (true on mobile), and an override
+     * (reader pages make the sidebar temporary). temporary = uses an overlay
+     * instead of taking up space in the layout */
+    const sidebarTemporary = createOverridableValue(() => !mdAndUp.value, ['comicReader'])
+
+    /** sidebarOpen has the default state (hidden on mobile), and an override
+     * (clicking the sidebar icon should show it) */
+    const sidebarOpen = createOverridableValue(() => mdAndUp.value, ['manual'])
+    function setSidebarOpen(state: boolean) {
+        console.log('setSidebarOpen', state)
+        sidebarOpen.setLayer(
+            'manual',
+            state === sidebarOpen.initialValue.value ? undefined : state!
+        )
+    }
+
+    return {
+        navbarScrollHide,
+        navbarHidden,
+
+        // Sidebar
+        sidebarOpen,
+        setSidebarOpen,
+        sidebarTemporary,
+    }
+})
+
+if (import.meta.hot) {
+    import.meta.hot.accept(acceptHMRUpdate(useLayoutStore, import.meta.hot))
+}
+
+export function useNavbarScrollHide() {
+    const layout = useLayoutStore()
+    onBeforeMount(() => {
+        layout.navbarScrollHide.enabled = true
+    })
+    onUnmounted(() => {
+        layout.navbarScrollHide.enabled = false
+    })
+}
 
 // Amount of scroll (in pixels) before hiding/showing the navbar
 const SCROLL_HIDE_THRESHOLD = 200
@@ -9,11 +74,10 @@ const SCROLL_HIDE_THRESHOLD = 200
 // Navbar will always be shown when within this offset from the top
 const SCROLL_MIN_OFFSET = 100
 
-export const useLayoutStore = defineStore('layout', () => {
-    // Navbar stuff
-    const navbarScrollHideEnabled = ref(false)
+/** Computes based on scroll position changes whether the navbar should be
+ * hidden or not. Result used by the store only when enabled. */
+function useNavbarScrollHideState() {
     const scroll = useScroll(window)
-
     const anchorY = ref(0)
     const lastDirection = ref<'up' | 'down' | null>(null)
     const hidden = ref(false)
@@ -52,65 +116,5 @@ export const useLayoutStore = defineStore('layout', () => {
         }
     )
 
-    const navbarHidden = computed(() => {
-        if (!navbarScrollHideEnabled.value) return false
-        return hidden.value
-    })
-
-    // Sidebar stuff
-    const { mdAndUp } = useDisplay()
-    const defaultSidebarState = computed(() => {
-        return mdAndUp.value ? 'show' : 'hide'
-    })
-    const defaultSidebarStateOverride = ref<'show' | 'hide' | null>(null)
-    const sidebarStateOverride = ref<'show' | 'hide' | null>(null)
-    const sidebarState = computed(() => {
-        return (
-            sidebarStateOverride.value ??
-            defaultSidebarStateOverride.value ??
-            defaultSidebarState.value
-        )
-    })
-
-    function setSidebarState(state: 'show' | 'hide' | null) {
-        sidebarStateOverride.value = state === defaultSidebarState.value ? null : state
-    }
-
-    return {
-        navbarScrollHideEnabled,
-        navbarHidden,
-        defaultSidebarState,
-        defaultSidebarStateOverride,
-        sidebarStateOverride,
-        sidebarState,
-        setSidebarState,
-    }
-})
-
-if (import.meta.hot) {
-    import.meta.hot.accept(acceptHMRUpdate(useLayoutStore, import.meta.hot))
-}
-
-export function useNavbarScrollHide() {
-    const store = useLayoutStore()
-
-    onBeforeMount(() => {
-        store.navbarScrollHideEnabled = true
-    })
-
-    onUnmounted(() => {
-        store.navbarScrollHideEnabled = false
-    })
-}
-
-export function useAlwaysHideSidebar() {
-    const store = useLayoutStore()
-
-    onBeforeMount(() => {
-        store.defaultSidebarStateOverride = 'hide'
-    })
-
-    onUnmounted(() => {
-        store.defaultSidebarStateOverride = null
-    })
+    return hidden
 }

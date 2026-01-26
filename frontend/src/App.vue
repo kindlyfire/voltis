@@ -71,5 +71,9 @@ body {
 
 .v-navigation-drawer__scrim {
     @apply select-none;
+
+    &.fade-transition-leave-active {
+        pointer-events: none;
+    }
 }
 </style>

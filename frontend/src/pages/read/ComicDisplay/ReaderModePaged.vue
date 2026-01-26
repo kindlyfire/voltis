@@ -19,8 +19,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useReaderStore } from './useComicDisplayStore'
+import { useLayoutStore } from '@/pages/useLayoutStore'
 
 const reader = useReaderStore()
+const layout = useLayoutStore()
+layout.navbarHidden.useLayer('comicReaderPaged', true)
 
 const loader = computed(() => reader.state?.loaders[reader.state.page])
 </script>

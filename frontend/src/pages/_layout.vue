@@ -1,12 +1,10 @@
 <template>
     <VApp>
         <VAppBar
-            :flat="store.navbarHidden"
-            :style="store.navbarHidden && { transform: 'translateY(-64px)' }"
+            :flat="store.navbarHidden.value"
+            :style="store.navbarHidden.value && { transform: 'translateY(-64px)' }"
         >
-            <VAppBarNavIcon
-                @click="store.setSidebarState(store.sidebarState === 'show' ? 'hide' : 'show')"
-            />
+            <VAppBarNavIcon @click="store.setSidebarOpen(!store.sidebarOpen.value)" />
             <VAppBarTitle>
                 <RouterLink to="/">Voltis</RouterLink>
             </VAppBarTitle>
@@ -31,10 +29,10 @@
             </template>
         </VAppBar>
         <VNavigationDrawer
-            :model-value="store.sidebarState === 'show'"
-            :permanent="store.defaultSidebarState === 'show'"
-            :temporary="store.defaultSidebarState === 'hide'"
-            @update:model-value="val => store.setSidebarState(val ? 'show' : 'hide')"
+            :model-value="store.sidebarOpen.value"
+            :permanent="!store.sidebarTemporary.value"
+            :temporary="store.sidebarTemporary.value"
+            @update:model-value="val => store.setSidebarOpen(val)"
             :style="{
                 top: '0',
                 height: '100vh',

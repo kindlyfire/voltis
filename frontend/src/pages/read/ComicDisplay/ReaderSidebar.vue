@@ -4,15 +4,16 @@
         temporary
         disable-route-watcher
         location="right"
-        width="300"
+        width="350"
         :style="{
             top: '0',
             height: '100vh',
-            zIndex: 1010,
         }"
     >
-        <div class="pa-4 space-y-4!" v-if="reader.state">
-            <div class="d-flex align-center">
+        <div class="pa-4 pt-0 space-y-4! mt-16" v-if="reader.state">
+            <!-- mb-2!: The spacing of 4 with the element below feels kinda wrong,
+            because of how much empty space there is in this element. -->
+            <div class="h-16 d-flex align-center mb-2!">
                 <span class="text-h6">Reader</span>
                 <VSpacer />
                 <VBtn icon variant="text" @click="reader.sidebarOpen = false">
@@ -134,14 +135,16 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch, type Ref } from 'vue'
+import { onUnmounted, ref, watch, type Ref } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
 import { useReaderStore } from './useComicDisplayStore'
 import { contentApi } from '@/utils/api/content'
 import type { Content } from '@/utils/api/types'
 import type { ReaderMode } from './types'
+import { useLayoutStore } from '@/pages/useLayoutStore'
 
 const reader = useReaderStore()
+const layout = useLayoutStore()
 
 const kbShortcuts = [
     ['Left arrow', 'Previous Page'],
@@ -150,6 +153,15 @@ const kbShortcuts = [
     ['Period', 'Next Entry'],
 ]
 
+const navbarHidden = layout.navbarHidden.useLayer('comicReaderSidebar')
+watch(
+    () => reader.sidebarOpen,
+    open => {
+        navbarHidden(open ? false : undefined)
+    }
+)
+
+/** Page slider handling with debounce for actual updates */
 const sliderPage = ref(reader.state?.page ?? 0)
 watch(
     () => reader.state?.page,
@@ -159,13 +171,14 @@ watch(
 )
 const debouncedGoToPage = useDebounceFn((page: number) => {
     reader.goToPage(page)
-    console.log('Debounced go to page:', page)
 }, 200)
 function onSliderChange(page: number) {
     sliderPage.value = page
     debouncedGoToPage(page)
 }
 
+/** Parent content. Since this involves another fetch, when the content changes,
+ * we keep the old parent around while the new one is loaded. */
 const parent = ref(null) as Ref<Content | null>
 watch(
     () => reader.state?.content,
@@ -200,9 +213,5 @@ function setLongstripWidth(width: number) {
 
 onUnmounted(() => {
     originalPage = null
-})
-
-onMounted(() => {
-    console.log('Onmounted called')
 })
 </script>

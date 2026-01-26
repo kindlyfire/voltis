@@ -33,9 +33,11 @@
 import { ref, onMounted } from 'vue'
 import { useDebounceFn, useEventListener } from '@vueuse/core'
 import { useReaderStore } from './useComicDisplayStore'
+import { useNavbarScrollHide } from '@/pages/useLayoutStore'
 
 const reader = useReaderStore()
 const containerRef = ref<HTMLElement | null>(null)
+useNavbarScrollHide()
 
 function getPageStyle(index: number) {
     const page = reader.state?.pageDimensions[index]
