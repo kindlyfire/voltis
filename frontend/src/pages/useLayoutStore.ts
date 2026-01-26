@@ -1,8 +1,9 @@
-import { createOverridableValue } from '@/utils/misc'
+import { createOverridableValue, useSystemTheme } from '@/utils/misc'
+import { useLocalStorage } from '@/utils/localStorage'
 import { useDebounceFn, useScroll } from '@vueuse/core'
 import { acceptHMRUpdate, defineStore } from 'pinia'
-import { onBeforeMount, onUnmounted, ref, watch } from 'vue'
-import { useDisplay } from 'vuetify'
+import { computed, onBeforeMount, onUnmounted, ref, watch } from 'vue'
+import { useDisplay, useTheme } from 'vuetify'
 
 export const useLayoutStore = defineStore('layout', () => {
     const { mdAndUp } = useDisplay(undefined, 'composables')
@@ -43,6 +44,34 @@ export const useLayoutStore = defineStore('layout', () => {
         )
     }
 
+    // Theme
+    const vuetifyTheme = useTheme()
+    const systemTheme = useSystemTheme()
+    const { value: themePreference } = useLocalStorage<'light' | 'dark' | null>(
+        'theme-preference',
+        found => found ?? null
+    )
+    const effectiveTheme = computed(() => {
+        if (themePreference.value) {
+            return themePreference.value
+        } else {
+            return systemTheme.value ? 'dark' : 'light'
+        }
+    })
+    watch(
+        () => effectiveTheme.value,
+        theme => {
+            vuetifyTheme.global.name.value = theme
+        },
+        { immediate: true }
+    )
+    function toggleTheme() {
+        themePreference.value = effectiveTheme.value === 'dark' ? 'light' : 'dark'
+    }
+    function resetTheme() {
+        themePreference.value = null
+    }
+
     return {
         navbarScrollHide,
         navbarHidden,
@@ -51,6 +80,11 @@ export const useLayoutStore = defineStore('layout', () => {
         sidebarOpen,
         setSidebarOpen,
         sidebarTemporary,
+
+        // Theme
+        theme: effectiveTheme,
+        toggleTheme,
+        resetTheme,
     }
 })
 

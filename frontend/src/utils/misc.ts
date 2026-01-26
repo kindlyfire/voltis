@@ -1,4 +1,5 @@
 import { QueryClient } from '@tanstack/vue-query'
+import { useEventListener } from '@vueuse/core'
 import {
     computed,
     onBeforeMount,
@@ -88,4 +89,13 @@ export function createOverridableValue<TValue, const TLayer extends string>(
     }
 
     return obj
+}
+
+export function useSystemTheme() {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+    const isDark = ref(mediaQuery.matches)
+    useEventListener(mediaQuery, 'change', (e: MediaQueryListEvent) => {
+        isDark.value = e.matches
+    })
+    return isDark
 }

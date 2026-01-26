@@ -7,25 +7,9 @@
 
 <script setup lang="ts">
 import { RouterView, useRouter } from 'vue-router'
-import { useTheme } from 'vuetify'
-import { onMounted, onUnmounted, watch } from 'vue'
+import { watch } from 'vue'
 import { usersApi } from './utils/api/users'
 import { useHead } from '@unhead/vue'
-
-const theme = useTheme()
-
-const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
-const updateTheme = (e: MediaQueryListEvent | MediaQueryList) => {
-    theme.global.name.value = e.matches ? 'dark' : 'light'
-}
-
-onMounted(() => {
-    mediaQuery.addEventListener('change', updateTheme)
-})
-
-onUnmounted(() => {
-    mediaQuery.removeEventListener('change', updateTheme)
-})
 
 const router = useRouter()
 const qMe = usersApi.useMe()

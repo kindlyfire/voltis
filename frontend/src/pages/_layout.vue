@@ -9,6 +9,13 @@
                 <RouterLink to="/">Voltis</RouterLink>
             </VAppBarTitle>
             <VSpacer />
+            <VBtn
+                ref="themeBtnRef"
+                variant="text"
+                size="small"
+                :icon="store.theme === 'light' ? 'mdi-weather-sunny' : 'mdi-weather-night'"
+                title="Toggle theme (Shift+click or long press to reset to system)"
+            />
             <VMenu v-if="qMe.data?.value">
                 <template #activator="{ props }">
                     <VBtn v-bind="props" variant="text" class="me-5">
@@ -93,15 +100,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { usersApi } from '@/utils/api/users'
 import { authApi } from '@/utils/api/auth'
 import { librariesApi } from '@/utils/api/libraries'
 import { useRouter, useRoute } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
+import { onLongPress, useEventListener } from '@vueuse/core'
 import { useLayoutStore } from './useLayoutStore'
 
 const store = useLayoutStore()
+
 const router = useRouter()
 const route = useRoute()
 const isSettings = computed(() => route.path.startsWith('/settings'))
@@ -117,4 +126,23 @@ async function handleLogout() {
     queryClient.invalidateQueries({ queryKey: ['users', 'me'] })
     router.push('/auth/login')
 }
+
+/** We out here overcomplicating things to the bone. It's nice, though. */
+const themeBtnRef = ref<HTMLElement | null>(null)
+let longPressTriggered = false
+onLongPress(
+    themeBtnRef,
+    () => {
+        longPressTriggered = true
+        store.resetTheme()
+    },
+    { delay: 500 }
+)
+useEventListener(document.body, 'pointerup', () =>
+    setTimeout(() => (longPressTriggered = false), 0)
+)
+useEventListener(themeBtnRef, 'click', e => {
+    if (longPressTriggered) return
+    e.shiftKey ? store.resetTheme() : store.toggleTheme()
+})
 </script>
