@@ -2,11 +2,9 @@ import datetime
 import pathlib
 import re
 import zipfile
-from io import BytesIO
 
 import anyio
 import anyio.to_thread
-import imagesize
 import structlog
 from anyio import Path
 import vmeta
