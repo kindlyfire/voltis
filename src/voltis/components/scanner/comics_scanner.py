@@ -9,6 +9,7 @@ import anyio.to_thread
 import imagesize
 import structlog
 from anyio import Path
+import vmeta
 
 from voltis.db.models import Content
 from voltis.utils.misc import notnone, now_without_tz
@@ -113,13 +114,19 @@ class ComicScanner(ScannerBase):
         path = pathlib.Path(notnone(content.file_uri))
 
         try:
-            with zipfile.ZipFile(path, "r") as zf:
-                pages = _list_pages(zf)
-                if not pages:
-                    content.valid = False
-                    return
-                content.mutate_meta()["pages"] = pages
-                content.cover_uri = f"{content.file_uri}/{pages[0][0]}"
+            meta = vmeta.read_metadata_and_pages(path.as_posix())
+            pages: list[tuple[str, int, int]] = []
+
+            for page in meta["pages"]:
+                if "error" in page:
+                    raise ValueError("PageInfoError: " + page["error"])
+                pages.append((page["name"], page["width"], page["height"]))
+
+            if not pages:
+                content.valid = False
+                return
+            content.mutate_meta()["pages"] = pages
+            content.cover_uri = f"{content.file_uri}/{pages[0][0]}"
         except (zipfile.BadZipFile, OSError):
             content.valid = False
 
@@ -234,34 +241,3 @@ def _clean_series_name(name: str) -> str:
             break
         name = cleaned
     return name.strip()
-
-
-def _list_pages(zf: zipfile.ZipFile) -> list[tuple[str, int, int]]:
-    """
-    List image files in a zip archive, sorted naturally by filename.
-    Returns paths relative to the archive root.
-    """
-    pages: list[tuple[str, int, int]] = []
-    for info in zf.infolist():
-        if info.is_dir():
-            continue
-        ext = pathlib.Path(info.filename).suffix.lower()
-        if ext in IMAGE_EXTENSIONS:
-            width, height = imagesize.get(BytesIO(zf.read(info.filename)))
-            if not isinstance(width, int) or not isinstance(height, int):
-                continue
-            pages.append((info.filename, width, height))
-
-    pages.sort(key=lambda x: _natural_sort_key(x[0]))
-    return pages
-
-
-def _natural_sort_key(s: str) -> list[int | str]:
-    """Sort key for natural sorting (e.g., page2 < page10)."""
-    parts: list[int | str] = []
-    for part in re.split(r"(\d+)", s):
-        if part.isdigit():
-            parts.append(int(part))
-        else:
-            parts.append(part.lower())
-    return parts

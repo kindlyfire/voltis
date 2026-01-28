@@ -21,6 +21,7 @@ async def _scan(
     library_id: str | None,
     dry_run: bool,
     filter_paths: list[str] | None,
+    force: bool = False,
 ):
     if not library_id and not scanner_type:
         click.echo("\nError: --type is required when not using --library", err=True)
@@ -62,7 +63,7 @@ async def _scan(
         click.echo(f"  Source: {unquote(source.path_uri)}")
 
     async with LogTime(logger, "Library scan"):
-        result = await scanner.scan(dry_run=dry_run, filter_paths=filter_paths)
+        result = await scanner.scan(dry_run=dry_run, filter_paths=filter_paths, force=force)
 
     # Display results
     click.echo("")
