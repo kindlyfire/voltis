@@ -3,8 +3,10 @@ from importlib.metadata import version as pkg_version
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
+from starlette.middleware.gzip import GZipResponder, IdentityResponder
+from starlette.datastructures import Headers
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from voltis.services.resource_broker import ResourceBroker
 from voltis.services.settings import settings
@@ -58,3 +60,25 @@ def create_app(rb: ResourceBroker):
     app.include_router(static_router)
 
     return app
+
+
+class GZipMiddleware:
+    def __init__(self, app: ASGIApp, minimum_size: int = 500, compresslevel: int = 9) -> None:
+        self.app = app
+        self.minimum_size = minimum_size
+        self.compresslevel = compresslevel
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = Headers(scope=scope)
+        if not scope["path"].startswith("/api/files/") and "gzip" in headers.get(
+            "Accept-Encoding", ""
+        ):
+            responder = GZipResponder(self.app, self.minimum_size, compresslevel=self.compresslevel)
+        else:
+            responder = IdentityResponder(self.app, self.minimum_size)
+
+        await responder(scope, receive, send)

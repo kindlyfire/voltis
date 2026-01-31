@@ -1,11 +1,11 @@
 import datetime
 import mimetypes
 import typing
-import zipfile
 from pathlib import Path
 
 import pyvips
 from fastapi import HTTPException
+import vmeta
 
 from voltis.db.models import Content
 from voltis.services.settings import settings
@@ -30,11 +30,7 @@ def _find_archive_and_inner_path(path: Path) -> tuple[Path, str] | None:
 
 def _read_from_archive(archive_path: Path, inner_path: str) -> bytes:
     """Read a file from inside a zip-based archive."""
-    with zipfile.ZipFile(archive_path, "r") as zf:
-        try:
-            return zf.read(inner_path)
-        except KeyError:
-            raise HTTPException(status_code=404, detail=f"File not found in archive: {inner_path}")
+    return vmeta.read_file(archive_path.as_posix(), inner_path)
 
 
 def read_content_file(uri: str) -> tuple[bytes, str]:
