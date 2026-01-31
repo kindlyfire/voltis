@@ -27,6 +27,8 @@
             </div>
         </template>
     </div>
+
+    <div class="browser-ui-padding"></div>
 </template>
 
 <script setup lang="ts">
@@ -99,5 +101,9 @@ onMounted(() => {
     width: 100%;
     height: auto;
     display: block;
+}
+
+.browser-ui-padding {
+    height: calc(100lvh - 100svh);
 }
 </style>
