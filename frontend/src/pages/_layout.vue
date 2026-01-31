@@ -93,7 +93,7 @@
                 </VListItem>
             </VList>
         </VNavigationDrawer>
-        <VMain>
+        <VMain :style="store.navbarTemporary ? { '--v-layout-top': '0px' } : {}">
             <RouterView />
         </VMain>
     </VApp>

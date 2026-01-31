@@ -32,12 +32,12 @@ const loader = computed(() => reader.state?.loaders[reader.state.page])
 .reader-paged {
     width: 100%;
     height: 100%;
-    min-height: calc(100dvh - var(--v-layout-top, 0px));
+    min-height: 100dvh;
 }
 
 .reader-paged__image {
     width: 100%;
-    height: calc(100dvh - var(--v-layout-top, 0px));
+    height: 100dvh;
     object-fit: contain;
 }
 </style>

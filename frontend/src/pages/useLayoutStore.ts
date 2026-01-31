@@ -27,6 +27,11 @@ export const useLayoutStore = defineStore('layout', () => {
             navbarHidden.setLayer('scrollHide', enabled ? hidden : undefined)
         }
     )
+    const navbarTemporary = computed(() => {
+        // Navbar scroll hide doesn't count, since it will always show when the
+        // viewport is near the top of the scroll area
+        return navbarHidden.getLayer('comicReaderPaged') || false
+    })
 
     /** sidebarTemporary has the default state (true on mobile), and an override
      * (reader pages make the sidebar temporary). temporary = uses an overlay
@@ -75,6 +80,7 @@ export const useLayoutStore = defineStore('layout', () => {
     return {
         navbarScrollHide,
         navbarHidden,
+        navbarTemporary,
 
         // Sidebar
         sidebarOpen,

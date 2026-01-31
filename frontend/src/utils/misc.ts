@@ -57,6 +57,7 @@ export function createOverridableValue<TValue, const TLayer extends string>(
         value: Ref<TValue>
         useLayer: (layer: TLayer, value?: TValue) => (v: TValue | undefined) => void
         setLayer: (layer: TLayer, value: TValue | undefined) => void
+        getLayer: (layer: TLayer) => TValue | undefined
     } = {
         initialValue: computed(() => toValue(initial)),
         overrides: ref([]),
@@ -85,6 +86,10 @@ export function createOverridableValue<TValue, const TLayer extends string>(
         setLayer(layer: TLayer, value: TValue | undefined) {
             const index = layerIndex(layer)
             this.overrides.value[index] = value
+        },
+        getLayer(layer: TLayer): TValue | undefined {
+            const index = layerIndex(layer)
+            return this.overrides.value[index]
         },
     }
 
