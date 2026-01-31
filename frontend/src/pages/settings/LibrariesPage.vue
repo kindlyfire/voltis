@@ -3,7 +3,7 @@
         <div class="d-flex align-center mb-6">
             <h1 class="text-h4">Libraries</h1>
             <VSpacer />
-            <VBtn color="primary" @click="selectedLibraryId = 'new'">Create Library</VBtn>
+            <VBtn color="primary" @click="showLibraryModal('new')">Create Library</VBtn>
         </div>
 
         <VTable>
@@ -38,14 +38,14 @@
                             icon="mdi-magnify-scan"
                             variant="text"
                             size="small"
-                            @click="((scanLibraryIds = [library.id]), (scanModalOpen = true))"
+                            @click="showScanModal([library.id])"
                             title="Scan library"
                         />
                         <VBtn
                             icon="mdi-pencil"
                             variant="text"
                             size="small"
-                            @click="selectedLibraryId = library.id"
+                            @click="showLibraryModal(library.id)"
                             title="Edit library"
                         />
                         <CopyIdButton :id="library.id" />
@@ -55,25 +55,17 @@
         </VTable>
 
         <div class="mt-4">
-            <VBtn
-                variant="tonal"
-                prepend-icon="mdi-magnify-scan"
-                @click="((scanLibraryIds = []), (scanModalOpen = true))"
-            >
+            <VBtn variant="tonal" prepend-icon="mdi-magnify-scan" @click="showScanModal([])">
                 Scan All
             </VBtn>
         </div>
-
-        <LibraryModal :library-id="selectedLibraryId" @close="selectedLibraryId = null" />
-        <ScanModal :library-ids="scanLibraryIds" v-model="scanModalOpen" />
     </VContainer>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
 import { librariesApi } from '@/utils/api/libraries'
-import LibraryModal from './LibraryModal.vue'
-import ScanModal from './ScanModal.vue'
+import { showLibraryModal } from './LibraryModal.vue'
+import { showScanModal } from './ScanModal.vue'
 import CopyIdButton from './CopyIdButton.vue'
 import { useHead } from '@unhead/vue'
 
@@ -82,7 +74,4 @@ useHead({
 })
 
 const libraries = librariesApi.useList()
-const selectedLibraryId = ref<string | null>(null)
-const scanModalOpen = ref(false)
-const scanLibraryIds = ref<string[]>([])
 </script>

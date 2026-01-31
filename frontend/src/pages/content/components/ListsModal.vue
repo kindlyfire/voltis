@@ -1,9 +1,5 @@
 <template>
-    <VDialog
-        :model-value="modelValue"
-        @update:model-value="$emit('update:modelValue', $event)"
-        max-width="400"
-    >
+    <VDialog :model-value="open" @update:model-value="v => !v && close()" max-width="400">
         <VCard>
             <VCardTitle>Add to list</VCardTitle>
             <VCardText class="space-y-4!">
@@ -48,7 +44,7 @@
             </VCardText>
             <VCardActions>
                 <VSpacer />
-                <VBtn variant="text" @click="$emit('update:modelValue', false)">Close</VBtn>
+                <VBtn variant="text" @click="close()">Close</VBtn>
             </VCardActions>
         </VCard>
     </VDialog>
@@ -62,12 +58,9 @@ import { contentApi } from '@/utils/api/content'
 import AQueryError from '@/components/AQueryError.vue'
 
 const props = defineProps<{
-    modelValue: boolean
+    open: boolean
+    close: () => void
     contentId: string
-}>()
-
-defineEmits<{
-    'update:modelValue': [value: boolean]
 }>()
 
 const queryClient = useQueryClient()
@@ -108,5 +101,14 @@ async function toggleList(listId: string) {
     } finally {
         pendingListIds.value.delete(listId)
     }
+}
+</script>
+
+<script lang="ts">
+import { Modals } from '@/utils/modals'
+import Self from './ListsModal.vue'
+
+export function showListsModal(contentId: string): Promise<void> {
+    return Modals.show(Self, { contentId })
 }
 </script>

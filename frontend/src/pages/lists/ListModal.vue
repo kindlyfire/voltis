@@ -1,9 +1,5 @@
 <template>
-    <VDialog
-        :model-value="modelValue"
-        @update:model-value="$emit('update:modelValue', $event)"
-        max-width="500"
-    >
+    <VDialog :model-value="open" @update:model-value="v => !v && close()" max-width="500">
         <VCard>
             <VCardTitle>{{ isNew ? 'Create List' : 'Edit List' }}</VCardTitle>
             <VCardText>
@@ -33,9 +29,7 @@
                         >
                             {{ isNew ? 'Create' : 'Update' }}
                         </VBtn>
-                        <VBtn variant="text" @click="$emit('update:modelValue', false)"
-                            >Cancel</VBtn
-                        >
+                        <VBtn variant="text" @click="close()">Cancel</VBtn>
                         <VSpacer />
                         <VBtn
                             v-if="!isNew"
@@ -62,19 +56,16 @@ import { useForm } from '@/utils/forms'
 import { customListsApi } from '@/utils/api/custom-lists'
 
 const props = defineProps<{
-    listId: string | null
-    modelValue: boolean
-}>()
-
-const emit = defineEmits<{
-    'update:modelValue': [boolean]
+    open: boolean
+    close: () => void
+    listId: string
 }>()
 
 const isNew = computed(() => props.listId === 'new')
 const visibilityOptions = ['public', 'private', 'unlisted']
 
 const list = customListsApi.useGet(() => (isNew.value ? null : props.listId), {
-    enabled: computed(() => !isNew.value && !!props.listId),
+    enabled: computed(() => !isNew.value),
 })
 const createList = customListsApi.useCreate()
 const updateList = customListsApi.useUpdate()
@@ -95,28 +86,11 @@ const form = useForm({
         if (isNew.value) {
             await createList.mutateAsync(values)
         } else {
-            await updateList.mutateAsync({ id: props.listId!, ...values })
+            await updateList.mutateAsync({ id: props.listId, ...values })
         }
-        emit('update:modelValue', false)
+        props.close()
     },
 })
-
-watch(
-    () => props.listId,
-    () => {
-        form.reset()
-        if (isNew.value) {
-            form.setValues({ name: '', description: '', visibility: 'private' })
-        } else if (list.data?.value) {
-            form.setValues({
-                name: list.data.value.name,
-                description: list.data.value.description ?? '',
-                visibility: list.data.value.visibility,
-            })
-        }
-    },
-    { immediate: true }
-)
 
 watch(
     () => list.data?.value,
@@ -128,12 +102,22 @@ watch(
                 visibility: val.visibility,
             })
         }
-    }
+    },
+    { immediate: true }
 )
 
 async function handleDelete() {
-    if (!props.listId || isNew.value) return
+    if (isNew.value) return
     await deleteList.mutateAsync(props.listId)
-    emit('update:modelValue', false)
+    props.close()
+}
+</script>
+
+<script lang="ts">
+import { Modals } from '@/utils/modals'
+import Self from './ListModal.vue'
+
+export function showListModal(listId: string): Promise<void> {
+    return Modals.show(Self, { listId })
 }
 </script>

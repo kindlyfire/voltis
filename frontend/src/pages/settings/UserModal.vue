@@ -1,9 +1,5 @@
 <template>
-    <VDialog
-        :model-value="modelValue"
-        @update:model-value="$emit('update:modelValue', $event)"
-        max-width="500"
-    >
+    <VDialog :model-value="open" @update:model-value="v => !v && close()" max-width="500">
         <VCard>
             <VCardTitle>{{ isNew ? 'Create User' : 'Edit User' }}</VCardTitle>
             <VCardText>
@@ -29,9 +25,7 @@
                         >
                             {{ isNew ? 'Create' : 'Update' }}
                         </VBtn>
-                        <VBtn variant="text" @click="$emit('update:modelValue', false)">
-                            Cancel
-                        </VBtn>
+                        <VBtn variant="text" @click="close()"> Cancel </VBtn>
                         <VSpacer />
                         <VBtn
                             v-if="!isNew"
@@ -58,12 +52,9 @@ import AInput from '@/components/AInput.vue'
 import AQueryError from '@/components/AQueryError.vue'
 
 const props = defineProps<{
-    userId: string | null
-    modelValue: boolean
-}>()
-
-const emit = defineEmits<{
-    'update:modelValue': [boolean]
+    open: boolean
+    close: () => void
+    userId: string
 }>()
 
 const isNew = computed(() => props.userId === 'new')
@@ -96,48 +87,41 @@ const form = useForm({
     },
     onSubmit: async values => {
         await upsert.mutateAsync({
-            id: isNew.value ? undefined : props.userId!,
+            id: isNew.value ? undefined : props.userId,
             username: values.username,
             password: values.password || undefined,
             permissions: values.isAdmin ? ['ADMIN'] : [],
         })
-        emit('update:modelValue', false)
+        props.close()
     },
 })
 
 watch(
-    () => props.userId,
-    () => {
-        form.reset()
-        if (props.userId === 'new') {
-            form.setValues({ username: '', password: '', isAdmin: false })
-        } else if (user.value) {
-            form.setValues({
-                username: user.value.username,
-                password: '',
-                isAdmin: user.value.permissions.includes('ADMIN'),
-            })
-        }
-    },
-    { immediate: true }
-)
-
-watch(
     () => user.value,
     u => {
-        if (u && props.userId !== 'new') {
+        if (u && !isNew.value) {
             form.setValues({
                 username: u.username,
                 password: '',
                 isAdmin: u.permissions.includes('ADMIN'),
             })
         }
-    }
+    },
+    { immediate: true }
 )
 
 async function handleDelete() {
-    if (!props.userId || isNew.value) return
+    if (isNew.value) return
     await deleteUser.mutateAsync(props.userId)
-    emit('update:modelValue', false)
+    props.close()
+}
+</script>
+
+<script lang="ts">
+import { Modals } from '@/utils/modals'
+import Self from './UserModal.vue'
+
+export function showUserModal(userId: string): Promise<void> {
+    return Modals.show(Self, { userId })
 }
 </script>

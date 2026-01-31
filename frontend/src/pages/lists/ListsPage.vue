@@ -3,7 +3,7 @@
         <div class="d-flex align-center mb-6">
             <h1 class="text-h4">My Lists</h1>
             <VSpacer />
-            <VBtn color="primary" @click="openCreate">Create List</VBtn>
+            <VBtn color="primary" @click="showListModal('new')">Create List</VBtn>
         </div>
 
         <VTable>
@@ -31,38 +31,23 @@
                             icon="mdi-pencil"
                             variant="text"
                             size="small"
-                            @click="openEdit(list.id)"
+                            @click="showListModal(list.id)"
                         />
                     </td>
                 </tr>
             </tbody>
         </VTable>
-
-        <ListModal :list-id="selectedListId" v-model="modalOpen" />
     </VContainer>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
 import { useHead } from '@unhead/vue'
 import { customListsApi } from '@/utils/api/custom-lists'
-import ListModal from './ListModal.vue'
+import { showListModal } from './ListModal.vue'
 
 useHead({
     title: 'Lists',
 })
 
 const lists = customListsApi.useList('me')
-const modalOpen = ref(false)
-const selectedListId = ref<string | null>(null)
-
-function openCreate() {
-    selectedListId.value = 'new'
-    modalOpen.value = true
-}
-
-function openEdit(id: string) {
-    selectedListId.value = id
-    modalOpen.value = true
-}
 </script>

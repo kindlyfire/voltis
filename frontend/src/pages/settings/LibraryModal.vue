@@ -1,5 +1,5 @@
 <template>
-    <VDialog :model-value="!!libraryId" @update:model-value="$emit('close')" max-width="500">
+    <VDialog :model-value="open" @update:model-value="v => !v && close()" max-width="500">
         <VCard>
             <VCardTitle>{{ isNew ? 'Create Library' : 'Edit Library' }}</VCardTitle>
             <VCardText>
@@ -58,7 +58,7 @@
                         >
                             {{ isNew ? 'Create' : 'Update' }}
                         </VBtn>
-                        <VBtn variant="text" @click="$emit('close')">Cancel</VBtn>
+                        <VBtn variant="text" @click="close()">Cancel</VBtn>
                         <VSpacer />
                         <VBtn
                             v-if="!isNew"
@@ -85,11 +85,9 @@ import AInput from '@/components/AInput.vue'
 import AQueryError from '@/components/AQueryError.vue'
 
 const props = defineProps<{
-    libraryId: string | null
-}>()
-
-const emit = defineEmits<{
-    close: []
+    open: boolean
+    close: () => void
+    libraryId: string
 }>()
 
 const isNew = computed(() => props.libraryId === 'new')
@@ -118,12 +116,12 @@ const form = useForm({
     },
     onSubmit: async values => {
         await upsert.mutateAsync({
-            id: isNew.value ? undefined : props.libraryId!,
+            id: isNew.value ? undefined : props.libraryId,
             name: values.name,
             type: values.type!,
             sources: values.sources.filter(s => s.path_uri.trim() !== ''),
         })
-        emit('close')
+        props.close()
     },
 })
 
@@ -145,34 +143,27 @@ function updateSource(index: number, value: string) {
 }
 
 watch(
-    () => props.libraryId,
-    () => {
-        form.reset()
-        if (props.libraryId === 'new') {
-            form.setValues({ name: '', type: null, sources: [] })
-        } else if (library.value) {
-            form.setValues({
-                name: library.value.name,
-                type: library.value.type,
-                sources: library.value.sources,
-            })
+    () => library.value,
+    l => {
+        if (l && !isNew.value) {
+            form.setValues({ name: l.name, type: l.type, sources: l.sources })
         }
     },
     { immediate: true }
 )
 
-watch(
-    () => library.value,
-    l => {
-        if (l && props.libraryId !== 'new') {
-            form.setValues({ name: l.name, type: l.type, sources: l.sources })
-        }
-    }
-)
-
 async function handleDelete() {
-    if (!props.libraryId || isNew.value) return
+    if (isNew.value) return
     await deleteLibrary.mutateAsync(props.libraryId)
-    emit('close')
+    props.close()
+}
+</script>
+
+<script lang="ts">
+import { Modals } from '@/utils/modals'
+import Self from './LibraryModal.vue'
+
+export function showLibraryModal(libraryId: string): Promise<void> {
+    return Modals.show(Self, { libraryId })
 }
 </script>

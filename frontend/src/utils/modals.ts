@@ -26,7 +26,7 @@ export const Modals = {
                 resolve(data)
                 setTimeout(() => {
                     removeEntry(id)
-                }, 300)
+                }, 1000)
             }
 
             const entry: ModalEntry = {

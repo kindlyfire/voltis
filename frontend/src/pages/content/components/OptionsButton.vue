@@ -14,7 +14,7 @@
             <VListItem
                 prepend-icon="mdi-format-list-bulleted"
                 title="Add to list"
-                @click="showListsModal = true"
+                @click="showListsModal(props.contentId)"
             />
             <VListItem
                 prepend-icon="mdi-check-all"
@@ -28,22 +28,18 @@
             />
         </VList>
     </VMenu>
-
-    <ListsModal v-model="showListsModal" :content-id="contentId" />
 </template>
 
 <script setup lang="ts">
 import { contentApi } from '@/utils/api/content'
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
-import { ref } from 'vue'
-import ListsModal from './ListsModal.vue'
+import { showListsModal } from './ListsModal.vue'
 
 const props = defineProps<{
     contentId: string
 }>()
 
 const queryClient = useQueryClient()
-const showListsModal = ref(false)
 
 const mMarkAllRead = useMutation({
     mutationFn: async () => {

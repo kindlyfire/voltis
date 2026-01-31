@@ -1,9 +1,9 @@
 <template>
     <VDialog
-        :model-value="modelValue"
-        @update:model-value="$emit('update:modelValue', $event)"
+        :model-value="open"
+        @update:model-value="v => !v && close()"
         max-width="500"
-        persistent
+        :persistent="scan.isPending.value"
     >
         <VCard>
             <VCardTitle>{{ title }}</VCardTitle>
@@ -21,9 +21,7 @@
                         ]"
                     />
                     <div class="flex justify-end mt-6 gap-2">
-                        <VBtn variant="text" @click="$emit('update:modelValue', false)"
-                            >Cancel</VBtn
-                        >
+                        <VBtn variant="text" @click="close()">Cancel</VBtn>
                         <VBtn color="primary" @click="startScan">Start Scan</VBtn>
                     </div>
                 </template>
@@ -53,7 +51,7 @@
                         </div>
                     </div>
                     <div class="flex justify-end mt-4">
-                        <VBtn variant="text" @click="$emit('update:modelValue', false)">Close</VBtn>
+                        <VBtn variant="text" @click="close()">Close</VBtn>
                     </div>
                 </template>
             </VCardText>
@@ -62,17 +60,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, computed } from 'vue'
 import { librariesApi } from '@/utils/api/libraries'
 import AQueryError from '@/components/AQueryError.vue'
 
 const props = defineProps<{
+    open: boolean
+    close: () => void
     libraryIds: string[]
-    modelValue: boolean
-}>()
-
-defineEmits<{
-    'update:modelValue': [boolean]
 }>()
 
 const libraries = librariesApi.useList()
@@ -99,16 +94,15 @@ function startScan() {
         force: forceScan.value,
     })
 }
+</script>
 
-watch(
-    () => props.modelValue,
-    open => {
-        if (open) {
-            scan.reset()
-            forceScan.value = false
-        }
-    }
-)
+<script lang="ts">
+import { Modals } from '@/utils/modals'
+import Self from './ScanModal.vue'
+
+export function showScanModal(libraryIds: string[]): Promise<void> {
+    return Modals.show(Self, { libraryIds })
+}
 </script>
 
 <style lang="css" scoped>
