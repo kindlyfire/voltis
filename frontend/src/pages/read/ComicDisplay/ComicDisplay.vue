@@ -7,15 +7,17 @@
     <ReaderSidebar />
 
     <VProgressLinear
-        :model-value="reader.progress"
+        :model-value="progressValue"
         class="reader-progress"
+        :class="`mode-${reader.mode}`"
         height="3"
         color="primary"
     />
 </template>
 
 <script setup lang="ts">
-import { watch, onUnmounted } from 'vue'
+import { watch, computed, onUnmounted } from 'vue'
+import { useScroll, useWindowSize } from '@vueuse/core'
 import { useReaderStore } from './useComicDisplayStore'
 import ReaderModePaged from './ReaderModePaged.vue'
 import ReaderModeLongstrip from './ReaderModeLongstrip.vue'
@@ -57,6 +59,16 @@ onUnmounted(() => {
 })
 
 const controls = useReaderControls()
+
+const { y: scrollY } = useScroll(window)
+const { height: windowHeight } = useWindowSize()
+const progressValue = computed(() => {
+    if (reader.mode === 'paged') return reader.progress
+    scrollY.value
+    const maxScroll = document.documentElement.scrollHeight - windowHeight.value
+    if (maxScroll <= 0) return 0
+    return Math.min(100, (scrollY.value / maxScroll) * 100)
+})
 </script>
 
 <style scoped>
@@ -74,5 +86,9 @@ const controls = useReaderControls()
     right: 0;
     z-index: 10000;
     pointer-events: none;
+
+    &.mode-longstrip {
+        transition: none;
+    }
 }
 </style>
