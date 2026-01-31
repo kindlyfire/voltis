@@ -61,7 +61,7 @@ export const useLayoutStore = defineStore('layout', () => {
     watch(
         () => effectiveTheme.value,
         theme => {
-            vuetifyTheme.global.name.value = theme
+            vuetifyTheme.change(theme)
         },
         { immediate: true }
     )

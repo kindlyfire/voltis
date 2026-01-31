@@ -59,6 +59,13 @@ export function useReaderControls() {
         }
 
         if (switchToSibling) {
+            // This makes sure that, on .dispose(), we correctly mark the
+            // chapter as completed. Since progress in longstrip mode is based
+            // on which image is in the middle of the viewport, we may be at the
+            // end even though it hasn't set the page to the last one.
+            if (direction == 'next' && reader.mode === 'longstrip' && reader.state) {
+                reader.setPage(reader.state?.pageDimensions.length - 1)
+            }
             reader.goToSibling(direction, direction === 'prev')
         }
     }
