@@ -1,5 +1,4 @@
 import datetime
-import pathlib
 import re
 import zipfile
 
@@ -9,7 +8,7 @@ import structlog
 from anyio import Path
 import vmeta
 
-from voltis.db.models import Content
+from voltis.db.models import Content, ContentMetadata
 from voltis.utils.misc import notnone, now_without_tz
 
 from .base import LibraryFile, ScannerBase
@@ -53,7 +52,13 @@ class ComicScanner(ScannerBase):
 
     async def scan_file(self, file: LibraryFile, content: Content | None) -> Content | None:
         path = Path(file.uri)
-        name, year = _parse_series_name(path.parent.name)
+        meta, valid = await anyio.to_thread.run_sync(self._scan_comic, path)
+        if not valid:
+            return None
+
+        fallback_name, fallback_year = _parse_series_name(path.parent.name)
+        name = meta.get("series") or fallback_name
+        year = meta.get("year") or fallback_year
         uri_part = f"{name}_{year}" if year else name
         series = await self.find_or_create_series(
             file_uri=path.parent.as_posix(),
@@ -65,8 +70,15 @@ class ComicScanner(ScannerBase):
 
         # Parse volume/chapter from filename
         filename = path.stem
-        vol_num = _parse_volume_number(filename)
-        ch_num: int | float | None = _parse_chapter_number(filename)
+        vol_num = meta["volume"] if "volume" in meta else _parse_volume_number(filename)
+        ch_num: str | int | float | None = (
+            meta["number"] if "number" in meta else _parse_chapter_number(filename)
+        )
+        if isinstance(ch_num, str):
+            try:
+                ch_num = float(ch_num)
+            except ValueError:
+                ch_num = _parse_chapter_number(ch_num)
         if vol_num is None and ch_num is None:
             ch_num = _parse_fallback_chapter_number(filename)
 
@@ -101,16 +113,18 @@ class ComicScanner(ScannerBase):
         content.parent_id = series.id
         content.updated_at = now_without_tz()
         content.order_parts = [vol_num, ch_num]
+        assert "pages" in meta
+        content.cover_uri = f"{content.file_uri}/{meta['pages'][0][0]}"
 
-        if not self.no_fs:
-            await anyio.to_thread.run_sync(self._scan_comic, content)
+        m = content.mutate_meta()
+        for k, v in meta.items():
+            m[k] = v
 
         return content
 
-    def _scan_comic(self, content: Content) -> None:
-        """Scan a comic file (.cbz) for pages and cover."""
-        path = pathlib.Path(notnone(content.file_uri))
-
+    def _scan_comic(self, path: Path) -> tuple[ContentMetadata, bool]:
+        """Scan a comic file (.cbz) for pages, cover, and metadata."""
+        m = ContentMetadata()
         try:
             meta = vmeta.read_metadata_and_pages(path.as_posix())
             pages: list[tuple[str, int, int]] = []
@@ -121,12 +135,15 @@ class ComicScanner(ScannerBase):
                 pages.append((page["name"], page["width"], page["height"]))
 
             if not pages:
-                content.valid = False
-                return
-            content.mutate_meta()["pages"] = pages
-            content.cover_uri = f"{content.file_uri}/{pages[0][0]}"
+                return m, False
+            m["pages"] = pages
+            # content.cover_uri = f"{content.file_uri}/{pages[0][0]}"
+            comic_info = meta.get("metadata")
+            if comic_info:
+                _store_comic_metadata(m, comic_info)
+            return m, True
         except (zipfile.BadZipFile, OSError):
-            content.valid = False
+            return m, False
 
     async def _scan_series_cover(self, series: Content, folder: Path) -> None:
         """Scan a comic series folder for a cover image."""
@@ -142,9 +159,19 @@ class ComicScanner(ScannerBase):
         content.cover_uri = None
         content.file_mtime = None
         await self._scan_series_cover(content, Path(notnone(content.file_uri)))
-        if not content.cover_uri and items:
-            content.cover_uri = items[0].cover_uri
+        if items:
+            if not content.cover_uri:
+                content.cover_uri = items[0].cover_uri
             content.file_mtime = items[0].file_mtime
+
+            # Merge metadata from ComicInfo of all items
+            ignore_keys = {"pages", "series", "volume", "number", "title"}
+            m = content.mutate_meta()
+            for item in items:
+                item_meta = item.mutate_meta()
+                for k, v in item_meta.items():
+                    if k not in ignore_keys and k not in m:
+                        m[k] = v
 
 
 def _parse_volume_number(name: str) -> float | None:
@@ -226,6 +253,68 @@ def _parse_series_year(name: str) -> int | None:
         if 1000 <= year <= 9999:
             return year
     return None
+
+
+_COMIC_DIRECT_FIELDS = [
+    "title",
+    "series",
+    "writer",
+    "penciller",
+    "inker",
+    "colorist",
+    "letterer",
+    "cover_artist",
+    "editor",
+    "genre",
+    "age_rating",
+    "manga",
+    "characters",
+    "teams",
+    "locations",
+    "story_arc",
+    "series_group",
+    "format",
+    "imprint",
+    "web",
+    "notes",
+    "scan_information",
+    "black_and_white",
+    "community_rating",
+    "review",
+    "main_character_or_team",
+    "alternate_series",
+    "alternate_number",
+    "alternate_count",
+    "count",
+    "number",
+    "volume",
+    "publisher",
+]
+
+
+def _store_comic_metadata(m: ContentMetadata, comic_info: vmeta.ComicInfo) -> None:
+    """Extract ComicInfo metadata into ContentMetadata dict."""
+    if "summary" in comic_info:
+        m["description"] = comic_info["summary"]
+    if "language_iso" in comic_info:
+        m["language"] = comic_info["language_iso"]
+
+    if "year" in comic_info:
+        y = comic_info["year"]
+        mo = comic_info.get("month")
+        d = comic_info.get("day")
+        if mo and d:
+            m["publication_date"] = f"{y:04d}-{mo:02d}-{d:02d}"
+        else:
+            m["publication_date"] = str(y)
+
+    if "writer" in comic_info:
+        m["authors"] = [a.strip() for a in comic_info["writer"].split(",")]
+
+    for field in _COMIC_DIRECT_FIELDS:
+        val = comic_info.get(field)
+        if val is not None and val != "" and val != "Unknown":
+            m[field] = val
 
 
 def _clean_series_name(name: str) -> str:

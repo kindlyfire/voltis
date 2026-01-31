@@ -17,6 +17,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP
 from sqlalchemy.orm import DeclarativeBase, Mapped, relationship
 from sqlalchemy.orm import mapped_column as col
+from sqlalchemy.orm.attributes import flag_modified
 
 from voltis.utils.misc import now_without_tz
 
@@ -111,11 +112,57 @@ class ContentMetadata(TypedDict, total=False):
     """Names, including extension, of the page files of a comic, with the image
     width and height."""
 
+    # Shared fields (books + comics)
     authors: list[str]
     description: str
     publisher: str
     language: str
     publication_date: str
+
+    # Comic-specific fields (from ComicInfo.xml)
+    title: str
+    series: str
+    writer: str
+    penciller: str
+    inker: str
+    colorist: str
+    letterer: str
+    cover_artist: str
+    editor: str
+    genre: str
+    age_rating: str
+    manga: str
+    characters: str
+    teams: str
+    locations: str
+    story_arc: str
+    series_group: str
+    format: str
+    imprint: str
+    web: str
+    notes: str
+    scan_information: str
+    black_and_white: str
+    community_rating: float
+    review: str
+    main_character_or_team: str
+    alternate_series: str
+    alternate_number: str
+    alternate_count: int
+    count: int
+    number: str
+    volume: int
+
+
+def content_metadata_get_year(meta: ContentMetadata) -> str | None:
+    """Extract a publication year from ContentMetadata."""
+    pub_date = meta.get("publication_date")
+    if pub_date:
+        try:
+            return pub_date[:4]
+        except ValueError:
+            pass
+    return None
 
 
 class Content(_Base, _DefaultColumns):
@@ -184,6 +231,7 @@ class Content(_Base, _DefaultColumns):
 
     def mutate_meta(self) -> ContentMetadata:
         meta = self.meta = self.meta or {}
+        flag_modified(self, "meta")
         return meta
 
 
