@@ -18,22 +18,19 @@
         </template>
         <template v-else>Continue Reading</template>
     </VBtn>
-    <ResetReadingModal v-model="showResetModal" :content-id="props.contentId" />
 </template>
 
 <script setup lang="ts">
 import { contentApi } from '@/utils/api/content'
 import { useKeyModifier } from '@vueuse/core'
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import ResetReadingModal from './ResetReadingModal.vue'
+import { showResetReadingModal } from './ResetReadingModal.vue'
 
 const props = defineProps<{
     contentId: string
     class?: string
 }>()
-
-const showResetModal = ref(false)
 
 const router = useRouter()
 const qContent = contentApi.useGet(() => props.contentId)
@@ -71,13 +68,19 @@ const readingStatus = computed(() => {
 
 const ctrlModifier = useKeyModifier('Control')
 
-function onClick() {
+async function onClick() {
     const content = qContent.data.value
     const rs = readingStatus.value
     if (rs == null || !content) return
 
     if (rs === 'all-completed') {
-        showResetModal.value = true
+        const confirmed = await showResetReadingModal(props.contentId)
+        if (confirmed) {
+            const firstChild = qChildren.data.value?.data[0]
+            if (firstChild) {
+                router.push('/' + firstChild.id)
+            }
+        }
         return
     }
 

@@ -1,11 +1,5 @@
 <template>
-    <VDialog
-        :model-value="modelValue"
-        @update:model-value="
-            $event => (mResetReading.isPaused.value ? null : $emit('update:modelValue', $event))
-        "
-        max-width="400"
-    >
+    <VDialog :model-value="open" @update:model-value="v => !v && close(false)" max-width="400">
         <VCard>
             <VCardTitle>You've completed this series</VCardTitle>
             <VCardText>
@@ -17,7 +11,7 @@
                 <VSpacer />
                 <VBtn
                     variant="text"
-                    @click="$emit('update:modelValue', false)"
+                    @click="close(false)"
                     :disabled="mResetReading.isPending.value"
                 >
                     No
@@ -37,36 +31,28 @@
 <script setup lang="ts">
 import { contentApi } from '@/utils/api/content'
 import { useMutation } from '@tanstack/vue-query'
-import { useRouter } from 'vue-router'
 import AQueryError from '@/components/AQueryError.vue'
 
 const props = defineProps<{
-    modelValue: boolean
+    open: boolean
+    close: (confirmed: boolean) => void
     contentId: string
 }>()
-
-const emit = defineEmits<{
-    'update:modelValue': [value: boolean]
-}>()
-
-const router = useRouter()
-const qChildren = contentApi.useList(() => ({
-    parent_id: props.contentId,
-    sort: 'order',
-    sort_order: 'asc',
-}))
 
 const mResetReading = useMutation({
     mutationFn: async () => {
         await contentApi.setSeriesItemStatuses(props.contentId, null)
         await contentApi.updateUserData(props.contentId, { status: 'reading' })
-
-        const firstChild = qChildren.data.value?.data[0]
-        if (firstChild) {
-            router.push('/' + firstChild.id)
-        }
-
-        emit('update:modelValue', false)
+        props.close(true)
     },
 })
+</script>
+
+<script lang="ts">
+import { Modals } from '@/utils/modals'
+import Self from './ResetReadingModal.vue'
+
+export function showResetReadingModal(contentId: string): Promise<boolean> {
+    return Modals.show<boolean>(Self, { contentId })
+}
 </script>

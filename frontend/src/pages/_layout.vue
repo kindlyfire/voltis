@@ -96,11 +96,13 @@
         <VMain :style="store.navbarTemporary ? { '--v-layout-top': '0px' } : {}">
             <RouterView />
         </VMain>
+        <ModalContainer />
     </VApp>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { ModalContainer } from '@/utils/modals'
 import { usersApi } from '@/utils/api/users'
 import { authApi } from '@/utils/api/auth'
 import { librariesApi } from '@/utils/api/libraries'
