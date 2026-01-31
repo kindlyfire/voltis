@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     TESTS_DB_URL: str = ""
     CACHE_DIR: str = "/tmp/voltis_cache"
 
+    CORS: str = ""
     REGISTRATION_ENABLED: bool = False
 
 
