@@ -6,6 +6,7 @@ import type {
     Content,
     ContentListParams,
     Paginated,
+    ReadingStatus,
     UserToContent,
     UserToContentUpdate,
 } from './types'
@@ -118,9 +119,13 @@ export const contentApi = {
         })
     },
 
-    resetSeriesProgress: async (contentId: string): Promise<void> => {
-        await apiFetch(`/content/${contentId}/reset-series-progress`, {
+    setSeriesItemStatuses: async (
+        contentId: string,
+        status: ReadingStatus | null
+    ): Promise<void> => {
+        await apiFetch(`/content/${contentId}/series-item-statuses`, {
             method: 'POST',
+            body: JSON.stringify({ status }),
         })
     },
 }

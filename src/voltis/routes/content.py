@@ -4,6 +4,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import asc, desc, func, select, tuple_, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import aliased
 
 from voltis.db.models import (
@@ -272,11 +273,16 @@ async def update_user_data(
         return UserToContentDTO.from_model(user_to_content)
 
 
-@router.post("/{content_id}/reset-series-progress")
-async def reset_series_progress(
+class SeriesItemStatusesRequest(BaseModel):
+    status: ReadingStatus | None
+
+
+@router.post("/{content_id}/series-item-statuses")
+async def set_series_item_statuses(
     rb: RbProvider,
     user: UserProvider,
     content_id: str,
+    body: SeriesItemStatusesRequest,
 ) -> None:
     async with rb.get_asession() as session:
         content = await session.get(Content, content_id)
@@ -287,16 +293,38 @@ async def reset_series_progress(
             select(Content.library_id, Content.uri).where(Content.parent_id == content_id)
         )
         child_keys = [(row.library_id, row.uri) for row in children.all()]
-
         if not child_keys:
             return
 
-        await session.execute(
-            update(UserToContent)
-            .where(
-                (UserToContent.user_id == user.id)
-                & tuple_(UserToContent.library_id, UserToContent.uri).in_(child_keys)
+        ts = now_without_tz()
+
+        if body.status is None:
+            await session.execute(
+                update(UserToContent)
+                .where(
+                    (UserToContent.user_id == user.id)
+                    & tuple_(UserToContent.library_id, UserToContent.uri).in_(child_keys)
+                )
+                .values(status=None, status_updated_at=ts, progress={}, progress_updated_at=None)
             )
-            .values(status=None, progress={})
-        )
+        else:
+            stmt = pg_insert(UserToContent).on_conflict_do_update(
+                index_elements=["user_id", "library_id", "uri"],
+                set_={"status": body.status, "status_updated_at": ts},
+            )
+            await session.execute(
+                stmt,
+                [
+                    {
+                        "id": UserToContent.make_id(),
+                        "user_id": user.id,
+                        "library_id": library_id,
+                        "uri": uri,
+                        "status": body.status,
+                        "status_updated_at": ts,
+                    }
+                    for library_id, uri in child_keys
+                ],
+            )
+
         await session.commit()

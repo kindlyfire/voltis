@@ -19,6 +19,7 @@ class ResourceBroker:
             pool_pre_ping=True,
             pool_recycle=300,
             pool_use_lifo=True,
+            # echo=True,
         )
 
     def get_asession(self) -> AsyncSession:

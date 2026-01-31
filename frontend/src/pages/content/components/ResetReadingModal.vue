@@ -58,7 +58,7 @@ const qChildren = contentApi.useList(() => ({
 
 const mResetReading = useMutation({
     mutationFn: async () => {
-        await contentApi.resetSeriesProgress(props.contentId)
+        await contentApi.setSeriesItemStatuses(props.contentId, null)
         await contentApi.updateUserData(props.contentId, { status: 'reading' })
 
         const firstChild = qChildren.data.value?.data[0]

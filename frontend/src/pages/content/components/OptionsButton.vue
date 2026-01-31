@@ -17,6 +17,11 @@
                 @click="showListsModal = true"
             />
             <VListItem
+                prepend-icon="mdi-check-all"
+                title="Mark all as read"
+                @click="mMarkAllRead.mutate()"
+            />
+            <VListItem
                 prepend-icon="mdi-refresh"
                 title="Reset progress"
                 @click="mResetProgress.mutate()"
@@ -40,10 +45,19 @@ const props = defineProps<{
 const queryClient = useQueryClient()
 const showListsModal = ref(false)
 
+const mMarkAllRead = useMutation({
+    mutationFn: async () => {
+        if (confirm('Are you sure you want to mark all items as read?')) {
+            await contentApi.setSeriesItemStatuses(props.contentId, 'completed')
+            queryClient.invalidateQueries()
+        }
+    },
+})
+
 const mResetProgress = useMutation({
     mutationFn: async () => {
         if (confirm('Are you sure you want to reset your progress for this series?')) {
-            await contentApi.resetSeriesProgress(props.contentId)
+            await contentApi.setSeriesItemStatuses(props.contentId, null)
             queryClient.invalidateQueries()
         }
     },
