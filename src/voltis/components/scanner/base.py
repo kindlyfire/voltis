@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import math
 from typing import Any
+import typing
 
 import anyio
 import anyio.to_thread
@@ -15,6 +16,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from voltis.db.models import (
     Content,
     ContentMetadataDict,
+    ContentMetadataMerged,
     ContentMetadataRow,
     ContentType,
     GroupingContentTypes,
@@ -29,6 +31,18 @@ from voltis.utils.misc import notnone, now_without_tz
 from voltis.utils.time import LogTime, log_time
 
 logger = structlog.stdlib.get_logger()
+
+_SERIES_INHERITED_FIELDS = [
+    "authors",
+    "publisher",
+    "language",
+    "genre",
+    "age_rating",
+    "manga",
+    "imprint",
+    "description",
+    "publication_date",
+]
 
 
 class LibrarySourceMissing(Exception):
@@ -446,6 +460,55 @@ class ScannerBase(ABC):
             )
             await session.execute(stmt)
             await session.commit()
+
+    async def _inherit_child_metadata(self, series: Content, items: list[Content]) -> None:
+        """Copy inheritable metadata fields from children to the series."""
+        if not items:
+            return
+
+        async with self.rb.get_asession() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(ContentMetadataMerged).where(
+                            ContentMetadataMerged.uri.in_([item.uri for item in items]),
+                            ContentMetadataMerged.library_id == self.library.id,
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+        meta_by_uri = {r.uri: r.data for r in rows}
+
+        inherited: ContentMetadataDict = {}
+        for item in items:
+            child_meta = meta_by_uri.get(item.uri, {})
+            for field in _SERIES_INHERITED_FIELDS:
+                if field not in inherited and field in child_meta:
+                    inherited[field] = child_meta[field]
+            if len(inherited) == len(_SERIES_INHERITED_FIELDS):
+                break
+
+        if not inherited:
+            return
+
+        # Read existing series metadata (provider=0) to preserve title etc.
+        async with self.rb.get_asession() as session:
+            existing_row = (
+                await session.execute(
+                    select(ContentMetadataRow).where(
+                        ContentMetadataRow.uri == series.uri,
+                        ContentMetadataRow.library_id == self.library.id,
+                        ContentMetadataRow.provider == 0,
+                    )
+                )
+            ).scalar_one_or_none()
+
+        existing_data = typing.cast(ContentMetadataDict, existing_row.data if existing_row else {})
+        merged: ContentMetadataDict = {**existing_data, **inherited}
+        await self.write_metadata(series.uri, self.library.id, provider=0, data=merged)
 
     async def scan_series(self, content: Content, items: list[Content]) -> None:
         """Will be called on any series whose files have changed. Used to for

@@ -142,3 +142,4 @@ class BookScanner(ScannerBase):
         if items:
             content.cover_uri = items[0].cover_uri
             content.file_mtime = items[0].file_mtime
+        await self._inherit_child_metadata(content, items)
