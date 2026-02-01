@@ -140,13 +140,6 @@ class Content(_Base, _DefaultColumns):
     uri: Mapped[str] = col(Text, unique=True)
     """The full URI, including parents, separated by a `/`. Example: My Comic/v0_ch1"""
 
-    title: Mapped[str] = col(Text)
-    """
-    The title. This typically does not repeat the title given in the parent
-    Content. So if a comic_series is named "My Name", the comic will be named
-    "Volume 1", not "My Name Volume 1".
-    """
-
     valid: Mapped[bool] = col(default=True)
     """When a file is detected but metadata extraction fails, this is set to
     false. For example, a `My Comic/Ch.1.cbz` that isn't actually a zip."""

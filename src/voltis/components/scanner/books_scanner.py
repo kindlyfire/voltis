@@ -84,7 +84,6 @@ class BookScanner(ScannerBase):
                     type="book",
                     created_at=now_without_tz(),
                 )
-        content.title = title
         content.file_uri = file.uri
         content.uri_part = uri_part
         content.uri = f"{series.uri}/{uri_part}" if series else uri_part
@@ -94,11 +93,15 @@ class BookScanner(ScannerBase):
         content.order_parts = [series_index or 0.0]
 
         if not self.no_fs:
-            await self._scan_book(content, metadata)
+            await self._scan_book(content, title, metadata)
+        else:
+            await self.write_metadata(
+                content.uri, self.library.id, provider=0, data=ContentMetadataDict(title=title)
+            )
 
         return content
 
-    async def _scan_book(self, content: Content, metadata: EpubMetadata | None) -> None:
+    async def _scan_book(self, content: Content, title: str, metadata: EpubMetadata | None) -> None:
         """Scan a book file (.epub) for cover and additional metadata."""
         assert content.file_uri
         path = pathlib.Path(content.file_uri)
@@ -115,8 +118,9 @@ class BookScanner(ScannerBase):
             content.valid = False
             return
 
+        data: ContentMetadataDict = {"title": title}
+        raw: dict = {}
         if metadata:
-            data: ContentMetadataDict = {}
             if metadata.authors:
                 data["authors"] = metadata.authors
             if metadata.description:
@@ -127,11 +131,10 @@ class BookScanner(ScannerBase):
                 data["language"] = metadata.language
             if metadata.publication_date:
                 data["publication_date"] = metadata.publication_date
-            if data:
-                raw = {k: v for k, v in metadata.to_object().items() if v is not None}
-                await self.write_metadata(
-                    content.uri, self.library.id, provider=0, data=data, raw=raw
-                )
+            raw = {k: v for k, v in metadata.to_object().items() if v is not None}
+        await self.write_metadata(
+            content.uri, self.library.id, provider=0, data=data, raw=raw
+        )
 
     async def scan_series(self, content, items):
         content.cover_uri = None

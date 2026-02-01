@@ -89,7 +89,7 @@ class ContentDTO(BaseModel):
             created_at=model.created_at,
             updated_at=model.updated_at,
             uri_part=model.uri_part,
-            title=model.title,
+            title=(meta or {}).get("title", ""),
             valid=model.valid,
             file_uri=model.file_uri,
             file_mtime=model.file_mtime,

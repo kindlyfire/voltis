@@ -1,5 +1,6 @@
 import datetime
 import re
+import typing
 import zipfile
 
 import anyio
@@ -109,7 +110,6 @@ class ComicScanner(ScannerBase):
         content.uri_part = uri_part
         content.uri = f"{series.uri}/{uri_part}"
         content.valid = True
-        content.title = title
         content.parent_id = series.id
         content.updated_at = now_without_tz()
         content.order_parts = [vol_num, ch_num]
@@ -118,20 +118,21 @@ class ComicScanner(ScannerBase):
         fd = content.mutate_file_data()
         fd["pages"] = pages
 
-        if meta:
-            await self.write_metadata(
-                content.uri, self.library.id, provider=0, data=meta, raw=comic_info
-            )
+        if "title" not in meta:
+            meta["title"] = title
+        await self.write_metadata(
+            content.uri, self.library.id, provider=0, data=meta, raw=typing.cast(dict, comic_info)
+        )
 
         return content
 
     def _scan_comic(
         self, path: Path
-    ) -> tuple[list[tuple[str, int, int]], ContentMetadataDict, dict, bool]:
+    ) -> tuple[list[tuple[str, int, int]], ContentMetadataDict, vmeta.ComicInfo, bool]:
         """Scan a comic file (.cbz) for pages, cover, and metadata."""
         m = ContentMetadataDict()
         pages: list[tuple[str, int, int]] = []
-        comic_info: dict = {}
+        comic_info: vmeta.ComicInfo = {}
         try:
             raw = vmeta.read_metadata_and_pages(path.as_posix())
 
@@ -142,6 +143,7 @@ class ComicScanner(ScannerBase):
 
             if not pages:
                 return pages, m, comic_info, False
+
             comic_info = raw.get("metadata") or {}
             if comic_info:
                 _comicinfo_to_metadata(m, comic_info)

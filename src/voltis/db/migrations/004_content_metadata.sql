@@ -27,3 +27,4 @@ GROUP BY uri, library_id;
 
 ALTER TABLE content ADD COLUMN file_data JSONB NOT NULL DEFAULT '{}'::JSONB;
 ALTER TABLE content DROP COLUMN meta;
+ALTER TABLE content DROP COLUMN title;

@@ -399,7 +399,6 @@ class ScannerBase(ABC):
                 uri_part=uri_part,
                 uri=uri,
                 type=type,
-                title=title,
                 file_uri=file_uri,
                 order_parts=[],
                 created_at=now_without_tz(),
@@ -408,6 +407,9 @@ class ScannerBase(ABC):
             async with self.rb.get_asession() as session:
                 session.add(series)
                 await session.commit()
+            await self.write_metadata(
+                uri, self.library.id, provider=0, data=ContentMetadataDict(title=title)
+            )
             self.series.append(series)
             self._resolved_parents[uri] = series
             return series
