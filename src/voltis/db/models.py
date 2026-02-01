@@ -251,7 +251,11 @@ class ContentMetadataRow(_Base):
     uri: Mapped[str] = col(Text, primary_key=True)
     library_id: Mapped[str] = col(Text, ForeignKey("libraries.id"), primary_key=True)
     provider: Mapped[int] = col(Integer, primary_key=True)
+    """
+    1: File metadata (e.g. ComicInfo.xml, EPUB metadata), 2: MangaBaka, 99: Admin overrides
+    """
     data: Mapped[dict] = col("data", JSONB, server_default="{}")
+    raw: Mapped[dict] = col("raw", JSONB, server_default="{}")
     updated_at: Mapped[datetime.datetime] = col(TIMESTAMP, server_default="")
 
 

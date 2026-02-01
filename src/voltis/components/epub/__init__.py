@@ -27,6 +27,19 @@ class EpubMetadata:
     language: str | None = None
     publication_date: str | None = None
 
+    def to_object(self) -> dict:
+        return {
+            "title": self.title,
+            "authors": self.authors,
+            "series": self.series,
+            "series_index": self.series_index,
+            "cover_path": self.cover_path,
+            "description": self.description,
+            "publisher": self.publisher,
+            "language": self.language,
+            "publication_date": self.publication_date,
+        }
+
 
 @dataclass(slots=True)
 class EpubChapter:

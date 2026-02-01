@@ -424,16 +424,22 @@ class ScannerBase(ABC):
         pass
 
     async def write_metadata(
-        self, uri: str, library_id: str, provider: int, data: ContentMetadataDict
+        self,
+        uri: str,
+        library_id: str,
+        provider: int,
+        data: ContentMetadataDict,
+        raw: dict | None = None,
     ) -> None:
         """Upsert a metadata provider row for the given content URI."""
+        raw = raw or {}
         async with self.rb.get_asession() as session:
             stmt = (
                 pg_insert(ContentMetadataRow)
-                .values(uri=uri, library_id=library_id, provider=provider, data=data)
+                .values(uri=uri, library_id=library_id, provider=provider, data=data, raw=raw)
                 .on_conflict_do_update(
                     index_elements=["uri", "library_id", "provider"],
-                    set_={"data": data, "updated_at": now_without_tz()},
+                    set_={"data": data, "raw": raw, "updated_at": now_without_tz()},
                 )
             )
             await session.execute(stmt)

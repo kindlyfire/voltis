@@ -52,7 +52,7 @@ class ComicScanner(ScannerBase):
 
     async def scan_file(self, file: LibraryFile, content: Content | None) -> Content | None:
         path = Path(file.uri)
-        pages, meta, valid = await anyio.to_thread.run_sync(self._scan_comic, path)
+        pages, meta, comic_info, valid = await anyio.to_thread.run_sync(self._scan_comic, path)
         if not valid:
             return None
 
@@ -119,16 +119,19 @@ class ComicScanner(ScannerBase):
         fd["pages"] = pages
 
         if meta:
-            await self.write_metadata(content.uri, self.library.id, provider=0, data=meta)
+            await self.write_metadata(
+                content.uri, self.library.id, provider=0, data=meta, raw=comic_info
+            )
 
         return content
 
     def _scan_comic(
         self, path: Path
-    ) -> tuple[list[tuple[str, int, int]], ContentMetadataDict, bool]:
+    ) -> tuple[list[tuple[str, int, int]], ContentMetadataDict, dict, bool]:
         """Scan a comic file (.cbz) for pages, cover, and metadata."""
         m = ContentMetadataDict()
         pages: list[tuple[str, int, int]] = []
+        comic_info: dict = {}
         try:
             raw = vmeta.read_metadata_and_pages(path.as_posix())
 
@@ -138,13 +141,13 @@ class ComicScanner(ScannerBase):
                 pages.append((page["name"], page["width"], page["height"]))
 
             if not pages:
-                return pages, m, False
-            comic_info = raw.get("metadata")
+                return pages, m, comic_info, False
+            comic_info = raw.get("metadata") or {}
             if comic_info:
                 _comicinfo_to_metadata(m, comic_info)
-            return pages, m, True
+            return pages, m, comic_info, True
         except (zipfile.BadZipFile, OSError):
-            return pages, m, False
+            return pages, m, comic_info, False
 
     async def _scan_series_cover(self, series: Content, folder: Path) -> None:
         """Scan a comic series folder for a cover image."""

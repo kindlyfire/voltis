@@ -15,6 +15,7 @@ CREATE TABLE content_metadata (
     library_id TEXT NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
     provider INTEGER NOT NULL,
     data JSONB NOT NULL DEFAULT '{}'::JSONB,
+    raw JSONB NOT NULL DEFAULT '{}'::JSONB,
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
     PRIMARY KEY (uri, library_id, provider)
 );
