@@ -165,6 +165,7 @@ class ScannerRepository:
             type=type,
             file_uri=file_uri,
             order_parts=[],
+            valid=True,
             created_at=now_without_tz(),
             updated_at=now_without_tz(),
         )

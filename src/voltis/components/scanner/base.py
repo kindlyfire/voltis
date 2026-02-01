@@ -171,6 +171,8 @@ class Scanner(abc.ABC):
                 content.file_mtime = file.mtime
                 content.file_size = file.size
                 content.file_uri = file.path
+                if content not in self.r.content:
+                    self.r.content.append(content)
                 if content.parent_id:
                     parents_with_updates.add(content.parent_id)
 
