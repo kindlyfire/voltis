@@ -71,9 +71,12 @@ export interface UserToContentUpdate {
     progress?: ReadingProgress
 }
 
-export interface ContentMetadata {
+export interface ContentFileData {
     /** [filename, width, height] */
     pages?: Array<[string, number, number]>
+}
+
+export interface ContentMetadata {
     authors?: string[]
     description?: string
     publisher?: string
@@ -96,6 +99,7 @@ export interface Content {
     order: number | null
     order_parts: number[]
     meta: ContentMetadata
+    file_data: ContentFileData
     parent_id: string | null
     library_id: string
     children_count: number | null

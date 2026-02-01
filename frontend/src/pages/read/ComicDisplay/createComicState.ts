@@ -78,7 +78,7 @@ export function createComicState(contentId: string, initialPage: number | 'last'
 
             state.content = content
             userData = content.user_data ?? null
-            state.pageDimensions = (content.meta.pages ?? []).map(p => ({
+            state.pageDimensions = (content.file_data.pages ?? []).map(p => ({
                 width: p[1],
                 height: p[2],
             }))

@@ -10,9 +10,12 @@ import anyio.to_thread
 import structlog
 from anyio import CapacityLimiter, Path, create_task_group
 from sqlalchemy import delete, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from voltis.db.models import (
     Content,
+    ContentMetadataDict,
+    ContentMetadataRow,
     ContentType,
     GroupingContentTypes,
     LeafContentTypes,
@@ -419,6 +422,22 @@ class ScannerBase(ABC):
     @abstractmethod
     async def scan_file(self, file: LibraryFile, content: Content | None) -> Content | None:
         pass
+
+    async def write_metadata(
+        self, uri: str, library_id: str, provider: int, data: ContentMetadataDict
+    ) -> None:
+        """Upsert a metadata provider row for the given content URI."""
+        async with self.rb.get_asession() as session:
+            stmt = (
+                pg_insert(ContentMetadataRow)
+                .values(uri=uri, library_id=library_id, provider=provider, data=data)
+                .on_conflict_do_update(
+                    index_elements=["uri", "library_id", "provider"],
+                    set_={"data": data, "updated_at": now_without_tz()},
+                )
+            )
+            await session.execute(stmt)
+            await session.commit()
 
     async def scan_series(self, content: Content, items: list[Content]) -> None:
         """Will be called on any series whose files have changed. Used to for

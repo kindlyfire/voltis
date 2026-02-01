@@ -8,7 +8,7 @@ import structlog
 from anyio import Path
 import vmeta
 
-from voltis.db.models import Content, ContentMetadata
+from voltis.db.models import Content, ContentMetadataDict
 from voltis.utils.misc import notnone, now_without_tz
 
 from .base import LibraryFile, ScannerBase
@@ -52,7 +52,7 @@ class ComicScanner(ScannerBase):
 
     async def scan_file(self, file: LibraryFile, content: Content | None) -> Content | None:
         path = Path(file.uri)
-        meta, valid = await anyio.to_thread.run_sync(self._scan_comic, path)
+        pages, meta, valid = await anyio.to_thread.run_sync(self._scan_comic, path)
         if not valid:
             return None
 
@@ -113,37 +113,38 @@ class ComicScanner(ScannerBase):
         content.parent_id = series.id
         content.updated_at = now_without_tz()
         content.order_parts = [vol_num, ch_num]
-        assert "pages" in meta
-        content.cover_uri = f"{content.file_uri}/{meta['pages'][0][0]}"
+        content.cover_uri = f"{content.file_uri}/{pages[0][0]}"
 
-        m = content.mutate_meta()
-        for k, v in meta.items():
-            m[k] = v
+        fd = content.mutate_file_data()
+        fd["pages"] = pages
+
+        if meta:
+            await self.write_metadata(content.uri, self.library.id, provider=0, data=meta)
 
         return content
 
-    def _scan_comic(self, path: Path) -> tuple[ContentMetadata, bool]:
+    def _scan_comic(
+        self, path: Path
+    ) -> tuple[list[tuple[str, int, int]], ContentMetadataDict, bool]:
         """Scan a comic file (.cbz) for pages, cover, and metadata."""
-        m = ContentMetadata()
+        m = ContentMetadataDict()
+        pages: list[tuple[str, int, int]] = []
         try:
-            meta = vmeta.read_metadata_and_pages(path.as_posix())
-            pages: list[tuple[str, int, int]] = []
+            raw = vmeta.read_metadata_and_pages(path.as_posix())
 
-            for page in meta["pages"]:
+            for page in raw["pages"]:
                 if "error" in page:
                     raise ValueError("PageInfoError: " + page["error"])
                 pages.append((page["name"], page["width"], page["height"]))
 
             if not pages:
-                return m, False
-            m["pages"] = pages
-            # content.cover_uri = f"{content.file_uri}/{pages[0][0]}"
-            comic_info = meta.get("metadata")
+                return pages, m, False
+            comic_info = raw.get("metadata")
             if comic_info:
-                _store_comic_metadata(m, comic_info)
-            return m, True
+                _comicinfo_to_metadata(m, comic_info)
+            return pages, m, True
         except (zipfile.BadZipFile, OSError):
-            return m, False
+            return pages, m, False
 
     async def _scan_series_cover(self, series: Content, folder: Path) -> None:
         """Scan a comic series folder for a cover image."""
@@ -163,15 +164,6 @@ class ComicScanner(ScannerBase):
             if not content.cover_uri:
                 content.cover_uri = items[0].cover_uri
             content.file_mtime = items[0].file_mtime
-
-            # Merge metadata from ComicInfo of all items
-            ignore_keys = {"pages", "series", "volume", "number", "title"}
-            m = content.mutate_meta()
-            for item in items:
-                item_meta = item.mutate_meta()
-                for k, v in item_meta.items():
-                    if k not in ignore_keys and k not in m:
-                        m[k] = v
 
 
 def _parse_volume_number(name: str) -> float | None:
@@ -292,8 +284,8 @@ _COMIC_DIRECT_FIELDS = [
 ]
 
 
-def _store_comic_metadata(m: ContentMetadata, comic_info: vmeta.ComicInfo) -> None:
-    """Extract ComicInfo metadata into ContentMetadata dict."""
+def _comicinfo_to_metadata(m: ContentMetadataDict, comic_info: vmeta.ComicInfo) -> None:
+    """Extract ComicInfo metadata into ContentMetadataDict dict."""
     if "summary" in comic_info:
         m["description"] = comic_info["summary"]
     if "language_iso" in comic_info:

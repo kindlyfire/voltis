@@ -9,7 +9,9 @@ from sqlalchemy.orm import aliased
 
 from voltis.db.models import (
     Content,
-    ContentMetadata,
+    ContentFileData,
+    ContentMetadataDict,
+    ContentMetadataMerged,
     ContentType,
     CustomList,
     CustomListToContent,
@@ -67,7 +69,8 @@ class ContentDTO(BaseModel):
     type: ContentType
     order: int | None
     order_parts: list[float | None]
-    meta: ContentMetadata
+    meta: ContentMetadataDict = {}
+    file_data: ContentFileData = {}
     parent_id: str | None
     library_id: str
     children_count: int | None = None
@@ -77,6 +80,7 @@ class ContentDTO(BaseModel):
     def from_model(
         cls,
         model: Content,
+        meta: ContentMetadataDict | None = None,
         children_count: int | None = None,
         user_to_content: UserToContent | None = None,
     ) -> "ContentDTO":
@@ -94,7 +98,8 @@ class ContentDTO(BaseModel):
             type=model.type,
             order=model.order,
             order_parts=model.order_parts,
-            meta=model.meta,
+            meta=meta or {},
+            file_data=model.file_data or {},
             parent_id=model.parent_id,
             library_id=model.library_id,
             children_count=children_count,
@@ -110,12 +115,17 @@ async def get_content(
 ) -> ContentDTO:
     async with rb.get_asession() as session:
         query = (
-            select(Content, UserToContent)
+            select(Content, UserToContent, ContentMetadataMerged.data)
             .outerjoin(
                 UserToContent,
                 (UserToContent.library_id == Content.library_id)
                 & (UserToContent.uri == Content.uri)
                 & (UserToContent.user_id == user.id),
+            )
+            .outerjoin(
+                ContentMetadataMerged,
+                (ContentMetadataMerged.uri == Content.uri)
+                & (ContentMetadataMerged.library_id == Content.library_id),
             )
             .where(Content.id == content_id)
         )
@@ -123,7 +133,7 @@ async def get_content(
         row = result.one_or_none()
         if row is None:
             raise HTTPException(status_code=404, detail="Content not found")
-        return ContentDTO.from_model(row[0], user_to_content=row[1])
+        return ContentDTO.from_model(row[0], meta=row[2], user_to_content=row[1])
 
 
 @router.get("/{content_id}/lists")
@@ -173,12 +183,17 @@ async def list_content(
             .lateral()
         )
         base_query = (
-            select(Content, count_subq.c.children_count, UserToContent)
+            select(Content, count_subq.c.children_count, UserToContent, ContentMetadataMerged.data)
             .outerjoin(
                 UserToContent,
                 (UserToContent.library_id == Content.library_id)
                 & (UserToContent.uri == Content.uri)
                 & (UserToContent.user_id == user.id),
+            )
+            .outerjoin(
+                ContentMetadataMerged,
+                (ContentMetadataMerged.uri == Content.uri)
+                & (ContentMetadataMerged.library_id == Content.library_id),
             )
             .where(Content.valid == valid)
         )
@@ -218,7 +233,7 @@ async def list_content(
 
         return PaginatedResponse(
             data=[
-                ContentDTO.from_model(row[0], children_count=row[1], user_to_content=row[2])
+                ContentDTO.from_model(row[0], meta=row[3], children_count=row[1], user_to_content=row[2])
                 for row in data_r.all()
             ],
             total=total_r.scalar_one(),

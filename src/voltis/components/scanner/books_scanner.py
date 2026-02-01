@@ -7,7 +7,7 @@ import structlog
 from anyio import Path
 
 from voltis.components.epub import EpubMetadata, read_metadata
-from voltis.db.models import Content
+from voltis.db.models import Content, ContentMetadataDict
 from voltis.utils.misc import now_without_tz
 
 from .base import LibraryFile, ScannerBase
@@ -94,11 +94,11 @@ class BookScanner(ScannerBase):
         content.order_parts = [series_index or 0.0]
 
         if not self.no_fs:
-            await anyio.to_thread.run_sync(self._scan_book, content, metadata)
+            await self._scan_book(content, metadata)
 
         return content
 
-    def _scan_book(self, content: Content, metadata: EpubMetadata | None) -> None:
+    async def _scan_book(self, content: Content, metadata: EpubMetadata | None) -> None:
         """Scan a book file (.epub) for cover and additional metadata."""
         assert content.file_uri
         path = pathlib.Path(content.file_uri)
@@ -106,29 +106,29 @@ class BookScanner(ScannerBase):
         try:
             with zipfile.ZipFile(path, "r") as zf:
                 if metadata and metadata.cover_path:
-                    # Verify cover exists in archive
                     try:
                         zf.getinfo(metadata.cover_path)
                         content.cover_uri = f"{content.file_uri}/{metadata.cover_path}"
                     except KeyError:
                         pass
-
-                # Store additional metadata
-                if metadata:
-                    meta = content.mutate_meta()
-                    if metadata.authors:
-                        meta["authors"] = metadata.authors
-                    if metadata.description:
-                        meta["description"] = metadata.description
-                    if metadata.publisher:
-                        meta["publisher"] = metadata.publisher
-                    if metadata.language:
-                        meta["language"] = metadata.language
-                    if metadata.publication_date:
-                        meta["publication_date"] = metadata.publication_date
-
         except (zipfile.BadZipFile, OSError):
             content.valid = False
+            return
+
+        if metadata:
+            data: ContentMetadataDict = {}
+            if metadata.authors:
+                data["authors"] = metadata.authors
+            if metadata.description:
+                data["description"] = metadata.description
+            if metadata.publisher:
+                data["publisher"] = metadata.publisher
+            if metadata.language:
+                data["language"] = metadata.language
+            if metadata.publication_date:
+                data["publication_date"] = metadata.publication_date
+            if data:
+                await self.write_metadata(content.uri, self.library.id, provider=0, data=data)
 
     async def scan_series(self, content, items):
         content.cover_uri = None

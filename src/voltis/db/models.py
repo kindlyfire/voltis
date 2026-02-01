@@ -107,62 +107,10 @@ class Library(_Base, _DefaultColumns):
         self.sources = [source.model_dump(mode="json") for source in sources]
 
 
-class ContentMetadata(TypedDict, total=False):
+class ContentFileData(TypedDict, total=False):
     pages: list[tuple[str, int, int]]
     """Names, including extension, of the page files of a comic, with the image
     width and height."""
-
-    # Shared fields (books + comics)
-    authors: list[str]
-    description: str
-    publisher: str
-    language: str
-    publication_date: str
-
-    # Comic-specific fields (from ComicInfo.xml)
-    title: str
-    series: str
-    writer: str
-    penciller: str
-    inker: str
-    colorist: str
-    letterer: str
-    cover_artist: str
-    editor: str
-    genre: str
-    age_rating: str
-    manga: str
-    characters: str
-    teams: str
-    locations: str
-    story_arc: str
-    series_group: str
-    format: str
-    imprint: str
-    web: str
-    notes: str
-    scan_information: str
-    black_and_white: str
-    community_rating: float
-    review: str
-    main_character_or_team: str
-    alternate_series: str
-    alternate_number: str
-    alternate_count: int
-    count: int
-    number: str
-    volume: int
-
-
-def content_metadata_get_year(meta: ContentMetadata) -> str | None:
-    """Extract a publication year from ContentMetadata."""
-    pub_date = meta.get("publication_date")
-    if pub_date:
-        try:
-            return pub_date[:4]
-        except ValueError:
-            pass
-    return None
 
 
 class Content(_Base, _DefaultColumns):
@@ -218,7 +166,7 @@ class Content(_Base, _DefaultColumns):
     type: Mapped[ContentType] = col(Text)
     order: Mapped[int | None] = col()
     order_parts: Mapped[list[float | None]] = col(ARRAY(REAL))
-    meta: Mapped[ContentMetadata] = col("meta", JSONB, server_default="{}")
+    file_data: Mapped[ContentFileData] = col("file_data", JSONB, server_default="{}")
 
     parent_id: Mapped[str | None] = col(Text, ForeignKey("content.id"))
     parent: Mapped["Content | None"] = relationship(
@@ -229,10 +177,82 @@ class Content(_Base, _DefaultColumns):
     library_id: Mapped[str] = col(Text, ForeignKey("libraries.id"))
     library: Mapped["Library"] = relationship()
 
-    def mutate_meta(self) -> ContentMetadata:
-        meta = self.meta = self.meta or {}
-        flag_modified(self, "meta")
-        return meta
+    def mutate_file_data(self) -> ContentFileData:
+        file_data = self.file_data = self.file_data or {}
+        flag_modified(self, "file_data")
+        return file_data
+
+
+class ContentMetadataDict(TypedDict, total=False):
+    # Shared fields (books + comics)
+    authors: list[str]
+    description: str
+    publisher: str
+    language: str
+    publication_date: str
+
+    # Comic-specific fields (from ComicInfo.xml)
+    title: str
+    series: str
+    writer: str
+    penciller: str
+    inker: str
+    colorist: str
+    letterer: str
+    cover_artist: str
+    editor: str
+    genre: str
+    age_rating: str
+    manga: str
+    characters: str
+    teams: str
+    locations: str
+    story_arc: str
+    series_group: str
+    format: str
+    imprint: str
+    web: str
+    notes: str
+    scan_information: str
+    black_and_white: str
+    community_rating: float
+    review: str
+    main_character_or_team: str
+    alternate_series: str
+    alternate_number: str
+    alternate_count: int
+    count: int
+    number: str
+    volume: int
+
+
+def content_metadata_get_year(meta: ContentMetadataDict) -> str | None:
+    """Extract a publication year from ContentMetadataDict."""
+    pub_date = meta.get("publication_date")
+    if pub_date:
+        try:
+            return pub_date[:4]
+        except ValueError:
+            pass
+    return None
+
+
+class ContentMetadataMerged(_Base):
+    __tablename__ = "content_metadata_merged"
+
+    uri: Mapped[str] = col(Text, primary_key=True)
+    library_id: Mapped[str] = col(Text, primary_key=True)
+    data: Mapped[dict] = col("data", JSONB)
+
+
+class ContentMetadataRow(_Base):
+    __tablename__ = "content_metadata"
+
+    uri: Mapped[str] = col(Text, primary_key=True)
+    library_id: Mapped[str] = col(Text, ForeignKey("libraries.id"), primary_key=True)
+    provider: Mapped[int] = col(Integer, primary_key=True)
+    data: Mapped[dict] = col("data", JSONB, server_default="{}")
+    updated_at: Mapped[datetime.datetime] = col(TIMESTAMP, server_default="")
 
 
 ReadingStatus = Literal["reading", "completed", "on_hold", "dropped", "plan_to_read"]

@@ -50,14 +50,14 @@ async def get_page(
         if not content:
             raise HTTPException(status_code=404, detail="Content not found")
 
-        metadata = content.meta
-        if not content.file_uri or not metadata or "pages" not in metadata:
+        file_data = content.file_data
+        if not content.file_uri or not file_data or "pages" not in file_data:
             raise HTTPException(status_code=404, detail="Content has no pages")
 
-        if page_index < 0 or page_index >= len(metadata["pages"]):
+        if page_index < 0 or page_index >= len(file_data["pages"]):
             raise HTTPException(status_code=404, detail="Page index out of range")
 
-        page_name = metadata["pages"][page_index]
+        page_name = file_data["pages"][page_index]
         file_path = Path(content.file_uri)
         page_uri = file_path / page_name[0]
 
