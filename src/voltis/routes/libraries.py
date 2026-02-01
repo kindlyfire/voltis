@@ -6,9 +6,9 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
-from voltis.components.scanner.base import LibrarySourceMissing
-from voltis.components.scanner.loader import ScannerType, get_scanner
-from voltis.db.models import Content, Library
+from voltis.components.scanner2.fs_reader import LibrarySourceMissing
+from voltis.components.scanner2.loader import get_scanner
+from voltis.db.models import Content, Library, ScannerType
 from voltis.routes._misc import OK_RESPONSE, OkResponse
 from voltis.routes._providers import AdminUserProvider, RbProvider, UserProvider
 from voltis.utils.misc import now_without_tz
@@ -107,10 +107,10 @@ async def scan_libraries(
     results = []
     for library in libraries:
         logger.info("Scanning library", library_id=library.id, library_name=library.name)
-        scanner = get_scanner(library.type, library, rb)
+        scanner = get_scanner(rb, library, force=force)
 
         try:
-            scan_result = await scanner.scan(force=force)
+            scan_result = await scanner.scan()
         except LibrarySourceMissing as err:
             raise HTTPException(
                 status_code=500,

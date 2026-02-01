@@ -4,8 +4,8 @@ from importlib.metadata import version as pkg_version
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from starlette.middleware.gzip import GZipResponder, IdentityResponder
 from starlette.datastructures import Headers
+from starlette.middleware.gzip import GZipResponder, IdentityResponder
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from voltis.services.resource_broker import ResourceBroker

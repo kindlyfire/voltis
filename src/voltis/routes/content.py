@@ -233,7 +233,9 @@ async def list_content(
 
         return PaginatedResponse(
             data=[
-                ContentDTO.from_model(row[0], meta=row[3], children_count=row[1], user_to_content=row[2])
+                ContentDTO.from_model(
+                    row[0], meta=row[3], children_count=row[1], user_to_content=row[2]
+                )
                 for row in data_r.all()
             ],
             total=total_r.scalar_one(),

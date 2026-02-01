@@ -4,8 +4,8 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import Text, and_, delete, func, or_, select, text, true, update
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.exc import IntegrityError
 
 from voltis.db.models import (
     Content,
@@ -13,9 +13,9 @@ from voltis.db.models import (
     CustomListToContent,
     CustomListVisibility,
 )
-from voltis.routes.content import ContentDTO
 from voltis.routes._misc import OK_RESPONSE, OkResponse
 from voltis.routes._providers import RbProvider, UserProvider
+from voltis.routes.content import ContentDTO
 from voltis.utils.misc import Unset, UnsetType, now_without_tz
 
 router = APIRouter()

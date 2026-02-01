@@ -5,7 +5,7 @@ import click
 import structlog
 from sqlalchemy import select
 
-from voltis.components.scanner.loader import get_scanner
+from voltis.components.scanner2.loader import get_scanner
 from voltis.db.models import Library, ScannerType
 from voltis.services.resource_broker import ResourceBroker
 from voltis.utils.misc import now_without_tz
@@ -57,34 +57,36 @@ async def _scan(
         )
 
     # Create scanner and run scan
-    scanner = get_scanner(lib.type, lib, rb)
     click.echo(f"Scanning library: {lib.name or lib.id}")
     for source in lib.get_sources():
         click.echo(f"  Source: {unquote(source.path_uri)}")
 
     async with LogTime(logger, "Library scan"):
-        result = await scanner.scan(dry_run=dry_run, filter_paths=filter_paths, force=force)
+        task = get_scanner(
+            rb, no_fs=False, dry_run=dry_run, filter_paths=filter_paths, force=force, library=lib
+        )
+        result = await task.scan()
 
     # Display results
     click.echo("")
     if result.added:
         click.echo(f"Added ({len(result.added)}):")
         for item in result.added[:20]:
-            click.echo(f"  + {unquote(item.uri)}")
+            click.echo(f"  + {unquote(item.path)}")
         if len(result.added) > 20:
             click.echo(f"  ... and {len(result.added) - 20} more")
 
     if result.updated:
         click.echo(f"\nUpdated ({len(result.updated)}):")
         for item in result.updated[:20]:
-            click.echo(f"  ~ {unquote(item.uri)}")
+            click.echo(f"  ~ {unquote(item.path)}")
         if len(result.updated) > 20:
             click.echo(f"  ... and {len(result.updated) - 20} more")
 
     if result.removed:
         click.echo(f"\nRemoved ({len(result.removed)}):")
-        for item, _ in result.removed[:20]:
-            click.echo(f"  - {unquote(item.uri)}")
+        for item in result.removed[:20]:
+            click.echo(f"  - {unquote(item.path)}")
         if len(result.removed) > 20:
             click.echo(f"  ... and {len(result.removed) - 20} more")
 

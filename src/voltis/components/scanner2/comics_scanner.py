@@ -1,5 +1,6 @@
 import datetime
 import re
+import stat
 import typing
 import zipfile
 
@@ -9,10 +10,11 @@ import structlog
 import vmeta
 from anyio import Path
 
+from voltis.components.scanner2.fs_reader import LibraryFile
 from voltis.db.models import Content, ContentMetadataDict
 from voltis.utils.misc import notnone, now_without_tz
 
-from .base import LibraryFile, ScannerBase
+from .base import Scanner
 
 logger = structlog.stdlib.get_logger()
 
@@ -20,7 +22,7 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 COVER_NAMES = ["cover.jpg", "cover.jpeg", "cover.png", "cover.webp"]
 
 
-class ComicScanner(ScannerBase):
+class ComicsScanner(Scanner):
     """
     Scanner for comic files (.cbz).
 
@@ -44,15 +46,11 @@ class ComicScanner(ScannerBase):
     volume.
     """
 
-    def __init__(self, library, rb, no_fs=False):
-        super().__init__(library, rb, no_fs)
-        self._resolved_parents: dict[Path, Content] = {}
-
-    def check_file_eligible(self, file: LibraryFile) -> bool:
-        return file.uri.lower().endswith(".cbz") or file.uri.lower().endswith(".zip")
+    def file_eligible(self, file: LibraryFile) -> bool:
+        return file.path.lower().endswith(".cbz") or file.path.lower().endswith(".zip")
 
     async def scan_file(self, file: LibraryFile, content: Content | None) -> Content | None:
-        path = Path(file.uri)
+        path = Path(file.path)
         pages, meta, comic_info, valid = await anyio.to_thread.run_sync(self._scan_comic, path)
         if not valid:
             return None
@@ -61,7 +59,7 @@ class ComicScanner(ScannerBase):
         name = meta.get("series") or fallback_name
         year = meta.get("year") or fallback_year
         uri_part = f"{name}_{year}" if year else name
-        series = await self.find_or_create_series(
+        series = self.r.get_series(
             file_uri=path.parent.as_posix(),
             uri_part=uri_part,
             uri=f"comic/{uri_part}",
@@ -95,9 +93,7 @@ class ComicScanner(ScannerBase):
 
         # Create or update content
         if content is None:
-            content, should_skip = self.find_reusable_content(uri_part, series.id)
-            if should_skip:
-                return None
+            content = self.r.match_deleted_item(uri_part, series.id)
             if content is None:
                 content = Content(
                     id=Content.make_id(),
@@ -106,7 +102,7 @@ class ComicScanner(ScannerBase):
                     created_at=now_without_tz(),
                 )
 
-        content.file_uri = file.uri
+        content.file_uri = file.path
         content.uri_part = uri_part
         content.uri = f"{series.uri}/{uri_part}"
         content.valid = True
@@ -120,9 +116,9 @@ class ComicScanner(ScannerBase):
 
         if "title" not in meta:
             meta["title"] = title
-        await self.write_metadata(
-            content.uri, self.library.id, provider=0, data=meta, raw=typing.cast(dict, comic_info)
-        )
+        meta_row = self.r.get_metadata(uri=content.uri, provider=0)
+        meta_row.data = typing.cast(dict, meta)
+        meta_row.raw = typing.cast(dict, comic_info)
 
         return content
 
@@ -155,21 +151,24 @@ class ComicScanner(ScannerBase):
         """Scan a comic series folder for a cover image."""
         for cover_name in COVER_NAMES:
             cover_path = folder / cover_name
-            if await cover_path.is_file():
+            try:
+                stat_ = await cover_path.stat()
+            except Exception:
+                continue
+            if stat.S_ISREG(stat_.st_mode):
                 series.cover_uri = cover_path.as_posix()
-                stat = await cover_path.stat()
-                series.file_mtime = datetime.datetime.fromtimestamp(stat.st_mtime)
+                series.file_mtime = datetime.datetime.fromtimestamp(stat_.st_mtime)
                 return
 
-    async def scan_series(self, content, items):
-        content.cover_uri = None
-        content.file_mtime = None
-        await self._scan_series_cover(content, Path(notnone(content.file_uri)))
+    async def update_series(self, series, items):
+        self._inherit_child_metadata(series, items)
+        series.cover_uri = None
+        series.file_mtime = None
+        await self._scan_series_cover(series, Path(notnone(series.file_uri)))
         if items:
-            if not content.cover_uri:
-                content.cover_uri = items[0].cover_uri
-            content.file_mtime = items[0].file_mtime
-        await self._inherit_child_metadata(content, items)
+            if not series.cover_uri:
+                series.cover_uri = items[0].cover_uri
+            series.file_mtime = items[0].file_mtime
 
 
 def _parse_volume_number(name: str) -> float | None:

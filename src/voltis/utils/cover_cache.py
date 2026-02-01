@@ -4,8 +4,8 @@ import typing
 from pathlib import Path
 
 import pyvips
-from fastapi import HTTPException
 import vmeta
+from fastapi import HTTPException
 
 from voltis.db.models import Content
 from voltis.services.settings import settings
