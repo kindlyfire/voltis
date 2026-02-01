@@ -491,10 +491,21 @@ class ScannerBase(ABC):
             if len(inherited) == len(_SERIES_INHERITED_FIELDS):
                 break
 
-        if not inherited:
-            return
+        # Derive the series title from the first child's "series" metadata
+        # field (ComicInfo series name / EPUB series name), falling back to
+        # the series uri_part.
+        series_title: str | None = None
+        for item in items:
+            child_meta = meta_by_uri.get(item.uri, {})
+            if "series" in child_meta:
+                series_title = child_meta["series"]
+                break
+        if series_title is None:
+            series_title = series.uri_part
+        inherited["title"] = series_title
 
-        # Read existing series metadata (provider=0) to preserve title etc.
+        # Read existing series metadata (provider=0) to preserve any
+        # fields not being overwritten.
         async with self.rb.get_asession() as session:
             existing_row = (
                 await session.execute(

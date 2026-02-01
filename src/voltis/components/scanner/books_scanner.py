@@ -131,10 +131,10 @@ class BookScanner(ScannerBase):
                 data["language"] = metadata.language
             if metadata.publication_date:
                 data["publication_date"] = metadata.publication_date
+            if metadata.series:
+                data["series"] = metadata.series
             raw = {k: v for k, v in metadata.to_object().items() if v is not None}
-        await self.write_metadata(
-            content.uri, self.library.id, provider=0, data=data, raw=raw
-        )
+        await self.write_metadata(content.uri, self.library.id, provider=0, data=data, raw=raw)
 
     async def scan_series(self, content, items):
         content.cover_uri = None
