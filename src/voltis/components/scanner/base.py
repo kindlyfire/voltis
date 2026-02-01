@@ -7,8 +7,8 @@ import anyio.to_thread
 import structlog
 from anyio import CapacityLimiter, create_task_group
 
-from voltis.components.scanner2.fs_reader import LibraryFile, get_fs_items
-from voltis.components.scanner2.repository import ScannerRepository
+from voltis.components.scanner.fs_reader import LibraryFile, get_fs_items
+from voltis.components.scanner.repository import ScannerRepository
 from voltis.db.models import Content, ContentMetadataDict, Library, LibrarySource
 from voltis.services.resource_broker import ResourceBroker
 from voltis.utils.cover_cache import delete_content_cover_cached

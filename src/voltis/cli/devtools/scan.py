@@ -5,7 +5,7 @@ import click
 import structlog
 from sqlalchemy import select
 
-from voltis.components.scanner2.loader import get_scanner
+from voltis.components.scanner.loader import get_scanner
 from voltis.db.models import Library, ScannerType
 from voltis.services.resource_broker import ResourceBroker
 from voltis.utils.misc import now_without_tz

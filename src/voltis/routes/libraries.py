@@ -6,8 +6,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
-from voltis.components.scanner2.fs_reader import LibrarySourceMissing
-from voltis.components.scanner2.loader import get_scanner
+from voltis.components.scanner.fs_reader import LibrarySourceMissing
+from voltis.components.scanner.loader import get_scanner
 from voltis.db.models import Content, Library, ScannerType
 from voltis.routes._misc import OK_RESPONSE, OkResponse
 from voltis.routes._providers import AdminUserProvider, RbProvider, UserProvider

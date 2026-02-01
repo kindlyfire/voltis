@@ -10,7 +10,7 @@ import structlog
 import vmeta
 from anyio import Path
 
-from voltis.components.scanner2.fs_reader import LibraryFile
+from voltis.components.scanner.fs_reader import LibraryFile
 from voltis.db.models import Content, ContentMetadataDict
 from voltis.utils.misc import notnone, now_without_tz
 
