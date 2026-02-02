@@ -19,6 +19,7 @@ dependencies = [
     "pyvips[binary]>=3.1.1",
     "sqlalchemy>=2.0.45",
     "structlog>=25.5.0",
+    "tenacity>=9.1.2",
     "unidecode>=1.4.0",
     "uvicorn>=0.40.0",
     "vmeta @ https://tijlvdb-releases.s3.de.io.cloud.ovh.net/vmeta/vmeta-0.1.0-cp314-cp314-linux_x86_64.whl",
