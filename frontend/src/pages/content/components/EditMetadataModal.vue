@@ -10,15 +10,25 @@
                 </div>
 
                 <template v-else-if="qLayers.isSuccess.value && localLayers">
-                    <VSelect
-                        v-model="selectedView"
-                        :items="viewOptions"
-                        item-title="title"
-                        item-value="value"
-                        density="compact"
-                        variant="outlined"
-                        hide-details
-                    />
+                    <div class="d-flex align-center ga-2">
+                        <VSelect
+                            v-model="selectedView"
+                            :items="viewOptions"
+                            item-title="title"
+                            item-value="value"
+                            density="compact"
+                            variant="outlined"
+                            hide-details
+                        />
+                        <VBtn
+                            v-if="selectedViewLayer && selectedViewLayer.provider !== 99"
+                            variant="tonal"
+                            @click="showRawDialog = true"
+                            class="h-10!"
+                        >
+                            Raw
+                        </VBtn>
+                    </div>
 
                     <div class="metadata-fields">
                         <template v-for="field in fieldsWithValues" :key="field.key">
@@ -131,6 +141,33 @@
             </VCardActions>
         </VCard>
     </VDialog>
+
+    <!-- Raw data sub-dialog -->
+    <VDialog v-model="showRawDialog" max-width="1000">
+        <VCard v-if="selectedViewLayer">
+            <VCardTitle>Raw data — {{ providerLabel(selectedViewLayer.provider) }}</VCardTitle>
+            <VCardText>
+                <div class="flex flex-col lg:flex-row gap-4">
+                    <div class="flex-1">
+                        <div class="text-caption text-medium-emphasis mb-1">Normalized Data</div>
+                        <pre class="raw-json">{{
+                            JSON.stringify(selectedViewLayer.data, null, 2)
+                        }}</pre>
+                    </div>
+                    <div v-if="Object.keys(selectedViewLayer.raw).length" class="flex-1">
+                        <div class="text-caption text-medium-emphasis mb-1">Raw Response</div>
+                        <pre class="raw-json">{{
+                            JSON.stringify(selectedViewLayer.raw, null, 2)
+                        }}</pre>
+                    </div>
+                </div>
+            </VCardText>
+            <VCardActions>
+                <VSpacer />
+                <VBtn variant="text" @click="showRawDialog = false">Close</VBtn>
+            </VCardActions>
+        </VCard>
+    </VDialog>
 </template>
 
 <script setup lang="ts">
@@ -210,6 +247,7 @@ const serverSnapshot = ref<string>('')
 const selectedView = ref<string>('merged')
 const editingField = ref<keyof ContentMetadata | null>(null)
 const editValue = ref<string>('')
+const showRawDialog = ref(false)
 
 watch(
     () => qLayers.data?.value,
@@ -251,6 +289,11 @@ const viewOptions = computed(() => {
         options.push({ title: providerLabel(layer.provider), value: String(layer.provider) })
     }
     return options
+})
+
+const selectedViewLayer = computed(() => {
+    if (selectedView.value === 'merged') return null
+    return localLayers.value?.layers.find(l => l.provider === Number(selectedView.value)) ?? null
 })
 
 const isEditable = computed(() => selectedView.value === 'merged' || selectedView.value === '99')
@@ -357,5 +400,17 @@ export function showEditMetadataModal(contentId: string): Promise<void> {
 
 .field-label--editable:hover {
     text-decoration: underline;
+}
+
+.raw-json {
+    font-size: 0.75rem;
+    line-height: 1.4;
+    background: rgba(var(--v-theme-on-surface), 0.05);
+    border-radius: 4px;
+    padding: 12px;
+    overflow: auto;
+    max-height: 500px;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 </style>

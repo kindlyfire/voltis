@@ -362,6 +362,7 @@ async def set_series_item_statuses(
 class MetadataLayerDTO(BaseModel):
     provider: int
     data: ContentMetadataDict
+    raw: dict
 
 
 class MetadataLayersResponse(BaseModel):
@@ -389,13 +390,13 @@ async def get_metadata_layers(
             .order_by(ContentMetadataRow.provider)
         )
         layers = [
-            MetadataLayerDTO(provider=row.provider, data=typing.cast(ContentMetadataDict, row.data))
+            MetadataLayerDTO(provider=row.provider, data=typing.cast(ContentMetadataDict, row.data), raw=row.raw or {})
             for row in rows.scalars().all()
         ]
 
         # Always include overrides layer (99)
         if not any(layer.provider == 99 for layer in layers):
-            layers.append(MetadataLayerDTO(provider=99, data={}))
+            layers.append(MetadataLayerDTO(provider=99, data={}, raw={}))
 
         merged_result = await session.execute(
             select(ContentMetadataMerged.data).where(
