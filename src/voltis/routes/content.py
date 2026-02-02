@@ -83,6 +83,8 @@ class ContentDTO(BaseModel):
         meta: ContentMetadataDict | None = None,
         children_count: int | None = None,
         user_to_content: UserToContent | None = None,
+        include_file_data: bool = True,
+        include_meta: bool = True,
     ) -> "ContentDTO":
         return cls(
             id=model.id,
@@ -98,8 +100,8 @@ class ContentDTO(BaseModel):
             type=model.type,
             order=model.order,
             order_parts=model.order_parts,
-            meta=meta or {},
-            file_data=model.file_data or {},
+            meta=(meta or {}) if include_meta else {},
+            file_data=(model.file_data or {}) if include_file_data else {},
             parent_id=model.parent_id,
             library_id=model.library_id,
             children_count=children_count,
@@ -174,7 +176,10 @@ async def list_content(
     offset: Annotated[int, Query(ge=0)] = 0,
     sort: Annotated[Literal["order", "created_at", "progress_updated_at"] | None, Query()] = None,
     sort_order: Annotated[Literal["asc", "desc"], Query()] = "desc",
+    include: Annotated[str, Query()] = "",
 ) -> PaginatedResponse[ContentDTO]:
+    include_ = [part.strip() for part in include.split(",") if part.strip()]
+
     async with rb.get_asession() as session:
         ChildContent = aliased(Content)
         count_subq = (
@@ -234,7 +239,12 @@ async def list_content(
         return PaginatedResponse(
             data=[
                 ContentDTO.from_model(
-                    row[0], meta=row[3], children_count=row[1], user_to_content=row[2]
+                    row[0],
+                    meta=row[3],
+                    children_count=row[1],
+                    user_to_content=row[2],
+                    include_file_data="file_data" in include_,
+                    include_meta="meta" in include_,
                 )
                 for row in data_r.all()
             ],
