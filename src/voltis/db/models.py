@@ -80,6 +80,10 @@ class LibrarySource(BaseModel):
     path_uri: str
 
 
+class LibrarySettings(BaseModel):
+    enable_mangabaka: bool = False
+
+
 class Library(_Base, _DefaultColumns):
     """
     A library is a collection of books, comics, series or movies. It defines
@@ -97,6 +101,7 @@ class Library(_Base, _DefaultColumns):
     type: Mapped[ScannerType] = col(Text)
     scanned_at: Mapped[datetime.datetime | None] = col(TIMESTAMP)
     sources: Mapped[list[Any]] = col("sources", JSONB, server_default="{}")
+    settings: Mapped[dict] = col("settings", JSONB, server_default="{}")
 
     contents: Mapped[list["Content"]] = relationship(back_populates="library")
 
@@ -105,6 +110,12 @@ class Library(_Base, _DefaultColumns):
 
     def set_sources(self, sources: list[LibrarySource]):
         self.sources = [source.model_dump(mode="json") for source in sources]
+
+    def get_settings(self) -> LibrarySettings:
+        return LibrarySettings.model_validate(self.settings)
+
+    def set_settings(self, settings: LibrarySettings):
+        self.settings = settings.model_dump(mode="json", exclude_defaults=True)
 
 
 class ContentFileData(TypedDict, total=False):
@@ -247,6 +258,7 @@ class ContentMetadataRow(_Base):
     """
     1: File metadata (e.g. ComicInfo.xml, EPUB metadata), 2: MangaBaka, 99: Admin overrides
     """
+    remote_id: Mapped[str | None] = col(Text)
     data: Mapped[dict] = col("data", JSONB, server_default="{}")
     raw: Mapped[dict] = col("raw", JSONB, server_default="{}")
     updated_at: Mapped[datetime.datetime] = col(TIMESTAMP, server_default="")

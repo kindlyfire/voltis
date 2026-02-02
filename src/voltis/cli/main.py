@@ -132,6 +132,21 @@ def scan(
     )
 
 
+@devtools.command("scan-sources")
+@click.option("--library", required=True, type=str, help="Library ID to scan")
+@click.option("--id", "content_id", type=str, default=None, help="Only scan this content ID")
+@click.option("--force", is_flag=True, help="Re-fetch series that already have metadata")
+def scan_sources(library: str, content_id: str | None, force: bool):
+    """Fetch metadata from external sources for comic series"""
+    import anyio
+
+    from ..services.resource_broker import ResourceBroker
+    from .devtools.scan_sources import _scan_sources
+
+    rb = ResourceBroker()
+    anyio.run(_scan_sources, rb, library, content_id, force)
+
+
 @main.group()
 def users():
     """User management commands"""
