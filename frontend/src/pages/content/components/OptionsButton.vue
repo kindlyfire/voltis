@@ -12,6 +12,11 @@
         </template>
         <VList>
             <VListItem
+                prepend-icon="mdi-download"
+                title="Download"
+                @click="showDownloadModal(props.contentId)"
+            />
+            <VListItem
                 prepend-icon="mdi-format-list-bulleted"
                 title="Add to list"
                 @click="showListsModal(props.contentId)"
@@ -41,6 +46,7 @@ import { computed } from 'vue'
 import { contentApi } from '@/utils/api/content'
 import { usersApi } from '@/utils/api/users'
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
+import { showDownloadModal } from './DownloadModal.vue'
 import { showEditMetadataModal } from './EditMetadataModal.vue'
 import { showListsModal } from './ListsModal.vue'
 

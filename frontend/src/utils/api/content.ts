@@ -6,6 +6,7 @@ import type {
     Content,
     ContentListParams,
     ContentMetadata,
+    DownloadInfo,
     MetadataLayersResponse,
     Paginated,
     ReadingStatus,
@@ -62,6 +63,13 @@ export const contentApi = {
             },
             enabled: isEnabled(params),
             ...options,
+        }),
+
+    useDownloadInfo: (id: MaybeRefOrGetter<string | undefined | null>) =>
+        useQuery({
+            queryKey: ['content', 'download-info', id],
+            queryFn: async () => apiFetch<DownloadInfo>(`/files/download-info/${toValue(id)}`),
+            enabled: isEnabled(id),
         }),
 
     useBookChapters: (id: MaybeRefOrGetter<string | undefined | null>) =>

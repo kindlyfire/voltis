@@ -175,6 +175,11 @@ export interface BookChapter {
     linear: boolean
 }
 
+export interface DownloadInfo {
+    file_count: number
+    total_size: number | null
+}
+
 export type CustomListVisibility = 'public' | 'private' | 'unlisted'
 
 export interface CustomListPartial {

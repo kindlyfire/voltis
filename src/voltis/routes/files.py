@@ -1,15 +1,24 @@
+import io
+import zipfile
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import anyio
+import anyio.from_thread
 import anyio.to_thread
+from anyio.streams.memory import MemoryObjectSendStream
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
+from fastapi.responses import StreamingResponse as StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import func, select
+from sqlalchemy.orm import load_only
 
 from voltis.components.epub import list_chapters, read_chapter
 from voltis.db.models import Content
 from voltis.routes._providers import RbProvider, UserProvider
 from voltis.utils.cover_cache import read_content_cover, read_content_file
+from voltis.utils.misc import notnone
 
 router = APIRouter()
 
@@ -149,3 +158,124 @@ async def get_book_resource(
 
         data, media_type = await anyio.to_thread.run_sync(read_content_file, final_path)
         return Response(content=data, media_type=media_type)
+
+
+class DownloadInfoResponse(BaseModel):
+    file_count: int
+    total_size: int | None
+
+
+@router.get("/download-info/{content_id}")
+async def get_download_info(
+    rb: RbProvider,
+    _user: UserProvider,
+    content_id: str,
+) -> DownloadInfoResponse:
+    async with rb.get_asession() as session:
+        content = await session.get(Content, content_id)
+        if not content:
+            raise HTTPException(status_code=404, detail="Content not found")
+
+        if content.type in ("comic", "book"):
+            if not content.file_uri:
+                raise HTTPException(status_code=404, detail="Content has no file")
+            return DownloadInfoResponse(
+                file_count=1,
+                total_size=content.file_size,
+            )
+
+        # Series: aggregate children
+        result = await session.execute(
+            select(
+                func.count(Content.id),
+                func.sum(Content.file_size),
+            ).where((Content.parent_id == content_id) & (Content.file_uri.isnot(None)))
+        )
+        file_count, total_size = result.one()
+        if not file_count:
+            raise HTTPException(status_code=404, detail="No downloadable files")
+
+        return DownloadInfoResponse(
+            file_count=file_count,
+            total_size=total_size,
+        )
+
+
+@router.get("/download/{content_id}")
+async def download(
+    rb: RbProvider,
+    _user: UserProvider,
+    content_id: str,
+) -> Response:
+    async with rb.get_asession() as session:
+        content = await session.get(Content, content_id)
+        if not content:
+            raise HTTPException(status_code=404, detail="Content not found")
+
+        if content.type in ("comic", "book"):
+            if not content.file_uri:
+                raise HTTPException(status_code=404, detail="Content has no file")
+            file_path = Path(content.file_uri)
+            return FileResponse(
+                file_path,
+                filename=file_path.name,
+                media_type="application/octet-stream",
+            )
+
+        # Series: stream a ZIP of all children's files
+        result = await session.execute(
+            select(Content)
+            .options(load_only(Content.file_uri, Content.uri_part))
+            .where((Content.parent_id == content_id) & (Content.file_uri.isnot(None)))
+            .order_by(Content.order)
+        )
+        children = result.scalars().all()
+        if not children:
+            raise HTTPException(status_code=404, detail="No downloadable files")
+
+        file_paths = [(Path(notnone(c.file_uri)), Path(notnone(c.file_uri)).name) for c in children]
+        zip_filename = f"{content.uri_part}.zip"
+
+        async def stream_zip() -> AsyncIterator[bytes]:
+            send_stream, receive_stream = anyio.create_memory_object_stream[bytes](8)
+
+            async def build_zip() -> None:
+                async with send_stream:
+                    await anyio.to_thread.run_sync(_write_zip_to_stream, file_paths, send_stream)
+
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(build_zip)
+                async with receive_stream:
+                    async for chunk in receive_stream:
+                        yield chunk
+
+        headers = {
+            "Content-Disposition": f'attachment; filename="{zip_filename}"',
+        }
+        return StreamingResponse(
+            stream_zip(),
+            media_type="application/zip",
+            headers=headers,
+        )
+
+
+def _write_zip_to_stream(
+    file_paths: list[tuple[Path, str]],
+    send_stream: MemoryObjectSendStream[bytes],
+) -> None:
+    """Build a ZIP in a worker thread, sending chunks via the stream."""
+    buf = io.BytesIO()
+    sent = 0
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as zf:
+        for file_path, arcname in file_paths:
+            zf.write(file_path, arcname)
+            pos = buf.tell()
+            if pos > sent:
+                buf.seek(sent)
+                anyio.from_thread.run(send_stream.send, buf.read(pos - sent))
+                sent = pos
+    # Final flush for central directory
+    buf.seek(sent)
+    remainder = buf.read()
+    if remainder:
+        anyio.from_thread.run(send_stream.send, remainder)
