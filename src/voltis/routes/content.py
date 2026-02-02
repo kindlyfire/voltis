@@ -1,4 +1,5 @@
 import datetime
+import typing
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query
@@ -12,6 +13,7 @@ from voltis.db.models import (
     ContentFileData,
     ContentMetadataDict,
     ContentMetadataMerged,
+    ContentMetadataRow,
     ContentType,
     CustomList,
     CustomListToContent,
@@ -19,7 +21,7 @@ from voltis.db.models import (
     ReadingStatus,
     UserToContent,
 )
-from voltis.routes._providers import RbProvider, UserProvider
+from voltis.routes._providers import AdminUserProvider, RbProvider, UserProvider
 from voltis.utils.misc import PaginatedResponse, Unset, UnsetType, now_without_tz
 
 router = APIRouter()
@@ -355,3 +357,92 @@ async def set_series_item_statuses(
             )
 
         await session.commit()
+
+
+class MetadataLayerDTO(BaseModel):
+    provider: int
+    data: ContentMetadataDict
+
+
+class MetadataLayersResponse(BaseModel):
+    merged: ContentMetadataDict
+    layers: list[MetadataLayerDTO]
+
+
+@router.get("/{content_id}/metadata-layers")
+async def get_metadata_layers(
+    rb: RbProvider,
+    user: AdminUserProvider,
+    content_id: str,
+) -> MetadataLayersResponse:
+    async with rb.get_asession() as session:
+        content = await session.get(Content, content_id)
+        if not content:
+            raise HTTPException(status_code=404, detail="Content not found")
+
+        rows = await session.execute(
+            select(ContentMetadataRow)
+            .where(
+                (ContentMetadataRow.uri == content.uri)
+                & (ContentMetadataRow.library_id == content.library_id)
+            )
+            .order_by(ContentMetadataRow.provider)
+        )
+        layers = [
+            MetadataLayerDTO(provider=row.provider, data=typing.cast(ContentMetadataDict, row.data))
+            for row in rows.scalars().all()
+        ]
+
+        # Always include overrides layer (99)
+        if not any(layer.provider == 99 for layer in layers):
+            layers.append(MetadataLayerDTO(provider=99, data={}))
+
+        merged_result = await session.execute(
+            select(ContentMetadataMerged.data).where(
+                (ContentMetadataMerged.uri == content.uri)
+                & (ContentMetadataMerged.library_id == content.library_id)
+            )
+        )
+        merged = merged_result.scalar_one_or_none() or {}
+
+        return MetadataLayersResponse(
+            merged=typing.cast(ContentMetadataDict, merged), layers=layers
+        )
+
+
+class MetadataOverrideRequest(BaseModel):
+    data: ContentMetadataDict
+
+
+@router.post("/{content_id}/metadata-override")
+async def update_metadata_override(
+    rb: RbProvider,
+    user: AdminUserProvider,
+    content_id: str,
+    body: MetadataOverrideRequest,
+) -> MetadataLayersResponse:
+    async with rb.get_asession() as session:
+        content = await session.get(Content, content_id)
+        if not content:
+            raise HTTPException(status_code=404, detail="Content not found")
+
+        stmt = (
+            pg_insert(ContentMetadataRow)
+            .values(
+                uri=content.uri,
+                library_id=content.library_id,
+                provider=99,
+                data=body.data,
+                raw={},
+                updated_at=now_without_tz(),
+            )
+            .on_conflict_do_update(
+                index_elements=["uri", "library_id", "provider"],
+                set_={"data": body.data, "updated_at": now_without_tz()},
+            )
+        )
+        await session.execute(stmt)
+        await session.commit()
+
+    # Return fresh layers
+    return await get_metadata_layers(rb, user, content_id)

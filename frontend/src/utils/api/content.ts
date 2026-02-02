@@ -5,6 +5,8 @@ import type {
     BookChapter,
     Content,
     ContentListParams,
+    ContentMetadata,
+    MetadataLayersResponse,
     Paginated,
     ReadingStatus,
     UserToContent,
@@ -126,6 +128,27 @@ export const contentApi = {
         await apiFetch(`/content/${contentId}/series-item-statuses`, {
             method: 'POST',
             body: JSON.stringify({ status }),
+        })
+    },
+
+    useMetadataLayers: (id: MaybeRefOrGetter<string | undefined | null>) =>
+        useQuery({
+            queryKey: ['content', 'metadata-layers', id],
+            queryFn: async () => contentApi.getMetadataLayers(toValue(id)!),
+            enabled: isEnabled(id),
+        }),
+
+    getMetadataLayers: async (contentId: string): Promise<MetadataLayersResponse> => {
+        return apiFetch<MetadataLayersResponse>(`/content/${contentId}/metadata-layers`)
+    },
+
+    updateMetadataOverride: async (
+        contentId: string,
+        data: ContentMetadata
+    ): Promise<MetadataLayersResponse> => {
+        return apiFetch<MetadataLayersResponse>(`/content/${contentId}/metadata-override`, {
+            method: 'POST',
+            body: JSON.stringify({ data }),
         })
     },
 }

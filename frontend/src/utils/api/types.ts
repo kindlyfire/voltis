@@ -77,11 +77,55 @@ export interface ContentFileData {
 }
 
 export interface ContentMetadata {
+    // Shared fields
     authors?: string[]
     description?: string
     publisher?: string
     language?: string
     publication_date?: string
+    // Comic-specific fields
+    title?: string
+    series?: string
+    writer?: string
+    penciller?: string
+    inker?: string
+    colorist?: string
+    letterer?: string
+    cover_artist?: string
+    editor?: string
+    genre?: string
+    age_rating?: string
+    manga?: string
+    characters?: string
+    teams?: string
+    locations?: string
+    story_arc?: string
+    series_group?: string
+    format?: string
+    imprint?: string
+    web?: string
+    notes?: string
+    scan_information?: string
+    black_and_white?: string
+    community_rating?: number
+    review?: string
+    main_character_or_team?: string
+    alternate_series?: string
+    alternate_number?: string
+    alternate_count?: number
+    count?: number
+    number?: string
+    volume?: number
+}
+
+export interface MetadataLayer {
+    provider: number
+    data: ContentMetadata
+}
+
+export interface MetadataLayersResponse {
+    merged: ContentMetadata
+    layers: MetadataLayer[]
 }
 
 export interface Content {

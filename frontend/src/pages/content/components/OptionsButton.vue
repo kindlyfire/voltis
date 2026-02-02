@@ -17,6 +17,12 @@
                 @click="showListsModal(props.contentId)"
             />
             <VListItem
+                v-if="isAdmin"
+                prepend-icon="mdi-pencil"
+                title="Edit metadata"
+                @click="showEditMetadataModal(props.contentId)"
+            />
+            <VListItem
                 prepend-icon="mdi-check-all"
                 title="Mark all as read"
                 @click="mMarkAllRead.mutate()"
@@ -31,13 +37,19 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { contentApi } from '@/utils/api/content'
+import { usersApi } from '@/utils/api/users'
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
+import { showEditMetadataModal } from './EditMetadataModal.vue'
 import { showListsModal } from './ListsModal.vue'
 
 const props = defineProps<{
     contentId: string
 }>()
+
+const qMe = usersApi.useMe()
+const isAdmin = computed(() => qMe.data.value?.permissions.includes('ADMIN'))
 
 const queryClient = useQueryClient()
 
