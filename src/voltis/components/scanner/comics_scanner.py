@@ -68,7 +68,7 @@ class ComicsScanner(Scanner):
         )
 
         # Parse volume/chapter from filename
-        filename = path.stem
+        filename = _clean_series_name(path.stem)
         vol_num = meta["volume"] if "volume" in meta else _parse_volume_number(filename)
         ch_num: str | int | float | None = (
             meta["number"] if "number" in meta else _parse_chapter_number(filename)
