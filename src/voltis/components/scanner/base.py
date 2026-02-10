@@ -37,6 +37,12 @@ class ScannerResult:
     unchanged: list[LibraryFile]
 
 
+@dataclass(slots=True)
+class ScannerEventProgress:
+    total: int
+    processed: int
+
+
 class Scanner(abc.ABC):
     def __init__(
         self,
@@ -47,6 +53,7 @@ class Scanner(abc.ABC):
         dry_run: bool = False,
         filter_paths: list[str] | None = None,
         force: bool = False,
+        events: bool = True,
     ):
         self.rb = rb
         self.library = library
@@ -56,6 +63,12 @@ class Scanner(abc.ABC):
         self.dry_run = dry_run
         self.filter_paths = filter_paths
         self.force = force
+        self.events = events
+        self.events_send, self.events_recv = anyio.create_memory_object_stream[
+            ScannerEventProgress
+        ](math.inf)
+        self._progress_total = 0
+        self._progress_processed = 0
 
     async def scan(self):
         sources = (
@@ -86,6 +99,7 @@ class Scanner(abc.ABC):
                 self.r.content_d.append(content)
 
         # Main scan loop
+        self._progress_total = len(to_add) + len(to_update)
         parents_with_updates: set[str] = set()
         async with LogTime(logger, "calling scan_file"), create_task_group() as tg:
             for item in to_add:
@@ -175,6 +189,11 @@ class Scanner(abc.ABC):
                     self.r.content.append(content)
                 if content.parent_id:
                     parents_with_updates.add(content.parent_id)
+        self._progress_processed += 1
+        if self.events:
+            await self.events_send.send(
+                ScannerEventProgress(total=self._progress_total, processed=self._progress_processed)
+            )
 
     async def _scan_series_wrapper(self, content: Content, items: list[Content]):
         async with self.limiter:
