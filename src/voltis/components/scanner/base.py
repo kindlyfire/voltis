@@ -43,6 +43,14 @@ class ScannerEventProgress:
     processed: int
 
 
+@dataclass(slots=True)
+class ScannerEventUpdateSummary:
+    to_add: int
+    to_update: int
+    to_remove: int
+    unchanged: int
+
+
 class Scanner(abc.ABC):
     def __init__(
         self,
@@ -65,8 +73,9 @@ class Scanner(abc.ABC):
         self.force = force
         self.events = events
         self.events_send, self.events_recv = anyio.create_memory_object_stream[
-            ScannerEventProgress
+            ScannerEventProgress | ScannerEventUpdateSummary
         ](math.inf)
+        self.event_update_summary: ScannerEventUpdateSummary | None = None
         self._progress_total = 0
         self._progress_processed = 0
 
@@ -84,51 +93,63 @@ class Scanner(abc.ABC):
         self,
         files: list[LibraryFile],
     ):
-        await self.r.load()
+        try:
+            await self.r.load()
 
-        to_add, to_update, unchanged, to_remove = self._match_files(files)
-        if self.force:
-            to_update.extend(unchanged)
-            unchanged = []
+            to_add, to_update, unchanged, to_remove = self._match_files(files)
+            if self.force:
+                to_update.extend(unchanged)
+                unchanged = []
 
-        # Move removed items to the deleted list
-        for item in to_remove:
-            content = next((c for c in self.r.content if c.file_uri == item.path), None)
-            if content:
-                self.r.content.remove(content)
-                self.r.content_d.append(content)
+            self.event_update_summary = ScannerEventUpdateSummary(
+                to_add=len(to_add),
+                to_update=len(to_update),
+                to_remove=len(to_remove),
+                unchanged=len(unchanged),
+            )
+            if self.events:
+                await self.events_send.send(self.event_update_summary)
 
-        # Main scan loop
-        self._progress_total = len(to_add) + len(to_update)
-        parents_with_updates: set[str] = set()
-        async with LogTime(logger, "calling scan_file"), create_task_group() as tg:
-            for item in to_add:
-                tg.start_soon(self._scan_file_wrapper, item, None, parents_with_updates)
-            for item in to_update:
-                tg.start_soon(
-                    self._scan_file_wrapper,
-                    item,
-                    next((c for c in self.r.content if c.file_uri == item.path)),
-                    parents_with_updates,
-                )
+            # Move removed items to the deleted list
+            for item in to_remove:
+                content = next((c for c in self.r.content if c.file_uri == item.path), None)
+                if content:
+                    self.r.content.remove(content)
+                    self.r.content_d.append(content)
 
-        async with LogTime(logger, "calling update_series"), create_task_group() as tg:
-            for parent_id in parents_with_updates:
-                parent = next((c for c in self.r.content if c.id == parent_id), None)
-                if not parent:
-                    continue
-                items = [c for c in self.r.content if c.parent_id == parent_id]
-                tg.start_soon(self._scan_series_wrapper, parent, items)
+            # Main scan loop
+            self._progress_total = len(to_add) + len(to_update)
+            parents_with_updates: set[str] = set()
+            async with LogTime(logger, "calling scan_file"), create_task_group() as tg:
+                for item in to_add:
+                    tg.start_soon(self._scan_file_wrapper, item, None, parents_with_updates)
+                for item in to_update:
+                    tg.start_soon(
+                        self._scan_file_wrapper,
+                        item,
+                        next((c for c in self.r.content if c.file_uri == item.path)),
+                        parents_with_updates,
+                    )
 
-        if not self.dry_run:
-            await self._commit()
+            async with LogTime(logger, "calling update_series"), create_task_group() as tg:
+                for parent_id in parents_with_updates:
+                    parent = next((c for c in self.r.content if c.id == parent_id), None)
+                    if not parent:
+                        continue
+                    items = [c for c in self.r.content if c.parent_id == parent_id]
+                    tg.start_soon(self._scan_series_wrapper, parent, items)
 
-        return ScannerResult(
-            added=to_add,
-            updated=to_update,
-            removed=to_remove,
-            unchanged=unchanged,
-        )
+            if not self.dry_run:
+                await self._commit()
+
+            return ScannerResult(
+                added=to_add,
+                updated=to_update,
+                removed=to_remove,
+                unchanged=unchanged,
+            )
+        finally:
+            self.events_send.close()
 
     async def _commit(self):
         async with self.rb.get_asession() as session:

@@ -2,7 +2,7 @@
     <VContainer>
         <div class="space-y-8">
             <section v-if="lastRead?.length">
-                <ACarousel title="Last Read">
+                <ACarousel title="Recently Read">
                     <template v-if="qLastRead.isLoading.value">
                         <ACarouselItem v-for="i in 3" :key="i">
                             <AContentGridItemSkeleton />
@@ -17,7 +17,7 @@
             </section>
 
             <section class="mt-4">
-                <ACarousel title="Newest">
+                <ACarousel title="Newly Added">
                     <template v-if="qNewest.isLoading.value">
                         <ACarouselItem v-for="i in 3" :key="i">
                             <AContentGridItemSkeleton />

@@ -3,8 +3,14 @@ from urllib.parse import unquote
 
 import click
 import structlog
+from anyio import create_task_group
 from sqlalchemy import select
 
+from voltis.components.scanner.base import (
+    ScannerEventProgress,
+    ScannerEventUpdateSummary,
+    ScannerResult,
+)
 from voltis.components.scanner.loader import get_scanner
 from voltis.db.models import Library, ScannerType
 from voltis.services.resource_broker import ResourceBroker
@@ -59,13 +65,30 @@ async def _scan(
     # Create scanner and run scan
     click.echo(f"Scanning library: {lib.name or lib.id}")
     for source in lib.get_sources():
-        click.echo(f"  Source: {unquote(source.path_uri)}")
+        click.echo(f"Source: {unquote(source.path_uri)}")
 
     async with LogTime(logger, "Library scan"):
-        task = get_scanner(
+        scanner = get_scanner(
             rb, no_fs=False, dry_run=dry_run, filter_paths=filter_paths, force=force, library=lib
         )
-        result = await task.scan()
+
+        async def consume_events():
+            async with scanner.events_recv:
+                async for event in scanner.events_recv:
+                    if isinstance(event, ScannerEventUpdateSummary):
+                        click.echo(
+                            f"Matching outcome: {event.to_add} to add, {event.to_update} to update, "
+                            f"{event.to_remove} to remove, {event.unchanged} unchanged (may be inaccurate)"
+                        )
+                    elif isinstance(event, ScannerEventProgress):
+                        click.echo(f"\r[{event.processed}/{event.total}] Scanning...", nl=False)
+                        if event.processed == event.total:
+                            click.echo("")
+
+        async with create_task_group() as tg:
+            tg.start_soon(consume_events)
+
+            result = await scanner.scan()
 
     # Display results
     click.echo("")
