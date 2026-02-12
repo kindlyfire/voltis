@@ -28,19 +28,9 @@
                 @click="showEditMetadataModal(props.contentId)"
             />
             <VListItem
-                prepend-icon="mdi-check-all"
-                title="Mark all as read"
-                @click="mMarkAllRead.mutate()"
-            />
-            <VListItem
-                prepend-icon="mdi-check-underline"
-                title="Mark read until..."
-                @click="showMarkReadUntilModal(props.contentId)"
-            />
-            <VListItem
-                prepend-icon="mdi-refresh"
-                title="Reset progress"
-                @click="mResetProgress.mutate()"
+                prepend-icon="mdi-book-sync"
+                title="Update progress"
+                @click="showUpdateProgressModal(props.contentId)"
             />
         </VList>
     </VMenu>
@@ -48,13 +38,11 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { contentApi } from '@/utils/api/content'
 import { usersApi } from '@/utils/api/users'
-import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import { showDownloadModal } from './DownloadModal.vue'
 import { showEditMetadataModal } from './EditMetadataModal.vue'
 import { showListsModal } from './ListsModal.vue'
-import { showMarkReadUntilModal } from './MarkReadUntilModal.vue'
+import { showUpdateProgressModal } from './UpdateProgressModal.vue'
 
 const props = defineProps<{
     contentId: string
@@ -62,24 +50,4 @@ const props = defineProps<{
 
 const qMe = usersApi.useMe()
 const isAdmin = computed(() => qMe.data.value?.permissions.includes('ADMIN'))
-
-const queryClient = useQueryClient()
-
-const mMarkAllRead = useMutation({
-    mutationFn: async () => {
-        if (confirm('Are you sure you want to mark all items as read?')) {
-            await contentApi.setSeriesItemStatuses(props.contentId, 'completed')
-            queryClient.invalidateQueries()
-        }
-    },
-})
-
-const mResetProgress = useMutation({
-    mutationFn: async () => {
-        if (confirm('Are you sure you want to reset your progress for this series?')) {
-            await contentApi.setSeriesItemStatuses(props.contentId, null)
-            queryClient.invalidateQueries()
-        }
-    },
-})
 </script>

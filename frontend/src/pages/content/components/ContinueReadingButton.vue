@@ -78,7 +78,7 @@ async function onClick() {
         if (confirmed) {
             const firstChild = qChildren.data.value?.data[0]
             if (firstChild) {
-                router.push('/' + firstChild.id)
+                router.push('/r/' + firstChild.id)
             }
         }
         return
