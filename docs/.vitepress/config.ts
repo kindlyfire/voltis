@@ -14,10 +14,13 @@ export default defineConfig({
 				text: 'Installation',
 				link: '/installation',
 			},
-			// {
-			// 	text: 'Installation',
-			// 	items: [{ text: 'Markdown Examples', link: '/markdown-examples' }],
-			// },
+			{
+				text: 'Libraries',
+				items: [
+					{ text: 'Comics', link: '/lib/comics' },
+					{ text: 'Books', link: '/lib/books' },
+				],
+			},
 		],
 
 		socialLinks: [

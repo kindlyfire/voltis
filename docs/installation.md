@@ -66,5 +66,4 @@ docker compose exec app sh
 ./voltis devtools scan --library l_00000000
 ```
 
-Where `l_00000000` is the library ID, which can be found in the URL when viewing
-the library in the web interface.
+Where `l_00000000` is the library ID, which can be copied from the interface.
