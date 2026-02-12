@@ -1077,6 +1077,7 @@ dependencies = [
     { name = "unidecode" },
     { name = "uvicorn" },
     { name = "vmeta" },
+    { name = "websockets" },
 ]
 
 [package.dev-dependencies]
@@ -1107,6 +1108,7 @@ requires-dist = [
     { name = "unidecode", specifier = ">=1.4.0" },
     { name = "uvicorn", specifier = ">=0.40.0" },
     { name = "vmeta", url = "https://tijlvdb-releases.s3.de.io.cloud.ovh.net/vmeta/vmeta-0.1.0-cp314-cp314-linux_x86_64.whl" },
+    { name = "websockets", specifier = ">=16.0" },
 ]
 
 [package.metadata.requires-dev]

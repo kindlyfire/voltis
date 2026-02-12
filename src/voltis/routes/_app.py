@@ -4,10 +4,12 @@ from importlib.metadata import version as pkg_version
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from sqlalchemy import func, select
 from starlette.datastructures import Headers
 from starlette.middleware.gzip import GZipResponder, IdentityResponder
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from voltis.db.models import User
 from voltis.services.resource_broker import ResourceBroker
 from voltis.services.settings import settings
 
@@ -19,6 +21,8 @@ from .files import router as files_router
 from .libraries import router as libraries_router
 from .static import router as static_router
 from .users import router as users_router
+from .ws import ConnectionManager
+from .ws import router as ws_router
 
 try:
     APP_VERSION = pkg_version("voltis")
@@ -29,6 +33,7 @@ except PackageNotFoundError:
 class InfoDTO(BaseModel):
     version: str
     registration_enabled: bool
+    first_user_flow: bool
 
 
 def create_app(rb: ResourceBroker):
@@ -52,11 +57,11 @@ def create_app(rb: ResourceBroker):
     app.include_router(libraries_router, prefix="/api/libraries")
     app.include_router(collections_router, prefix="/api/collections")
     app.include_router(custom_lists_router, prefix="/api/custom-lists")
+    app.include_router(ws_router, prefix="/api/ws")
 
-    @app.get("/api/info")
-    async def get_info() -> InfoDTO:
-        return InfoDTO(version=APP_VERSION, registration_enabled=settings.REGISTRATION_ENABLED)
+    app.state.ws_manager = ConnectionManager()
 
+    add_info_route(app, rb)
     app.include_router(static_router)
 
     return app
@@ -82,3 +87,26 @@ class GZipMiddleware:
             responder = IdentityResponder(self.app, self.minimum_size)
 
         await responder(scope, receive, send)
+
+
+def add_info_route(app: FastAPI, rb: ResourceBroker):
+    first_user_flow = True
+
+    @app.get("/api/info")
+    async def get_info() -> InfoDTO:
+        nonlocal first_user_flow
+        if first_user_flow:
+            async with rb.get_asession() as session:
+                res = await session.scalars(
+                    select(func.count())
+                    .select_from(User)
+                    .where(User.permissions.contains(["ADMIN"]))
+                )
+                if res.one() > 0:
+                    first_user_flow = False
+
+        return InfoDTO(
+            version=APP_VERSION,
+            registration_enabled=settings.REGISTRATION_ENABLED,
+            first_user_flow=first_user_flow,
+        )
