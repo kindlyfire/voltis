@@ -1,17 +1,10 @@
 <template>
-    <VDialog
-        :model-value="open"
-        @update:model-value="v => !v && close()"
-        max-width="500"
-        :persistent="scan.isPending.value"
-    >
+    <VDialog :model-value="open" @update:model-value="v => !v && close()" max-width="500">
         <VCard>
             <VCardTitle>{{ title }}</VCardTitle>
             <VCardText>
                 <!-- Form -->
-                <template
-                    v-if="!scan.isPending.value && !scan.isSuccess.value && !scan.isError.value"
-                >
+                <template v-if="!scanning">
                     <VCheckbox
                         class="force-scan-checkbox"
                         v-model="forceScan"
@@ -27,29 +20,56 @@
                 </template>
 
                 <!-- Scanning -->
-                <template v-else-if="scan.isPending.value">
-                    <div class="text-center py-4">
-                        <VProgressCircular indeterminate class="mb-4" />
-                        <div>Scanning libraries...</div>
-                    </div>
-                </template>
-
-                <!-- Results -->
                 <template v-else>
-                    <AQueryError :mutation="scan" />
-                    <div v-if="scan.isSuccess.value" class="space-y-2!">
-                        <div
-                            v-for="result in scan.data.value"
-                            :key="result.library_id"
-                            class="border rounded pa-3"
-                        >
-                            <div class="font-medium">{{ getLibraryName(result.library_id) }}</div>
-                            <div class="text-sm text-medium-emphasis">
-                                Added: {{ result.added }} | Updated: {{ result.updated }} | Removed:
-                                {{ result.removed }} | Unchanged: {{ result.unchanged }}
+                    <div v-if="scanStatus.length === 0 && !scanComplete" class="text-center py-4">
+                        <VProgressCircular indeterminate class="mb-4" />
+                        <div>Starting scan...</div>
+                    </div>
+
+                    <template v-else>
+                        <div class="space-y-3!">
+                            <div
+                                v-for="item in scanStatus"
+                                :key="item.library_id"
+                                class="border rounded pa-3"
+                            >
+                                <div class="font-medium">{{ item.library_name }}</div>
+                                <template
+                                    v-if="item.status === 'running' || item.status === 'done'"
+                                >
+                                    <VProgressLinear
+                                        :model-value="
+                                            !item.progress
+                                                ? 0
+                                                : item.progress.total === 0
+                                                  ? 100
+                                                  : (item.progress.processed /
+                                                        item.progress.total) *
+                                                    100
+                                        "
+                                        :color="item.status === 'done' ? 'success' : undefined"
+                                        class="mt-2"
+                                        rounded
+                                        height="6"
+                                    />
+                                    <div class="text-xs text-medium-emphasis mt-1">
+                                        {{ item.progress?.processed ?? 0 }} /
+                                        {{ item.progress?.total ?? '?' }}
+                                    </div>
+                                    <div
+                                        v-if="item.summary"
+                                        class="text-sm text-medium-emphasis mt-1"
+                                    >
+                                        {{ item.summary.to_add }} to add,
+                                        {{ item.summary.to_update }} to update,
+                                        {{ item.summary.to_remove }} to remove
+                                    </div>
+                                </template>
+                                <div v-else class="text-sm text-medium-emphasis mt-1">Queued</div>
                             </div>
                         </div>
-                    </div>
+                    </template>
+
                     <div class="flex justify-end mt-4">
                         <VBtn variant="text" @click="close()">Close</VBtn>
                     </div>
@@ -60,9 +80,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onUnmounted } from 'vue'
 import { librariesApi } from '@/utils/api/libraries'
-import AQueryError from '@/components/AQueryError.vue'
+import { ws } from '@/utils/ws'
+
+interface ScanStatusItem {
+    library_id: string
+    library_name: string
+    status: 'running' | 'queued' | 'done'
+    summary?: { to_add: number; to_update: number; to_remove: number; unchanged: number }
+    progress?: { total: number; processed: number }
+}
 
 const props = defineProps<{
     open: boolean
@@ -73,6 +101,11 @@ const props = defineProps<{
 const libraries = librariesApi.useList()
 const scan = librariesApi.useScan()
 const forceScan = ref(false)
+const scanning = ref(false)
+const scanComplete = ref(false)
+const scanStatus = ref<ScanStatusItem[]>([])
+
+let unsubscribe: (() => void) | null = null
 
 const title = computed(() => {
     if (props.libraryIds.length === 0) {
@@ -89,11 +122,48 @@ function getLibraryName(id: string): string {
 }
 
 function startScan() {
-    scan.mutate({
-        ids: props.libraryIds.length > 0 ? props.libraryIds : undefined,
-        force: forceScan.value,
-    })
+    scan.mutate(
+        {
+            ids: props.libraryIds.length > 0 ? props.libraryIds : undefined,
+            force: forceScan.value,
+        },
+        {
+            onSuccess: () => {
+                scanning.value = true
+                unsubscribe = ws.on('scan_status', (msg: { queue: ScanStatusItem[] }) => {
+                    const queueIds = new Set(msg.queue.map(i => i.library_id))
+
+                    // Mark items no longer in queue as done
+                    for (const item of scanStatus.value) {
+                        if (item.status !== 'done' && !queueIds.has(item.library_id)) {
+                            item.status = 'done'
+                        }
+                    }
+
+                    // Update or append items from queue
+                    for (const incoming of msg.queue) {
+                        const existing = scanStatus.value.find(
+                            i => i.library_id === incoming.library_id
+                        )
+                        if (existing) {
+                            Object.assign(existing, incoming)
+                        } else {
+                            scanStatus.value.push(incoming)
+                        }
+                    }
+
+                    if (msg.queue.length === 0) {
+                        scanComplete.value = true
+                    }
+                })
+            },
+        }
+    )
 }
+
+onUnmounted(() => {
+    unsubscribe?.()
+})
 </script>
 
 <script lang="ts">

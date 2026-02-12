@@ -21,6 +21,8 @@ from .files import router as files_router
 from .libraries import router as libraries_router
 from .static import router as static_router
 from .users import router as users_router
+from voltis.utils.scan_queue import scan_queue
+
 from .ws import ConnectionManager
 from .ws import router as ws_router
 
@@ -60,6 +62,7 @@ def create_app(rb: ResourceBroker):
     app.include_router(ws_router, prefix="/api/ws")
 
     app.state.ws_manager = ConnectionManager()
+    scan_queue.ws_manager = app.state.ws_manager
 
     add_info_route(app, rb)
     app.include_router(static_router)

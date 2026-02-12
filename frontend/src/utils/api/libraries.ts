@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { apiFetch } from '../fetch'
-import type { Library, LibraryUpsert, ScanResult } from './types'
+import type { Library, LibraryUpsert, OkResponse } from './types'
 
 export const librariesApi = {
     useList: () =>
@@ -44,7 +44,7 @@ export const librariesApi = {
                 if (opts?.ids?.length) params.set('id', opts.ids.join(','))
                 if (opts?.force) params.set('force', 'true')
                 const qs = params.toString()
-                return apiFetch<ScanResult[]>(`/libraries/scan${qs ? `?${qs}` : ''}`, {
+                return apiFetch<OkResponse>(`/libraries/scan${qs ? `?${qs}` : ''}`, {
                     method: 'POST',
                 })
             },

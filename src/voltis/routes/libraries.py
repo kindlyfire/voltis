@@ -6,9 +6,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
-from voltis.components.scanner.fs_reader import LibrarySourceMissing
-from voltis.components.scanner.loader import get_scanner
 from voltis.db.models import Content, Library, ScannerType
+from voltis.utils.scan_queue import scan_queue
 from voltis.routes._misc import OK_RESPONSE, OkResponse
 from voltis.routes._providers import AdminUserProvider, RbProvider, UserProvider
 from voltis.utils.misc import now_without_tz
@@ -96,7 +95,7 @@ async def scan_libraries(
     _user: AdminUserProvider,
     id: str | None = None,
     force: bool = False,
-) -> list[ScanResultDTO]:
+) -> OkResponse:
     async with rb.get_asession() as session:
         q = select(Library)
         if id:
@@ -104,30 +103,10 @@ async def scan_libraries(
             q = q.where(Library.id.in_(library_ids))
         libraries = list(await session.scalars(q))
 
-    results = []
     for library in libraries:
-        logger.info("Scanning library", library_id=library.id, library_name=library.name)
-        scanner = get_scanner(rb, library, force=force)
+        await scan_queue.enqueue(rb, library.id, force=force)
 
-        try:
-            scan_result = await scanner.scan()
-        except LibrarySourceMissing as err:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to scan library {library.name}: {err}",
-            )
-
-        results.append(
-            ScanResultDTO(
-                library_id=library.id,
-                added=len(scan_result.added),
-                updated=len(scan_result.updated),
-                removed=len(scan_result.removed),
-                unchanged=len(scan_result.unchanged),
-            )
-        )
-
-    return results
+    return OK_RESPONSE
 
 
 @router.post("/{id_or_new}")

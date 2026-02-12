@@ -119,6 +119,8 @@ class Scanner(abc.ABC):
 
             # Main scan loop
             self._progress_total = len(to_add) + len(to_update)
+            if self.events and self._progress_total == 0:
+                await self.events_send.send(ScannerEventProgress(total=0, processed=0))
             parents_with_updates: set[str] = set()
             async with LogTime(logger, "calling scan_file"), create_task_group() as tg:
                 for item in to_add:
