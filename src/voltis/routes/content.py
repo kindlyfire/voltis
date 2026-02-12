@@ -304,6 +304,7 @@ async def update_user_data(
 
 class SeriesItemStatusesRequest(BaseModel):
     status: ReadingStatus | None
+    until_id: str | None = None
 
 
 @router.post("/{content_id}/series-item-statuses")
@@ -319,24 +320,43 @@ async def set_series_item_statuses(
             raise HTTPException(status_code=404, detail="Content not found")
 
         children = await session.execute(
-            select(Content.library_id, Content.uri).where(Content.parent_id == content_id)
+            select(Content.id, Content.library_id, Content.uri)
+            .where(Content.parent_id == content_id)
+            .order_by(asc(Content.order))
         )
-        child_keys = [(row.library_id, row.uri) for row in children.all()]
-        if not child_keys:
+        child_list = children.all()
+        if not child_list:
             return
+
+        all_keys = [(row.library_id, row.uri) for row in child_list]
+
+        if body.until_id is not None:
+            split_index = None
+            for i, row in enumerate(child_list):
+                if row.id == body.until_id:
+                    split_index = i
+                    break
+            if split_index is None:
+                raise HTTPException(status_code=404, detail="Target child not found")
+            set_keys = all_keys[: split_index + 1]
+        else:
+            set_keys = all_keys
 
         ts = now_without_tz()
 
-        if body.status is None:
+        # Clear statuses and progress
+        if body.status is None or body.until_id is not None:
             await session.execute(
                 update(UserToContent)
                 .where(
                     (UserToContent.user_id == user.id)
-                    & tuple_(UserToContent.library_id, UserToContent.uri).in_(child_keys)
+                    & tuple_(UserToContent.library_id, UserToContent.uri).in_(all_keys)
                 )
                 .values(status=None, status_updated_at=ts, progress={}, progress_updated_at=None)
             )
-        else:
+
+        # Upsert the target items with the given status
+        if body.status is not None:
             stmt = pg_insert(UserToContent).on_conflict_do_update(
                 index_elements=["user_id", "library_id", "uri"],
                 set_={"status": body.status, "status_updated_at": ts},
@@ -352,7 +372,7 @@ async def set_series_item_statuses(
                         "status": body.status,
                         "status_updated_at": ts,
                     }
-                    for library_id, uri in child_keys
+                    for library_id, uri in set_keys
                 ],
             )
 
@@ -390,7 +410,11 @@ async def get_metadata_layers(
             .order_by(ContentMetadataRow.provider)
         )
         layers = [
-            MetadataLayerDTO(provider=row.provider, data=typing.cast(ContentMetadataDict, row.data), raw=row.raw or {})
+            MetadataLayerDTO(
+                provider=row.provider,
+                data=typing.cast(ContentMetadataDict, row.data),
+                raw=row.raw or {},
+            )
             for row in rows.scalars().all()
         ]
 

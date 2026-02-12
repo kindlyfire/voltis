@@ -131,11 +131,12 @@ export const contentApi = {
 
     setSeriesItemStatuses: async (
         contentId: string,
-        status: ReadingStatus | null
+        status: ReadingStatus | null,
+        untilId?: string,
     ): Promise<void> => {
         await apiFetch(`/content/${contentId}/series-item-statuses`, {
             method: 'POST',
-            body: JSON.stringify({ status }),
+            body: JSON.stringify({ status, until_id: untilId }),
         })
     },
 

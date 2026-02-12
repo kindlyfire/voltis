@@ -33,6 +33,11 @@
                 @click="mMarkAllRead.mutate()"
             />
             <VListItem
+                prepend-icon="mdi-check-underline"
+                title="Mark read until..."
+                @click="showMarkReadUntilModal(props.contentId)"
+            />
+            <VListItem
                 prepend-icon="mdi-refresh"
                 title="Reset progress"
                 @click="mResetProgress.mutate()"
@@ -49,6 +54,7 @@ import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import { showDownloadModal } from './DownloadModal.vue'
 import { showEditMetadataModal } from './EditMetadataModal.vue'
 import { showListsModal } from './ListsModal.vue'
+import { showMarkReadUntilModal } from './MarkReadUntilModal.vue'
 
 const props = defineProps<{
     contentId: string

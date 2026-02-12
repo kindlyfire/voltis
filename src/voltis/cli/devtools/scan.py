@@ -9,7 +9,6 @@ from sqlalchemy import select
 from voltis.components.scanner.base import (
     ScannerEventProgress,
     ScannerEventUpdateSummary,
-    ScannerResult,
 )
 from voltis.components.scanner.loader import get_scanner
 from voltis.db.models import Library, ScannerType
