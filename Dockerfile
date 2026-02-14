@@ -3,7 +3,7 @@
 #
 FROM astral/uv:python3.14-alpine AS builder
 
-ARG VMETA_REF=7e27946ee2b545a337b9019e93dff0a376d200f4
+ARG VMETA_REF=472ce8ca5f95d4250bad4d8183437bc9ca158cf2
 
 WORKDIR /build
 
@@ -13,6 +13,7 @@ RUN apk add --no-cache \
     vips-dev \
     musl-dev \
     gcc \
+    g++ \
     patchelf
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
@@ -61,7 +62,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 COPY --from=frontend /app/frontend/dist /app/frontend/dist
 
-RUN echo -e '#!/bin/sh\nexec uv run --no-sync voltis "$@"' > ./voltis && chmod +x ./voltis
+RUN echo -e '#!/bin/sh\nexec uv run --no-sync --offline voltis "$@"' > ./voltis && chmod +x ./voltis
 
 ENV PATH="/app/.venv/bin:$PATH"
 LABEL org.opencontainers.image.source=https://github.com/kindlyfire/voltis
