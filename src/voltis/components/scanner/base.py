@@ -10,6 +10,7 @@ from anyio import CapacityLimiter, create_task_group
 from voltis.components.scanner.fs_reader import LibraryFile, get_fs_items
 from voltis.components.scanner.repository import ScannerRepository
 from voltis.db.models import Content, ContentMetadataDict, Library, LibrarySource
+from voltis.db.search import refresh_search_index
 from voltis.services.resource_broker import ResourceBroker
 from voltis.utils.cover_cache import delete_content_cover_cached
 from voltis.utils.time import LogTime
@@ -156,6 +157,8 @@ class Scanner(abc.ABC):
     async def _commit(self):
         async with self.rb.get_asession() as session:
             await self.r.commit(session)
+            await session.commit()
+            await refresh_search_index(session)
             await session.commit()
 
     def _match_files(self, files: list[LibraryFile]):

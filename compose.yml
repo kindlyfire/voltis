@@ -7,9 +7,12 @@ services:
   #     APP_DB_URL: postgresql+psycopg://postgres:postgres@postgres:5432/voltis
   #   depends_on:
   #     - postgres
+  #   volumes:
+  #     - /my/library/1:/app/library/1
+  #     - /my/library/2:/app/library/2
 
   postgres:
-    image: postgres:18
+    image: paradedb/paradedb:0.21.8-pg18
     environment:
       POSTGRES_DB: postgres
       POSTGRES_USER: postgres

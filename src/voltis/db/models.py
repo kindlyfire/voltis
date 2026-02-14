@@ -244,8 +244,9 @@ def content_metadata_get_year(meta: ContentMetadataDict) -> str | None:
 class ContentMetadataMerged(_Base):
     __tablename__ = "content_metadata_merged"
 
-    uri: Mapped[str] = col(Text, primary_key=True)
-    library_id: Mapped[str] = col(Text, primary_key=True)
+    id: Mapped[str] = col(Text, primary_key=True)
+    uri: Mapped[str] = col(Text)
+    library_id: Mapped[str] = col(Text)
     data: Mapped[dict] = col("data", JSONB)
 
 

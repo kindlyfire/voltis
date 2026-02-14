@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import asc, desc, func, select, tuple_, update
+from sqlalchemy import asc, desc, func, select, text, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import aliased
 
@@ -21,6 +21,7 @@ from voltis.db.models import (
     ReadingStatus,
     UserToContent,
 )
+from voltis.db.search import refresh_search_index
 from voltis.routes._providers import AdminUserProvider, RbProvider, UserProvider
 from voltis.utils.misc import PaginatedResponse, Unset, UnsetType, now_without_tz
 
@@ -174,6 +175,7 @@ async def list_content(
     valid: Annotated[bool, Query()] = True,
     reading_status: Annotated[ReadingStatus | None, Query()] = None,
     starred: Annotated[bool | None, Query()] = None,
+    search: Annotated[str | None, Query()] = None,
     limit: Annotated[int | None, Query(gt=0)] = None,
     offset: Annotated[int, Query(ge=0)] = 0,
     sort: Annotated[Literal["order", "created_at", "progress_updated_at"] | None, Query()] = None,
@@ -218,6 +220,12 @@ async def list_content(
             base_query = base_query.where(UserToContent.status == reading_status)
         if starred is not None:
             base_query = base_query.where(UserToContent.starred.is_(starred))
+        if search is not None:
+            base_query = base_query.where(
+                ContentMetadataMerged.data["title"].astext.bool_op("|||")(
+                    text("(:search)::pdb.fuzzy(1, t)").bindparams(search=search)
+                )
+            )
 
         sorting = desc if sort_order == "desc" else asc
         data_query = base_query
@@ -467,6 +475,8 @@ async def update_metadata_override(
             )
         )
         await session.execute(stmt)
+        await session.commit()
+        await refresh_search_index(session)
         await session.commit()
 
     # Return fresh layers
