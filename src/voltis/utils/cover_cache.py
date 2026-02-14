@@ -1,5 +1,8 @@
 import datetime
 import mimetypes
+import re
+import subprocess
+import tempfile
 import typing
 from pathlib import Path
 
@@ -11,7 +14,7 @@ from voltis.db.models import Content
 from voltis.services.settings import settings
 
 COVER_MAX_WIDTH = 750
-ARCHIVE_EXTENSIONS = {".cbz", ".zip", ".epub"}
+ARCHIVE_EXTENSIONS = {".cbz", ".zip", ".epub", ".pdf"}
 
 
 def _find_archive_and_inner_path(path: Path) -> tuple[Path, str] | None:
@@ -29,8 +32,43 @@ def _find_archive_and_inner_path(path: Path) -> tuple[Path, str] | None:
 
 
 def _read_from_archive(archive_path: Path, inner_path: str) -> bytes:
-    """Read a file from inside a zip-based archive."""
+    """Read a file from inside a zip-based archive or PDF."""
+    if archive_path.suffix.lower() == ".pdf":
+        return _read_from_pdf(archive_path, inner_path)
     return vmeta.read_file(archive_path.as_posix(), inner_path)
+
+
+def _read_from_pdf(archive_path: Path, inner_path: str) -> bytes:
+    """Extract an image from a PDF by page identifier (e.g. 'p4-2')."""
+    match = re.match(r"^p(\d+)-(\d+)$", inner_path)
+    if not match:
+        raise HTTPException(status_code=400, detail=f"Invalid PDF page identifier: {inner_path}")
+    pdf_page = int(match.group(1))
+    image_index = int(match.group(2))
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = subprocess.run(
+            [
+                "pdfimages",
+                "-f",
+                str(pdf_page),
+                "-l",
+                str(pdf_page),
+                "-all",
+                archive_path.as_posix(),
+                str(Path(tmpdir) / "out"),
+            ],
+            capture_output=True,
+            timeout=60,
+        )
+        if result.returncode != 0:
+            raise HTTPException(status_code=500, detail="pdfimages extraction failed")
+
+        files = sorted(Path(tmpdir).iterdir())
+        if image_index >= len(files):
+            raise HTTPException(status_code=404, detail="Image index out of range")
+
+        return files[image_index].read_bytes()
 
 
 def read_content_file(uri: str) -> tuple[bytes, str]:

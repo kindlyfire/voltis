@@ -45,7 +45,7 @@ RUN pnpm build
 #
 FROM python:3.14-alpine
 
-RUN apk add --no-cache vips
+RUN apk add --no-cache vips poppler-utils
 
 WORKDIR /app
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/

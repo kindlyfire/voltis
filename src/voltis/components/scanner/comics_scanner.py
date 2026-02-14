@@ -1,6 +1,7 @@
 import datetime
 import re
 import stat
+import subprocess
 import typing
 import zipfile
 
@@ -47,11 +48,17 @@ class ComicsScanner(Scanner):
     """
 
     def file_eligible(self, file: LibraryFile) -> bool:
-        return file.path.lower().endswith(".cbz") or file.path.lower().endswith(".zip")
+        lower = file.path.lower()
+        return lower.endswith(".cbz") or lower.endswith(".zip") or lower.endswith(".pdf")
 
     async def scan_file(self, file: LibraryFile, content: Content | None) -> Content | None:
         path = Path(file.path)
-        pages, meta, comic_info, valid = await anyio.to_thread.run_sync(self._scan_comic, path)
+        if file.path.lower().endswith(".pdf"):
+            pages, valid = await anyio.to_thread.run_sync(self._scan_pdf, path)
+            meta = ContentMetadataDict()
+            comic_info: vmeta.ComicInfo = {}
+        else:
+            pages, meta, comic_info, valid = await anyio.to_thread.run_sync(self._scan_comic, path)
         if not valid:
             return None
 
@@ -146,6 +153,35 @@ class ComicsScanner(Scanner):
             return pages, m, comic_info, True
         except (zipfile.BadZipFile, OSError):
             return pages, m, comic_info, False
+
+    def _scan_pdf(self, path: Path) -> tuple[list[tuple[str, int, int]], bool]:
+        """Scan a PDF file for images using pdfimages."""
+        pages: list[tuple[str, int, int]] = []
+        try:
+            result = subprocess.run(
+                ["pdfimages", "-list", path.as_posix()],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if result.returncode != 0:
+                return pages, False
+
+            for line in result.stdout.splitlines():
+                parts = line.split()
+                if not parts or not parts[0].isdigit():
+                    continue
+                # Columns: page num type width height ...
+                pdf_page = int(parts[0])
+                width = int(parts[3])
+                height = int(parts[4])
+                # Count how many images we've seen on this pdf_page
+                index = sum(1 for p, _, _ in pages if p.startswith(f"p{pdf_page}-"))
+                pages.append((f"p{pdf_page}-{index}", width, height))
+
+            return pages, len(pages) > 0
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            return pages, False
 
     async def _scan_series_cover(self, series: Content, folder: Path) -> None:
         """Scan a comic series folder for a cover image."""
