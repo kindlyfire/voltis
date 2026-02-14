@@ -155,11 +155,11 @@ class ComicsScanner(Scanner):
             return pages, m, comic_info, False
 
     def _scan_pdf(self, path: Path) -> tuple[list[tuple[str, int, int]], bool]:
-        """Scan a PDF file for images using pdfimages."""
+        """Scan a PDF file for pages using pdfinfo."""
         pages: list[tuple[str, int, int]] = []
         try:
             result = subprocess.run(
-                ["pdfimages", "-list", path.as_posix()],
+                ["pdfinfo", path.as_posix()],
                 capture_output=True,
                 text=True,
                 timeout=60,
@@ -167,19 +167,27 @@ class ComicsScanner(Scanner):
             if result.returncode != 0:
                 return pages, False
 
+            page_count = 0
+            page_width = 0
+            page_height = 0
             for line in result.stdout.splitlines():
-                parts = line.split()
-                if not parts or not parts[0].isdigit():
-                    continue
-                # Columns: page num type width height ...
-                pdf_page = int(parts[0])
-                width = int(parts[3])
-                height = int(parts[4])
-                # Count how many images we've seen on this pdf_page
-                index = sum(1 for p, _, _ in pages if p.startswith(f"p{pdf_page}-"))
-                pages.append((f"p{pdf_page}-{index}", width, height))
+                if line.startswith("Pages:"):
+                    page_count = int(line.split(":", 1)[1].strip())
+                elif line.startswith("Page size:"):
+                    # Format: "Page size:      612 x 792 pts (letter)"
+                    size_match = re.search(r"([\d.]+)\s*x\s*([\d.]+)", line)
+                    if size_match:
+                        # Convert points to pixels at 250 DPI
+                        page_width = round(float(size_match.group(1)) * 250 / 72)
+                        page_height = round(float(size_match.group(2)) * 250 / 72)
 
-            return pages, len(pages) > 0
+            if page_count <= 0:
+                return pages, False
+
+            for i in range(1, page_count + 1):
+                pages.append((f"p{i}", page_width, page_height))
+
+            return pages, True
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
             return pages, False
 

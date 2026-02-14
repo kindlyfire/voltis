@@ -2,7 +2,6 @@ import datetime
 import mimetypes
 import re
 import subprocess
-import tempfile
 import typing
 from pathlib import Path
 
@@ -39,36 +38,34 @@ def _read_from_archive(archive_path: Path, inner_path: str) -> bytes:
 
 
 def _read_from_pdf(archive_path: Path, inner_path: str) -> bytes:
-    """Extract an image from a PDF by page identifier (e.g. 'p4-2')."""
-    match = re.match(r"^p(\d+)-(\d+)$", inner_path)
+    """Render a PDF page as JPEG using pdftoppm (e.g. 'p4')."""
+    match = re.match(r"^p(\d+)$", inner_path)
     if not match:
         raise HTTPException(status_code=400, detail=f"Invalid PDF page identifier: {inner_path}")
     pdf_page = int(match.group(1))
-    image_index = int(match.group(2))
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        result = subprocess.run(
-            [
-                "pdfimages",
-                "-f",
-                str(pdf_page),
-                "-l",
-                str(pdf_page),
-                "-all",
-                archive_path.as_posix(),
-                str(Path(tmpdir) / "out"),
-            ],
-            capture_output=True,
-            timeout=60,
-        )
-        if result.returncode != 0:
-            raise HTTPException(status_code=500, detail="pdfimages extraction failed")
+    result = subprocess.run(
+        [
+            "pdftoppm",
+            "-r",
+            "250",
+            "-jpeg",
+            "-jpegopt",
+            "quality=90",
+            "-singlefile",
+            "-f",
+            str(pdf_page),
+            "-l",
+            str(pdf_page),
+            archive_path.as_posix(),
+        ],
+        capture_output=True,
+        timeout=60,
+    )
+    if result.returncode != 0:
+        raise HTTPException(status_code=500, detail="pdftoppm rendering failed")
 
-        files = sorted(Path(tmpdir).iterdir())
-        if image_index >= len(files):
-            raise HTTPException(status_code=404, detail="Image index out of range")
-
-        return files[image_index].read_bytes()
+    return result.stdout
 
 
 def read_content_file(uri: str) -> tuple[bytes, str]:
@@ -93,7 +90,10 @@ def read_content_file(uri: str) -> tuple[bytes, str]:
 
     archive_path, inner_path = result
     content = _read_from_archive(archive_path, inner_path)
-    media_type = mimetypes.guess_type(inner_path)[0] or "application/octet-stream"
+    if archive_path.suffix.lower() == ".pdf":
+        media_type = "image/jpeg"
+    else:
+        media_type = mimetypes.guess_type(inner_path)[0] or "application/octet-stream"
     return content, media_type
 
 
