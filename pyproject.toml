@@ -22,7 +22,7 @@ dependencies = [
     "tenacity>=9.1.2",
     "unidecode>=1.4.0",
     "uvicorn>=0.40.0",
-    "vmeta @ https://tijlvdb-releases.s3.de.io.cloud.ovh.net/vmeta/vmeta-0.1.1-cp314-cp314-linux_x86_64.whl",
+    "vmeta @ https://tijlvdb-releases.s3.de.io.cloud.ovh.net/vmeta/vmeta-0.1.2-cp314-cp314-linux_x86_64.whl",
     "websockets>=16.0",
 ]
 

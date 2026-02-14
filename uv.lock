@@ -1047,10 +1047,10 @@ wheels = [
 
 [[package]]
 name = "vmeta"
-version = "0.1.1"
-source = { url = "https://tijlvdb-releases.s3.de.io.cloud.ovh.net/vmeta/vmeta-0.1.1-cp314-cp314-linux_x86_64.whl" }
+version = "0.1.2"
+source = { url = "https://tijlvdb-releases.s3.de.io.cloud.ovh.net/vmeta/vmeta-0.1.2-cp314-cp314-linux_x86_64.whl" }
 wheels = [
-    { url = "https://tijlvdb-releases.s3.de.io.cloud.ovh.net/vmeta/vmeta-0.1.1-cp314-cp314-linux_x86_64.whl", hash = "sha256:cb2bd120c6bc026bd4e689d68ddec8725e308760914f47c803ff4941fd59c53a" },
+    { url = "https://tijlvdb-releases.s3.de.io.cloud.ovh.net/vmeta/vmeta-0.1.2-cp314-cp314-linux_x86_64.whl", hash = "sha256:46bec66b8174fd705abf86e962e4bf207334103e1fa875ec262dfa92c72fe74b" },
 ]
 
 [[package]]
@@ -1107,7 +1107,7 @@ requires-dist = [
     { name = "tenacity", specifier = ">=9.1.2" },
     { name = "unidecode", specifier = ">=1.4.0" },
     { name = "uvicorn", specifier = ">=0.40.0" },
-    { name = "vmeta", url = "https://tijlvdb-releases.s3.de.io.cloud.ovh.net/vmeta/vmeta-0.1.1-cp314-cp314-linux_x86_64.whl" },
+    { name = "vmeta", url = "https://tijlvdb-releases.s3.de.io.cloud.ovh.net/vmeta/vmeta-0.1.2-cp314-cp314-linux_x86_64.whl" },
     { name = "websockets", specifier = ">=16.0" },
 ]
 

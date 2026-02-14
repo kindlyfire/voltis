@@ -3,8 +3,6 @@
 #
 FROM astral/uv:python3.14-alpine AS builder
 
-ARG VMETA_REF=472ce8ca5f95d4250bad4d8183437bc9ca158cf2
-
 WORKDIR /build
 
 RUN apk add --no-cache \
@@ -20,6 +18,9 @@ ENV RUSTUP_HOME=/usr/local/rustup \
     PATH=/usr/local/cargo/bin:$PATH
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
 RUN --mount=type=cache,target=/root/.cache/uv uv tool install maturin
+
+ARG VMETA_REF=2dc269bd22dbf4f425a2360512fa2a582691c6c9
+
 RUN git init && \
     git remote add origin https://git.tijlvdb.me/tijlvdb/vmeta.git && \
     git fetch --depth 1 origin "$VMETA_REF" && \
@@ -27,7 +28,7 @@ RUN git init && \
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/build/target \
     PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 maturin build --release --features pyo3 --skip-auditwheel && \
-    cp target/wheels/vmeta-*.whl /tmp/
+    ls -v target/wheels/vmeta-*.whl | tail -1 | xargs -I{} cp {} /tmp/
 
 #
 # Frontend
