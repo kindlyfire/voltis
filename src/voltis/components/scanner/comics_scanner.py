@@ -49,7 +49,7 @@ class ComicsScanner(Scanner):
 
     def file_eligible(self, file: LibraryFile) -> bool:
         lower = file.path.lower()
-        return lower.endswith(".cbz") or lower.endswith(".zip") or lower.endswith(".pdf")
+        return lower.endswith((".cbz", ".zip", ".cbr", ".rar", ".pdf"))
 
     async def scan_file(self, file: LibraryFile, content: Content | None) -> Content | None:
         path = Path(file.path)

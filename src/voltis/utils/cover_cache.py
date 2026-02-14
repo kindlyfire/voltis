@@ -14,7 +14,7 @@ from voltis.db.models import Content
 from voltis.services.settings import settings
 
 COVER_MAX_WIDTH = 750
-ARCHIVE_EXTENSIONS = {".cbz", ".zip", ".epub", ".pdf"}
+ARCHIVE_EXTENSIONS = {".cbz", ".zip", ".cbr", ".rar", ".epub", ".pdf"}
 
 
 def _find_archive_and_inner_path(path: Path) -> tuple[Path, str] | None:
