@@ -223,12 +223,12 @@ class Scanner(abc.ABC):
 
     async def _scan_series_wrapper(self, content: Content, items: list[Content]):
         async with self.limiter:
-            await self.update_series(content, items)
-
             # Update item order
             items.sort(key=lambda x: [(math.inf if v is None else v) for v in x.order_parts])
             for index, item in enumerate(items):
                 item.order = index
+
+            await self.update_series(content, items)
 
     async def _delete_content_cover_cached_wrapper(self, content_id: str):
         async with self.limiter:
