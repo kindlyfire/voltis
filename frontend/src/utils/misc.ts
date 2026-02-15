@@ -93,6 +93,33 @@ export function createOverridableValue<TValue, const TLayer extends string>(
     return obj
 }
 
+/**
+ * Returns pointer event handlers that fire `fn` immediately on press,
+ * then repeatedly after an initial delay.
+ */
+export function useRepeatOnHold(fn: () => void, { initialDelay = 400, interval = 100 } = {}) {
+    let timer: any = null
+    function stop() {
+        if (timer != null) {
+            clearTimeout(timer)
+            timer = null
+        }
+    }
+    function start() {
+        stop()
+        fn()
+        const schedule = (delay: number) => {
+            timer = setTimeout(() => {
+                fn()
+                schedule(interval)
+            }, delay)
+        }
+        schedule(initialDelay)
+    }
+    onUnmounted(stop)
+    return { onPointerdown: start, onPointerup: stop, onPointerleave: stop }
+}
+
 export function useSystemTheme() {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
     const isDark = ref(mediaQuery.matches)

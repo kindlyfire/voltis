@@ -35,7 +35,7 @@
 import { ref, onMounted } from 'vue'
 import { useDebounceFn, useEventListener } from '@vueuse/core'
 import { useReaderStore } from './useComicDisplayStore'
-import { useNavbarScrollHide } from '@/pages/useLayoutStore'
+import { useNavbarScrollHide } from '@/pages/_layout/useLayoutStore'
 
 const reader = useReaderStore()
 const containerRef = ref<HTMLElement | null>(null)

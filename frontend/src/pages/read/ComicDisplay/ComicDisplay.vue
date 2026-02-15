@@ -24,7 +24,7 @@ import ReaderModeLongstrip from './ReaderModeLongstrip.vue'
 import ReaderSidebar from './ReaderSidebar.vue'
 import { useReaderControls } from './useReaderControls'
 import { useRouter } from 'vue-router'
-import { useLayoutStore } from '@/pages/useLayoutStore'
+import { useLayoutStore } from '@/pages/_layout/useLayoutStore'
 
 const props = defineProps<{
     contentId: string

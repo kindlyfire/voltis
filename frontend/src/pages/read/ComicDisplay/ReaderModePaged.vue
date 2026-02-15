@@ -19,7 +19,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useReaderStore } from './useComicDisplayStore'
-import { useLayoutStore } from '@/pages/useLayoutStore'
+import { useLayoutStore } from '@/pages/_layout/useLayoutStore'
 
 const reader = useReaderStore()
 const layout = useLayoutStore()

@@ -141,7 +141,7 @@ import { useReaderStore } from './useComicDisplayStore'
 import { contentApi } from '@/utils/api/content'
 import type { Content } from '@/utils/api/types'
 import type { ReaderMode } from './types'
-import { useLayoutStore } from '@/pages/useLayoutStore'
+import { useLayoutStore } from '@/pages/_layout/useLayoutStore'
 
 const reader = useReaderStore()
 const layout = useLayoutStore()

@@ -1,49 +1,57 @@
 <template>
-    <div ref="gridRef" class="grid gap-4" :style="gridStyle">
-        <template v-if="loading">
-            <AContentGridItemSkeleton />
-            <AContentGridItemSkeleton />
-            <AContentGridItemSkeleton />
-        </template>
+    <div>
+        <div class="d-flex align-center justify-space-between mb-2">
+            <span> {{ items.length }} items </span>
+            <AContentGridSettings :store-key="storeKey" :width="width" />
+        </div>
 
-        <template v-else>
-            <AContentGridItem
-                v-for="item in items"
-                :key="item.id"
-                :content="item"
-                :to-read-route="toReadRoute"
-            />
-        </template>
+        <div ref="gridRef" class="grid gap-4" :style="gridStyle">
+            <template v-if="loading">
+                <AContentGridItemSkeleton />
+                <AContentGridItemSkeleton />
+                <AContentGridItemSkeleton />
+            </template>
+
+            <template v-else>
+                <AContentGridItem
+                    v-for="item in items"
+                    :key="item.id"
+                    :content="item"
+                    :to-read-route="toReadRoute"
+                />
+            </template>
+        </div>
     </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed, ref, toRef } from 'vue'
 import { useElementSize } from '@vueuse/core'
 import type { Content } from '@/utils/api/types'
 import AContentGridItemSkeleton from './AContentGridItemSkeleton.vue'
 import AContentGridItem from './AContentGridItem.vue'
+import AContentGridSettings from './AContentGridSettings.vue'
+import { useContentGridStore } from './useContentGridStore'
 
-export interface AContentGridSettings {
-    itemSize?: number
-}
+const props = withDefaults(
+    defineProps<{
+        items: Content[]
+        loading: boolean
+        toReadRoute?: boolean
+        storeKey?: string
+    }>(),
+    { storeKey: 'default' }
+)
 
-const DEFAULT_ITEM_SIZE = 170
-
-const props = defineProps<{
-    items: Content[]
-    loading: boolean
-    toReadRoute?: boolean
-    settings?: AContentGridSettings
-}>()
+const store = useContentGridStore()
+const itemSize = store.getForKey(toRef(props, 'storeKey'))
 
 const gridRef = ref<HTMLElement>()
 const { width } = useElementSize(gridRef)
 
 const cols = computed(() => {
-    const target = props.settings?.itemSize ?? DEFAULT_ITEM_SIZE
     if (width.value <= 0) return 1
-    return Math.max(1, Math.round(width.value / target))
+    return Math.max(1, Math.round(width.value / itemSize.value))
 })
 
 const gridStyle = computed(() => ({

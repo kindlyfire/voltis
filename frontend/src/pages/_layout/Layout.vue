@@ -122,7 +122,7 @@ import { librariesApi } from '@/utils/api/libraries'
 import { useRouter, useRoute } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
 import { onLongPress, useEventListener, useThrottleFn } from '@vueuse/core'
-import { useLayoutStore } from '../useLayoutStore'
+import { useLayoutStore } from './useLayoutStore'
 import SearchBox from './SearchBox.vue'
 
 const store = useLayoutStore()
