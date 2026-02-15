@@ -13,7 +13,7 @@
             </RouterLink>
 
             <span
-                v-if="content.user_data?.status"
+                v-if="content.user_data?.status && !settings.hideStatus"
                 class="absolute top-2 left-2 bg-black/80 text-white p-1 rounded-full aspect-square w-5 flex items-center justify-center"
                 :title="`Status: ${STATUS_TITLES[content.user_data.status]}`"
             >
@@ -21,7 +21,7 @@
             </span>
 
             <span
-                v-if="childrenCount != null"
+                v-if="childrenCount != null && !settings.hideItemCount"
                 class="absolute top-2 right-2 bg-black/80 text-white text-xs font-medium px-2 py-0.5 rounded-full"
             >
                 {{ childrenCount }}
@@ -41,19 +41,27 @@
             </span>
         </VCard>
 
-        <div class="text-body-2 pt-2 line-clamp-2">{{ content.title }}</div>
+        <div v-if="!settings.hideTitle" class="text-body-2 pt-2 line-clamp-2">{{ content.title }}</div>
     </div>
 </template>
 
 <script setup lang="ts">
 import type { Content, ReadingStatus } from '@/utils/api/types'
-import { computed } from 'vue'
+import { computed, toRef } from 'vue'
 import { API_URL } from '@/utils/fetch'
+import { useContentGridStore } from './useContentGridStore'
 
-const props = defineProps<{
-    content: Content
-    toReadRoute?: boolean
-}>()
+const props = withDefaults(
+    defineProps<{
+        content: Content
+        toReadRoute?: boolean
+        storeKey?: string
+    }>(),
+    { storeKey: 'default' }
+)
+
+const store = useContentGridStore()
+const settings = store.getForKey(toRef(props, 'storeKey'))
 
 const STATUS_ICONS: Record<ReadingStatus, string> = {
     reading: 'mdi-book-open-page-variant',

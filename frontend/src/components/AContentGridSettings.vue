@@ -37,6 +37,26 @@
                         v-bind="plusHold"
                     />
                 </div>
+
+                <VDivider class="my-3" />
+
+                <div class="d-flex align-center justify-space-between mb-1">
+                    <span class="text-caption text-medium-emphasis">Visibility</span>
+                    <a class="text-caption cursor-pointer" @click="showAll">Show all</a>
+                </div>
+                <VCheckbox
+                    v-model="hideItemCount"
+                    label="Hide item count"
+                    density="compact"
+                    hide-details
+                />
+                <VCheckbox
+                    v-model="hideStatus"
+                    label="Hide reading status"
+                    density="compact"
+                    hide-details
+                />
+                <VCheckbox v-model="hideTitle" label="Hide title" density="compact" hide-details />
             </VCardText>
         </VCard>
     </VMenu>
@@ -56,15 +76,15 @@ const props = defineProps<{
 }>()
 
 const store = useContentGridStore()
-const itemSize = store.getForKey(toRef(props, 'storeKey'))
+const settings = store.getForKey(toRef(props, 'storeKey'))
 
 const cols = computed({
     get: () => {
         if (props.width <= 0) return 1
-        return Math.max(1, Math.round(props.width / itemSize.value))
+        return Math.max(1, Math.round(props.width / settings.value.itemSize))
     },
     set: (n: number) => {
-        if (props.width > 0) itemSize.value = Math.round(props.width / n)
+        if (props.width > 0) settings.value = { itemSize: Math.round(props.width / n) }
     },
 })
 
@@ -103,5 +123,28 @@ const minusHold = useRepeatOnHold(() => {
 })
 const plusHold = useRepeatOnHold(() => {
     if (cols.value < maxCols.value) cols.value++
+})
+
+function showAll() {
+    settings.value = { hideItemCount: false, hideStatus: false, hideTitle: false }
+}
+
+const hideItemCount = computed({
+    get: () => settings.value.hideItemCount,
+    set: (v: boolean) => {
+        settings.value = { hideItemCount: v }
+    },
+})
+const hideStatus = computed({
+    get: () => settings.value.hideStatus,
+    set: (v: boolean) => {
+        settings.value = { hideStatus: v }
+    },
+})
+const hideTitle = computed({
+    get: () => settings.value.hideTitle,
+    set: (v: boolean) => {
+        settings.value = { hideTitle: v }
+    },
 })
 </script>

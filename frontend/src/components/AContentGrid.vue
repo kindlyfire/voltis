@@ -18,6 +18,7 @@
                     :key="item.id"
                     :content="item"
                     :to-read-route="toReadRoute"
+                    :store-key="storeKey"
                 />
             </template>
         </div>
@@ -44,14 +45,14 @@ const props = withDefaults(
 )
 
 const store = useContentGridStore()
-const itemSize = store.getForKey(toRef(props, 'storeKey'))
+const settings = store.getForKey(toRef(props, 'storeKey'))
 
 const gridRef = ref<HTMLElement>()
 const { width } = useElementSize(gridRef)
 
 const cols = computed(() => {
     if (width.value <= 0) return 1
-    return Math.max(1, Math.round(width.value / itemSize.value))
+    return Math.max(1, Math.round(width.value / settings.value.itemSize))
 })
 
 const gridStyle = computed(() => ({

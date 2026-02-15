@@ -4,21 +4,31 @@ import { computed, toValue, type MaybeRefOrGetter } from 'vue'
 
 const DEFAULT_ITEM_SIZE = 170
 
-interface GridSettings {
+export interface GridSettings {
     itemSize: number
+    hideItemCount: boolean
+    hideStatus: boolean
+    hideTitle: boolean
+}
+
+const DEFAULTS: GridSettings = {
+    itemSize: DEFAULT_ITEM_SIZE,
+    hideItemCount: false,
+    hideStatus: false,
+    hideTitle: false,
 }
 
 export const useContentGridStore = defineStore('contentGrid', () => {
-    const { value: entries } = useLocalStorage<Record<string, GridSettings>>(
+    const { value: entries } = useLocalStorage<Record<string, Partial<GridSettings>>>(
         'content-grid-settings',
         found => found ?? {}
     )
 
     function getForKey(key: MaybeRefOrGetter<string>) {
         return computed({
-            get: () => entries.value[toValue(key)]?.itemSize ?? DEFAULT_ITEM_SIZE,
-            set: (v: number) => {
-                entries.value[toValue(key)] = { itemSize: v }
+            get: (): GridSettings => ({ ...DEFAULTS, ...entries.value[toValue(key)] }),
+            set: (v: Partial<GridSettings>) => {
+                entries.value[toValue(key)] = { ...entries.value[toValue(key)], ...v }
             },
         })
     }
