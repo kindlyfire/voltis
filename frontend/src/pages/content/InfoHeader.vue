@@ -17,7 +17,10 @@
             <div class="flex gap-3">
                 <div class="shrink-0">
                     <VCard>
-                        <div class="w-[100px] sm:w-[125px] md:w-[200px]">
+                        <div
+                            class="w-[100px] sm:w-[125px] md:w-[200px] cursor-pointer"
+                            @click="showCoverOverlay = true"
+                        >
                             <img
                                 v-if="content?.cover_uri"
                                 :src="`${API_URL}/files/cover/${content.id}`"
@@ -140,7 +143,10 @@
             <div class="flex gap-6 items-end">
                 <div class="shrink-0">
                     <VCard>
-                        <div class="w-[100px] sm:w-[125px] md:w-[200px]">
+                        <div
+                            class="w-[100px] sm:w-[125px] md:w-[200px] cursor-pointer"
+                            @click="showCoverOverlay = true"
+                        >
                             <img
                                 v-if="content?.cover_uri"
                                 :src="`${API_URL}/files/cover/${content.id}`"
@@ -180,12 +186,25 @@
             </div>
         </VContainer>
     </div>
+
+    <VOverlay
+        v-model="showCoverOverlay"
+        class="align-center justify-center"
+        scrim
+        @click="showCoverOverlay = false"
+    >
+        <img
+            v-if="content?.cover_uri"
+            :src="`${API_URL}/files/cover/${content.id}`"
+            class="cover-overlay-image"
+        />
+    </VOverlay>
 </template>
 
 <script setup lang="ts">
 import { contentApi } from '@/utils/api/content'
 import { API_URL } from '@/utils/fetch'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import ReadingStatusButton from './components/ReadingStatusButton.vue'
 import ContinueReadingButton from './components/ContinueReadingButton.vue'
 import RatingButton from './components/RatingButton.vue'
@@ -201,6 +220,8 @@ const parent = qParent.data
 
 const mUpdateUserData = contentApi.useUpdateUserData()
 const isStarred = computed(() => props.content.user_data?.starred ?? false)
+
+const showCoverOverlay = ref(false)
 
 async function toggleStar() {
     mUpdateUserData.mutateAsync({
@@ -264,5 +285,11 @@ async function toggleStar() {
 .description-text {
     white-space: pre-wrap;
     margin: 0;
+}
+
+.cover-overlay-image {
+    max-width: 90vw;
+    max-height: 90vh;
+    object-fit: contain;
 }
 </style>
