@@ -53,6 +53,7 @@ export const contentApi = {
                 if (p.valid !== undefined) searchParams.append('valid', String(p.valid))
                 if (p.reading_status) searchParams.append('reading_status', p.reading_status)
                 if (p.starred !== undefined) searchParams.append('starred', String(p.starred))
+                if (p.search) searchParams.append('search', p.search)
                 if (p.limit !== undefined) searchParams.append('limit', String(p.limit))
                 if (p.offset !== undefined) searchParams.append('offset', String(p.offset))
                 if (p.sort) searchParams.append('sort', p.sort)

@@ -163,6 +163,7 @@ export interface ContentListParams {
     valid?: boolean
     reading_status?: ReadingStatus
     starred?: boolean
+    search?: string
     limit?: number
     offset?: number
     sort?: 'order' | 'created_at' | 'progress_updated_at'

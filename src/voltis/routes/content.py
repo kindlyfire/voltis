@@ -221,9 +221,10 @@ async def list_content(
         if starred is not None:
             base_query = base_query.where(UserToContent.starred.is_(starred))
         if search is not None:
+            fuzzy_distance = 0 if len(search) < 3 else 1
             base_query = base_query.where(
                 ContentMetadataMerged.data["title"].astext.bool_op("|||")(
-                    text("(:search)::pdb.fuzzy(1, t)").bindparams(search=search)
+                    text(f"(:search)::pdb.fuzzy({fuzzy_distance}, t)").bindparams(search=search)
                 )
             )
 
@@ -237,6 +238,10 @@ async def list_content(
             data_query = data_query.order_by(sorting(Content.created_at))
         elif sort == "order":
             data_query = data_query.order_by(sorting(Content.order))
+        elif search is not None:
+            data_query = data_query.order_by(
+                desc(text("paradedb.score(content_metadata_merged.id)"))
+            )
 
         if offset:
             data_query = data_query.offset(offset)

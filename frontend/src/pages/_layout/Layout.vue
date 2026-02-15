@@ -5,9 +5,10 @@
             :style="store.navbarHidden.value && { transform: 'translateY(-64px)' }"
         >
             <VAppBarNavIcon @click="store.setSidebarOpen(!store.sidebarOpen.value)" />
-            <VAppBarTitle>
+            <VAppBarTitle style="flex: 0 1 auto" class="hidden! md:flex! mr-6!">
                 <RouterLink to="/">Voltis</RouterLink>
             </VAppBarTitle>
+            <SearchBox class="ms-2 me-2" />
             <VSpacer />
             <VBtn
                 ref="themeBtnRef"
@@ -16,24 +17,6 @@
                 :icon="store.theme === 'light' ? 'mdi-weather-sunny' : 'mdi-weather-night'"
                 title="Toggle theme (Shift+click or long press to reset to system)"
             />
-            <VMenu v-if="qMe.data?.value">
-                <template #activator="{ props }">
-                    <VBtn v-bind="props" variant="text" class="me-5">
-                        {{ qMe.data.value.username }}
-                        <VIcon end>mdi-chevron-down</VIcon>
-                    </VBtn>
-                </template>
-                <VList>
-                    <VListItem @click="handleLogout" :disabled="mLogout.isPending.value">
-                        <VListItemTitle>Logout</VListItemTitle>
-                    </VListItem>
-                </VList>
-            </VMenu>
-            <template v-else>
-                <RouterLink to="/auth/login">
-                    <VBtn variant="text" class="me-5">Login</VBtn>
-                </RouterLink>
-            </template>
         </VAppBar>
         <VNavigationDrawer
             :model-value="store.sidebarOpen.value"
@@ -92,6 +75,24 @@
                     <VListItemTitle>Settings</VListItemTitle>
                 </VListItem>
             </VList>
+            <template #append>
+                <VDivider class="mx-2" />
+                <VList nav>
+                    <VMenu v-if="qMe.data?.value" location="top">
+                        <template #activator="{ props }">
+                            <VListItem v-bind="props" prepend-icon="mdi-account">
+                                <VListItemTitle>{{ qMe.data.value.username }}</VListItemTitle>
+                            </VListItem>
+                        </template>
+                        <VList>
+                            <VListItem @click="handleLogout" :disabled="mLogout.isPending.value">
+                                <VListItemTitle>Logout</VListItemTitle>
+                            </VListItem>
+                        </VList>
+                    </VMenu>
+                </VList>
+                <div class="ff-browser-chrome-spacer"></div>
+            </template>
         </VNavigationDrawer>
         <VMain :style="store.navbarTemporary ? { '--v-layout-top': '0px' } : {}">
             <RouterView />
@@ -109,7 +110,8 @@ import { librariesApi } from '@/utils/api/libraries'
 import { useRouter, useRoute } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
 import { onLongPress, useEventListener } from '@vueuse/core'
-import { useLayoutStore } from './useLayoutStore'
+import { useLayoutStore } from '../useLayoutStore'
+import SearchBox from './SearchBox.vue'
 
 const store = useLayoutStore()
 
@@ -148,3 +150,18 @@ useEventListener(themeBtnRef, 'click', e => {
     e.shiftKey ? store.resetTheme() : store.toggleTheme()
 })
 </script>
+
+<style scoped>
+.ff-browser-chrome-spacer {
+    display: none;
+}
+
+@supports (-moz-appearance: none) {
+    @media (hover: none) {
+        .ff-browser-chrome-spacer {
+            display: block;
+            height: calc(100lvh - 100dvh);
+        }
+    }
+}
+</style>

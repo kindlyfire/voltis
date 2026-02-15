@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import AppLayout from './pages/_layout.vue'
+import AppLayout from './pages/_layout/Layout.vue'
 import HomePage from './pages/HomePage.vue'
 import LibraryPage from './pages/LibraryPage.vue'
 import PageLogin from './pages/auth/PageLogin.vue'
