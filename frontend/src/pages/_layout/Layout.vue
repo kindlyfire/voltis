@@ -109,7 +109,7 @@ import { authApi } from '@/utils/api/auth'
 import { librariesApi } from '@/utils/api/libraries'
 import { useRouter, useRoute } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
-import { onLongPress, useEventListener } from '@vueuse/core'
+import { onLongPress, useEventListener, useThrottleFn } from '@vueuse/core'
 import { useLayoutStore } from '../useLayoutStore'
 import SearchBox from './SearchBox.vue'
 
@@ -142,13 +142,14 @@ onLongPress(
     },
     { delay: 500 }
 )
-useEventListener(document.body, 'pointerup', () =>
+useEventListener(document.body, 'pointerup', () => {
     setTimeout(() => (longPressTriggered = false), 0)
-)
-useEventListener(themeBtnRef, 'click', e => {
+})
+const handleThemeClick = useThrottleFn((e: MouseEvent) => {
     if (longPressTriggered) return
     e.shiftKey ? store.resetTheme() : store.toggleTheme()
-})
+}, 10)
+useEventListener(themeBtnRef, 'click', handleThemeClick)
 </script>
 
 <style scoped>
