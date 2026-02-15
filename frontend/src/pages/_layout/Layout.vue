@@ -8,15 +8,9 @@
             <VAppBarTitle style="flex: 0 1 auto" class="hidden! md:flex! mr-6!">
                 <RouterLink to="/">Voltis</RouterLink>
             </VAppBarTitle>
-            <SearchBox class="ms-2 me-2" />
-            <VSpacer />
-            <VBtn
-                ref="themeBtnRef"
-                variant="text"
-                size="small"
-                :icon="store.theme === 'light' ? 'mdi-weather-sunny' : 'mdi-weather-night'"
-                title="Toggle theme (Shift+click or long press to reset to system)"
-            />
+            <VBtn icon="mdi-home" variant="text" to="/" class="md:hidden!" exact />
+            <SearchBox class="grow md:grow-0 ms-2 me-2" />
+            <VSpacer class="hidden! md:flex!" />
         </VAppBar>
         <VNavigationDrawer
             :model-value="store.sidebarOpen.value"
@@ -78,18 +72,36 @@
             <template #append>
                 <VDivider class="mx-2" />
                 <VList nav>
-                    <VMenu v-if="qMe.data?.value" location="top">
-                        <template #activator="{ props }">
-                            <VListItem v-bind="props" prepend-icon="mdi-account">
-                                <VListItemTitle>{{ qMe.data.value.username }}</VListItemTitle>
-                            </VListItem>
-                        </template>
-                        <VList>
-                            <VListItem @click="handleLogout" :disabled="mLogout.isPending.value">
-                                <VListItemTitle>Logout</VListItemTitle>
-                            </VListItem>
-                        </VList>
-                    </VMenu>
+                    <div class="flex items-center gap-2">
+                        <div class="grow">
+                            <VMenu location="top" class="grow">
+                                <template #activator="{ props }">
+                                    <VListItem v-bind="props" prepend-icon="mdi-account">
+                                        <VListItemTitle>{{
+                                            qMe.data.value?.username || 'Loading...'
+                                        }}</VListItemTitle>
+                                    </VListItem>
+                                </template>
+                                <VList>
+                                    <VListItem
+                                        @click="handleLogout"
+                                        :disabled="mLogout.isPending.value"
+                                    >
+                                        <VListItemTitle>Logout</VListItemTitle>
+                                    </VListItem>
+                                </VList>
+                            </VMenu>
+                        </div>
+                        <VBtn
+                            ref="themeBtnRef"
+                            variant="text"
+                            size="small"
+                            :icon="
+                                store.theme === 'light' ? 'mdi-weather-sunny' : 'mdi-weather-night'
+                            "
+                            title="Toggle theme (Shift+click or long press to reset to system)"
+                        />
+                    </div>
                 </VList>
                 <div class="ff-browser-chrome-spacer"></div>
             </template>
