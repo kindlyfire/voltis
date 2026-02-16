@@ -1,7 +1,7 @@
 <template>
-    <VMenu v-if="active" :close-on-content-click="false" max-width="350">
+    <VMenu v-if="visible" v-model="menuOpen" :close-on-content-click="false" max-width="350">
         <template #activator="{ props }">
-            <VBtn v-bind="props" icon="mdi-sync" variant="text" class="scan-spin" />
+            <VBtn v-bind="props" icon="mdi-sync" variant="text" :class="active && 'scan-spin'" />
         </template>
         <VCard>
             <VCardText class="space-y-3!">
@@ -54,26 +54,42 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onUnmounted } from 'vue'
-import { ws } from '@/utils/ws'
-
-interface ScanStatusItem {
-    library_id: string
-    library_name: string
-    status: 'running' | 'queued' | 'done'
-    progress?: { total: number; processed: number }
-}
+import { ref, computed, watch, onUnmounted } from 'vue'
+import { useWsOnScanStatus, type ScanStatusItem } from '@/utils/ws'
 
 const scanStatus = ref<ScanStatusItem[]>([])
+const menuOpen = ref(false)
 const active = computed(() => scanStatus.value.some(i => i.status !== 'done'))
+const pendingClear = ref(false)
+const visible = computed(() => scanStatus.value.length > 0)
 
 let clearTimer: ReturnType<typeof setTimeout> | null = null
 
-const unsubscribe = ws.on('scan_status', (msg: { queue: ScanStatusItem[] }) => {
+function scheduleClear() {
+    if (clearTimer) clearTimeout(clearTimer)
+    clearTimer = setTimeout(() => {
+        clearTimer = null
+        if (menuOpen.value) {
+            pendingClear.value = true
+        } else {
+            scanStatus.value = []
+        }
+    }, 10000)
+}
+
+watch(menuOpen, open => {
+    if (!open && pendingClear.value) {
+        pendingClear.value = false
+        scanStatus.value = []
+    }
+})
+
+useWsOnScanStatus(msg => {
     if (clearTimer) {
         clearTimeout(clearTimer)
         clearTimer = null
     }
+    pendingClear.value = false
 
     const queueIds = new Set(msg.queue.map(i => i.library_id))
 
@@ -93,14 +109,11 @@ const unsubscribe = ws.on('scan_status', (msg: { queue: ScanStatusItem[] }) => {
     }
 
     if (msg.queue.length === 0) {
-        clearTimer = setTimeout(() => {
-            scanStatus.value = []
-        }, 3000)
+        scheduleClear()
     }
 })
 
 onUnmounted(() => {
-    unsubscribe()
     if (clearTimer) clearTimeout(clearTimer)
 })
 </script>

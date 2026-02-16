@@ -61,3 +61,21 @@ function on(type: string, handler: Handler): () => void {
 }
 
 export const ws = { connect, send, on }
+
+// --- Composables ---
+
+import { onUnmounted } from 'vue'
+
+export interface ScanStatusItem {
+    library_id: string
+    library_name: string
+    status: 'running' | 'queued' | 'done'
+    summary?: { to_add: number; to_update: number; to_remove: number; unchanged: number }
+    progress?: { total: number; processed: number }
+}
+
+export function useWsOnScanStatus(cb: (msg: { queue: ScanStatusItem[] }) => void) {
+    const unsub = ws.on('scan_status', cb)
+    onUnmounted(unsub)
+    return unsub
+}

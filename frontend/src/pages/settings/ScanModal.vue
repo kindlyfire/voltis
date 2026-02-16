@@ -81,18 +81,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed } from 'vue'
 import { contentApi } from '@/utils/api/content'
 import { librariesApi } from '@/utils/api/libraries'
-import { ws } from '@/utils/ws'
-
-interface ScanStatusItem {
-    library_id: string
-    library_name: string
-    status: 'running' | 'queued' | 'done'
-    summary?: { to_add: number; to_update: number; to_remove: number; unchanged: number }
-    progress?: { total: number; processed: number }
-}
+import { useWsOnScanStatus, type ScanStatusItem } from '@/utils/ws'
 
 const props = defineProps<{
     open: boolean
@@ -108,8 +100,6 @@ const scanning = ref(false)
 const scanComplete = ref(false)
 const scanStatus = ref<ScanStatusItem[]>([])
 
-let unsubscribe: (() => void) | null = null
-
 const isContentScan = computed(() => !!props.contentId)
 
 const title = computed(() => {
@@ -123,32 +113,32 @@ function getLibraryName(id: string): string {
     return libraries.data?.value?.find(l => l.id === id)?.name ?? id
 }
 
+useWsOnScanStatus(msg => {
+    if (!scanning.value) return
+    const queueIds = new Set(msg.queue.map(i => i.library_id))
+
+    for (const item of scanStatus.value) {
+        if (item.status !== 'done' && !queueIds.has(item.library_id)) {
+            item.status = 'done'
+        }
+    }
+
+    for (const incoming of msg.queue) {
+        const existing = scanStatus.value.find(i => i.library_id === incoming.library_id)
+        if (existing) {
+            Object.assign(existing, incoming)
+        } else {
+            scanStatus.value.push(incoming)
+        }
+    }
+
+    if (msg.queue.length === 0) {
+        scanComplete.value = true
+    }
+})
+
 function subscribeScanStatus() {
     scanning.value = true
-    unsubscribe = ws.on('scan_status', (msg: { queue: ScanStatusItem[] }) => {
-        const queueIds = new Set(msg.queue.map(i => i.library_id))
-
-        // Mark items no longer in queue as done
-        for (const item of scanStatus.value) {
-            if (item.status !== 'done' && !queueIds.has(item.library_id)) {
-                item.status = 'done'
-            }
-        }
-
-        // Update or append items from queue
-        for (const incoming of msg.queue) {
-            const existing = scanStatus.value.find(i => i.library_id === incoming.library_id)
-            if (existing) {
-                Object.assign(existing, incoming)
-            } else {
-                scanStatus.value.push(incoming)
-            }
-        }
-
-        if (msg.queue.length === 0) {
-            scanComplete.value = true
-        }
-    })
 }
 
 async function startScan() {
@@ -165,10 +155,6 @@ async function startScan() {
         )
     }
 }
-
-onUnmounted(() => {
-    unsubscribe?.()
-})
 </script>
 
 <script lang="ts">
