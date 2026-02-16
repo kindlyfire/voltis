@@ -1,9 +1,18 @@
+export interface LibraryPreference {
+    visibility?: 'show' | 'hide' | 'overflow'
+}
+
+export interface UserPreferences {
+    libraries?: Record<string, LibraryPreference>
+}
+
 export interface User {
     id: string
     created_at: string
     updated_at: string
     username: string
     permissions: string[]
+    preferences: UserPreferences
 }
 
 export interface UserUpsert {
@@ -11,6 +20,12 @@ export interface UserUpsert {
     username: string
     password?: string
     permissions: string[]
+}
+
+export interface UpdateMe {
+    username: string
+    password?: string
+    preferences?: UserPreferences
 }
 
 export type ScannerType = 'comics' | 'books'

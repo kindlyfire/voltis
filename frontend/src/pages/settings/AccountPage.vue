@@ -69,9 +69,7 @@ const detailsForm = useForm({
     },
     onSubmit: async values => {
         await upsert.mutateAsync({
-            id: me.data.value!.id,
             username: values.username,
-            permissions: me.data.value!.permissions,
         })
     },
 })
@@ -100,10 +98,8 @@ const passwordForm = useForm({
         if (!_me) return
 
         await upsert.mutateAsync({
-            id: _me.id,
             username: _me.username,
             password: values.password,
-            permissions: _me.permissions,
         })
         passwordForm.reset()
     },

@@ -55,6 +55,14 @@ class _DefaultColumns:
     )
 
 
+class LibraryPreference(BaseModel):
+    visibility: Literal["show", "hide", "overflow"] | None = None
+
+
+class UserPreferences(BaseModel):
+    libraries: dict[str, LibraryPreference] = {}
+
+
 class User(_Base, _DefaultColumns):
     __tablename__ = "users"
     __idprefix__ = "u"
@@ -62,8 +70,12 @@ class User(_Base, _DefaultColumns):
     username: Mapped[str] = col(Text, unique=True)
     password_hash: Mapped[str] = col(Text)
     permissions: Mapped[list[str]] = col(ARRAY(Text), server_default="")
+    preferences: Mapped[dict] = col(JSONB, server_default="{}")
 
     sessions: Mapped[list["Session"]] = relationship(back_populates="user")
+
+    def get_preferences(self) -> UserPreferences:
+        return UserPreferences.model_validate(self.preferences)
 
 
 class Session(_Base):

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { apiFetch, RequestError } from '../fetch'
-import type { User, UserUpsert } from './types'
+import type { UpdateMe, User, UserUpsert } from './types'
 import { ws } from '../ws'
 
 export const usersApi = {
@@ -32,7 +32,7 @@ export const usersApi = {
     useUpdateMe: () => {
         const queryClient = useQueryClient()
         return useMutation({
-            mutationFn: async (body: UserUpsert) => {
+            mutationFn: async (body: UpdateMe) => {
                 return apiFetch<User>('/users/me', {
                     method: 'POST',
                     body: JSON.stringify(body),

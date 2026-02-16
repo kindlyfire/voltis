@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from voltis.db.models import User
+from voltis.db.models import User, UserPreferences
 from voltis.routes._misc import OK_RESPONSE, OkResponse
 from voltis.routes._providers import AdminUserProvider, RbProvider, UserProvider
 from voltis.utils.misc import now_without_tz
@@ -19,6 +19,7 @@ class UserDTO(BaseModel):
     updated_at: datetime.datetime
     username: str
     permissions: list[str]
+    preferences: UserPreferences
 
     @classmethod
     def from_model(cls, model: User) -> "UserDTO":
@@ -28,7 +29,14 @@ class UserDTO(BaseModel):
             updated_at=model.updated_at,
             username=model.username,
             permissions=model.permissions,
+            preferences=model.get_preferences(),
         )
+
+
+class UpdateMeRequest(BaseModel):
+    username: str
+    password: str | None = None
+    preferences: UserPreferences | None = None
 
 
 class UpsertRequest(BaseModel):
@@ -58,13 +66,17 @@ async def get_current_user(
 async def update_current_user(
     rb: RbProvider,
     user: UserProvider,
-    body: UpsertRequest,
+    body: UpdateMeRequest,
 ) -> UserDTO:
     async with rb.get_asession() as session:
         session.add(user)
         user.username = body.username
         if body.password:
             user.password_hash = bcrypt.hashpw(body.password.encode(), bcrypt.gensalt()).decode()
+        if "preferences" in body.model_fields_set:
+            user.preferences = (
+                body.preferences.model_dump(exclude_unset=True) if body.preferences else {}
+            )
         user.updated_at = now_without_tz()
         await session.commit()
         await session.refresh(user)
