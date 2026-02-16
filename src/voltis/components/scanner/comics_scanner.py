@@ -63,15 +63,15 @@ class ComicsScanner(Scanner):
             return None
 
         fallback_name, fallback_year = _parse_series_name(path.parent.name)
-        name = meta.get("series") or fallback_name
-        year = meta.get("year") or fallback_year
-        uri_part = f"{name}_{year}" if year else name
+        s_name = meta.get("series") or fallback_name
+        s_year = meta.get("year") or fallback_year
+        uri_part = f"{s_name}_{s_year}" if s_year else s_name
         series = self.r.get_series(
             file_uri=path.parent.as_posix(),
             uri_part=uri_part,
             uri=f"comic/{uri_part}",
             type="comic_series",
-            title=name,
+            title=s_name,
         )
 
         # Parse volume/chapter from filename
@@ -80,15 +80,31 @@ class ComicsScanner(Scanner):
         ch_num: str | int | float | None = (
             meta["number"] if "number" in meta else _parse_chapter_number(filename)
         )
+        year_num = meta["year"] if "year" in meta else _parse_series_year(path.stem)
         if isinstance(ch_num, str):
             try:
                 ch_num = float(ch_num)
             except ValueError:
                 ch_num = _parse_chapter_number(ch_num)
         if vol_num is None and ch_num is None:
-            ch_num = _parse_fallback_chapter_number(filename)
+            # The reason we remove the common prefix is so we don't interpret a
+            # number in the series name as the chapter number. Still, this is
+            # not perfect.
+            ch_num = _parse_fallback_chapter_number(
+                _remove_common_prefix(filename, path.parent.name)[0]
+            )
 
-        uri_part = f"v{vol_num or 0}_ch{ch_num or 0}"
+        uri_parts: list[str] = []
+        if vol_num is not None:
+            uri_parts.append(f"v{vol_num:g}")
+        if ch_num is not None:
+            uri_parts.append(f"ch{ch_num:g}")
+        if vol_num is None and ch_num is None and year_num is not None:
+            uri_parts.append(f"y{year_num}")
+        if not uri_parts:
+            return None
+
+        uri_part = "_".join(uri_parts) if uri_parts else filename
 
         # Build title from vol/chapter
         parts = []
@@ -96,6 +112,8 @@ class ComicsScanner(Scanner):
             parts.append(f"Vol. {vol_num:g}")
         if ch_num is not None:
             parts.append(f"Ch. {ch_num:g}")
+        if vol_num is None and ch_num is None and year_num is not None:
+            parts.append(f"{s_name} ({year_num})")
         title = " ".join(parts) if parts else filename
 
         # Create or update content
@@ -368,3 +386,12 @@ def _clean_series_name(name: str) -> str:
             break
         name = cleaned
     return name.strip()
+
+
+def _remove_common_prefix(str1: str, str2: str) -> tuple[str, str]:
+    """Remove the common prefix from two strings."""
+    min_len = min(len(str1), len(str2))
+    i = 0
+    while i < min_len and str1[i] == str2[i]:
+        i += 1
+    return str1[i:], str2[i:]

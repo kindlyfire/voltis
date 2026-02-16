@@ -37,7 +37,6 @@ async def get_fs_items(
     return [item for sublist in items for item in sublist if eligible_cb(item)]
 
 
-@log_time(logger)
 async def _get_fs_items_source(source: LibrarySource):
     path = Path(source.path_uri)
     limiter = CapacityLimiter(20)

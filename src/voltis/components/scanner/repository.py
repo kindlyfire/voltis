@@ -116,6 +116,22 @@ class ScannerRepository:
             self.content.append(item)
         return item
 
+    def check_uri_available(self, content: Content) -> bool:
+        """Check if a content URI is available, or already used by the content
+        itself (when updating)."""
+        existing = len(
+            [
+                c
+                for c in self.content
+                if c.uri_part == content.uri_part
+                and c.parent_id == content.parent_id
+                and c not in self.content_d
+            ]
+        )
+        if content in self.content:
+            return existing <= 1
+        return existing == 0
+
     def get_series(
         self,
         *,

@@ -203,15 +203,38 @@ class Scanner(abc.ABC):
         self, file: LibraryFile, content: Content | None, parents_with_updates: set[str]
     ):
         async with self.limiter:
-            content = await self.scan_file(file, content)
-            if content:
-                content.file_mtime = file.mtime
-                content.file_size = file.size
-                content.file_uri = file.path
-                if content not in self.r.content:
-                    self.r.content.append(content)
+            content_updated = await self.scan_file(file, content)
+            if content_updated:
+                content_updated.file_mtime = file.mtime
+                content_updated.file_size = file.size
+                content_updated.file_uri = file.path
+
+                uri_duped = not self.r.check_uri_available(content_updated)
+                if uri_duped:
+                    logger.warning(
+                        "URI conflict detected when adding content, file will be skipped",
+                        file=content_updated.file_uri,
+                        uri=content_updated.uri,
+                    )
+                else:
+                    if content_updated not in self.r.content:
+                        self.r.content.append(content_updated)
+                    if content_updated.parent_id:
+                        parents_with_updates.add(content_updated.parent_id)
+
+            # If the scanner returns null and there was an existing content, we
+            # delete it
+            if not content_updated and content:
+                self.r.content.remove(content)
+                self.r.content_d.append(content)
                 if content.parent_id:
                     parents_with_updates.add(content.parent_id)
+
+            if not content_updated:
+                logger.warning(
+                    "Scanner failed to parse file, skipping",
+                    file=file.path,
+                )
         self._progress_processed += 1
         if self.events:
             await self.events_send.send(
