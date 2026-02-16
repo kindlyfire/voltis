@@ -9,6 +9,7 @@
                 <RouterLink to="/">Voltis</RouterLink>
             </VAppBarTitle>
             <VBtn icon="mdi-home" variant="text" to="/" class="md:hidden!" exact />
+            <ScanIndicator />
             <SearchBox class="grow md:grow-0 ms-2 me-2" />
             <VSpacer class="hidden! md:flex!" />
         </VAppBar>
@@ -120,6 +121,7 @@ import { onLongPress, useEventListener, useThrottleFn } from '@vueuse/core'
 import { useLayoutStore } from './useLayoutStore'
 import SearchBox from './SearchBox.vue'
 import Libraries from './Libraries.vue'
+import ScanIndicator from './ScanIndicator.vue'
 
 const store = useLayoutStore()
 
