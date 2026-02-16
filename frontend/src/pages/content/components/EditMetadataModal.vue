@@ -255,7 +255,7 @@ watch(
     () => qLayers.data?.value,
     data => {
         if (!data) return
-        localLayers.value = JSON.parse(JSON.stringify(data))
+        localLayers.value = jsonClone(data)
         const serverOverrides = data.layers.find(l => l.source === 'overrides')
         serverSnapshot.value = JSON.stringify(serverOverrides?.data ?? {})
     },
@@ -305,7 +305,9 @@ const selectedViewLayer = computed(() => {
     return localLayers.value?.layers.find(l => l.source === selectedView.value) ?? null
 })
 
-const isEditable = computed(() => selectedView.value === 'merged' || selectedView.value === 'overrides')
+const isEditable = computed(
+    () => selectedView.value === 'merged' || selectedView.value === 'overrides'
+)
 
 const isDirty = computed(
     () => JSON.stringify(overridesLayer.value?.data ?? {}) !== serverSnapshot.value
@@ -390,6 +392,7 @@ const mSave = useMutation({
 <script lang="ts">
 import { Modals } from '@/utils/modals'
 import Self from './EditMetadataModal.vue'
+import { jsonClone } from '@/utils/misc'
 
 export function showEditMetadataModal(contentId: string): Promise<void> {
     return Modals.show(Self, { contentId })

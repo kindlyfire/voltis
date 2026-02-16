@@ -34,6 +34,9 @@
                     <VListItemTitle>Back</VListItemTitle>
                 </VListItem>
                 <VDivider class="my-2" />
+                <VListItem to="/settings/interface" prepend-icon="mdi-monitor">
+                    <VListItemTitle>Interface</VListItemTitle>
+                </VListItem>
                 <VListItem to="/settings/account" prepend-icon="mdi-account">
                     <VListItemTitle>Account</VListItemTitle>
                 </VListItem>
@@ -55,17 +58,9 @@
                     <VListItemTitle>Lists</VListItemTitle>
                 </VListItem>
                 <VDivider class="my-2" />
-                <VListSubheader>Libraries</VListSubheader>
-                <VListItem
-                    v-for="library in qLibraries.data?.value"
-                    :key="library.id"
-                    :to="`/${library.id}`"
-                    prepend-icon="mdi-bookshelf"
-                >
-                    <VListItemTitle>{{ library.name }}</VListItemTitle>
-                </VListItem>
+                <Libraries />
                 <VDivider class="my-2" />
-                <VListItem to="/settings/account" prepend-icon="mdi-cog">
+                <VListItem to="/settings/interface" prepend-icon="mdi-cog">
                     <VListItemTitle>Settings</VListItemTitle>
                 </VListItem>
             </VList>
@@ -118,12 +113,13 @@ import { computed, ref } from 'vue'
 import { ModalContainer } from '@/utils/modals'
 import { usersApi } from '@/utils/api/users'
 import { authApi } from '@/utils/api/auth'
-import { librariesApi } from '@/utils/api/libraries'
+
 import { useRouter, useRoute } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
 import { onLongPress, useEventListener, useThrottleFn } from '@vueuse/core'
 import { useLayoutStore } from './useLayoutStore'
 import SearchBox from './SearchBox.vue'
+import Libraries from './Libraries.vue'
 
 const store = useLayoutStore()
 
@@ -132,7 +128,6 @@ const route = useRoute()
 const isSettings = computed(() => route.path.startsWith('/settings'))
 const qMe = usersApi.useMe()
 const mLogout = authApi.useLogout()
-const qLibraries = librariesApi.useList()
 const queryClient = useQueryClient()
 
 const isAdmin = computed(() => qMe.data.value?.permissions.includes('ADMIN'))

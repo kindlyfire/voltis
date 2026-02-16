@@ -128,3 +128,7 @@ export function useSystemTheme() {
     })
     return isDark
 }
+
+export function jsonClone<T>(obj: T): T {
+    return JSON.parse(JSON.stringify(obj))
+}

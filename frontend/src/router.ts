@@ -8,6 +8,7 @@ import ContentPage from './pages/content/ContentPage.vue'
 import SettingsAccountPage from './pages/settings/AccountPage.vue'
 import SettingsUsersPage from './pages/settings/UsersPage.vue'
 import SettingsLibrariesPage from './pages/settings/LibrariesPage.vue'
+import SettingsInterfacePage from './pages/settings/InterfacePage.vue'
 import ListsPage from './pages/lists/ListsPage.vue'
 import ListPage from './pages/lists/ListPage.vue'
 import ReadPage from './pages/read/ReadPage.vue'
@@ -48,6 +49,11 @@ const router = createRouter({
                     path: '/:id(cl_[^/]+)',
                     name: 'list',
                     component: ListPage,
+                },
+                {
+                    path: '/settings/interface',
+                    name: 'settings-interface',
+                    component: SettingsInterfacePage,
                 },
                 {
                     path: '/settings/account',
