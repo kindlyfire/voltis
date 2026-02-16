@@ -253,13 +253,7 @@ def content_metadata_get_year(meta: ContentMetadataDict) -> str | None:
     return None
 
 
-class ContentMetadataMerged(_Base):
-    __tablename__ = "content_metadata_merged"
-
-    id: Mapped[str] = col(Text, primary_key=True)
-    uri: Mapped[str] = col(Text)
-    library_id: Mapped[str] = col(Text)
-    data: Mapped[dict] = col("data", JSONB)
+METADATA_MERGE_ORDER = ["file", "mangabaka", "overrides"]
 
 
 class ContentMetadataRow(_Base):
@@ -267,14 +261,38 @@ class ContentMetadataRow(_Base):
 
     uri: Mapped[str] = col(Text, primary_key=True)
     library_id: Mapped[str] = col(Text, ForeignKey("libraries.id"), primary_key=True)
-    provider: Mapped[int] = col(Integer, primary_key=True)
-    """
-    1: File metadata (e.g. ComicInfo.xml, EPUB metadata), 2: MangaBaka, 99: Admin overrides
-    """
-    remote_id: Mapped[str | None] = col(Text)
     data: Mapped[dict] = col("data", JSONB, server_default="{}")
-    raw: Mapped[dict] = col("raw", JSONB, server_default="{}")
+    data_raw: Mapped[dict] = col("data_raw", JSONB, server_default="{}")
     updated_at: Mapped[datetime.datetime] = col(TIMESTAMP, server_default="")
+
+    def merge(self):
+        merged = {}
+        for source in METADATA_MERGE_ORDER:
+            if source in self.data_raw:
+                source_data = self.data_raw[source].get("data", {})
+                merged.update(source_data)
+        self.data = merged
+        flag_modified(self, "data")
+
+    def get_source_data(self, source: str) -> dict:
+        return self.data_raw.get(source, {}).get("data", {})
+
+    def set_source(
+        self,
+        source: str,
+        data: dict | ContentMetadataDict,
+        *,
+        raw: dict | None = None,
+        remote_id: str | None = None,
+    ):
+        entry: dict = {"data": data}
+        if raw is not None:
+            entry["raw"] = raw
+        if remote_id is not None:
+            entry["remote_id"] = remote_id
+        self.data_raw[source] = entry
+        flag_modified(self, "data_raw")
+        self.merge()
 
 
 ReadingStatus = Literal["reading", "completed", "on_hold", "dropped", "plan_to_read"]

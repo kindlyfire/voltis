@@ -13,7 +13,6 @@ logger = structlog.stdlib.get_logger()
 
 
 def _is_dirty(obj) -> bool:
-    """Check if an ORM object is new (transient) or has modified attributes."""
     state = sa_inspect(obj)
     if state.transient:
         return True
@@ -32,8 +31,6 @@ class ScannerRepository:
         self.content: list[Content] = []
         self.content_d: list[Content] = []
         self.content_metadata: list[ContentMetadataRow] = []
-        self.content_metadata_d: list[ContentMetadataRow] = []
-
         self.resolved_parents: dict[str, Content] = {}
 
     async def load(self):
@@ -92,37 +89,24 @@ class ScannerRepository:
             )
             await session.execute(stmt)
 
-        # Upsert modified metadata
-        meta_rows = [m.as_dict() for m in self.content_metadata if _is_dirty(m)]
+        # Merge and upsert metadata
+        dirty_meta = [m for m in self.content_metadata if _is_dirty(m)]
+        for m in dirty_meta:
+            m.merge()
+        meta_rows = [m.as_dict() for m in dirty_meta]
         if meta_rows:
             stmt = pg_insert(ContentMetadataRow).values(meta_rows)
             stmt = stmt.on_conflict_do_update(
-                index_elements=["uri", "library_id", "provider"],
+                index_elements=["uri", "library_id"],
                 set_={
                     "data": stmt.excluded.data,
-                    "raw": stmt.excluded.raw,
+                    "data_raw": stmt.excluded.data_raw,
                     "updated_at": stmt.excluded.updated_at,
                 },
             )
             await session.execute(stmt)
 
-        # Delete removed metadata
-        if self.content_metadata_d:
-            for m in self.content_metadata_d:
-                await session.execute(
-                    delete(ContentMetadataRow).where(
-                        ContentMetadataRow.uri == m.uri,
-                        ContentMetadataRow.library_id == m.library_id,
-                        ContentMetadataRow.provider == m.provider,
-                    )
-                )
-
     def match_deleted_item(self, uri_part: str, parent_id: str | None) -> Content | None:
-        """
-        If an item is new, we try to find a deleted item with the same uri_part
-        and parent. This is needed because the initial matching is only done by
-        file path.
-        """
         item = next(
             (v for v in self.content_d if v.uri_part == uri_part and v.parent_id == parent_id),
             None,
@@ -170,25 +154,22 @@ class ScannerRepository:
             updated_at=now_without_tz(),
         )
         self.content.append(item)
-        self.get_metadata(uri=uri, provider=0).data = {"title": title}
+        self.get_metadata(uri=uri).set_source("file", data={"title": title})
         self.resolved_parents[uri] = item
         return item
 
-    def get_metadata(self, uri: str, provider: int) -> ContentMetadataRow:
-        """Get metadata for a given content item and provider."""
-        m = next(
-            (m for m in self.content_metadata if m.uri == uri and m.provider == provider), None
-        )
+    def get_metadata(self, uri: str) -> ContentMetadataRow:
+        """Get metadata for a given content item."""
+        m = next((m for m in self.content_metadata if m.uri == uri), None)
         if not m:
             m = ContentMetadataRow(
                 uri=uri,
                 library_id=self.library_id,
-                provider=provider,
                 updated_at=now_without_tz(),
                 data={},
-                raw={},
+                data_raw={},
             )
             self.content_metadata.append(m)
         flag_modified(m, "data")
-        flag_modified(m, "raw")
+        flag_modified(m, "data_raw")
         return m

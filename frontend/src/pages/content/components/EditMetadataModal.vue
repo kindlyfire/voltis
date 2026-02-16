@@ -21,7 +21,7 @@
                             hide-details
                         />
                         <VBtn
-                            v-if="selectedViewLayer && selectedViewLayer.provider !== 99"
+                            v-if="selectedViewLayer && selectedViewLayer.source !== 'overrides'"
                             variant="tonal"
                             @click="showRawDialog = true"
                             class="h-10!"
@@ -47,13 +47,13 @@
                                         size="x-small"
                                         variant="tonal"
                                         :color="
-                                            currentView.sources[field.key] === 99
+                                            currentView.sources[field.key] === 'overrides'
                                                 ? 'primary'
                                                 : undefined
                                         "
                                         class="ml-1"
                                     >
-                                        {{ providerLabel(currentView.sources[field.key]!) }}
+                                        {{ sourceLabel(currentView.sources[field.key]!) }}
                                     </VChip>
                                 </div>
                                 <div class="field-value grow">
@@ -145,7 +145,7 @@
     <!-- Raw data sub-dialog -->
     <VDialog v-model="showRawDialog" max-width="1000">
         <VCard v-if="selectedViewLayer">
-            <VCardTitle>Raw data — {{ providerLabel(selectedViewLayer.provider) }}</VCardTitle>
+            <VCardTitle>Raw data — {{ sourceLabel(selectedViewLayer.source) }}</VCardTitle>
             <VCardText>
                 <div class="flex flex-col lg:flex-row gap-4">
                     <div class="flex-1">
@@ -186,14 +186,16 @@ const props = defineProps<{
 const queryClient = useQueryClient()
 const qLayers = contentApi.useMetadataLayers(() => props.contentId)
 
-const PROVIDER_LABELS: Record<number, string> = {
-    0: 'File',
-    1: 'MangaBaka',
-    99: 'Overrides',
+const SOURCE_LABELS: Record<string, string> = {
+    file: 'File',
+    mangabaka: 'MangaBaka',
+    overrides: 'Overrides',
 }
 
-function providerLabel(provider: number): string {
-    return PROVIDER_LABELS[provider] ?? `Provider ${provider}`
+const SOURCE_ORDER = ['file', 'mangabaka', 'overrides']
+
+function sourceLabel(source: string): string {
+    return SOURCE_LABELS[source] ?? source
 }
 
 interface FieldDef {
@@ -254,28 +256,31 @@ watch(
     data => {
         if (!data) return
         localLayers.value = JSON.parse(JSON.stringify(data))
-        const server99 = data.layers.find(l => l.provider === 99)
-        serverSnapshot.value = JSON.stringify(server99?.data ?? {})
+        const serverOverrides = data.layers.find(l => l.source === 'overrides')
+        serverSnapshot.value = JSON.stringify(serverOverrides?.data ?? {})
     },
     { immediate: true }
 )
 
-const overridesLayer = computed(() => localLayers.value?.layers.find(l => l.provider === 99))
+const overridesLayer = computed(() => localLayers.value?.layers.find(l => l.source === 'overrides'))
 
 const currentView = computed(() => {
     if (!localLayers.value)
-        return { values: {} as Record<string, any>, sources: {} as Record<string, number> }
+        return { values: {} as Record<string, any>, sources: {} as Record<string, string> }
     const layers =
         selectedView.value === 'merged'
             ? localLayers.value.layers
-            : localLayers.value.layers.filter(l => l.provider === Number(selectedView.value))
+            : localLayers.value.layers.filter(l => l.source === selectedView.value)
     const values: Record<string, any> = {}
-    const sources: Record<string, number> = {}
-    for (const layer of [...layers].sort((a, b) => a.provider - b.provider)) {
+    const sources: Record<string, string> = {}
+    const sorted = [...layers].sort(
+        (a, b) => SOURCE_ORDER.indexOf(a.source) - SOURCE_ORDER.indexOf(b.source)
+    )
+    for (const layer of sorted) {
         for (const [key, val] of Object.entries(layer.data)) {
             if (val != null) {
                 values[key] = val
-                sources[key] = layer.provider
+                sources[key] = layer.source
             }
         }
     }
@@ -286,17 +291,21 @@ const viewOptions = computed(() => {
     const layers = localLayers.value?.layers ?? []
     const options = [{ title: 'Merged', value: 'merged' }]
     for (const layer of layers) {
-        options.push({ title: providerLabel(layer.provider), value: String(layer.provider) })
+        if (layer.source !== 'overrides' && !Object.keys(layer.data).length) continue
+        options.push({ title: sourceLabel(layer.source), value: layer.source })
+    }
+    if (!options.some(o => o.value === 'overrides')) {
+        options.push({ title: sourceLabel('overrides'), value: 'overrides' })
     }
     return options
 })
 
 const selectedViewLayer = computed(() => {
     if (selectedView.value === 'merged') return null
-    return localLayers.value?.layers.find(l => l.provider === Number(selectedView.value)) ?? null
+    return localLayers.value?.layers.find(l => l.source === selectedView.value) ?? null
 })
 
-const isEditable = computed(() => selectedView.value === 'merged' || selectedView.value === '99')
+const isEditable = computed(() => selectedView.value === 'merged' || selectedView.value === 'overrides')
 
 const isDirty = computed(
     () => JSON.stringify(overridesLayer.value?.data ?? {}) !== serverSnapshot.value

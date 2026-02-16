@@ -10,7 +10,6 @@ from anyio import CapacityLimiter, create_task_group
 from voltis.components.scanner.fs_reader import LibraryFile, get_fs_items
 from voltis.components.scanner.repository import ScannerRepository
 from voltis.db.models import Content, ContentMetadataDict, Library, LibrarySource
-from voltis.db.search import refresh_search_index
 from voltis.services.resource_broker import ResourceBroker
 from voltis.utils.cover_cache import delete_content_cover_cached
 from voltis.utils.time import LogTime
@@ -158,8 +157,6 @@ class Scanner(abc.ABC):
         async with self.rb.get_asession() as session:
             await self.r.commit(session)
             await session.commit()
-            await refresh_search_index(session)
-            await session.commit()
 
     def _match_files(self, files: list[LibraryFile]):
         """Takes the loaded content, and categorizes them as deleted, new, or
@@ -241,10 +238,10 @@ class Scanner(abc.ABC):
 
         inherited: ContentMetadataDict = {}
         for item in items:
-            child_meta = self.r.get_metadata(uri=item.uri, provider=0).data
+            child_data = self.r.get_metadata(uri=item.uri).data
             for field in _SERIES_INHERITED_FIELDS:
-                if field not in inherited and field in child_meta:
-                    inherited[field] = child_meta[field]
+                if field not in inherited and field in child_data:
+                    inherited[field] = child_data[field]
             if len(inherited) == len(_SERIES_INHERITED_FIELDS):
                 break
 
@@ -252,16 +249,17 @@ class Scanner(abc.ABC):
         # field, falling back to the series uri_part.
         series_title: str | None = None
         for item in items:
-            child_meta = self.r.get_metadata(uri=item.uri, provider=0).data
-            if "series" in child_meta:
-                series_title = child_meta["series"]
+            child_data = self.r.get_metadata(uri=item.uri).data
+            if "series" in child_data:
+                series_title = child_data["series"]
                 break
         if series_title is None:
             series_title = series.uri_part
         inherited["title"] = series_title
 
-        meta_row = self.r.get_metadata(uri=series.uri, provider=0)
-        meta_row.data = {**meta_row.data, **inherited}
+        meta_row = self.r.get_metadata(uri=series.uri)
+        current = meta_row.data_raw.get("file", {}).get("data", {})
+        meta_row.set_source("file", data={**current, **inherited})
 
     #
     # -- abstract methods --

@@ -134,7 +134,7 @@ export interface ContentMetadata {
 }
 
 export interface MetadataLayer {
-    provider: number
+    source: string
     data: ContentMetadata
     raw: Record<string, unknown>
 }

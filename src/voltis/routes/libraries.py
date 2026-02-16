@@ -7,10 +7,10 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from voltis.db.models import Content, Library, ScannerType
-from voltis.utils.scan_queue import scan_queue
 from voltis.routes._misc import OK_RESPONSE, OkResponse
 from voltis.routes._providers import AdminUserProvider, RbProvider, UserProvider
 from voltis.utils.misc import now_without_tz
+from voltis.utils.scan_queue import scan_queue
 
 router = APIRouter()
 logger = structlog.stdlib.get_logger()

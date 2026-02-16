@@ -1,7 +1,6 @@
 import click
 import structlog
 from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from voltis.components.metadata_sources.mangabaka import MangaBaka, Series
 from voltis.db.models import Content, ContentMetadataDict, ContentMetadataRow, Library
@@ -9,8 +8,6 @@ from voltis.services.resource_broker import ResourceBroker
 from voltis.utils.misc import now_without_tz
 
 logger = structlog.stdlib.get_logger()
-
-PROVIDER_MANGABAKA = 2
 
 
 def _map_to_metadata(s: Series) -> ContentMetadataDict:
@@ -43,7 +40,6 @@ async def _scan_sources(
             click.echo(f"Error: Library {library_id} not found", err=True)
             return
 
-        # Load comic series
         q = select(Content).where(
             Content.library_id == library_id,
             Content.type == "comic_series",
@@ -63,8 +59,7 @@ async def _scan_sources(
                 await session.scalars(
                     select(ContentMetadataRow.uri).where(
                         ContentMetadataRow.library_id == library_id,
-                        ContentMetadataRow.provider == PROVIDER_MANGABAKA,
-                        ContentMetadataRow.remote_id.isnot(None),
+                        ContentMetadataRow.data_raw["mangabaka"]["remote_id"].astext.isnot(None),
                     )
                 )
             ).all()
@@ -109,26 +104,33 @@ async def _scan_sources(
                     mb_id=full["id"],
                 )
 
-                row_dict = {
-                    "uri": content.uri,
-                    "library_id": library_id,
-                    "provider": PROVIDER_MANGABAKA,
-                    "remote_id": str(full["id"]),
-                    "data": dict(_map_to_metadata(full)),
-                    "raw": dict(full),
-                    "updated_at": now_without_tz(),
-                }
-                stmt = pg_insert(ContentMetadataRow).values(row_dict)
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=["uri", "library_id", "provider"],
-                    set_={
-                        "remote_id": stmt.excluded.remote_id,
-                        "data": stmt.excluded.data,
-                        "raw": stmt.excluded.raw,
-                        "updated_at": stmt.excluded.updated_at,
-                    },
+                # Load or create the metadata row
+                row = (
+                    await session.execute(
+                        select(ContentMetadataRow).where(
+                            ContentMetadataRow.uri == content.uri,
+                            ContentMetadataRow.library_id == library_id,
+                        )
+                    )
+                ).scalar_one_or_none()
+
+                if not row:
+                    row = ContentMetadataRow(
+                        uri=content.uri,
+                        library_id=library_id,
+                        data={},
+                        data_raw={},
+                        updated_at=now_without_tz(),
+                    )
+                    session.add(row)
+
+                row.set_source(
+                    "mangabaka",
+                    data=dict(_map_to_metadata(full)),
+                    raw=dict(full),
+                    remote_id=str(full["id"]),
                 )
-                await session.execute(stmt)
+                row.updated_at = now_without_tz()
                 matched += 1
 
         await session.commit()

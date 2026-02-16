@@ -9,10 +9,10 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import aliased
 
 from voltis.db.models import (
+    METADATA_MERGE_ORDER,
     Content,
     ContentFileData,
     ContentMetadataDict,
-    ContentMetadataMerged,
     ContentMetadataRow,
     ContentType,
     CustomList,
@@ -21,7 +21,6 @@ from voltis.db.models import (
     ReadingStatus,
     UserToContent,
 )
-from voltis.db.search import refresh_search_index
 from voltis.routes._providers import AdminUserProvider, RbProvider, UserProvider
 from voltis.utils.misc import PaginatedResponse, Unset, UnsetType, now_without_tz
 from voltis.utils.scan_queue import scan_queue
@@ -121,7 +120,7 @@ async def get_content(
 ) -> ContentDTO:
     async with rb.get_asession() as session:
         query = (
-            select(Content, UserToContent, ContentMetadataMerged.data)
+            select(Content, UserToContent, ContentMetadataRow.data)
             .outerjoin(
                 UserToContent,
                 (UserToContent.library_id == Content.library_id)
@@ -129,9 +128,9 @@ async def get_content(
                 & (UserToContent.user_id == user.id),
             )
             .outerjoin(
-                ContentMetadataMerged,
-                (ContentMetadataMerged.uri == Content.uri)
-                & (ContentMetadataMerged.library_id == Content.library_id),
+                ContentMetadataRow,
+                (ContentMetadataRow.uri == Content.uri)
+                & (ContentMetadataRow.library_id == Content.library_id),
             )
             .where(Content.id == content_id)
         )
@@ -193,7 +192,7 @@ async def list_content(
             .lateral()
         )
         base_query = (
-            select(Content, count_subq.c.children_count, UserToContent, ContentMetadataMerged.data)
+            select(Content, count_subq.c.children_count, UserToContent, ContentMetadataRow.data)
             .outerjoin(
                 UserToContent,
                 (UserToContent.library_id == Content.library_id)
@@ -201,9 +200,9 @@ async def list_content(
                 & (UserToContent.user_id == user.id),
             )
             .outerjoin(
-                ContentMetadataMerged,
-                (ContentMetadataMerged.uri == Content.uri)
-                & (ContentMetadataMerged.library_id == Content.library_id),
+                ContentMetadataRow,
+                (ContentMetadataRow.uri == Content.uri)
+                & (ContentMetadataRow.library_id == Content.library_id),
             )
             .where(Content.valid == valid)
         )
@@ -224,7 +223,7 @@ async def list_content(
         if search is not None:
             fuzzy_distance = 0 if len(search) < 3 else 1
             base_query = base_query.where(
-                ContentMetadataMerged.data["title"].astext.bool_op("|||")(
+                ContentMetadataRow.data["title"].astext.bool_op("|||")(
                     text(f"(:search)::pdb.fuzzy({fuzzy_distance}, t)").bindparams(search=search)
                 )
             )
@@ -240,9 +239,7 @@ async def list_content(
         elif sort == "order":
             data_query = data_query.order_by(sorting(Content.order))
         elif search is not None:
-            data_query = data_query.order_by(
-                desc(text("paradedb.score(content_metadata_merged.id)"))
-            )
+            data_query = data_query.order_by(desc(text("paradedb.score(content_metadata.id)")))
 
         if offset:
             data_query = data_query.offset(offset)
@@ -394,7 +391,7 @@ async def set_series_item_statuses(
 
 
 class MetadataLayerDTO(BaseModel):
-    provider: int
+    source: str
     data: ContentMetadataDict
     raw: dict
 
@@ -415,37 +412,30 @@ async def get_metadata_layers(
         if not content:
             raise HTTPException(status_code=404, detail="Content not found")
 
-        rows = await session.execute(
-            select(ContentMetadataRow)
-            .where(
-                (ContentMetadataRow.uri == content.uri)
-                & (ContentMetadataRow.library_id == content.library_id)
+        row = (
+            await session.execute(
+                select(ContentMetadataRow).where(
+                    (ContentMetadataRow.uri == content.uri)
+                    & (ContentMetadataRow.library_id == content.library_id)
+                )
             )
-            .order_by(ContentMetadataRow.provider)
-        )
-        layers = [
-            MetadataLayerDTO(
-                provider=row.provider,
-                data=typing.cast(ContentMetadataDict, row.data),
-                raw=row.raw or {},
-            )
-            for row in rows.scalars().all()
-        ]
+        ).scalar_one_or_none()
 
-        # Always include overrides layer (99)
-        if not any(layer.provider == 99 for layer in layers):
-            layers.append(MetadataLayerDTO(provider=99, data={}, raw={}))
-
-        merged_result = await session.execute(
-            select(ContentMetadataMerged.data).where(
-                (ContentMetadataMerged.uri == content.uri)
-                & (ContentMetadataMerged.library_id == content.library_id)
+        data_raw = row.data_raw if row else {}
+        layers = []
+        for source in METADATA_MERGE_ORDER:
+            entry = data_raw.get(source, {})
+            layers.append(
+                MetadataLayerDTO(
+                    source=source,
+                    data=typing.cast(ContentMetadataDict, entry.get("data", {})),
+                    raw=entry.get("raw", {}),
+                )
             )
-        )
-        merged = merged_result.scalar_one_or_none() or {}
 
         return MetadataLayersResponse(
-            merged=typing.cast(ContentMetadataDict, merged), layers=layers
+            merged=typing.cast(ContentMetadataDict, row.data if row else {}),
+            layers=layers,
         )
 
 
@@ -465,27 +455,28 @@ async def update_metadata_override(
         if not content:
             raise HTTPException(status_code=404, detail="Content not found")
 
-        stmt = (
-            pg_insert(ContentMetadataRow)
-            .values(
+        row = (
+            await session.execute(
+                select(ContentMetadataRow).where(
+                    (ContentMetadataRow.uri == content.uri)
+                    & (ContentMetadataRow.library_id == content.library_id)
+                )
+            )
+        ).scalar_one_or_none()
+
+        if not row:
+            row = ContentMetadataRow(
                 uri=content.uri,
                 library_id=content.library_id,
-                provider=99,
-                data=body.data,
-                raw={},
+                data_raw={},
                 updated_at=now_without_tz(),
             )
-            .on_conflict_do_update(
-                index_elements=["uri", "library_id", "provider"],
-                set_={"data": body.data, "updated_at": now_without_tz()},
-            )
-        )
-        await session.execute(stmt)
-        await session.commit()
-        await refresh_search_index(session)
+            session.add(row)
+
+        row.set_source("overrides", data=body.data)
+        row.updated_at = now_without_tz()
         await session.commit()
 
-    # Return fresh layers
     return await get_metadata_layers(rb, user, content_id)
 
 

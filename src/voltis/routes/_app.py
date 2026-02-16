@@ -12,6 +12,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from voltis.db.models import User
 from voltis.services.resource_broker import ResourceBroker
 from voltis.services.settings import settings
+from voltis.utils.scan_queue import scan_queue
 
 from .auth import router as auth_router
 from .collections import router as collections_router
@@ -21,8 +22,6 @@ from .files import router as files_router
 from .libraries import router as libraries_router
 from .static import router as static_router
 from .users import router as users_router
-from voltis.utils.scan_queue import scan_queue
-
 from .ws import ConnectionManager
 from .ws import router as ws_router
 

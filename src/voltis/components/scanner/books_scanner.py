@@ -1,5 +1,4 @@
 import pathlib
-import typing
 import zipfile
 
 import anyio
@@ -87,8 +86,8 @@ class BooksScanner(Scanner):
         if not self.no_fs:
             self._scan_book(content, title, metadata)
         else:
-            meta_row = self.r.get_metadata(uri=content.uri, provider=0)
-            meta_row.data = {"title": title}
+            meta_row = self.r.get_metadata(uri=content.uri)
+            meta_row.set_source("file", data={"title": title})
 
         return content
 
@@ -126,9 +125,8 @@ class BooksScanner(Scanner):
                 data["series"] = metadata.series
             raw = {k: v for k, v in metadata.to_object().items() if v is not None}
 
-        meta_row = self.r.get_metadata(uri=content.uri, provider=0)
-        meta_row.data = typing.cast(dict, data)
-        meta_row.raw = raw
+        meta_row = self.r.get_metadata(uri=content.uri)
+        meta_row.set_source("file", data, raw=raw)
 
     async def update_series(self, series: Content, items: list[Content]) -> None:
         series.cover_uri = None

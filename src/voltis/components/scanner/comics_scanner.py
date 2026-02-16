@@ -123,9 +123,8 @@ class ComicsScanner(Scanner):
 
         if "title" not in meta:
             meta["title"] = title
-        meta_row = self.r.get_metadata(uri=content.uri, provider=0)
-        meta_row.data = typing.cast(dict, meta)
-        meta_row.raw = typing.cast(dict, comic_info)
+        meta_row = self.r.get_metadata(uri=content.uri)
+        meta_row.set_source("file", meta, raw=typing.cast(dict, comic_info))
 
         return content
 
