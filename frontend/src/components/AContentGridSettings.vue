@@ -57,6 +57,16 @@
                     hide-details
                 />
                 <VCheckbox v-model="hideTitle" label="Hide title" density="compact" hide-details />
+
+                <VDivider class="my-3" />
+
+                <div class="d-flex align-center justify-space-between mb-1">
+                    <span class="text-caption text-medium-emphasis">Item count</span>
+                </div>
+                <VBtnToggle v-model="itemCountMode" mandatory density="compact" variant="outlined">
+                    <VBtn value="unread" size="small">Unread</VBtn>
+                    <VBtn value="total" size="small">Total</VBtn>
+                </VBtnToggle>
             </VCardText>
         </VCard>
     </VMenu>
@@ -126,13 +136,24 @@ const plusHold = useRepeatOnHold(() => {
 })
 
 function showAll() {
-    settings.value = { hideItemCount: false, hideStatus: false, hideTitle: false }
+    settings.value = {
+        hideItemCount: false,
+        hideStatus: false,
+        hideTitle: false,
+        itemCountMode: 'unread',
+    }
 }
 
 const hideItemCount = computed({
     get: () => settings.value.hideItemCount,
     set: (v: boolean) => {
         settings.value = { hideItemCount: v }
+    },
+})
+const itemCountMode = computed({
+    get: () => settings.value.itemCountMode,
+    set: (v: 'unread' | 'total') => {
+        settings.value = { itemCountMode: v }
     },
 })
 const hideStatus = computed({

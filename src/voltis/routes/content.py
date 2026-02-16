@@ -77,6 +77,7 @@ class ContentDTO(BaseModel):
     parent_id: str | None
     library_id: str
     children_count: int | None = None
+    unread_children_count: int | None = None
     user_data: UserToContentDTO | None = None
 
     @classmethod
@@ -85,6 +86,7 @@ class ContentDTO(BaseModel):
         model: Content,
         meta: ContentMetadataDict | None = None,
         children_count: int | None = None,
+        unread_children_count: int | None = None,
         user_to_content: UserToContent | None = None,
         include_file_data: bool = True,
         include_meta: bool = True,
@@ -108,6 +110,7 @@ class ContentDTO(BaseModel):
             parent_id=model.parent_id,
             library_id=model.library_id,
             children_count=children_count,
+            unread_children_count=unread_children_count,
             user_data=UserToContentDTO.from_model(user_to_content) if user_to_content else None,
         )
 
@@ -186,13 +189,36 @@ async def list_content(
 
     async with rb.get_asession() as session:
         ChildContent = aliased(Content)
+        ChildUTC = aliased(UserToContent)
         count_subq = (
             select(func.count(ChildContent.id).label("children_count"))
             .where(ChildContent.parent_id == Content.id)
             .lateral()
         )
+        unread_subq = (
+            select(func.count(ChildContent.id).label("unread_children_count"))
+            .outerjoin(
+                ChildUTC,
+                (ChildUTC.library_id == ChildContent.library_id)
+                & (ChildUTC.uri == ChildContent.uri)
+                & (ChildUTC.user_id == user.id),
+            )
+            .where(
+                ChildContent.parent_id == Content.id,
+                (ChildUTC.id.is_(None))
+                | ChildUTC.status.is_(None)
+                | (~ChildUTC.status.in_(["completed", "dropped"])),
+            )
+            .lateral()
+        )
         base_query = (
-            select(Content, count_subq.c.children_count, UserToContent, ContentMetadataRow.data)
+            select(
+                Content,
+                count_subq.c.children_count,
+                unread_subq.c.unread_children_count,
+                UserToContent,
+                ContentMetadataRow.data,
+            )
             .outerjoin(
                 UserToContent,
                 (UserToContent.library_id == Content.library_id)
@@ -253,9 +279,10 @@ async def list_content(
             data=[
                 ContentDTO.from_model(
                     row[0],
-                    meta=row[3],
+                    meta=row[4],
                     children_count=row[1],
-                    user_to_content=row[2],
+                    unread_children_count=row[2],
+                    user_to_content=row[3],
                     include_file_data="file_data" in include_,
                     include_meta="meta" in include_,
                 )

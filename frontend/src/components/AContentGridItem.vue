@@ -41,7 +41,9 @@
             </span>
         </VCard>
 
-        <div v-if="!settings.hideTitle" class="text-body-2 pt-2 line-clamp-2">{{ content.title }}</div>
+        <div v-if="!settings.hideTitle" class="text-body-2 pt-2 line-clamp-2">
+            {{ content.title }}
+        </div>
     </div>
 </template>
 
@@ -89,9 +91,13 @@ const coverUri = computed(() => {
 })
 
 const childrenCount = computed(() => {
-    return props.content.type === 'book_series' || props.content.type === 'comic_series'
-        ? props.content.children_count
-        : null
+    if (props.content.type !== 'book_series' && props.content.type !== 'comic_series') return null
+    const count =
+        settings.value.itemCountMode === 'unread'
+            ? props.content.unread_children_count
+            : props.content.children_count
+    if (settings.value.itemCountMode === 'unread' && count === 0) return null
+    return count
 })
 
 const statusIcon = computed(() => {

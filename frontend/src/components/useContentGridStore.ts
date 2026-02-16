@@ -7,6 +7,7 @@ const DEFAULT_ITEM_SIZE = 170
 export interface GridSettings {
     itemSize: number
     hideItemCount: boolean
+    itemCountMode: 'unread' | 'total'
     hideStatus: boolean
     hideTitle: boolean
 }
@@ -14,6 +15,7 @@ export interface GridSettings {
 const DEFAULTS: GridSettings = {
     itemSize: DEFAULT_ITEM_SIZE,
     hideItemCount: false,
+    itemCountMode: 'unread',
     hideStatus: false,
     hideTitle: false,
 }

@@ -163,6 +163,7 @@ export interface Content {
     parent_id: string | null
     library_id: string
     children_count: number | null
+    unread_children_count: number | null
     user_data: UserToContent | null
 }
 
