@@ -27,8 +27,14 @@ class ScanQueue:
         self._current_summary: ScannerEventUpdateSummary | None = None
         self._current_progress: ScannerEventProgress | None = None
 
-    async def enqueue(self, rb: ResourceBroker, library_id: str, force: bool = False):
-        if any(s.library.id == library_id for s in self.queue):
+    async def enqueue(
+        self,
+        rb: ResourceBroker,
+        library_id: str,
+        force: bool = False,
+        filter_paths: list[str] | None = None,
+    ):
+        if not filter_paths and any(s.library.id == library_id for s in self.queue):
             logger.info("Scan already queued", library_id=library_id)
             return
 
@@ -37,7 +43,7 @@ class ScanQueue:
             if library is None:
                 raise ValueError(f"Library {library_id} not found")
 
-        scanner = get_scanner(rb, library, force=force)
+        scanner = get_scanner(rb, library, force=force, filter_paths=filter_paths)
         self.queue.append(scanner)
         logger.info("Scan enqueued", library_id=library_id, queue_size=len(self.queue))
 

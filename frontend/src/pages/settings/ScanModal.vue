@@ -8,6 +8,7 @@
                     <VCheckbox
                         class="force-scan-checkbox"
                         v-model="forceScan"
+                        :disabled="isContentScan"
                         label="Force scan"
                         :messages="[
                             'Force scanning will re-scan all files, even if they have not changed since the last scan.',
@@ -81,6 +82,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onUnmounted } from 'vue'
+import { contentApi } from '@/utils/api/content'
 import { librariesApi } from '@/utils/api/libraries'
 import { ws } from '@/utils/ws'
 
@@ -96,24 +98,24 @@ const props = defineProps<{
     open: boolean
     close: () => void
     libraryIds: string[]
+    contentId?: string
 }>()
 
 const libraries = librariesApi.useList()
 const scan = librariesApi.useScan()
-const forceScan = ref(false)
+const forceScan = ref(!!props.contentId)
 const scanning = ref(false)
 const scanComplete = ref(false)
 const scanStatus = ref<ScanStatusItem[]>([])
 
 let unsubscribe: (() => void) | null = null
 
+const isContentScan = computed(() => !!props.contentId)
+
 const title = computed(() => {
-    if (props.libraryIds.length === 0) {
-        return 'Scan All Libraries'
-    }
-    if (props.libraryIds.length === 1) {
-        return `Scan ${getLibraryName(props.libraryIds[0]!)}`
-    }
+    if (isContentScan.value) return 'Scan Content'
+    if (props.libraryIds.length === 0) return 'Scan All Libraries'
+    if (props.libraryIds.length === 1) return `Scan ${getLibraryName(props.libraryIds[0]!)}`
     return `Scan ${props.libraryIds.length} Libraries`
 })
 
@@ -121,44 +123,47 @@ function getLibraryName(id: string): string {
     return libraries.data?.value?.find(l => l.id === id)?.name ?? id
 }
 
-function startScan() {
-    scan.mutate(
-        {
-            ids: props.libraryIds.length > 0 ? props.libraryIds : undefined,
-            force: forceScan.value,
-        },
-        {
-            onSuccess: () => {
-                scanning.value = true
-                unsubscribe = ws.on('scan_status', (msg: { queue: ScanStatusItem[] }) => {
-                    const queueIds = new Set(msg.queue.map(i => i.library_id))
+function subscribeScanStatus() {
+    scanning.value = true
+    unsubscribe = ws.on('scan_status', (msg: { queue: ScanStatusItem[] }) => {
+        const queueIds = new Set(msg.queue.map(i => i.library_id))
 
-                    // Mark items no longer in queue as done
-                    for (const item of scanStatus.value) {
-                        if (item.status !== 'done' && !queueIds.has(item.library_id)) {
-                            item.status = 'done'
-                        }
-                    }
-
-                    // Update or append items from queue
-                    for (const incoming of msg.queue) {
-                        const existing = scanStatus.value.find(
-                            i => i.library_id === incoming.library_id
-                        )
-                        if (existing) {
-                            Object.assign(existing, incoming)
-                        } else {
-                            scanStatus.value.push(incoming)
-                        }
-                    }
-
-                    if (msg.queue.length === 0) {
-                        scanComplete.value = true
-                    }
-                })
-            },
+        // Mark items no longer in queue as done
+        for (const item of scanStatus.value) {
+            if (item.status !== 'done' && !queueIds.has(item.library_id)) {
+                item.status = 'done'
+            }
         }
-    )
+
+        // Update or append items from queue
+        for (const incoming of msg.queue) {
+            const existing = scanStatus.value.find(i => i.library_id === incoming.library_id)
+            if (existing) {
+                Object.assign(existing, incoming)
+            } else {
+                scanStatus.value.push(incoming)
+            }
+        }
+
+        if (msg.queue.length === 0) {
+            scanComplete.value = true
+        }
+    })
+}
+
+async function startScan() {
+    if (isContentScan.value) {
+        await contentApi.scanContent(props.contentId!)
+        subscribeScanStatus()
+    } else {
+        scan.mutate(
+            {
+                ids: props.libraryIds.length > 0 ? props.libraryIds : undefined,
+                force: forceScan.value,
+            },
+            { onSuccess: subscribeScanStatus }
+        )
+    }
 }
 
 onUnmounted(() => {
@@ -170,8 +175,13 @@ onUnmounted(() => {
 import { Modals } from '@/utils/modals'
 import Self from './ScanModal.vue'
 
-export function showScanModal(libraryIds: string[]): Promise<void> {
-    return Modals.show(Self, { libraryIds })
+export function showScanModal(libraryIds: string[]): Promise<void>
+export function showScanModal(opts: { contentId: string }): Promise<void>
+export function showScanModal(arg: string[] | { contentId: string }): Promise<void> {
+    if (Array.isArray(arg)) {
+        return Modals.show(Self, { libraryIds: arg })
+    }
+    return Modals.show(Self, { libraryIds: [], contentId: arg.contentId })
 }
 </script>
 

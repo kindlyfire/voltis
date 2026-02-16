@@ -51,7 +51,16 @@ async def _get_fs_items_source(source: LibrarySource):
             mtime = datetime.datetime.fromtimestamp(stat_.st_mtime)
             files.append(LibraryFile(path=item.as_posix(), mtime=mtime, size=stat_.st_size))
 
-    if not await path.is_dir():
+    try:
+        stat_ = await path.stat()
+    except FileNotFoundError:
+        raise LibrarySourceMissing(f"Source path does not exist: {path}")
+
+    if stat.S_ISREG(stat_.st_mode):
+        await get_file_info(path)
+        return files
+
+    if not stat.S_ISDIR(stat_.st_mode):
         raise LibrarySourceMissing(f"Source path does not exist: {path}")
 
     async with create_task_group() as tg:

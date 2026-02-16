@@ -152,6 +152,10 @@ export const contentApi = {
         return apiFetch<MetadataLayersResponse>(`/content/${contentId}/metadata-layers`)
     },
 
+    scanContent: async (contentId: string) => {
+        return apiFetch(`/content/${contentId}/scan`, { method: 'POST' })
+    },
+
     updateMetadataOverride: async (
         contentId: string,
         data: ContentMetadata

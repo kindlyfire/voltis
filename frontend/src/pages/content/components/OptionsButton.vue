@@ -28,6 +28,12 @@
                 @click="showEditMetadataModal(props.contentId)"
             />
             <VListItem
+                v-if="isAdmin"
+                prepend-icon="mdi-magnify-scan"
+                title="Scan"
+                @click="showScanModal({ contentId: props.contentId })"
+            />
+            <VListItem
                 prepend-icon="mdi-book-sync"
                 title="Update progress"
                 @click="showUpdateProgressModal(props.contentId)"
@@ -39,6 +45,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { usersApi } from '@/utils/api/users'
+import { showScanModal } from '@/pages/settings/ScanModal.vue'
 import { showDownloadModal } from './DownloadModal.vue'
 import { showEditMetadataModal } from './EditMetadataModal.vue'
 import { showListsModal } from './ListsModal.vue'

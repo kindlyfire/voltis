@@ -24,6 +24,7 @@ from voltis.db.models import (
 from voltis.db.search import refresh_search_index
 from voltis.routes._providers import AdminUserProvider, RbProvider, UserProvider
 from voltis.utils.misc import PaginatedResponse, Unset, UnsetType, now_without_tz
+from voltis.utils.scan_queue import scan_queue
 
 router = APIRouter()
 
@@ -486,3 +487,30 @@ async def update_metadata_override(
 
     # Return fresh layers
     return await get_metadata_layers(rb, user, content_id)
+
+
+@router.post("/{content_id}/scan")
+async def scan_content(
+    rb: RbProvider,
+    _user: AdminUserProvider,
+    content_id: str,
+):
+    async with rb.get_asession() as session:
+        content = await session.get(Content, content_id)
+        if not content:
+            raise HTTPException(status_code=404, detail="Content not found")
+
+        file_uris = []
+        if content.file_uri:
+            file_uris.append(content.file_uri)
+
+        children = (
+            await session.scalars(select(Content.file_uri).where(Content.parent_id == content_id))
+        ).all()
+        file_uris.extend(uri for uri in children if uri)
+
+        if not file_uris:
+            raise HTTPException(status_code=400, detail="No files to scan")
+
+        await scan_queue.enqueue(rb, content.library_id, force=True, filter_paths=file_uris)
+    return {"status": "queued"}
