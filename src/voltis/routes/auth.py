@@ -8,7 +8,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
 from voltis.db.models import Session, User
-from voltis.routes._misc import OK_RESPONSE, OkResponse
+from voltis.routes._misc import OK_RESPONSE, OkResponse, get_first_user_flow
 from voltis.routes._providers import (
     SESSION_DURATION_DAYS,
     RbProvider,
@@ -60,13 +60,19 @@ async def route_auth_register(
     username: Annotated[str, Body(min_length=2)],
     password: Annotated[str, Body(min_length=8)],
 ) -> OkResponse:
-    if settings.REGISTRATION_ENABLED is False:
+    first_user_flow = await get_first_user_flow(rb)
+    if settings.REGISTRATION_ENABLED is False and not first_user_flow:
         raise HTTPException(status_code=403, detail="Registration is disabled")
 
     password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
     async with rb.get_asession() as session:
-        user = User(id=User.make_id(), username=username, password_hash=password_hash)
+        user = User(
+            id=User.make_id(),
+            username=username,
+            password_hash=password_hash,
+            permissions=["ADMIN"] if first_user_flow else [],
+        )
         expires_at = datetime.now(timezone.utc) + timedelta(days=SESSION_DURATION_DAYS)
         user_session = Session(
             token=uuid4().hex + uuid4().hex,

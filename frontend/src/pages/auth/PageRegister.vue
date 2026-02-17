@@ -12,6 +12,14 @@
                             <VProgressCircular indeterminate size="64" />
                         </div>
                         <div v-else-if="registrationsEnabled">
+                            <VAlert
+                                v-if="isFirstUserFlow"
+                                type="info"
+                                variant="tonal"
+                                class="mb-4 mt-2"
+                            >
+                                Welcome! Create the first admin account below to get started.
+                            </VAlert>
                             <VForm @submit="onSubmit" class="space-y-4!">
                                 <AInput
                                     :input="getInputProps('username')"
@@ -45,7 +53,7 @@
                             for access.
                         </div>
                     </VCardText>
-                    <VCardActions>
+                    <VCardActions v-if="!isFirstUserFlow">
                         <VSpacer />
                         <RouterLink to="/auth/login">Already have an account?</RouterLink>
                     </VCardActions>
@@ -78,7 +86,10 @@ const queryClient = useQueryClient()
 useAlreadyLoggedInRedirect()
 
 const infoQuery = miscApi.useInfo()
-const registrationsEnabled = computed(() => infoQuery.data.value?.registration_enabled ?? false)
+const isFirstUserFlow = computed(() => infoQuery.data.value?.first_user_flow ?? false)
+const registrationsEnabled = computed(
+    () => isFirstUserFlow.value || (infoQuery.data.value?.registration_enabled ?? false)
+)
 
 const schema = z
     .object({
@@ -103,9 +114,14 @@ const { getInputProps, onSubmit, mutation } = useForm({
             username: values.username,
             password: values.password,
         })
-        await queryClient.refetchQueries({
-            queryKey: ['users', 'me'],
-        })
+        await Promise.all([
+            queryClient.refetchQueries({
+                queryKey: ['misc', 'info'],
+            }),
+            queryClient.refetchQueries({
+                queryKey: ['users', 'me'],
+            }),
+        ])
         router.push('/')
     },
 })

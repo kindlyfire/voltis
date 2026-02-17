@@ -27,6 +27,7 @@ export const usersApi = {
                     throw e
                 }
             },
+            refetchOnMount: false,
         }),
 
     useUpdateMe: () => {

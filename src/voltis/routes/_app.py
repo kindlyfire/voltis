@@ -4,12 +4,11 @@ from importlib.metadata import version as pkg_version
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy import func, select
 from starlette.datastructures import Headers
 from starlette.middleware.gzip import GZipResponder, IdentityResponder
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from voltis.db.models import User
+from voltis.routes._misc import get_first_user_flow
 from voltis.services.resource_broker import ResourceBroker
 from voltis.services.settings import settings
 from voltis.utils.scan_queue import scan_queue
@@ -94,23 +93,10 @@ class GZipMiddleware:
 
 
 def add_info_route(app: FastAPI, rb: ResourceBroker):
-    first_user_flow = True
-
     @app.get("/api/info")
     async def get_info() -> InfoDTO:
-        nonlocal first_user_flow
-        if first_user_flow:
-            async with rb.get_asession() as session:
-                res = await session.scalars(
-                    select(func.count())
-                    .select_from(User)
-                    .where(User.permissions.contains(["ADMIN"]))
-                )
-                if res.one() > 0:
-                    first_user_flow = False
-
         return InfoDTO(
             version=APP_VERSION,
             registration_enabled=settings.REGISTRATION_ENABLED,
-            first_user_flow=first_user_flow,
+            first_user_flow=await get_first_user_flow(rb),
         )

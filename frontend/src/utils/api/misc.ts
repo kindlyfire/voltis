@@ -6,6 +6,7 @@ import { isEnabled } from './_utils'
 export interface Info {
     version: string
     registration_enabled: boolean
+    first_user_flow: boolean
 }
 
 export const miscApi = {
@@ -14,6 +15,7 @@ export const miscApi = {
             queryKey: ['misc', 'info'],
             queryFn: () => miscApi.info(),
             enabled: isEnabled(enabled),
+            refetchOnMount: false,
         }),
 
     info: async (): Promise<Info> => {

@@ -147,7 +147,7 @@ const hasBrokenRefs = computed(() => (qBrokenRefs.data.value?.length ?? 0) > 0)
 async function handleLogout() {
     await mLogout.mutateAsync()
     queryClient.invalidateQueries({ queryKey: ['users', 'me'] })
-    router.push('/auth/login')
+    // The watcher in App.vue will redirect
 }
 
 /** We out here overcomplicating things to the bone. It's nice, though. */

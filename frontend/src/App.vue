@@ -1,5 +1,5 @@
 <template>
-    <div v-if="qMe.isLoading.value" class="loading-container">
+    <div v-if="qMe.isLoading.value || qInfo.isLoading.value" class="loading-container">
         <VProgressCircular indeterminate size="64" />
     </div>
     <RouterView v-else />
@@ -10,15 +10,24 @@ import { RouterView, useRouter } from 'vue-router'
 import { watch } from 'vue'
 import { usersApi } from './utils/api/users'
 import { useHead } from '@unhead/vue'
+import { miscApi } from './utils/api/misc'
 
 const router = useRouter()
 const qMe = usersApi.useMe()
+const qInfo = miscApi.useInfo()
 
 watch(
-    () => [qMe.data.value, qMe.isLoading.value, router.currentRoute.value] as const,
-    ([me, isLoading, route]) => {
-        if (!isLoading && !me && !route.path.startsWith('/auth')) {
-            router.replace('/auth/login')
+    () =>
+        [qMe.data.value, qMe.isLoading.value, router.currentRoute.value, qInfo.data.value] as const,
+    ([me, isLoading, route, info]) => {
+        if (!isLoading && !me && info) {
+            if (info.first_user_flow && route.path !== '/auth/register') {
+                router.replace('/auth/register')
+                return
+            }
+            if (!isLoading && !me && !route.path.startsWith('/auth')) {
+                router.replace('/auth/login')
+            }
         }
     },
     { immediate: true }
