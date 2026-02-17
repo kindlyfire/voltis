@@ -3,10 +3,14 @@ import { toValue, type MaybeRefOrGetter, type UnwrapRef } from 'vue'
 import { API_URL, apiFetch } from '../fetch'
 import type {
     BookChapter,
+    BrokenRefsFixRequest,
+    BrokenRefsSummaryItem,
+    BrokenUserToContent,
     Content,
     ContentListParams,
     ContentMetadata,
     DownloadInfo,
+    LibraryUrisResponse,
     MetadataLayersResponse,
     Paginated,
     ReadingStatus,
@@ -133,7 +137,7 @@ export const contentApi = {
     setSeriesItemStatuses: async (
         contentId: string,
         status: ReadingStatus | null,
-        untilId?: string,
+        untilId?: string
     ): Promise<void> => {
         await apiFetch(`/content/${contentId}/series-item-statuses`, {
             method: 'POST',
@@ -163,6 +167,53 @@ export const contentApi = {
         return apiFetch<MetadataLayersResponse>(`/content/${contentId}/metadata-override`, {
             method: 'POST',
             body: JSON.stringify({ data }),
+        })
+    },
+
+    listLibraryUris: async (libraryId: string): Promise<LibraryUrisResponse> => {
+        return apiFetch<LibraryUrisResponse>(`/content/refs/${libraryId}`)
+    },
+
+    useLibraryUris: (libraryId: MaybeRefOrGetter<string | undefined | null>) =>
+        useQuery({
+            queryKey: ['content', 'library-uris', libraryId],
+            queryFn: async () => contentApi.listLibraryUris(toValue(libraryId)!),
+            enabled: isEnabled(libraryId),
+        }),
+
+    useBrokenRefsSummary: (options: QueryOptions<BrokenRefsSummaryItem[]> = {}) =>
+        useQuery({
+            queryKey: ['content', 'broken-refs-summary'],
+            queryFn: async () => apiFetch<BrokenRefsSummaryItem[]>('/content/broken-refs'),
+            ...options,
+        }),
+
+    useBrokenRefs: (
+        libraryId: MaybeRefOrGetter<string | undefined | null>,
+        params: MaybeRefOrGetter<{ search?: string; limit?: number; offset?: number }> = {},
+        options: QueryOptions<Paginated<BrokenUserToContent>> = {}
+    ) =>
+        useQuery({
+            queryKey: ['content', 'broken-refs', libraryId, params],
+            queryFn: async () => {
+                const p = toValue(params)
+                const searchParams = new URLSearchParams()
+                if (p.search) searchParams.append('search', p.search)
+                if (p.limit !== undefined) searchParams.append('limit', String(p.limit))
+                if (p.offset !== undefined) searchParams.append('offset', String(p.offset))
+                const query = searchParams.toString()
+                return apiFetch<Paginated<BrokenUserToContent>>(
+                    `/content/broken-refs/${toValue(libraryId)}${query ? `?${query}` : ''}`
+                )
+            },
+            enabled: isEnabled(libraryId),
+            ...options,
+        }),
+
+    fixBrokenRefs: async (libraryId: string, body: BrokenRefsFixRequest): Promise<void> => {
+        await apiFetch(`/content/broken-refs/${libraryId}`, {
+            method: 'POST',
+            body: JSON.stringify(body),
         })
     },
 }

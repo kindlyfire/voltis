@@ -15,7 +15,7 @@
             <span
                 v-if="content.user_data?.status && !settings.hideStatus"
                 class="absolute top-2 left-2 bg-black/80 text-white p-1 rounded-full aspect-square w-5 flex items-center justify-center"
-                :title="`Status: ${STATUS_TITLES[content.user_data.status]}`"
+                :title="`Status: ${READING_STATUS_LABELS[content.user_data.status]}`"
             >
                 <VIcon :icon="statusIcon" size="12" />
             </span>
@@ -48,6 +48,7 @@
 </template>
 
 <script setup lang="ts">
+import { READING_STATUS_LABELS } from '@/utils/api/types'
 import type { Content, ReadingStatus } from '@/utils/api/types'
 import { computed, toRef } from 'vue'
 import { API_URL } from '@/utils/fetch'
@@ -71,14 +72,6 @@ const STATUS_ICONS: Record<ReadingStatus, string> = {
     on_hold: 'mdi-pause',
     dropped: 'mdi-close',
     plan_to_read: 'mdi-bookmark',
-}
-
-const STATUS_TITLES: Record<ReadingStatus, string> = {
-    reading: 'Reading',
-    completed: 'Completed',
-    on_hold: 'On Hold',
-    dropped: 'Dropped',
-    plan_to_read: 'Plan to Read',
 }
 
 const to = computed(() =>

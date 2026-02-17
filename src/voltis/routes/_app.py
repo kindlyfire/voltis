@@ -17,6 +17,7 @@ from voltis.utils.scan_queue import scan_queue
 from .auth import router as auth_router
 from .collections import router as collections_router
 from .content import router as content_router
+from .content_refs import router as content_refs_router
 from .custom_lists import router as custom_lists_router
 from .files import router as files_router
 from .libraries import router as libraries_router
@@ -52,6 +53,7 @@ def create_app(rb: ResourceBroker):
     app.add_middleware(GZipMiddleware)
 
     app.include_router(auth_router, prefix="/api/auth")
+    app.include_router(content_refs_router, prefix="/api/content")
     app.include_router(content_router, prefix="/api/content")
     app.include_router(files_router, prefix="/api/files")
     app.include_router(users_router, prefix="/api/users")

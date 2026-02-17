@@ -65,6 +65,14 @@ export type ContentType = 'comic' | 'comic_series' | 'book' | 'book_series'
 
 export type ReadingStatus = 'reading' | 'completed' | 'on_hold' | 'dropped' | 'plan_to_read'
 
+export const READING_STATUS_LABELS: Record<ReadingStatus, string> = {
+    reading: 'Reading',
+    completed: 'Completed',
+    on_hold: 'On Hold',
+    dropped: 'Dropped',
+    plan_to_read: 'Plan to Read',
+}
+
 export interface ReadingProgress {
     current_page?: number
     progress_percent?: number
@@ -76,6 +84,27 @@ export interface UserToContent {
     notes: string | null
     rating: number | null
     progress: ReadingProgress
+}
+
+export interface BrokenUserToContent extends UserToContent {
+    id: string
+    uri: string
+    library_id: string | null
+}
+
+export interface BrokenRefsSummaryItem {
+    library_id: string | null
+    count: number
+}
+
+export interface LibraryUrisResponse {
+    content_uris: string[]
+    user_uris: string[]
+}
+
+export interface BrokenRefsFixRequest {
+    delete?: string[]
+    update?: Record<string, string>
 }
 
 export interface UserToContentUpdate {

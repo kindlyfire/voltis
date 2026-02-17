@@ -41,6 +41,13 @@
                 <VListItem to="/settings/account" prepend-icon="mdi-account">
                     <VListItemTitle>Account</VListItemTitle>
                 </VListItem>
+                <VListItem
+                    v-if="hasBrokenRefs || route.path === '/settings/broken-refs'"
+                    to="/settings/broken-refs"
+                    prepend-icon="mdi-link-off"
+                >
+                    <VListItemTitle>Broken Refs</VListItemTitle>
+                </VListItem>
                 <template v-if="isAdmin">
                     <VDivider class="my-2" />
                     <VListItem to="/settings/users" prepend-icon="mdi-account-group">
@@ -119,6 +126,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
 import { onLongPress, useEventListener, useThrottleFn } from '@vueuse/core'
 import { useLayoutStore } from './useLayoutStore'
+import { contentApi } from '@/utils/api/content'
 import SearchBox from './SearchBox.vue'
 import Libraries from './Libraries.vue'
 import ScanIndicator from './ScanIndicator.vue'
@@ -133,6 +141,8 @@ const mLogout = authApi.useLogout()
 const queryClient = useQueryClient()
 
 const isAdmin = computed(() => qMe.data.value?.permissions.includes('ADMIN'))
+const qBrokenRefs = contentApi.useBrokenRefsSummary({ enabled: () => isSettings.value })
+const hasBrokenRefs = computed(() => (qBrokenRefs.data.value?.length ?? 0) > 0)
 
 async function handleLogout() {
     await mLogout.mutateAsync()
