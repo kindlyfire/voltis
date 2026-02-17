@@ -12,6 +12,7 @@ from voltis.components.scanner.repository import ScannerRepository
 from voltis.db.models import Content, ContentMetadataDict, Library, LibrarySource
 from voltis.services.resource_broker import ResourceBroker
 from voltis.utils.cover_cache import delete_content_cover_cached
+from voltis.utils.misc import now_without_tz
 from voltis.utils.time import LogTime
 
 logger = structlog.stdlib.get_logger()
@@ -156,6 +157,11 @@ class Scanner(abc.ABC):
     async def _commit(self):
         async with self.rb.get_asession() as session:
             await self.r.commit(session)
+
+            lib = await session.get(Library, self.library.id)
+            assert lib
+            lib.scanned_at = now_without_tz()
+
             await session.commit()
 
     def _match_files(self, files: list[LibraryFile]):

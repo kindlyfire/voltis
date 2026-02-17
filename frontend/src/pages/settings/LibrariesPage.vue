@@ -29,7 +29,7 @@
                     <td>
                         {{
                             library.scanned_at
-                                ? new Date(library.scanned_at).toLocaleString()
+                                ? new Date(library.scanned_at + 'Z').toLocaleString()
                                 : 'Never'
                         }}
                     </td>
