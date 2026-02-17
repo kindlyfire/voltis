@@ -9,6 +9,7 @@ from voltis.db.models import (
     Content,
     ContentMetadataRow,
     ContentType,
+    CustomListToContent,
     GroupingContentTypes,
     UserToContent,
 )
@@ -106,11 +107,21 @@ class ScannerRepository:
                 )
             )
             for old_uri, new_uri in self._uri_renames.items():
+                # In the future, we can turn this into a single update. Or maybe
+                # a procedure.
                 await session.execute(
                     update(UserToContent)
                     .where(
                         UserToContent.uri == old_uri,
                         UserToContent.library_id == self.library_id,
+                    )
+                    .values(uri=new_uri)
+                )
+                await session.execute(
+                    update(CustomListToContent)
+                    .where(
+                        CustomListToContent.uri == old_uri,
+                        CustomListToContent.library_id == self.library_id,
                     )
                     .values(uri=new_uri)
                 )
