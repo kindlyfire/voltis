@@ -83,6 +83,7 @@ import { useForm } from '@/utils/forms'
 import { librariesApi } from '@/utils/api/libraries'
 import AInput from '@/components/AInput.vue'
 import AQueryError from '@/components/AQueryError.vue'
+import { showConfirmModal } from '@/components/AConfirmModal.vue'
 
 const props = defineProps<{
     open: boolean
@@ -154,6 +155,13 @@ watch(
 
 async function handleDelete() {
     if (isNew.value) return
+    const confirmed = await showConfirmModal({
+        title: 'Delete Library',
+        message: `Are you sure you want to delete "${library.value?.name}"? This will remove all its content.`,
+        confirmText: 'Delete',
+        confirmColor: 'error',
+    })
+    if (!confirmed) return
     await deleteLibrary.mutateAsync(props.libraryId)
     props.close()
 }

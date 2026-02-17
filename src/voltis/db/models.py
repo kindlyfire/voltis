@@ -115,7 +115,7 @@ class Library(_Base, _DefaultColumns):
     sources: Mapped[list[Any]] = col("sources", JSONB, server_default="{}")
     settings: Mapped[dict] = col("settings", JSONB, server_default="{}")
 
-    contents: Mapped[list["Content"]] = relationship(back_populates="library")
+    contents: Mapped[list["Content"]] = relationship(back_populates="library", passive_deletes=True)
 
     def get_sources(self) -> list[LibrarySource]:
         return [LibrarySource.model_validate(source) for source in self.sources]
