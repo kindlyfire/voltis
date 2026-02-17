@@ -10,7 +10,6 @@ if TYPE_CHECKING:
 def get_scanner(
     rb: ResourceBroker,
     library: Library,
-    no_fs: bool = False,
     dry_run: bool = False,
     filter_paths: list[str] | None = None,
     force: bool = False,
@@ -22,7 +21,6 @@ def get_scanner(
 
         return ComicsScanner(
             dry_run=dry_run,
-            no_fs=no_fs,
             rb=rb,
             library=library,
             filter_paths=filter_paths,
@@ -34,7 +32,6 @@ def get_scanner(
 
         return BooksScanner(
             dry_run=dry_run,
-            no_fs=no_fs,
             rb=rb,
             library=library,
             filter_paths=filter_paths,

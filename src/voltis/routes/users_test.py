@@ -1,8 +1,4 @@
 import pytest
-from httpx import ASGITransport, AsyncClient
-
-from voltis.routes._app import create_app
-from voltis.services.settings import settings
 
 
 @pytest.mark.anyio

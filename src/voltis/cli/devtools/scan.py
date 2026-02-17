@@ -68,7 +68,7 @@ async def _scan(
 
     async with LogTime(logger, "Library scan"):
         scanner = get_scanner(
-            rb, no_fs=False, dry_run=dry_run, filter_paths=filter_paths, force=force, library=lib
+            rb, dry_run=dry_run, filter_paths=filter_paths, force=force, library=lib
         )
 
         async def consume_events():

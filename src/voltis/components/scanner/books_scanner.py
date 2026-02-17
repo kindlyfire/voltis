@@ -41,9 +41,7 @@ class BooksScanner(Scanner):
         path = Path(file.path)
 
         # Read EPUB metadata
-        metadata: EpubMetadata | None = None
-        if not self.no_fs:
-            metadata = await anyio.to_thread.run_sync(read_metadata, pathlib.Path(file.path))
+        metadata = await anyio.to_thread.run_sync(read_metadata, pathlib.Path(file.path))
 
         logger.info("Scanning book", file_path=file.path, metadata=metadata)
 
@@ -83,11 +81,7 @@ class BooksScanner(Scanner):
         content.updated_at = now_without_tz()
         content.order_parts = [series_index or 0.0]
 
-        if not self.no_fs:
-            self._scan_book(content, title, metadata)
-        else:
-            meta_row = self.r.get_metadata(uri=content.uri)
-            meta_row.set_source("file", data={"title": title})
+        self._scan_book(content, title, metadata)
 
         return content
 

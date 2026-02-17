@@ -58,7 +58,6 @@ class Scanner(abc.ABC):
         *,
         rb: ResourceBroker,
         library: Library,
-        no_fs: bool = False,
         dry_run: bool = False,
         filter_paths: list[str] | None = None,
         force: bool = False,
@@ -68,7 +67,6 @@ class Scanner(abc.ABC):
         self.library = library
         self.r = ScannerRepository(rb, library.id)
         self.limiter = CapacityLimiter(10)
-        self.no_fs = no_fs
         self.dry_run = dry_run
         self.filter_paths = filter_paths
         self.force = force
