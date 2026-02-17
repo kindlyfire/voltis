@@ -1,7 +1,7 @@
 <template>
     <VContainer>
-        <div class="d-flex align-center gap-4 mb-4">
-            <h1 class="text-h4">{{ library?.name }}</h1>
+        <div class="d-flex align-center gap-4">
+            <h1 class="text-h5">{{ library?.name }}</h1>
             <VBtn
                 class="ms-1"
                 :icon="true"

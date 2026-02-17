@@ -62,7 +62,11 @@ const props = defineProps<{
 }>()
 
 const isNew = computed(() => props.listId === 'new')
-const visibilityOptions = ['public', 'private', 'unlisted']
+const visibilityOptions = [
+    { title: 'Public', value: 'public' },
+    { title: 'Private', value: 'private' },
+    { title: 'Unlisted', value: 'unlisted' },
+]
 
 const list = customListsApi.useGet(() => (isNew.value ? null : props.listId), {
     enabled: computed(() => !isNew.value),

@@ -238,7 +238,7 @@ export interface CustomListPartial {
     visibility: CustomListVisibility
     user_id: string
     entry_count: number | null
-    cover_uris: string[]
+    cover_content_ids: string[]
 }
 
 export interface CustomListEntry {
@@ -252,7 +252,7 @@ export interface CustomListEntry {
     order: number | null
 }
 
-export type CustomList = Omit<CustomListPartial, 'cover_uris'> & {
+export type CustomList = Omit<CustomListPartial, 'cover_content_ids'> & {
     entries: CustomListEntry[]
 }
 

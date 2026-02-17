@@ -54,14 +54,14 @@ class CustomListDTO(BaseModel):
     visibility: CustomListVisibility
     user_id: str
     entry_count: int | None
-    cover_uris: list[str]
+    cover_content_ids: list[str]
 
     @classmethod
     def from_model(
         cls,
         model: CustomList,
         entry_count: int | None = None,
-        cover_uris: list[str] | None = None,
+        cover_content_ids: list[str] | None = None,
     ) -> "CustomListDTO":
         return cls(
             id=model.id,
@@ -72,7 +72,7 @@ class CustomListDTO(BaseModel):
             visibility=model.visibility,
             user_id=model.user_id,
             entry_count=entry_count,
-            cover_uris=cover_uris or [],
+            cover_content_ids=cover_content_ids or [],
         )
 
 
@@ -156,15 +156,15 @@ async def list_custom_lists(
             .lateral()
         )
 
-        cover_uris_subq = (
+        cover_content_ids_subq = (
             text(
                 """
                 SELECT (
                     array_agg(
-                        c.cover_uri
+                        c.id
                         ORDER BY (clc."order" IS NULL), clc."order", clc.created_at
                     ) FILTER (WHERE c.cover_uri IS NOT NULL)
-                )[1:4] AS cover_uris
+                )[1:4] AS cover_content_ids
                 FROM custom_list_to_content clc
                 LEFT JOIN content c
                     ON c.library_id = clc.library_id
@@ -172,7 +172,7 @@ async def list_custom_lists(
                 WHERE clc.custom_list_id = custom_lists.id
                 """
             )
-            .columns(cover_uris=ARRAY(Text))
+            .columns(cover_content_ids=ARRAY(Text))
             .lateral()
         )
 
@@ -180,10 +180,10 @@ async def list_custom_lists(
         others_clause = and_(CustomList.user_id != user.id, CustomList.visibility != "private")
 
         query = (
-            select(CustomList, entry_count_subq.c.entry_count, cover_uris_subq.c.cover_uris)
+            select(CustomList, entry_count_subq.c.entry_count, cover_content_ids_subq.c.cover_content_ids)
             .select_from(CustomList)
             .join(entry_count_subq, true())
-            .join(cover_uris_subq, true(), isouter=True)
+            .join(cover_content_ids_subq, true(), isouter=True)
         )
         if user_filter == "me":
             query = query.where(owner_clause)
@@ -195,7 +195,7 @@ async def list_custom_lists(
         query = query.order_by(CustomList.created_at.desc())
         result = await session.execute(query)
         return [
-            CustomListDTO.from_model(row[0], entry_count=row[1], cover_uris=row[2])
+            CustomListDTO.from_model(row[0], entry_count=row[1], cover_content_ids=row[2])
             for row in result.all()
         ]
 
@@ -265,7 +265,7 @@ async def create_custom_list(
         session.add(custom_list)
         await session.commit()
         await session.refresh(custom_list)
-        return CustomListDTO.from_model(custom_list, entry_count=0, cover_uris=[])
+        return CustomListDTO.from_model(custom_list, entry_count=0, cover_content_ids=[])
 
 
 @router.post("/{list_id}")
