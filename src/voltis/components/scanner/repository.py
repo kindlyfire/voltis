@@ -1,11 +1,17 @@
 import structlog
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
-from voltis.db.models import Content, ContentMetadataRow, ContentType, GroupingContentTypes
+from voltis.db.models import (
+    Content,
+    ContentMetadataRow,
+    ContentType,
+    GroupingContentTypes,
+    UserToContent,
+)
 from voltis.services.resource_broker import ResourceBroker
 from voltis.utils.misc import now_without_tz
 
@@ -32,6 +38,7 @@ class ScannerRepository:
         self.content_d: list[Content] = []
         self.content_metadata: list[ContentMetadataRow] = []
         self.resolved_parents: dict[str, Content] = {}
+        self._uri_renames: dict[str, str] = {}
 
     async def load(self):
         async with self.rb.get_asession() as session:
@@ -88,6 +95,25 @@ class ScannerRepository:
                 set_={col: stmt.excluded[col] for col in content_update_cols},
             )
             await session.execute(stmt)
+
+        # Delete old metadata rows and update user_to_content for renamed URIs
+        if self._uri_renames:
+            old_uris = list(self._uri_renames.keys())
+            await session.execute(
+                delete(ContentMetadataRow).where(
+                    ContentMetadataRow.uri.in_(old_uris),
+                    ContentMetadataRow.library_id == self.library_id,
+                )
+            )
+            for old_uri, new_uri in self._uri_renames.items():
+                await session.execute(
+                    update(UserToContent)
+                    .where(
+                        UserToContent.uri == old_uri,
+                        UserToContent.library_id == self.library_id,
+                    )
+                    .values(uri=new_uri)
+                )
 
         # Merge and upsert metadata
         dirty_meta = [m for m in self.content_metadata if _is_dirty(m)]
@@ -154,6 +180,11 @@ class ScannerRepository:
             None,
         )
         if item:
+            if item.uri != uri:
+                self._update_uris(item, uri)
+
+            item.uri_part = uri_part
+            item.file_uri = file_uri
             self.resolved_parents[uri] = item
             return item
 
@@ -173,6 +204,25 @@ class ScannerRepository:
         self.get_metadata(uri=uri).set_source("file", data={"title": title})
         self.resolved_parents[uri] = item
         return item
+
+    def _update_uris(self, content: Content, new_uri: str):
+        """Update a content's URI and cascade to its metadata and children."""
+        if content.uri == new_uri:
+            return
+
+        old_uri = content.uri
+        content.uri = new_uri
+        self._uri_renames[old_uri] = new_uri
+
+        meta = next((m for m in self.content_metadata if m.uri == old_uri), None)
+        if meta:
+            meta.uri = new_uri
+            flag_modified(meta, "data")
+
+        for child in self.content:
+            if child.parent_id == content.id:
+                child_new_uri = f"{new_uri}/{child.uri_part}"
+                self._update_uris(child, child_new_uri)
 
     def get_metadata(self, uri: str) -> ContentMetadataRow:
         """Get metadata for a given content item."""
