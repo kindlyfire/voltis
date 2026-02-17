@@ -1,5 +1,8 @@
 <template>
-    <VListSubheader>Libraries</VListSubheader>
+    <VListSubheader>
+        <template v-if="qLibraries.isLoading.value || libraries?.length">Libraries</template>
+        <template v-else>No libraries...</template>
+    </VListSubheader>
     <VListItem
         v-for="library in shownLibraries"
         :key="library.id"
@@ -47,6 +50,7 @@ import { keepPreviousData, useQuery } from '@tanstack/vue-query'
 const route = useRoute()
 const qMe = usersApi.useMe()
 const qLibraries = librariesApi.useList()
+const libraries = qLibraries.data
 
 const routeId = computed(() => route.params.id as string | undefined)
 const qContent = contentApi.useGet(

@@ -1,6 +1,23 @@
 <template>
     <VContainer>
-        <div class="space-y-8">
+        <div
+            v-if="!qLibraries.isLoading.value && libraries?.length === 0 && user"
+            class="d-flex flex-column align-center justify-center"
+            style="min-height: 75vh"
+        >
+            <template v-if="user.permissions.includes('ADMIN')">
+                <div class="text-h6 text-medium-emphasis mb-4">
+                    No libraries. Add one in settings!
+                </div>
+                <VBtn color="primary" to="/settings/libraries">Libraries</VBtn>
+            </template>
+            <template v-else>
+                <div class="text-h6 text-medium-emphasis mb-4">
+                    No libraries. Ask your server admin to import something!
+                </div>
+            </template>
+        </div>
+        <div v-else class="space-y-8">
             <section v-if="lastRead?.length">
                 <ACarousel title="Recently Read">
                     <template v-if="qLastRead.isLoading.value">
@@ -42,10 +59,17 @@ import ACarouselItem from '@/components/ACarouselItem.vue'
 import AContentGridItem from '@/components/AContentGridItem.vue'
 import AContentGridItemSkeleton from '@/components/AContentGridItemSkeleton.vue'
 import { contentApi } from '@/utils/api/content'
+import { librariesApi } from '@/utils/api/libraries'
+import { usersApi } from '@/utils/api/users'
 
 useHead({
     title: 'Home',
 })
+
+const qLibraries = librariesApi.useList()
+const libraries = computed(() => qLibraries.data.value)
+const qUser = usersApi.useMe()
+const user = qUser.data
 
 const qLastRead = contentApi.useList({
     reading_status: 'reading',
