@@ -29,6 +29,7 @@ func Register(e *echo.Echo, pool *pgxpool.Pool) {
 	(&UserRoutes{pool: pool}).Register(api.Group("/users"))
 	(&ContentRoutes{pool: pool, scanQueue: scanQueue}).Register(api.Group("/content"))
 	(&FileRoutes{pool: pool}).Register(api.Group("/files"))
+	(&ContentRefRoutes{pool: pool}).Register(api.Group("/content"))
 
 	registerStaticRoutes(e)
 }
