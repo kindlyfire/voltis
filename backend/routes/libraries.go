@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"voltis/db"
 	"voltis/models"
 
 	"github.com/jackc/pgx/v5"
@@ -79,17 +80,13 @@ func (lr *LibraryRoutes) list(c echo.Context) error {
 		ContentCount     *int `db:"content_count"`
 		RootContentCount *int `db:"root_content_count"`
 	}
-	rows, err := lr.pool.Query(ctx, `
+	items, err := db.Select[libraryRow](ctx, lr.pool, `
 		SELECT l.*,
 			(SELECT COUNT(*) FROM content WHERE library_id = l.id) AS content_count,
 			(SELECT COUNT(*) FROM content WHERE library_id = l.id AND parent_id IS NULL) AS root_content_count
 		FROM libraries l
 		ORDER BY l.name
 	`)
-	if err != nil {
-		return err
-	}
-	items, err := pgx.CollectRows(rows, pgx.RowToStructByName[libraryRow])
 	if err != nil {
 		return err
 	}
@@ -110,26 +107,21 @@ func (lr *LibraryRoutes) scan(c echo.Context) error {
 	idParam := c.QueryParam("id")
 	force := c.QueryParam("force") == "true"
 
-	var libraries []models.Library
+	var (
+		libraries []models.Library
+		err       error
+	)
 	if idParam != "" {
 		ids := strings.Split(idParam, ",")
 		for i := range ids {
 			ids[i] = strings.TrimSpace(ids[i])
 		}
-		rows, err := lr.pool.Query(ctx, "SELECT * FROM libraries WHERE id = ANY($1)", ids)
-		if err != nil {
-			return err
-		}
-		libraries, err = pgx.CollectRows(rows, pgx.RowToStructByName[models.Library])
+		libraries, err = db.Select[models.Library](ctx, lr.pool, "SELECT * FROM libraries WHERE id = ANY($1)", ids)
 		if err != nil {
 			return err
 		}
 	} else {
-		rows, err := lr.pool.Query(ctx, "SELECT * FROM libraries")
-		if err != nil {
-			return err
-		}
-		libraries, err = pgx.CollectRows(rows, pgx.RowToStructByName[models.Library])
+		libraries, err = db.Select[models.Library](ctx, lr.pool, "SELECT * FROM libraries")
 		if err != nil {
 			return err
 		}
@@ -227,11 +219,7 @@ func (lr *LibraryRoutes) delete(c echo.Context) error {
 }
 
 func getLibrary(ctx context.Context, pool *pgxpool.Pool, id string) (models.Library, error) {
-	rows, err := pool.Query(ctx, "SELECT * FROM libraries WHERE id = $1", id)
-	if err != nil {
-		return models.Library{}, err
-	}
-	lib, err := pgx.CollectExactlyOneRow(rows, pgx.RowToStructByName[models.Library])
+	lib, err := db.SelectOne[models.Library](ctx, pool, "SELECT * FROM libraries WHERE id = $1", id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return models.Library{}, echo.NewHTTPError(http.StatusNotFound, "Library not found")
 	}

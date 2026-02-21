@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	"voltis/db"
 	"voltis/models"
 
 	"github.com/jackc/pgx/v5"
@@ -61,11 +62,7 @@ func (ur *UserRoutes) list(c echo.Context) error {
 		return err
 	}
 
-	rows, err := ur.pool.Query(reqCtx(c), "SELECT * FROM users")
-	if err != nil {
-		return err
-	}
-	users, err := pgx.CollectRows(rows, pgx.RowToStructByName[models.User])
+	users, err := db.Select[models.User](reqCtx(c), ur.pool, "SELECT * FROM users")
 	if err != nil {
 		return err
 	}
@@ -238,11 +235,7 @@ func (ur *UserRoutes) delete(c echo.Context) error {
 }
 
 func getUser(ctx context.Context, pool *pgxpool.Pool, id string) (models.User, error) {
-	rows, err := pool.Query(ctx, "SELECT * FROM users WHERE id = $1", id)
-	if err != nil {
-		return models.User{}, err
-	}
-	user, err := pgx.CollectExactlyOneRow(rows, pgx.RowToStructByName[models.User])
+	user, err := db.SelectOne[models.User](ctx, pool, "SELECT * FROM users WHERE id = $1", id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return models.User{}, echo.NewHTTPError(http.StatusNotFound, "User not found")
 	}

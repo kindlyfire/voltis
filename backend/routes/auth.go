@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"voltis/config"
+	"voltis/db"
 	"voltis/models"
 
 	"github.com/jackc/pgx/v5"
@@ -38,11 +39,7 @@ func (a *AuthRoutes) login(c echo.Context) error {
 	}
 
 	ctx := reqCtx(c)
-	rows, err := a.pool.Query(ctx, "SELECT * FROM users WHERE username = $1", req.Username)
-	if err != nil {
-		return err
-	}
-	user, err := pgx.CollectExactlyOneRow(rows, pgx.RowToStructByName[models.User])
+	user, err := db.SelectOne[models.User](ctx, a.pool, "SELECT * FROM users WHERE username = $1", req.Username)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return echo.NewHTTPError(http.StatusUnauthorized, "invalid credentials")
 	}

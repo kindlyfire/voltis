@@ -7,6 +7,7 @@ import (
 	"slices"
 	"time"
 
+	"voltis/db"
 	"voltis/models"
 
 	"github.com/jackc/pgx/v5"
@@ -49,6 +50,12 @@ func authMiddleware(pool *pgxpool.Pool) echo.MiddlewareFunc {
 	}
 }
 
+type userWithSession struct {
+	models.User
+	SessionToken     string    `db:"session_token"`
+	SessionExpiresAt time.Time `db:"session_expires_at"`
+}
+
 func resolveUser(c echo.Context, pool *pgxpool.Pool) (*models.User, error) {
 	cookie, err := c.Cookie("voltis_session")
 	if err != nil || cookie.Value == "" {
@@ -56,22 +63,12 @@ func resolveUser(c echo.Context, pool *pgxpool.Pool) (*models.User, error) {
 	}
 
 	ctx := c.Request().Context()
-	rows, err := pool.Query(ctx, `
+	row, err := db.SelectOne[userWithSession](ctx, pool, `
 		SELECT u.*, s.token AS session_token, s.expires_at AS session_expires_at
 		FROM users u
 		JOIN sessions s ON s.user_id = u.id
 		WHERE s.token = $1 AND s.expires_at > NOW()
 	`, cookie.Value)
-	if err != nil {
-		return nil, err
-	}
-
-	type userWithSession struct {
-		models.User
-		SessionToken     string    `db:"session_token"`
-		SessionExpiresAt time.Time `db:"session_expires_at"`
-	}
-	row, err := pgx.CollectExactlyOneRow(rows, pgx.RowToStructByName[userWithSession])
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -115,4 +112,9 @@ func okResponse(c echo.Context) error {
 
 func reqCtx(c echo.Context) context.Context {
 	return c.Request().Context()
+}
+
+type PaginatedResponse[T any] struct {
+	Data  []T `json:"data"`
+	Total int `json:"total"`
 }
