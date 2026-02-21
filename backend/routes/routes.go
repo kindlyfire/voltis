@@ -30,6 +30,7 @@ func Register(e *echo.Echo, pool *pgxpool.Pool) {
 	(&ContentRoutes{pool: pool, scanQueue: scanQueue}).Register(api.Group("/content"))
 	(&FileRoutes{pool: pool}).Register(api.Group("/files"))
 	(&ContentRefRoutes{pool: pool}).Register(api.Group("/content"))
+	(&CustomListRoutes{pool: pool}).Register(api.Group("/custom-lists"))
 
 	registerStaticRoutes(e)
 }
