@@ -17,11 +17,7 @@ import (
 
 func main() {
 	slog.SetDefault(slog.New(tint.NewHandler(os.Stderr, nil)))
-	cfg, err := config.Load()
-	if err != nil {
-		slog.Error("failed to load config", "err", err)
-		os.Exit(1)
-	}
+	cfg := config.Load()
 
 	ctx := context.Background()
 	pool, err := db.Connect(ctx, cfg.DatabaseURL)

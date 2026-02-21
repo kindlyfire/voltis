@@ -22,17 +22,11 @@ func Get() Config {
 	if cached != nil {
 		return *cached
 	}
-	c, err := Load()
-	if err != nil {
-		panic("config: " + err.Error())
-	}
-	return c
+	return Load()
 }
 
-func Load() (Config, error) {
-	if err := godotenv.Load(); err != nil {
-		return Config{}, err
-	}
+func Load() Config {
+	_ = godotenv.Load()
 
 	c := Config{
 		DatabaseURL:         appendSSLDisable(envOr("APP_DATABASE_URL", "")),
@@ -43,7 +37,7 @@ func Load() (Config, error) {
 		RegistrationEnabled: os.Getenv("APP_REGISTRATION_ENABLED") == "true",
 	}
 	cached = &c
-	return c, nil
+	return c
 }
 
 func appendSSLDisable(url string) string {
