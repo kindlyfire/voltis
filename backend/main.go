@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"net/http"
 	"os"
 
 	"voltis/config"
@@ -37,6 +39,18 @@ func main() {
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
+	e.HTTPErrorHandler = func(err error, c echo.Context) {
+		if c.Response().Committed {
+			return
+		}
+		var he *echo.HTTPError
+		if errors.As(err, &he) {
+			_ = c.JSON(he.Code, map[string]any{"error": he.Message})
+		} else {
+			slog.Error("unhandled error", "err", err, "method", c.Request().Method, "path", c.Request().URL.String())
+			_ = c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		}
+	}
 
 	routes.Register(e, pool)
 

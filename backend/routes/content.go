@@ -13,6 +13,7 @@ import (
 
 	"voltis/db"
 	"voltis/models"
+	"voltis/scanner"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -20,7 +21,8 @@ import (
 )
 
 type ContentRoutes struct {
-	pool *pgxpool.Pool
+	pool      *pgxpool.Pool
+	scanQueue *scanner.Queue
 }
 
 func (cr *ContentRoutes) Register(g *echo.Group) {
@@ -76,7 +78,7 @@ type ContentDTO struct {
 	CoverURI            *string           `json:"cover_uri"`
 	Type                string            `json:"type"`
 	Order               *int              `json:"order"`
-	OrderParts          []float32         `json:"order_parts"`
+	OrderParts          []*float32        `json:"order_parts"`
 	Meta                json.RawMessage   `json:"meta"`
 	FileData            json.RawMessage   `json:"file_data"`
 	ParentID            *string           `json:"parent_id"`
@@ -117,7 +119,7 @@ func contentToDTO(c models.Content, opts contentDTOOpts) ContentDTO {
 
 	orderParts := c.OrderParts
 	if orderParts == nil {
-		orderParts = []float32{}
+		orderParts = []*float32{}
 	}
 
 	return ContentDTO{
@@ -799,9 +801,7 @@ func (cr *ContentRoutes) scanContent(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "No files to scan")
 	}
 
-	if err := enqueueScanWithFilter(cr.pool, content.LibraryID, fileURIs); err != nil {
-		return err
-	}
+	cr.scanQueue.Enqueue(content.LibraryID, true, fileURIs)
 
 	return c.JSON(http.StatusOK, map[string]string{"status": "queued"})
 }
@@ -855,10 +855,3 @@ func getContent(ctx context.Context, pool *pgxpool.Pool, id string) (models.Cont
 	return content, err
 }
 
-func enqueueScanWithFilter(pool *pgxpool.Pool, libraryID string, filterPaths []string) error {
-	// TODO
-	_ = pool
-	_ = libraryID
-	_ = filterPaths
-	return nil
-}

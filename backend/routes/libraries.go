@@ -11,6 +11,7 @@ import (
 
 	"voltis/db"
 	"voltis/models"
+	"voltis/scanner"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -18,7 +19,8 @@ import (
 )
 
 type LibraryRoutes struct {
-	pool *pgxpool.Pool
+	pool      *pgxpool.Pool
+	scanQueue *scanner.Queue
 }
 
 func (lr *LibraryRoutes) Register(g *echo.Group) {
@@ -128,9 +130,7 @@ func (lr *LibraryRoutes) scan(c echo.Context) error {
 	}
 
 	for _, lib := range libraries {
-		if err := enqueueScan(lr.pool, lib.ID, force); err != nil {
-			return err
-		}
+		lr.scanQueue.Enqueue(lib.ID, force, nil)
 	}
 
 	return okResponse(c)
@@ -226,10 +226,4 @@ func getLibrary(ctx context.Context, pool *pgxpool.Pool, id string) (models.Libr
 	return lib, err
 }
 
-// enqueueScan is a placeholder for the scan queue integration.
-func enqueueScan(pool *pgxpool.Pool, libraryID string, force bool) error {
-	_ = pool
-	_ = libraryID
-	_ = force
-	return nil
-}
+

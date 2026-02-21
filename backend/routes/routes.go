@@ -1,19 +1,33 @@
 package routes
 
 import (
+	"strings"
+
+	"voltis/scanner"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 )
 
 func Register(e *echo.Echo, pool *pgxpool.Pool) {
+	scanQueue := scanner.NewQueue(pool)
+
+	e.Use(middleware.GzipWithConfig(middleware.GzipConfig{
+		MinLength: 860,
+		Skipper: func(c echo.Context) bool {
+			return strings.HasPrefix(c.Path(), "/api/files/")
+		},
+	}))
+
 	e.GET("/api/info", infoHandler(pool))
 
 	api := e.Group("/api", authMiddleware(pool))
 
 	(&AuthRoutes{pool: pool}).Register(api.Group("/auth"))
-	(&LibraryRoutes{pool: pool}).Register(api.Group("/libraries"))
+	(&LibraryRoutes{pool: pool, scanQueue: scanQueue}).Register(api.Group("/libraries"))
 	(&UserRoutes{pool: pool}).Register(api.Group("/users"))
-	(&ContentRoutes{pool: pool}).Register(api.Group("/content"))
+	(&ContentRoutes{pool: pool, scanQueue: scanQueue}).Register(api.Group("/content"))
 	(&FileRoutes{pool: pool}).Register(api.Group("/files"))
 
 	registerStaticRoutes(e)

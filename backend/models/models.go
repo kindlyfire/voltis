@@ -48,7 +48,7 @@ type Content struct {
 	CoverURI   *string    `db:"cover_uri" json:"cover_uri"`
 	Type       string     `db:"type" json:"type"`
 	Order      *int       `db:"order" json:"order"`
-	OrderParts []float32  `db:"order_parts" json:"order_parts"`
+	OrderParts []*float32 `db:"order_parts" json:"order_parts"`
 	FileData   JSONB      `db:"file_data" json:"file_data"`
 	ParentID   *string    `db:"parent_id" json:"parent_id"`
 	LibraryID  string     `db:"library_id" json:"library_id"`
