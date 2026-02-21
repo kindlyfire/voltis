@@ -1,15 +1,15 @@
 package routes
 
 import (
-	"github.com/jmoiron/sqlx"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 )
 
-func Register(e *echo.Echo, db *sqlx.DB) {
-	api := e.Group("/api", authMiddleware(db))
+func Register(e *echo.Echo, pool *pgxpool.Pool) {
+	api := e.Group("/api", authMiddleware(pool))
 
-	(&AuthRoutes{db: db}).Register(api.Group("/auth"))
-	(&LibraryRoutes{db: db}).Register(api.Group("/libraries"))
+	(&AuthRoutes{pool: pool}).Register(api.Group("/auth"))
+	(&LibraryRoutes{pool: pool}).Register(api.Group("/libraries"))
 
 	registerStaticRoutes(e)
 }

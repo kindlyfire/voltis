@@ -1,7 +1,9 @@
 package routes
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"strings"
@@ -9,12 +11,13 @@ import (
 
 	"voltis/models"
 
-	"github.com/jmoiron/sqlx"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 )
 
 type LibraryRoutes struct {
-	db *sqlx.DB
+	pool *pgxpool.Pool
 }
 
 func (lr *LibraryRoutes) Register(g *echo.Group) {
@@ -70,12 +73,13 @@ func (lr *LibraryRoutes) list(c echo.Context) error {
 		return err
 	}
 
-	var rows []struct {
+	ctx := reqCtx(c)
+	type libraryRow struct {
 		models.Library
 		ContentCount     *int `db:"content_count"`
 		RootContentCount *int `db:"root_content_count"`
 	}
-	err := lr.db.Select(&rows, `
+	rows, err := lr.pool.Query(ctx, `
 		SELECT l.*,
 			(SELECT COUNT(*) FROM content WHERE library_id = l.id) AS content_count,
 			(SELECT COUNT(*) FROM content WHERE library_id = l.id AND parent_id IS NULL) AS root_content_count
@@ -85,9 +89,13 @@ func (lr *LibraryRoutes) list(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	items, err := pgx.CollectRows(rows, pgx.RowToStructByName[libraryRow])
+	if err != nil {
+		return err
+	}
 
-	result := make([]LibraryDTO, len(rows))
-	for i, r := range rows {
+	result := make([]LibraryDTO, len(items))
+	for i, r := range items {
 		result[i] = libraryToDTO(r.Library, r.ContentCount, r.RootContentCount)
 	}
 	return c.JSON(http.StatusOK, result)
@@ -98,6 +106,7 @@ func (lr *LibraryRoutes) scan(c echo.Context) error {
 		return err
 	}
 
+	ctx := reqCtx(c)
 	idParam := c.QueryParam("id")
 	force := c.QueryParam("force") == "true"
 
@@ -107,22 +116,27 @@ func (lr *LibraryRoutes) scan(c echo.Context) error {
 		for i := range ids {
 			ids[i] = strings.TrimSpace(ids[i])
 		}
-		query, args, err := sqlx.In("SELECT * FROM libraries WHERE id IN (?)", ids)
+		rows, err := lr.pool.Query(ctx, "SELECT * FROM libraries WHERE id = ANY($1)", ids)
 		if err != nil {
 			return err
 		}
-		err = lr.db.Select(&libraries, lr.db.Rebind(query), args...)
+		libraries, err = pgx.CollectRows(rows, pgx.RowToStructByName[models.Library])
 		if err != nil {
 			return err
 		}
 	} else {
-		if err := lr.db.Select(&libraries, "SELECT * FROM libraries"); err != nil {
+		rows, err := lr.pool.Query(ctx, "SELECT * FROM libraries")
+		if err != nil {
+			return err
+		}
+		libraries, err = pgx.CollectRows(rows, pgx.RowToStructByName[models.Library])
+		if err != nil {
 			return err
 		}
 	}
 
 	for _, lib := range libraries {
-		if err := enqueueScan(lr.db, lib.ID, force); err != nil {
+		if err := enqueueScan(lr.pool, lib.ID, force); err != nil {
 			return err
 		}
 	}
@@ -135,6 +149,7 @@ func (lr *LibraryRoutes) upsert(c echo.Context) error {
 		return err
 	}
 
+	ctx := reqCtx(c)
 	idOrNew := c.Param("id_or_new")
 
 	var req upsertLibraryRequest
@@ -159,7 +174,7 @@ func (lr *LibraryRoutes) upsert(c echo.Context) error {
 
 	if idOrNew == "new" {
 		id := models.MakeLibraryID()
-		_, err = lr.db.Exec(`
+		_, err = lr.pool.Exec(ctx, `
 			INSERT INTO libraries (id, created_at, updated_at, name, type, sources)
 			VALUES ($1, $2, $3, $4, $5, $6)
 		`, id, now, now, req.Name, req.Type, sourcesJSON)
@@ -167,27 +182,27 @@ func (lr *LibraryRoutes) upsert(c echo.Context) error {
 			return err
 		}
 
-		var lib models.Library
-		if err := lr.db.Get(&lib, "SELECT * FROM libraries WHERE id = $1", id); err != nil {
+		lib, err := getLibrary(ctx, lr.pool, id)
+		if err != nil {
 			return err
 		}
 		return c.JSON(http.StatusOK, libraryToDTO(lib, nil, nil))
 	}
 
-	var lib models.Library
-	err = lr.db.Get(&lib, "SELECT * FROM libraries WHERE id = $1", idOrNew)
+	_, err = getLibrary(ctx, lr.pool, idOrNew)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "Library not found")
 	}
 
-	_, err = lr.db.Exec(`
+	_, err = lr.pool.Exec(ctx, `
 		UPDATE libraries SET name = $1, sources = $2, updated_at = $3 WHERE id = $4
 	`, req.Name, sourcesJSON, now, idOrNew)
 	if err != nil {
 		return err
 	}
 
-	if err := lr.db.Get(&lib, "SELECT * FROM libraries WHERE id = $1", idOrNew); err != nil {
+	lib, err := getLibrary(ctx, lr.pool, idOrNew)
+	if err != nil {
 		return err
 	}
 	return c.JSON(http.StatusOK, libraryToDTO(lib, nil, nil))
@@ -198,22 +213,34 @@ func (lr *LibraryRoutes) delete(c echo.Context) error {
 		return err
 	}
 
+	ctx := reqCtx(c)
 	id := c.Param("id")
-	result, err := lr.db.Exec("DELETE FROM libraries WHERE id = $1", id)
+	result, err := lr.pool.Exec(ctx, "DELETE FROM libraries WHERE id = $1", id)
 	if err != nil {
 		return err
 	}
 
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
+	if result.RowsAffected() == 0 {
 		return echo.NewHTTPError(http.StatusNotFound, "Library not found")
 	}
 	return okResponse(c)
 }
 
-func enqueueScan(db *sqlx.DB, libraryID string, force bool) error {
-	// TODO
-	_ = db
+func getLibrary(ctx context.Context, pool *pgxpool.Pool, id string) (models.Library, error) {
+	rows, err := pool.Query(ctx, "SELECT * FROM libraries WHERE id = $1", id)
+	if err != nil {
+		return models.Library{}, err
+	}
+	lib, err := pgx.CollectExactlyOneRow(rows, pgx.RowToStructByName[models.Library])
+	if errors.Is(err, pgx.ErrNoRows) {
+		return models.Library{}, echo.NewHTTPError(http.StatusNotFound, "Library not found")
+	}
+	return lib, err
+}
+
+// enqueueScan is a placeholder for the scan queue integration.
+func enqueueScan(pool *pgxpool.Pool, libraryID string, force bool) error {
+	_ = pool
 	_ = libraryID
 	_ = force
 	return nil

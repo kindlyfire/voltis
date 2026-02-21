@@ -1,28 +1,34 @@
 package db
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"log/slog"
 	"sort"
 
-	"github.com/jmoiron/sqlx"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
-func Connect(databaseURL string) (*sqlx.DB, error) {
-	db, err := sqlx.Connect("postgres", databaseURL)
+func Connect(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
+	config, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	config.MaxConns = 20
+
+	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		return nil, fmt.Errorf("connect: %w", err)
 	}
-	db.SetMaxOpenConns(20)
-	return db, nil
+	return pool, nil
 }
 
-func Migrate(db *sqlx.DB) error {
-	_, err := db.Exec(`
+func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
+	_, err := pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS _migrations (
 			name TEXT PRIMARY KEY,
 			applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -33,7 +39,7 @@ func Migrate(db *sqlx.DB) error {
 	}
 
 	applied := map[string]bool{}
-	rows, err := db.Query("SELECT name FROM _migrations")
+	rows, err := pool.Query(ctx, "SELECT name FROM _migrations")
 	if err != nil {
 		return fmt.Errorf("query applied migrations: %w", err)
 	}
@@ -67,19 +73,19 @@ func Migrate(db *sqlx.DB) error {
 			return fmt.Errorf("read migration %s: %w", name, err)
 		}
 
-		tx, err := db.Begin()
+		tx, err := pool.Begin(ctx)
 		if err != nil {
 			return fmt.Errorf("begin tx for %s: %w", name, err)
 		}
-		if _, err := tx.Exec(string(sql)); err != nil {
-			_ = tx.Rollback()
+		if _, err := tx.Exec(ctx, string(sql)); err != nil {
+			_ = tx.Rollback(ctx)
 			return fmt.Errorf("exec migration %s: %w", name, err)
 		}
-		if _, err := tx.Exec("INSERT INTO _migrations (name) VALUES ($1)", nameNoExt); err != nil {
-			_ = tx.Rollback()
+		if _, err := tx.Exec(ctx, "INSERT INTO _migrations (name) VALUES ($1)", nameNoExt); err != nil {
+			_ = tx.Rollback(ctx)
 			return fmt.Errorf("record migration %s: %w", name, err)
 		}
-		if err := tx.Commit(); err != nil {
+		if err := tx.Commit(ctx); err != nil {
 			return fmt.Errorf("commit migration %s: %w", name, err)
 		}
 	}

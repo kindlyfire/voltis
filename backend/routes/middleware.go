@@ -1,14 +1,16 @@
 package routes
 
 import (
-	"database/sql"
+	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"time"
 
 	"voltis/models"
 
-	"github.com/jmoiron/sqlx"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 )
 
@@ -32,10 +34,10 @@ func setSessionCookie(c echo.Context, token string) {
 	})
 }
 
-func authMiddleware(db *sqlx.DB) echo.MiddlewareFunc {
+func authMiddleware(pool *pgxpool.Pool) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
-			user, err := resolveUser(c, db)
+			user, err := resolveUser(c, pool)
 			if err != nil {
 				return err
 			}
@@ -47,24 +49,30 @@ func authMiddleware(db *sqlx.DB) echo.MiddlewareFunc {
 	}
 }
 
-func resolveUser(c echo.Context, db *sqlx.DB) (*models.User, error) {
+func resolveUser(c echo.Context, pool *pgxpool.Pool) (*models.User, error) {
 	cookie, err := c.Cookie("voltis_session")
 	if err != nil || cookie.Value == "" {
 		return nil, nil
 	}
 
-	var row struct {
-		models.User
-		SessionToken     string    `db:"session_token"`
-		SessionExpiresAt time.Time `db:"session_expires_at"`
-	}
-	err = db.Get(&row, `
+	ctx := c.Request().Context()
+	rows, err := pool.Query(ctx, `
 		SELECT u.*, s.token AS session_token, s.expires_at AS session_expires_at
 		FROM users u
 		JOIN sessions s ON s.user_id = u.id
 		WHERE s.token = $1 AND s.expires_at > NOW()
 	`, cookie.Value)
-	if errors.Is(err, sql.ErrNoRows) {
+	if err != nil {
+		return nil, err
+	}
+
+	type userWithSession struct {
+		models.User
+		SessionToken     string    `db:"session_token"`
+		SessionExpiresAt time.Time `db:"session_expires_at"`
+	}
+	row, err := pgx.CollectExactlyOneRow(rows, pgx.RowToStructByName[userWithSession])
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -75,7 +83,7 @@ func resolveUser(c echo.Context, db *sqlx.DB) (*models.User, error) {
 	timeUntilExpiry := time.Until(row.SessionExpiresAt)
 	if timeUntilExpiry < sessionRefreshThresholdDays*24*time.Hour {
 		newExpiry := time.Now().Add(sessionDurationDays * 24 * time.Hour)
-		_, _ = db.Exec("UPDATE sessions SET expires_at = $1 WHERE token = $2", newExpiry, row.SessionToken)
+		_, _ = pool.Exec(ctx, "UPDATE sessions SET expires_at = $1 WHERE token = $2", newExpiry, row.SessionToken)
 		setSessionCookie(c, row.SessionToken)
 	}
 
@@ -95,14 +103,16 @@ func requireAdmin(c echo.Context) (*models.User, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, p := range user.Permissions {
-		if p == "ADMIN" {
-			return user, nil
-		}
+	if slices.Contains(user.Permissions, "ADMIN") {
+		return user, nil
 	}
 	return nil, echo.NewHTTPError(http.StatusForbidden)
 }
 
 func okResponse(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]bool{"ok": true})
+}
+
+func reqCtx(c echo.Context) context.Context {
+	return c.Request().Context()
 }

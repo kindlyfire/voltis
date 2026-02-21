@@ -1,22 +1,25 @@
 package routes
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"time"
 
 	"voltis/config"
 	"voltis/models"
 
-	"github.com/jmoiron/sqlx"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
-	"github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type AuthRoutes struct {
-	db *sqlx.DB
+	pool *pgxpool.Pool
 }
 
 func (a *AuthRoutes) Register(g *echo.Group) {
@@ -34,10 +37,17 @@ func (a *AuthRoutes) login(c echo.Context) error {
 		return err
 	}
 
-	var user models.User
-	err := a.db.Get(&user, "SELECT * FROM users WHERE username = $1", req.Username)
+	ctx := reqCtx(c)
+	rows, err := a.pool.Query(ctx, "SELECT * FROM users WHERE username = $1", req.Username)
 	if err != nil {
+		return err
+	}
+	user, err := pgx.CollectExactlyOneRow(rows, pgx.RowToStructByName[models.User])
+	if errors.Is(err, pgx.ErrNoRows) {
 		return echo.NewHTTPError(http.StatusUnauthorized, "invalid credentials")
+	}
+	if err != nil {
+		return err
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
@@ -49,7 +59,7 @@ func (a *AuthRoutes) login(c echo.Context) error {
 		return err
 	}
 	expiresAt := time.Now().Add(sessionDurationDays * 24 * time.Hour)
-	_, err = a.db.Exec(
+	_, err = a.pool.Exec(ctx,
 		"INSERT INTO sessions (token, user_id, expires_at) VALUES ($1, $2, $3)",
 		token, user.ID, expiresAt,
 	)
@@ -79,8 +89,9 @@ func (a *AuthRoutes) register(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "password must be at most 72 characters")
 	}
 
+	ctx := reqCtx(c)
 	cfg := config.Get()
-	firstUser, err := isFirstUserFlow(a.db)
+	firstUser, err := isFirstUserFlow(ctx, a.pool)
 	if err != nil {
 		return err
 	}
@@ -93,18 +104,19 @@ func (a *AuthRoutes) register(c echo.Context) error {
 		return err
 	}
 
-	permissions := "{}"
+	permissions := []string{}
 	if firstUser {
-		permissions = "{ADMIN}"
+		permissions = []string{"ADMIN"}
 	}
 
 	userID := models.MakeUserID()
-	_, err = a.db.Exec(
-		`INSERT INTO users (id, username, password_hash, permissions) VALUES ($1, $2, $3, $4::text[])`,
+	_, err = a.pool.Exec(ctx,
+		`INSERT INTO users (id, username, password_hash, permissions) VALUES ($1, $2, $3, $4)`,
 		userID, req.Username, string(hash), permissions,
 	)
 	if err != nil {
-		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			return echo.NewHTTPError(http.StatusBadRequest, "username already exists")
 		}
 		return err
@@ -115,7 +127,7 @@ func (a *AuthRoutes) register(c echo.Context) error {
 		return err
 	}
 	expiresAt := time.Now().Add(sessionDurationDays * 24 * time.Hour)
-	_, err = a.db.Exec(
+	_, err = a.pool.Exec(ctx,
 		"INSERT INTO sessions (token, user_id, expires_at) VALUES ($1, $2, $3)",
 		token, userID, expiresAt,
 	)
@@ -133,7 +145,7 @@ func (a *AuthRoutes) logout(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
 	}
 
-	if _, err := a.db.Exec("DELETE FROM sessions WHERE token = $1", cookie.Value); err != nil {
+	if _, err := a.pool.Exec(reqCtx(c), "DELETE FROM sessions WHERE token = $1", cookie.Value); err != nil {
 		return err
 	}
 
@@ -152,10 +164,11 @@ func (a *AuthRoutes) logout(c echo.Context) error {
 
 var firstUserFlow = true
 
-func isFirstUserFlow(db *sqlx.DB) (bool, error) {
+func isFirstUserFlow(ctx context.Context, pool *pgxpool.Pool) (bool, error) {
 	if firstUserFlow {
 		var count int
-		if err := db.Get(&count, "SELECT COUNT(*) FROM users WHERE 'ADMIN' = ANY(permissions)"); err != nil {
+		err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM users WHERE 'ADMIN' = ANY(permissions)").Scan(&count)
+		if err != nil {
 			return false, err
 		}
 		if count > 0 {
@@ -172,4 +185,3 @@ func generateToken() (string, error) {
 	}
 	return hex.EncodeToString(b), nil
 }
-
