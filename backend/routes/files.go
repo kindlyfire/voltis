@@ -9,7 +9,9 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"voltis/config"
@@ -374,8 +376,10 @@ func (fr *FileRoutes) download(c echo.Context) error {
 // File reading helpers
 
 var archiveExtensions = map[string]bool{
-	".zip": true, ".cbz": true, ".cbr": true, ".rar": true, ".epub": true,
+	".zip": true, ".cbz": true, ".cbr": true, ".rar": true, ".epub": true, ".pdf": true,
 }
+
+var pdfPagePattern = regexp.MustCompile(`^p(\d+)$`)
 
 func readContentFile(uri string) ([]byte, string, error) {
 	// Try as a regular file first
@@ -388,6 +392,11 @@ func readContentFile(uri string) ([]byte, string, error) {
 	archivePath, innerPath := findArchiveAndInnerPath(uri)
 	if archivePath == "" {
 		return nil, "", echo.NewHTTPError(http.StatusNotFound, "File not found")
+	}
+
+	// PDF page rendering via pdftoppm
+	if strings.ToLower(filepath.Ext(archivePath)) == ".pdf" {
+		return readPDFPage(archivePath, innerPath)
 	}
 
 	a, err := archive.Open(archivePath)
@@ -403,6 +412,27 @@ func readContentFile(uri string) ([]byte, string, error) {
 
 	mediaType := guessMediaType(innerPath)
 	return data, mediaType, nil
+}
+
+func readPDFPage(pdfPath, innerPath string) ([]byte, string, error) {
+	m := pdfPagePattern.FindStringSubmatch(innerPath)
+	if m == nil {
+		return nil, "", echo.NewHTTPError(http.StatusBadRequest, "Invalid PDF page identifier")
+	}
+	page := m[1]
+
+	cmd := exec.Command("pdftoppm",
+		"-r", "250",
+		"-jpeg", "-jpegopt", "quality=90",
+		"-singlefile",
+		"-f", page, "-l", page,
+		pdfPath,
+	)
+	data, err := cmd.Output()
+	if err != nil {
+		return nil, "", echo.NewHTTPError(http.StatusInternalServerError, "PDF rendering failed")
+	}
+	return data, "image/jpeg", nil
 }
 
 func readCover(content models.Content) ([]byte, string, error) {

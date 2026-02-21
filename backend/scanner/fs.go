@@ -18,7 +18,7 @@ func (f FSFile) HasChanged(other FSFile) bool {
 }
 
 var comicExtensions = map[string]bool{
-	".cbz": true, ".zip": true, ".cbr": true, ".rar": true,
+	".cbz": true, ".zip": true, ".cbr": true, ".rar": true, ".pdf": true,
 }
 
 func walkSources(sources []string, eligible func(string) bool) ([]FSFile, error) {

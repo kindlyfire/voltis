@@ -8,9 +8,13 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
+	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,19 +43,18 @@ func (cs *ComicsScanner) FileEligible(path string) bool {
 	return isComicFile(path)
 }
 
-func (cs *ComicsScanner) ScanFile(r *repository, libraryID string, file FSFile) *models.Content {
-	path := file.Path
+func scanArchivePages(path string) ([]pageInfo, *ComicInfo) {
 	a, err := archive.Open(path)
 	if err != nil {
 		slog_scan("failed to open archive", "path", path, "err", err)
-		return nil
+		return nil, nil
 	}
 	defer a.Close()
 
 	entries, err := a.List()
 	if err != nil {
 		slog_scan("failed to list archive", "path", path, "err", err)
-		return nil
+		return nil, nil
 	}
 
 	var pages []pageInfo
@@ -85,13 +88,70 @@ func (cs *ComicsScanner) ScanFile(r *repository, libraryID string, file FSFile) 
 		pages = append(pages, pageInfo{Name: entry.Name, Width: cfg.Width, Height: cfg.Height})
 	}
 
-	if len(pages) == 0 {
-		return nil
-	}
-
 	sort.Slice(pages, func(i, j int) bool {
 		return pages[i].Name < pages[j].Name
 	})
+
+	return pages, comicInfo
+}
+
+var pdfPagesRe = regexp.MustCompile(`^Pages:\s+(\d+)`)
+var pdfSizeRe = regexp.MustCompile(`([\d.]+)\s*x\s*([\d.]+)`)
+
+func scanPDFPages(path string) []pageInfo {
+	result, err := exec.Command("pdfinfo", path).Output()
+	if err != nil {
+		slog_scan("pdfinfo failed", "path", path, "err", err)
+		return nil
+	}
+
+	var pageCount int
+	var pageWidth, pageHeight int
+
+	for _, line := range strings.Split(string(result), "\n") {
+		if m := pdfPagesRe.FindStringSubmatch(line); m != nil {
+			pageCount, _ = strconv.Atoi(m[1])
+		} else if strings.HasPrefix(line, "Page size:") {
+			if m := pdfSizeRe.FindStringSubmatch(line); m != nil {
+				w, _ := strconv.ParseFloat(m[1], 64)
+				h, _ := strconv.ParseFloat(m[2], 64)
+				// Convert points to pixels at 250 DPI
+				pageWidth = int(math.Round(w * 250 / 72))
+				pageHeight = int(math.Round(h * 250 / 72))
+			}
+		}
+	}
+
+	if pageCount <= 0 {
+		return nil
+	}
+
+	pages := make([]pageInfo, pageCount)
+	for i := range pageCount {
+		pages[i] = pageInfo{
+			Name:   fmt.Sprintf("p%d", i+1),
+			Width:  pageWidth,
+			Height: pageHeight,
+		}
+	}
+	return pages
+}
+
+func (cs *ComicsScanner) ScanFile(r *repository, libraryID string, file FSFile) *models.Content {
+	path := file.Path
+
+	var pages []pageInfo
+	var comicInfo *ComicInfo
+
+	if strings.ToLower(filepath.Ext(path)) == ".pdf" {
+		pages = scanPDFPages(path)
+	} else {
+		pages, comicInfo = scanArchivePages(path)
+	}
+
+	if len(pages) == 0 {
+		return nil
+	}
 
 	// Extract metadata from ComicInfo
 	meta := map[string]any{}
