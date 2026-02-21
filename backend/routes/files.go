@@ -12,9 +12,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"voltis/archive"
 	"voltis/config"
 	"voltis/db"
+	"voltis/lib/archive"
+	"voltis/lib/epub"
 	"voltis/models"
 
 	"github.com/jackc/pgx/v5"
@@ -29,6 +30,8 @@ type FileRoutes struct {
 func (fr *FileRoutes) Register(g *echo.Group) {
 	g.GET("/cover/:content_id", fr.getCover)
 	g.GET("/comic-page/:content_id/:page_index", fr.getComicPage)
+	g.GET("/book-chapters/:content_id", fr.getBookChapters)
+	g.GET("/book-chapter/:content_id", fr.getBookChapter)
 	g.GET("/book-resource/:content_id", fr.getBookResource)
 	g.GET("/download-info/:content_id", fr.getDownloadInfo)
 	g.GET("/download/:content_id", fr.download)
@@ -121,6 +124,87 @@ func (fr *FileRoutes) getComicPage(c echo.Context) error {
 		c.Response().Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	}
 	return c.Blob(http.StatusOK, mediaType, data)
+}
+
+type chapterResponse struct {
+	ID     string  `json:"id"`
+	Href   string  `json:"href"`
+	Title  *string `json:"title"`
+	Linear bool    `json:"linear"`
+}
+
+func (fr *FileRoutes) getBookChapters(c echo.Context) error {
+	if _, err := requireUser(c); err != nil {
+		return err
+	}
+
+	ctx := reqCtx(c)
+	contentID := c.Param("content_id")
+
+	content, err := db.SelectOne[models.Content](ctx, fr.pool, "SELECT * FROM content WHERE id = $1", contentID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return echo.NewHTTPError(http.StatusNotFound, "Content not found")
+	}
+	if err != nil {
+		return err
+	}
+
+	if content.FileURI == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "Content not found")
+	}
+	if !strings.HasSuffix(strings.ToLower(*content.FileURI), ".epub") {
+		return echo.NewHTTPError(http.StatusBadRequest, "Content is not an EPUB")
+	}
+
+	chapters, err := epub.ListChapters(*content.FileURI)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	result := make([]chapterResponse, len(chapters))
+	for i, ch := range chapters {
+		result[i] = chapterResponse{
+			ID:     ch.ID,
+			Href:   ch.Href,
+			Linear: ch.Linear,
+		}
+		if ch.Title != "" {
+			result[i].Title = &ch.Title
+		}
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
+func (fr *FileRoutes) getBookChapter(c echo.Context) error {
+	if _, err := requireUser(c); err != nil {
+		return err
+	}
+
+	ctx := reqCtx(c)
+	contentID := c.Param("content_id")
+	href := c.QueryParam("href")
+
+	content, err := db.SelectOne[models.Content](ctx, fr.pool, "SELECT * FROM content WHERE id = $1", contentID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return echo.NewHTTPError(http.StatusNotFound, "Content not found")
+	}
+	if err != nil {
+		return err
+	}
+
+	if content.FileURI == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "Content not found")
+	}
+	if !strings.HasSuffix(strings.ToLower(*content.FileURI), ".epub") {
+		return echo.NewHTTPError(http.StatusBadRequest, "Content is not an EPUB")
+	}
+
+	chapterContent, err := epub.ReadChapter(*content.FileURI, href)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "Chapter not found")
+	}
+
+	return c.Blob(http.StatusOK, "application/xhtml+xml", []byte(chapterContent))
 }
 
 func (fr *FileRoutes) getBookResource(c echo.Context) error {

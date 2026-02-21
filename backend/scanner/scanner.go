@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"sort"
 	"strings"
@@ -44,6 +45,8 @@ func newFileScanner(libraryType string) FileScanner {
 	switch libraryType {
 	case "comics":
 		return &ComicsScanner{}
+	case "books":
+		return &BooksScanner{}
 	default:
 		return nil
 	}
@@ -176,6 +179,62 @@ func Scan(ctx context.Context, pool *pgxpool.Pool, libraryID string, libraryType
 		Removed:   len(toRemove),
 		Unchanged: len(unchanged),
 	}, nil
+}
+
+var seriesInheritedFields = []string{
+	"authors", "publisher", "language", "genre", "age_rating",
+	"manga", "imprint", "description", "publication_date",
+}
+
+func inheritChildMetadata(r *repository, series *models.Content, items []*models.Content) {
+	if len(items) == 0 {
+		return
+	}
+
+	inherited := map[string]any{}
+	for _, item := range items {
+		childMeta := r.getMetadata(item.URI)
+		for _, field := range seriesInheritedFields {
+			if _, ok := inherited[field]; ok {
+				continue
+			}
+			if v, ok := childMeta.Data[field]; ok {
+				inherited[field] = v
+			}
+		}
+		if len(inherited) == len(seriesInheritedFields) {
+			break
+		}
+	}
+
+	// Derive title from first child's "series" field
+	var seriesTitle string
+	for _, item := range items {
+		childMeta := r.getMetadata(item.URI)
+		if s, ok := childMeta.Data["series"].(string); ok && s != "" {
+			seriesTitle = s
+			break
+		}
+	}
+	if seriesTitle == "" {
+		seriesTitle = series.URIPart
+	}
+	inherited["title"] = seriesTitle
+
+	metaRow := r.getMetadata(series.URI)
+	existing := map[string]any{}
+	if raw, ok := metaRow.DataRaw["file"]; ok {
+		var entry struct {
+			Data map[string]any `json:"data"`
+		}
+		if json.Unmarshal(raw, &entry) == nil && entry.Data != nil {
+			existing = entry.Data
+		}
+	}
+	for k, v := range inherited {
+		existing[k] = v
+	}
+	metaRow.setSource("file", existing, nil)
 }
 
 func matchFiles(r *repository, files []FSFile, opts ScanOptions) (toAdd, toUpdate, unchanged, toRemove []FSFile) {

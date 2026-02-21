@@ -16,7 +16,7 @@ import (
 
 	_ "golang.org/x/image/webp"
 
-	"voltis/archive"
+	"voltis/lib/archive"
 	"voltis/models"
 )
 
@@ -28,11 +28,6 @@ var imageExtensions = map[string]bool{
 }
 
 var coverNames = []string{"cover.jpg", "cover.jpeg", "cover.png", "cover.webp"}
-
-var seriesInheritedFields = []string{
-	"authors", "publisher", "language", "genre", "age_rating",
-	"manga", "imprint", "description", "publication_date",
-}
 
 type pageInfo struct {
 	Name   string `json:"name"`
@@ -265,8 +260,7 @@ func (cs *ComicsScanner) ScanFile(r *repository, libraryID string, file FSFile) 
 }
 
 func (cs *ComicsScanner) UpdateSeries(r *repository, series *models.Content, items []*models.Content) {
-	// Inherit metadata from children to series
-	cs.inheritChildMetadata(r, series, items)
+	inheritChildMetadata(r, series, items)
 
 	// Find series cover
 	series.CoverURI = nil
@@ -277,57 +271,6 @@ func (cs *ComicsScanner) UpdateSeries(r *repository, series *models.Content, ite
 		series.FileMtime = items[0].FileMtime
 	}
 	r.markDirty(series)
-}
-
-func (cs *ComicsScanner) inheritChildMetadata(r *repository, series *models.Content, items []*models.Content) {
-	if len(items) == 0 {
-		return
-	}
-
-	inherited := map[string]any{}
-	for _, item := range items {
-		childMeta := r.getMetadata(item.URI)
-		for _, field := range seriesInheritedFields {
-			if _, ok := inherited[field]; ok {
-				continue
-			}
-			if v, ok := childMeta.Data[field]; ok {
-				inherited[field] = v
-			}
-		}
-		if len(inherited) == len(seriesInheritedFields) {
-			break
-		}
-	}
-
-	// Derive title from first child's "series" field
-	var seriesTitle string
-	for _, item := range items {
-		childMeta := r.getMetadata(item.URI)
-		if s, ok := childMeta.Data["series"].(string); ok && s != "" {
-			seriesTitle = s
-			break
-		}
-	}
-	if seriesTitle == "" {
-		seriesTitle = series.URIPart
-	}
-	inherited["title"] = seriesTitle
-
-	metaRow := r.getMetadata(series.URI)
-	existing := map[string]any{}
-	if raw, ok := metaRow.DataRaw["file"]; ok {
-		var entry struct {
-			Data map[string]any `json:"data"`
-		}
-		if json.Unmarshal(raw, &entry) == nil && entry.Data != nil {
-			existing = entry.Data
-		}
-	}
-	for k, v := range inherited {
-		existing[k] = v
-	}
-	metaRow.setSource("file", existing, nil)
 }
 
 func (cs *ComicsScanner) scanSeriesCover(series *models.Content) {
