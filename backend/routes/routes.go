@@ -6,10 +6,13 @@ import (
 )
 
 func Register(e *echo.Echo, pool *pgxpool.Pool) {
+	e.GET("/api/info", infoHandler(pool))
+
 	api := e.Group("/api", authMiddleware(pool))
 
 	(&AuthRoutes{pool: pool}).Register(api.Group("/auth"))
 	(&LibraryRoutes{pool: pool}).Register(api.Group("/libraries"))
+	(&UserRoutes{pool: pool}).Register(api.Group("/users"))
 
 	registerStaticRoutes(e)
 }
