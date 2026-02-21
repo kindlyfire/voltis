@@ -9,6 +9,7 @@ func Register(e *echo.Echo, db *sqlx.DB) {
 	api := e.Group("/api", authMiddleware(db))
 
 	(&AuthRoutes{db: db}).Register(api.Group("/auth"))
+	(&LibraryRoutes{db: db}).Register(api.Group("/libraries"))
 
 	registerStaticRoutes(e)
 }
