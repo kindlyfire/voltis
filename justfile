@@ -1,20 +1,15 @@
-[positional-arguments]
 app *args='':
-    uv run voltis "$@"
+    cd backend && go run . {{ args }}
 
-frontend:
-    cd frontend && pnpm dev
-
-# Format imports (I), then format code
 fmt:
-    uv run ruff check --select I --fix && uv run ruff format
+    cd backend && gofmt -w .
 
 check:
-    uv run ruff format --check && uv run ruff check && uv run pyright
+    cd backend && go vet ./...
 
 [positional-arguments]
 test *args='':
-    uv run pytest "$@"
+    cd backend && go test "$@" ./...
 
 docker-push-release:
     #!/usr/bin/env bash
