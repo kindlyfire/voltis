@@ -7,6 +7,9 @@ fmt:
 check:
     cd backend && go vet ./...
 
+lint:
+    cd backend && golangci-lint run ./...
+
 [positional-arguments]
 test *args='':
     cd backend && go test "$@" ./...
