@@ -20,6 +20,7 @@ import (
 	"voltis/lib/epub"
 	"voltis/models"
 
+	"github.com/cshum/vipsgen/vips"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
@@ -435,6 +436,8 @@ func readPDFPage(pdfPath, innerPath string) ([]byte, string, error) {
 	return data, "image/jpeg", nil
 }
 
+const coverMaxWidth = 750
+
 func readCover(content models.Content) ([]byte, string, error) {
 	if content.CoverURI == nil {
 		return nil, "", echo.NewHTTPError(http.StatusNotFound, "Content has no cover")
@@ -454,17 +457,35 @@ func readCover(content models.Content) ([]byte, string, error) {
 		}
 	}
 
-	// Read from source
 	data, _, err := readContentFile(*content.CoverURI)
 	if err != nil {
 		return nil, "", err
 	}
 
-	// Cache (best-effort)
+	data, err = resizeCover(data, coverMaxWidth)
+	if err != nil {
+		return nil, "", err
+	}
+
 	_ = os.MkdirAll(cacheDir, 0o755)
 	_ = os.WriteFile(cachePath, data, 0o644)
 
-	return data, guessMediaType(*content.CoverURI), nil
+	return data, "image/jpeg", nil
+}
+
+func resizeCover(data []byte, maxWidth int) ([]byte, error) {
+	opts := vips.DefaultThumbnailBufferOptions()
+	opts.Height = 10000
+	opts.Size = vips.SizeDown
+	img, err := vips.NewThumbnailBuffer(data, maxWidth, opts)
+	if err != nil {
+		return nil, fmt.Errorf("resize cover: %w", err)
+	}
+	defer img.Close()
+
+	jpegOpts := vips.DefaultJpegsaveBufferOptions()
+	jpegOpts.Q = 85
+	return img.JpegsaveBuffer(jpegOpts)
 }
 
 func findArchiveAndInnerPath(uri string) (string, string) {

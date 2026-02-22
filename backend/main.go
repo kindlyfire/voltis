@@ -11,6 +11,7 @@ import (
 	"voltis/db"
 	"voltis/routes"
 
+	"github.com/cshum/vipsgen/vips"
 	"github.com/labstack/echo/v4"
 	"github.com/lmittmann/tint"
 )
@@ -26,6 +27,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer pool.Close()
+	defer vips.Shutdown()
 
 	if err := db.Migrate(ctx, pool); err != nil {
 		slog.Error("failed to run migrations", "err", err)
