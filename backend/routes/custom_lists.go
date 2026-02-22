@@ -57,15 +57,15 @@ type customListEntryDTO struct {
 }
 
 type customListDetailDTO struct {
-	ID          string                `json:"id"`
-	CreatedAt   time.Time             `json:"created_at"`
-	UpdatedAt   time.Time             `json:"updated_at"`
-	Name        string                `json:"name"`
-	Description *string               `json:"description"`
-	Visibility  string                `json:"visibility"`
-	UserID      string                `json:"user_id"`
-	EntryCount  *int                  `json:"entry_count"`
-	Entries     []customListEntryDTO  `json:"entries"`
+	ID          string               `json:"id"`
+	CreatedAt   time.Time            `json:"created_at"`
+	UpdatedAt   time.Time            `json:"updated_at"`
+	Name        string               `json:"name"`
+	Description *string              `json:"description"`
+	Visibility  string               `json:"visibility"`
+	UserID      string               `json:"user_id"`
+	EntryCount  int                  `json:"entry_count"`
+	Entries     []customListEntryDTO `json:"entries"`
 }
 
 // Helpers
@@ -180,18 +180,16 @@ func (cr *CustomListRoutes) get(c echo.Context) error {
 
 	ctx := reqCtx(c)
 
-	var entryCount int
-	err = cr.pool.QueryRow(ctx,
-		"SELECT COUNT(*) FROM custom_list_to_content WHERE custom_list_id = $1", cl.ID).Scan(&entryCount)
+	entryCount, err := db.SelectScalar[int](ctx, cr.pool, "SELECT COUNT(*) FROM custom_list_to_content WHERE custom_list_id = $1", cl.ID)
 	if err != nil {
 		return err
 	}
 
 	type entryRow struct {
 		models.CustomListToContent
-		ContentID       *string         `db:"content_id"`
-		ContentData     json.RawMessage `db:"content_data"`
-		MetaData        json.RawMessage `db:"meta_data"`
+		ContentID   *string         `db:"content_id"`
+		ContentData json.RawMessage `db:"content_data"`
+		MetaData    json.RawMessage `db:"meta_data"`
 	}
 
 	entryRows, err := db.Select[entryRow](ctx, cr.pool, `
@@ -242,15 +240,15 @@ func (cr *CustomListRoutes) get(c echo.Context) error {
 		Description: cl.Description,
 		Visibility:  cl.Visibility,
 		UserID:      cl.UserID,
-		EntryCount:  &entryCount,
+		EntryCount:  entryCount,
 		Entries:     entries,
 	})
 }
 
 type customListUpsertRequest struct {
-	Name        string  `json:"name"`
-	Description *string `json:"description"`
-	Visibility  string  `json:"visibility"`
+	Name        string  `json:"name"        validate:"notblank,max=100"`
+	Description *string `json:"description" validate:"omitempty,max=5000"`
+	Visibility  string  `json:"visibility"  validate:"required,oneof=public private unlisted"`
 }
 
 func (cr *CustomListRoutes) create(c echo.Context) error {
@@ -263,11 +261,11 @@ func (cr *CustomListRoutes) create(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid JSON")
 	}
+	if err := ValidateStruct(req); err != nil {
+		return err
+	}
 
 	name := strings.TrimSpace(req.Name)
-	if name == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "Name cannot be empty")
-	}
 
 	ctx := reqCtx(c)
 	now := time.Now().UTC()
@@ -309,11 +307,11 @@ func (cr *CustomListRoutes) update(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid JSON")
 	}
+	if err := ValidateStruct(req); err != nil {
+		return err
+	}
 
 	name := strings.TrimSpace(req.Name)
-	if name == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "Name cannot be empty")
-	}
 
 	ctx := reqCtx(c)
 	now := time.Now().UTC()
@@ -372,7 +370,13 @@ func (cr *CustomListRoutes) createEntry(c echo.Context) error {
 
 	ctx := reqCtx(c)
 
-	content, err := db.SelectOne[models.Content](ctx, cr.pool, "SELECT * FROM content WHERE id = $1", req.ContentID)
+	tx, err := cr.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	content, err := db.SelectOne[models.Content](ctx, tx, "SELECT * FROM content WHERE id = $1", req.ContentID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return echo.NewHTTPError(http.StatusNotFound, "Content not found")
 	}
@@ -381,7 +385,7 @@ func (cr *CustomListRoutes) createEntry(c echo.Context) error {
 	}
 
 	var maxOrder *int
-	err = cr.pool.QueryRow(ctx,
+	err = tx.QueryRow(ctx,
 		"SELECT MAX(\"order\") FROM custom_list_to_content WHERE custom_list_id = $1", cl.ID).Scan(&maxOrder)
 	if err != nil {
 		return err
@@ -394,7 +398,7 @@ func (cr *CustomListRoutes) createEntry(c echo.Context) error {
 	now := time.Now().UTC()
 	entryID := models.MakeCustomListContentID()
 
-	_, err = cr.pool.Exec(ctx, `
+	_, err = tx.Exec(ctx, `
 		INSERT INTO custom_list_to_content (id, created_at, updated_at, custom_list_id, library_id, uri, notes, "order")
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	`, entryID, now, now, cl.ID, content.LibraryID, content.URI, req.Notes, orderValue)
@@ -403,25 +407,16 @@ func (cr *CustomListRoutes) createEntry(c echo.Context) error {
 	}
 
 	// Update list timestamp
-	_, _ = cr.pool.Exec(ctx, "UPDATE custom_lists SET updated_at = $1 WHERE id = $2", now, cl.ID)
+	_, err = tx.Exec(ctx, "UPDATE custom_lists SET updated_at = $1 WHERE id = $2", now, cl.ID)
+	if err != nil {
+		return err
+	}
 
-	// Build content DTO for response
-	var metaData json.RawMessage
-	_ = cr.pool.QueryRow(ctx,
-		"SELECT data FROM content_metadata WHERE uri = $1 AND library_id = $2",
-		content.URI, content.LibraryID).Scan(&metaData)
-	dto := contentToDTO(content, contentDTOOpts{meta: metaData, includeMeta: true})
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
 
-	return c.JSON(http.StatusOK, customListEntryDTO{
-		ID:        entryID,
-		CreatedAt: now,
-		UpdatedAt: now,
-		LibraryID: content.LibraryID,
-		URI:       content.URI,
-		Content:   &dto,
-		Notes:     req.Notes,
-		Order:     &orderValue,
-	})
+	return okResponse(c)
 }
 
 type reorderEntriesRequest struct {
@@ -466,7 +461,7 @@ func (cr *CustomListRoutes) reorderEntries(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	for i, id := range req.CTCIDs {
 		_, err = tx.Exec(ctx, `UPDATE custom_list_to_content SET "order" = $1 WHERE id = $2`, i, id)
@@ -483,11 +478,6 @@ func (cr *CustomListRoutes) reorderEntries(c echo.Context) error {
 	}
 
 	return okResponse(c)
-}
-
-type updateEntryRequest struct {
-	Notes *string `json:"notes"`
-	Order *int    `json:"order"`
 }
 
 func (cr *CustomListRoutes) updateEntry(c echo.Context) error {
@@ -543,40 +533,7 @@ func (cr *CustomListRoutes) updateEntry(c echo.Context) error {
 
 	_, _ = cr.pool.Exec(ctx, "UPDATE custom_lists SET updated_at = $1 WHERE id = $2", now, cl.ID)
 
-	// Fetch updated entry with content
-	updated, err := db.SelectOne[models.CustomListToContent](ctx, cr.pool,
-		"SELECT * FROM custom_list_to_content WHERE id = $1", entryID)
-	if err != nil {
-		return err
-	}
-
-	type contentRow struct {
-		models.Content
-		MetaData json.RawMessage `db:"meta_data"`
-	}
-	cr2, err := db.SelectOne[contentRow](ctx, cr.pool, `
-		SELECT c.*, cm.data AS meta_data
-		FROM content c
-		LEFT JOIN content_metadata cm ON cm.uri = c.uri AND cm.library_id = c.library_id
-		WHERE c.library_id = $1 AND c.uri = $2
-	`, updated.LibraryID, updated.URI)
-
-	var contentDTO *ContentDTO
-	if err == nil {
-		dto := contentToDTO(cr2.Content, contentDTOOpts{meta: cr2.MetaData, includeMeta: true})
-		contentDTO = &dto
-	}
-
-	return c.JSON(http.StatusOK, customListEntryDTO{
-		ID:        updated.ID,
-		CreatedAt: updated.CreatedAt,
-		UpdatedAt: updated.UpdatedAt,
-		LibraryID: updated.LibraryID,
-		URI:       updated.URI,
-		Content:   contentDTO,
-		Notes:     updated.Notes,
-		Order:     updated.Order,
-	})
+	return okResponse(c)
 }
 
 func (cr *CustomListRoutes) deleteEntry(c echo.Context) error {

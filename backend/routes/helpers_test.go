@@ -33,8 +33,8 @@ func newTestPool(t *testing.T) *pgxpool.Pool {
 	}
 
 	// Reset database
-	pool.Exec(ctx, "DROP SCHEMA public CASCADE")
-	pool.Exec(ctx, "CREATE SCHEMA public")
+	_, _ = pool.Exec(ctx, "DROP SCHEMA public CASCADE")
+	_, _ = pool.Exec(ctx, "CREATE SCHEMA public")
 	if err := db.Migrate(ctx, pool); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -125,20 +125,24 @@ type response struct {
 }
 
 func readResponse(r *http.Response) *response {
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 	body, _ := io.ReadAll(r.Body)
 	return &response{StatusCode: r.StatusCode, Body: body}
 }
 
 func (r *response) JSON() map[string]any {
 	var v map[string]any
-	json.Unmarshal(r.Body, &v)
+	if err := json.Unmarshal(r.Body, &v); err != nil {
+		panic(fmt.Sprintf("invalid JSON response: %s", string(r.Body)))
+	}
 	return v
 }
 
 func (r *response) JSONArray() []map[string]any {
 	var v []map[string]any
-	json.Unmarshal(r.Body, &v)
+	if err := json.Unmarshal(r.Body, &v); err != nil {
+		panic(fmt.Sprintf("invalid JSON response: %s", string(r.Body)))
+	}
 	return v
 }
 

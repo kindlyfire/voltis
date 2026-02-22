@@ -35,7 +35,7 @@ func ReadMetadata(filePath string) (*Metadata, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer zr.Close()
+	defer func() { _ = zr.Close() }()
 
 	m := &Metadata{}
 	opfPath, opfData, err := readOPF(zr)
@@ -62,7 +62,7 @@ func ListChapters(filePath string) ([]Chapter, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer zr.Close()
+	defer func() { _ = zr.Close() }()
 
 	opfPath, opfData, err := readOPF(zr)
 	if err != nil {
@@ -120,7 +120,7 @@ func ReadChapter(filePath string, chapterHref string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer zr.Close()
+	defer func() { _ = zr.Close() }()
 
 	for _, f := range zr.File {
 		if f.Name == chapterHref {
@@ -128,7 +128,7 @@ func ReadChapter(filePath string, chapterHref string) (string, error) {
 			if err != nil {
 				return "", err
 			}
-			defer rc.Close()
+			defer func() { _ = rc.Close() }()
 			var buf strings.Builder
 			if _, err := io.Copy(&buf, rc); err != nil {
 				return "", err
@@ -193,7 +193,7 @@ func readOPF(zr *zip.ReadCloser) (string, []byte, error) {
 			if err != nil {
 				break
 			}
-			defer rc.Close()
+			defer func() { _ = rc.Close() }()
 
 			var container struct {
 				RootFiles []struct {
@@ -231,7 +231,7 @@ func readZipFile(zr *zip.ReadCloser, name string) ([]byte, error) {
 			if err != nil {
 				return nil, err
 			}
-			defer rc.Close()
+			defer func() { _ = rc.Close() }()
 			return io.ReadAll(rc)
 		}
 	}
@@ -371,23 +371,6 @@ func parseNavTitles(zr *zip.ReadCloser, manifest map[string]manifestItem, opfDir
 
 func parseEPUB3Nav(data []byte, opfDir string) map[string]string {
 	titles := map[string]string{}
-
-	type anchor struct {
-		XMLName xml.Name `xml:"a"`
-		Href    string   `xml:"href,attr"`
-		Text    string   `xml:",chardata"`
-	}
-	type li struct {
-		A anchor `xml:"a"`
-	}
-	type ol struct {
-		Items []li `xml:"li"`
-	}
-	type nav struct {
-		XMLName xml.Name `xml:"nav"`
-		Type    string   `xml:"type,attr"`
-		OL      ol       `xml:"ol"`
-	}
 
 	// Simple approach: find all <a> elements in toc nav using string scanning
 	// since namespace-heavy XHTML is tricky with encoding/xml.
@@ -538,7 +521,7 @@ func ValidateCoverPath(filePath, coverPath string) bool {
 	if err != nil {
 		return false
 	}
-	defer zr.Close()
+	defer func() { _ = zr.Close() }()
 
 	for _, f := range zr.File {
 		if f.Name == coverPath {

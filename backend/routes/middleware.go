@@ -3,17 +3,32 @@ package routes
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"reflect"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"voltis/db"
 	"voltis/models"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 )
+
+var validate = newValidator()
+
+func newValidator() *validator.Validate {
+	v := validator.New()
+	_ = v.RegisterValidation("notblank", func(fl validator.FieldLevel) bool {
+		return strings.TrimSpace(fl.Field().String()) != ""
+	})
+	return v
+}
 
 const (
 	sessionDurationDays         = 30
@@ -117,4 +132,105 @@ func reqCtx(c echo.Context) context.Context {
 type PaginatedResponse[T any] struct {
 	Data  []T `json:"data"`
 	Total int `json:"total"`
+}
+
+// QueryToStruct binds query parameters into a struct using `query` tags and
+// applies defaults from `default` tags.
+// Supported field types: string, bool, int, *int.
+func QueryToStruct[T any](c echo.Context) (T, error) {
+	var result T
+	v := reflect.ValueOf(&result).Elem()
+	t := v.Type()
+
+	for i := range t.NumField() {
+		field := t.Field(i)
+		fv := v.Field(i)
+
+		name := field.Tag.Get("query")
+		if name == "" {
+			continue
+		}
+
+		raw := c.QueryParam(name)
+		if raw == "" {
+			if def, ok := field.Tag.Lookup("default"); ok {
+				raw = def
+			}
+		}
+		if raw == "" {
+			continue
+		}
+
+		switch fv.Kind() {
+		case reflect.String:
+			fv.SetString(raw)
+		case reflect.Bool:
+			switch raw {
+			case "true":
+				fv.SetBool(true)
+			case "false":
+				fv.SetBool(false)
+			default:
+				return result, echo.NewHTTPError(http.StatusBadRequest,
+					fmt.Sprintf("Invalid value for %s: must be 'true' or 'false'", name))
+			}
+		case reflect.Int:
+			n, err := strconv.Atoi(raw)
+			if err != nil {
+				return result, echo.NewHTTPError(http.StatusBadRequest,
+					fmt.Sprintf("Invalid value for %s: must be an integer", name))
+			}
+			fv.SetInt(int64(n))
+		case reflect.Pointer:
+			if fv.Type().Elem().Kind() == reflect.Int {
+				n, err := strconv.Atoi(raw)
+				if err != nil {
+					return result, echo.NewHTTPError(http.StatusBadRequest,
+						fmt.Sprintf("Invalid value for %s: must be an integer", name))
+				}
+				fv.Set(reflect.ValueOf(&n))
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// ValidateStruct validates a struct using `validate` tags. Field names in error
+// messages are resolved from `query` or `json` tags when available.
+func ValidateStruct[T any](s T) error {
+	if err := validate.Struct(s); err != nil {
+		var ve validator.ValidationErrors
+		if errors.As(err, &ve) {
+			t := reflect.TypeOf(s)
+			fields := make([]string, len(ve))
+			for i, fe := range ve {
+				name := fe.Field()
+				if sf, ok := t.FieldByName(fe.StructField()); ok {
+					if q := sf.Tag.Get("query"); q != "" {
+						name = q
+					} else if j := sf.Tag.Get("json"); j != "" {
+						name = strings.SplitN(j, ",", 2)[0]
+					}
+				}
+				fields[i] = fmt.Sprintf("%s: failed on '%s'", name, fe.Tag())
+			}
+			return echo.NewHTTPError(http.StatusBadRequest,
+				fmt.Sprintf("Validation failed: %s", strings.Join(fields, "; ")))
+		}
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	return nil
+}
+
+// BindQuery binds query parameters into a struct and validates it.
+func BindQuery[T any](c echo.Context) (T, error) {
+	result, err := QueryToStruct[T](c)
+	if err != nil {
+		return result, err
+	}
+	if err := ValidateStruct(result); err != nil {
+		return result, err
+	}
+	return result, nil
 }

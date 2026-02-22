@@ -347,7 +347,7 @@ func (fr *FileRoutes) download(c echo.Context) error {
 	c.Response().WriteHeader(http.StatusOK)
 
 	zw := zip.NewWriter(c.Response())
-	defer zw.Close()
+	defer func() { _ = zw.Close() }()
 
 	for _, child := range children {
 		name := filepath.Base(child.FileURI)
@@ -364,7 +364,7 @@ func (fr *FileRoutes) download(c echo.Context) error {
 			return err
 		}
 		_, err = io.Copy(w, f)
-		f.Close()
+		_ = f.Close()
 		if err != nil {
 			return err
 		}
@@ -403,7 +403,7 @@ func readContentFile(uri string) ([]byte, string, error) {
 	if err != nil {
 		return nil, "", echo.NewHTTPError(http.StatusNotFound, "File not found")
 	}
-	defer a.Close()
+	defer func() { _ = a.Close() }()
 
 	data, err := a.ReadFile(innerPath)
 	if err != nil {

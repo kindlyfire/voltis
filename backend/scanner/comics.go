@@ -49,7 +49,7 @@ func scanArchivePages(path string) ([]pageInfo, *ComicInfo) {
 		slog_scan("failed to open archive", "path", path, "err", err)
 		return nil, nil
 	}
-	defer a.Close()
+	defer func() { _ = a.Close() }()
 
 	entries, err := a.List()
 	if err != nil {

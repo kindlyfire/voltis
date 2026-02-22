@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -223,6 +222,21 @@ func (cr *ContentRoutes) listsForContent(c echo.Context) error {
 	return c.JSON(http.StatusOK, ids)
 }
 
+type contentListQuery struct {
+	ParentID      string `query:"parent_id"`
+	LibraryID     string `query:"library_id"`
+	Type          string `query:"type"`
+	Valid         string `query:"valid"           validate:"omitempty,oneof=true false"`
+	ReadingStatus string `query:"reading_status"  validate:"omitempty,oneof=reading completed on_hold dropped plan_to_read"`
+	Starred       string `query:"starred"         validate:"omitempty,oneof=true false"`
+	Search        string `query:"search"`
+	Limit         *int   `query:"limit"           validate:"omitempty,min=0"`
+	Offset        int    `query:"offset"          validate:"min=0"`
+	Sort          string `query:"sort"            validate:"omitempty,oneof=progress_updated_at created_at order"`
+	SortOrder     string `query:"sort_order"      validate:"omitempty,oneof=asc desc" default:"desc"`
+	Include       string `query:"include"`
+}
+
 func (cr *ContentRoutes) list(c echo.Context) error {
 	user, err := requireUser(c)
 	if err != nil {
@@ -230,43 +244,14 @@ func (cr *ContentRoutes) list(c echo.Context) error {
 	}
 
 	ctx := reqCtx(c)
-	parentID := c.QueryParam("parent_id")
-	libraryID := c.QueryParam("library_id")
-	typeParam := c.QueryParam("type")
-	validParam := c.QueryParam("valid")
-	readingStatus := c.QueryParam("reading_status")
-	starredParam := c.QueryParam("starred")
-	search := c.QueryParam("search")
-	limitParam := c.QueryParam("limit")
-	offsetParam := c.QueryParam("offset")
-	sortParam := c.QueryParam("sort")
-	sortOrder := c.QueryParam("sort_order")
-	includeParam := c.QueryParam("include")
 
-	valid := true
-	if validParam == "false" {
-		valid = false
-	}
-
-	offset := 0
-	if offsetParam != "" {
-		offset, _ = strconv.Atoi(offsetParam)
-	}
-
-	var limit *int
-	if limitParam != "" {
-		v, _ := strconv.Atoi(limitParam)
-		if v > 0 {
-			limit = &v
-		}
-	}
-
-	if sortOrder == "" {
-		sortOrder = "desc"
+	q, err := BindQuery[contentListQuery](c)
+	if err != nil {
+		return err
 	}
 
 	includes := map[string]bool{}
-	for _, part := range strings.Split(includeParam, ",") {
+	for part := range strings.SplitSeq(q.Include, ",") {
 		part = strings.TrimSpace(part)
 		if part != "" {
 			includes[part] = true
@@ -274,39 +259,39 @@ func (cr *ContentRoutes) list(c echo.Context) error {
 	}
 
 	// Build query
-	args := pgx.NamedArgs{"user_id": user.ID, "valid": valid}
+	args := pgx.NamedArgs{"user_id": user.ID, "valid": q.Valid != "false"}
 	where := []string{"c.valid = @valid"}
 
-	if parentID != "" {
-		if parentID == "null" {
+	if q.ParentID != "" {
+		if q.ParentID == "null" {
 			where = append(where, "c.parent_id IS NULL")
 		} else {
-			args["parent_id"] = parentID
+			args["parent_id"] = q.ParentID
 			where = append(where, "c.parent_id = @parent_id")
 		}
 	}
-	if libraryID != "" {
-		args["library_id"] = libraryID
+	if q.LibraryID != "" {
+		args["library_id"] = q.LibraryID
 		where = append(where, "c.library_id = @library_id")
 	}
-	if typeParam != "" {
-		args["types"] = strings.Split(typeParam, ",")
+	if q.Type != "" {
+		args["types"] = strings.Split(q.Type, ",")
 		where = append(where, "c.type = ANY(@types)")
 	}
-	if readingStatus != "" {
-		args["reading_status"] = readingStatus
+	if q.ReadingStatus != "" {
+		args["reading_status"] = q.ReadingStatus
 		where = append(where, "utc.status = @reading_status")
 	}
-	if starredParam != "" {
-		args["starred"] = starredParam == "true"
+	if q.Starred != "" {
+		args["starred"] = q.Starred == "true"
 		where = append(where, "utc.starred = @starred")
 	}
-	if search != "" {
+	if q.Search != "" {
 		fuzzyDist := 1
-		if len(search) < 3 {
+		if len(q.Search) < 3 {
 			fuzzyDist = 0
 		}
-		args["search"] = search
+		args["search"] = q.Search
 		where = append(where, fmt.Sprintf(
 			"cm.data->>'title' ||| (@search)::pdb.fuzzy(%d, t)", fuzzyDist,
 		))
@@ -332,16 +317,16 @@ func (cr *ContentRoutes) list(c echo.Context) error {
 
 	// Sorting
 	var orderClause string
-	switch sortParam {
+	switch q.Sort {
 	case "progress_updated_at":
-		orderClause = fmt.Sprintf("ORDER BY utc.progress_updated_at %s", sortOrder)
+		orderClause = fmt.Sprintf("ORDER BY utc.progress_updated_at %s", q.SortOrder)
 		baseFrom += " AND utc.user_id IS NOT NULL AND utc.progress_updated_at IS NOT NULL"
 	case "created_at":
-		orderClause = fmt.Sprintf("ORDER BY c.created_at %s", sortOrder)
+		orderClause = fmt.Sprintf("ORDER BY c.created_at %s", q.SortOrder)
 	case "order":
-		orderClause = fmt.Sprintf("ORDER BY c.\"order\" %s", sortOrder)
+		orderClause = fmt.Sprintf("ORDER BY c.\"order\" %s", q.SortOrder)
 	default:
-		if search != "" {
+		if q.Search != "" {
 			orderClause = "ORDER BY paradedb.score(cm.id) DESC"
 		}
 	}
@@ -369,11 +354,11 @@ func (cr *ContentRoutes) list(c echo.Context) error {
 		%s
 	`, baseFrom, orderClause)
 
-	if limit != nil {
-		dataQuery += fmt.Sprintf(" LIMIT %d", *limit)
+	if q.Limit != nil {
+		dataQuery += fmt.Sprintf(" LIMIT %d", *q.Limit)
 	}
-	if offset > 0 {
-		dataQuery += fmt.Sprintf(" OFFSET %d", offset)
+	if q.Offset > 0 {
+		dataQuery += fmt.Sprintf(" OFFSET %d", q.Offset)
 	}
 
 	items, err := db.Select[contentListRow](ctx, cr.pool, dataQuery, args)
@@ -398,9 +383,9 @@ func (cr *ContentRoutes) list(c echo.Context) error {
 
 type userToContentRequest struct {
 	Starred  *bool            `json:"starred"`
-	Status   *string          `json:"status"`
+	Status   *string          `json:"status"   validate:"omitempty,oneof=reading completed on_hold dropped plan_to_read"`
 	Notes    *string          `json:"notes"`
-	Rating   *int             `json:"rating"`
+	Rating   *int             `json:"rating"   validate:"omitempty,min=1,max=10"`
 	Progress *json.RawMessage `json:"progress"`
 }
 
@@ -419,33 +404,19 @@ func (cr *ContentRoutes) updateUserData(c echo.Context) error {
 	}
 
 	// Parse raw JSON to detect which fields were sent
+	body := c.Request().Body
 	var rawBody map[string]json.RawMessage
-	if err := json.NewDecoder(c.Request().Body).Decode(&rawBody); err != nil {
+	if err := json.NewDecoder(body).Decode(&rawBody); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid JSON")
 	}
 
 	var req userToContentRequest
-	if v, ok := rawBody["starred"]; ok {
-		_ = json.Unmarshal(v, &req.Starred)
+	rawFull, _ := json.Marshal(rawBody)
+	if err := json.Unmarshal(rawFull, &req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid JSON")
 	}
-	if v, ok := rawBody["status"]; ok {
-		var s *string
-		_ = json.Unmarshal(v, &s)
-		req.Status = s
-	}
-	if v, ok := rawBody["notes"]; ok {
-		var s *string
-		_ = json.Unmarshal(v, &s)
-		req.Notes = s
-	}
-	if v, ok := rawBody["rating"]; ok {
-		var i *int
-		_ = json.Unmarshal(v, &i)
-		req.Rating = i
-	}
-	if v, ok := rawBody["progress"]; ok {
-		p := json.RawMessage(v)
-		req.Progress = &p
+	if err := ValidateStruct(req); err != nil {
+		return err
 	}
 
 	// Get or create user_to_content
@@ -518,7 +489,7 @@ func (cr *ContentRoutes) updateUserData(c echo.Context) error {
 }
 
 type seriesItemStatusesRequest struct {
-	Status  *string `json:"status"`
+	Status  *string `json:"status"   validate:"omitempty,oneof=reading completed on_hold dropped plan_to_read"`
 	UntilID *string `json:"until_id"`
 }
 
@@ -535,18 +506,27 @@ func (cr *ContentRoutes) setSeriesItemStatuses(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return err
 	}
+	if err := ValidateStruct(req); err != nil {
+		return err
+	}
 
 	_, err = getContent(ctx, cr.pool, contentID)
 	if err != nil {
 		return err
 	}
 
+	tx, err := cr.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
 	type childRow struct {
 		ID        string `db:"id"`
 		LibraryID string `db:"library_id"`
 		URI       string `db:"uri"`
 	}
-	children, err := db.Select[childRow](ctx, cr.pool, `
+	children, err := db.Select[childRow](ctx, tx, `
 		SELECT id, library_id, uri FROM content
 		WHERE parent_id = $1 ORDER BY "order" ASC
 	`, contentID)
@@ -554,7 +534,7 @@ func (cr *ContentRoutes) setSeriesItemStatuses(c echo.Context) error {
 		return err
 	}
 	if len(children) == 0 {
-		return c.NoContent(http.StatusOK)
+		return okResponse(c)
 	}
 
 	setChildren := children
@@ -582,7 +562,7 @@ func (cr *ContentRoutes) setSeriesItemStatuses(c echo.Context) error {
 			allLibIDs[i] = ch.LibraryID
 			allURIs[i] = ch.URI
 		}
-		_, err = cr.pool.Exec(ctx, `
+		_, err = tx.Exec(ctx, `
 			UPDATE user_to_content
 			SET status = NULL, status_updated_at = $1, progress = '{}', progress_updated_at = NULL
 			WHERE user_id = $2
@@ -596,7 +576,7 @@ func (cr *ContentRoutes) setSeriesItemStatuses(c echo.Context) error {
 	// Upsert target items with the given status
 	if req.Status != nil {
 		for _, ch := range setChildren {
-			_, err = cr.pool.Exec(ctx, `
+			_, err = tx.Exec(ctx, `
 				INSERT INTO user_to_content (id, user_id, library_id, uri, status, status_updated_at)
 				VALUES ($1, $2, $3, $4, $5, $6)
 				ON CONFLICT (user_id, library_id, uri)
@@ -608,7 +588,11 @@ func (cr *ContentRoutes) setSeriesItemStatuses(c echo.Context) error {
 		}
 	}
 
-	return c.NoContent(http.StatusOK)
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+
+	return okResponse(c)
 }
 
 var metadataMergeOrder = []string{"file", "mangabaka", "overrides"}
@@ -784,18 +768,11 @@ func (cr *ContentRoutes) scanContent(c echo.Context) error {
 		fileURIs = append(fileURIs, *content.FileURI)
 	}
 
-	childRows, err := cr.pool.Query(ctx,
-		"SELECT file_uri FROM content WHERE parent_id = $1 AND file_uri IS NOT NULL", contentID)
+	childURIs, err := db.SelectScalars[string](ctx, cr.pool, "SELECT file_uri FROM content WHERE parent_id = $1 AND file_uri IS NOT NULL", contentID)
 	if err != nil {
 		return err
 	}
-	for childRows.Next() {
-		var uri string
-		if err := childRows.Scan(&uri); err != nil {
-			return err
-		}
-		fileURIs = append(fileURIs, uri)
-	}
+	fileURIs = append(fileURIs, childURIs...)
 
 	if len(fileURIs) == 0 {
 		return echo.NewHTTPError(http.StatusBadRequest, "No files to scan")
@@ -854,4 +831,3 @@ func getContent(ctx context.Context, pool *pgxpool.Pool, id string) (models.Cont
 	}
 	return content, err
 }
-

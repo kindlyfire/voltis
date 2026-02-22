@@ -4,7 +4,6 @@ import { apiFetch } from '../fetch'
 import type {
     CustomListPartial,
     CustomList,
-    CustomListEntry,
     CustomListEntryCreate,
     CustomListEntryUpdate,
     CustomListReorderRequest,
@@ -97,7 +96,7 @@ export const customListsApi = {
         return useMutation({
             mutationFn: async (data: CustomListEntryCreate & { listId: string }) => {
                 const { listId, ...body } = data
-                return apiFetch<CustomListEntry>(`/custom-lists/${listId}/entries`, {
+                return apiFetch<OkResponse>(`/custom-lists/${listId}/entries`, {
                     method: 'POST',
                     body: JSON.stringify(body),
                 })
@@ -116,7 +115,7 @@ export const customListsApi = {
                 data: CustomListEntryUpdate & { listId: string; entryId: string }
             ) => {
                 const { listId, entryId, ...body } = data
-                return apiFetch<CustomListEntry>(`/custom-lists/${listId}/entries/${entryId}`, {
+                return apiFetch<OkResponse>(`/custom-lists/${listId}/entries/${entryId}`, {
                     method: 'POST',
                     body: JSON.stringify(body),
                 })

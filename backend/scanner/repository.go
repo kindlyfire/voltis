@@ -289,7 +289,7 @@ func (r *repository) commit(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	// Delete removed content
 	if len(r.contentD) > 0 {

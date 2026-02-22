@@ -5,10 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
-	"strconv"
 	"time"
-
-	"context"
 
 	"voltis/db"
 	"voltis/models"
@@ -43,13 +40,13 @@ func (cr *ContentRefRoutes) listLibraryURIs(c echo.Context) error {
 	ctx := reqCtx(c)
 	libraryID := c.Param("library_id")
 
-	contentURIs, err := collectStrings(ctx, cr.pool,
+	contentURIs, err := db.SelectScalars[string](ctx, cr.pool,
 		"SELECT uri FROM content WHERE library_id = $1", libraryID)
 	if err != nil {
 		return err
 	}
 
-	userURIs, err := collectStrings(ctx, cr.pool,
+	userURIs, err := db.SelectScalars[string](ctx, cr.pool,
 		"SELECT uri FROM user_to_content WHERE user_id = $1 AND library_id = $2",
 		user.ID, libraryID)
 	if err != nil {
@@ -140,6 +137,12 @@ func brokenUTCToDTO(u models.UserToContent) brokenUserToContentDTO {
 	}
 }
 
+type brokenRefsQuery struct {
+	Search string `query:"search"`
+	Limit  *int   `query:"limit"  validate:"omitempty,min=1"`
+	Offset int    `query:"offset" validate:"min=0"`
+}
+
 func (cr *ContentRefRoutes) listBrokenRefs(c echo.Context) error {
 	user, err := requireUser(c)
 	if err != nil {
@@ -148,20 +151,10 @@ func (cr *ContentRefRoutes) listBrokenRefs(c echo.Context) error {
 
 	ctx := reqCtx(c)
 	libraryID := c.Param("library_id")
-	search := c.QueryParam("search")
-	limitParam := c.QueryParam("limit")
-	offsetParam := c.QueryParam("offset")
 
-	offset := 0
-	if offsetParam != "" {
-		offset, _ = strconv.Atoi(offsetParam)
-	}
-	var limit *int
-	if limitParam != "" {
-		v, _ := strconv.Atoi(limitParam)
-		if v > 0 {
-			limit = &v
-		}
+	q, err := BindQuery[brokenRefsQuery](c)
+	if err != nil {
+		return err
 	}
 
 	args := pgx.NamedArgs{
@@ -170,8 +163,8 @@ func (cr *ContentRefRoutes) listBrokenRefs(c echo.Context) error {
 	}
 
 	searchClause := ""
-	if search != "" {
-		args["search"] = "%" + search + "%"
+	if q.Search != "" {
+		args["search"] = "%" + q.Search + "%"
 		searchClause = " AND utc.uri ILIKE @search"
 	}
 
@@ -188,11 +181,11 @@ func (cr *ContentRefRoutes) listBrokenRefs(c echo.Context) error {
 	}
 
 	dataQuery := "SELECT utc.* " + baseQuery + " ORDER BY utc.uri"
-	if limit != nil {
-		dataQuery += fmt.Sprintf(" LIMIT %d", *limit)
+	if q.Limit != nil {
+		dataQuery += fmt.Sprintf(" LIMIT %d", *q.Limit)
 	}
-	if offset > 0 {
-		dataQuery += fmt.Sprintf(" OFFSET %d", offset)
+	if q.Offset > 0 {
+		dataQuery += fmt.Sprintf(" OFFSET %d", q.Offset)
 	}
 
 	items, err := db.Select[models.UserToContent](ctx, cr.pool, dataQuery, args)
@@ -206,23 +199,6 @@ func (cr *ContentRefRoutes) listBrokenRefs(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, PaginatedResponse[brokenUserToContentDTO]{Data: dtos, Total: total})
-}
-
-func collectStrings(ctx context.Context, pool *pgxpool.Pool, query string, args ...any) ([]string, error) {
-	rows, err := pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var result []string
-	for rows.Next() {
-		var s string
-		if err := rows.Scan(&s); err != nil {
-			return nil, err
-		}
-		result = append(result, s)
-	}
-	return result, nil
 }
 
 type brokenRefsFixRequest struct {
@@ -248,7 +224,7 @@ func (cr *ContentRefRoutes) fixBrokenRefs(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	// Delete
 	if len(req.Delete) > 0 {
@@ -324,5 +300,5 @@ func (cr *ContentRefRoutes) fixBrokenRefs(c echo.Context) error {
 		return err
 	}
 
-	return c.NoContent(http.StatusOK)
+	return okResponse(c)
 }
