@@ -22,7 +22,7 @@
 
                 <!-- Scanning -->
                 <template v-else>
-                    <div v-if="scanStatus.length === 0 && !scanComplete" class="text-center py-4">
+                    <div v-if="scans.length === 0 && !scanComplete" class="text-center py-4">
                         <VProgressCircular indeterminate class="mb-4" />
                         <div>Starting scan...</div>
                     </div>
@@ -30,13 +30,17 @@
                     <template v-else>
                         <div class="space-y-3!">
                             <div
-                                v-for="item in scanStatus"
-                                :key="item.library_id"
+                                v-for="item in scans"
+                                :key="item.libraryId"
                                 class="border rounded pa-3"
                             >
-                                <div class="font-medium">{{ item.library_name }}</div>
+                                <div class="font-medium">{{ getLibraryName(item.libraryId) }}</div>
                                 <template
-                                    v-if="item.status === 'running' || item.status === 'done'"
+                                    v-if="
+                                        item.status === 'running' ||
+                                        item.status === 'completed' ||
+                                        item.status === 'failed'
+                                    "
                                 >
                                     <VProgressLinear
                                         :model-value="
@@ -48,7 +52,13 @@
                                                         item.progress.total) *
                                                     100
                                         "
-                                        :color="item.status === 'done' ? 'success' : undefined"
+                                        :color="
+                                            item.status === 'completed'
+                                                ? 'success'
+                                                : item.status === 'failed'
+                                                  ? 'error'
+                                                  : undefined
+                                        "
                                         class="mt-2"
                                         rounded
                                         height="6"
@@ -58,12 +68,12 @@
                                         {{ item.progress?.total ?? '?' }}
                                     </div>
                                     <div
-                                        v-if="item.summary"
+                                        v-if="item.output"
                                         class="text-sm text-medium-emphasis mt-1"
                                     >
-                                        {{ item.summary.to_add }} to add,
-                                        {{ item.summary.to_update }} to update,
-                                        {{ item.summary.to_remove }} to remove
+                                        {{ item.output.to_add }} to add,
+                                        {{ item.output.to_update }} to update,
+                                        {{ item.output.to_remove }} to remove
                                     </div>
                                 </template>
                                 <div v-else class="text-sm text-medium-emphasis mt-1">Queued</div>
@@ -84,7 +94,7 @@
 import { ref, computed } from 'vue'
 import { contentApi } from '@/utils/api/content'
 import { librariesApi } from '@/utils/api/libraries'
-import { useWsOnScanStatus, type ScanStatusItem } from '@/utils/ws'
+import { useScanTracker } from '@/utils/ws'
 
 const props = defineProps<{
     open: boolean
@@ -97,10 +107,14 @@ const libraries = librariesApi.useList()
 const scan = librariesApi.useScan()
 const forceScan = ref(!!props.contentId)
 const scanning = ref(false)
-const scanComplete = ref(false)
-const scanStatus = ref<ScanStatusItem[]>([])
+const { scans } = useScanTracker()
 
 const isContentScan = computed(() => !!props.contentId)
+const scanComplete = computed(
+    () =>
+        scans.value.length > 0 &&
+        scans.value.every(i => i.status === 'completed' || i.status === 'failed')
+)
 
 const title = computed(() => {
     if (isContentScan.value) return 'Scan Content'
@@ -113,45 +127,21 @@ function getLibraryName(id: string): string {
     return libraries.data?.value?.find(l => l.id === id)?.name ?? id
 }
 
-useWsOnScanStatus(msg => {
-    if (!scanning.value) return
-    const queueIds = new Set(msg.queue.map(i => i.library_id))
-
-    for (const item of scanStatus.value) {
-        if (item.status !== 'done' && !queueIds.has(item.library_id)) {
-            item.status = 'done'
-        }
-    }
-
-    for (const incoming of msg.queue) {
-        const existing = scanStatus.value.find(i => i.library_id === incoming.library_id)
-        if (existing) {
-            Object.assign(existing, incoming)
-        } else {
-            scanStatus.value.push(incoming)
-        }
-    }
-
-    if (msg.queue.length === 0) {
-        scanComplete.value = true
-    }
-})
-
-function subscribeScanStatus() {
-    scanning.value = true
-}
-
 async function startScan() {
     if (isContentScan.value) {
         await contentApi.scanContent(props.contentId!)
-        subscribeScanStatus()
+        scanning.value = true
     } else {
         scan.mutate(
             {
                 ids: props.libraryIds.length > 0 ? props.libraryIds : undefined,
                 force: forceScan.value,
             },
-            { onSuccess: subscribeScanStatus }
+            {
+                onSuccess: () => {
+                    scanning.value = true
+                },
+            }
         )
     }
 }

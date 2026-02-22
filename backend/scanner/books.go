@@ -86,7 +86,7 @@ func (bs *BooksScanner) ScanFile(r *repository, libraryID string, file FSFile) *
 	content.Valid = true
 	content.ParentID = parentID
 	content.UpdatedAt = now
-	content.FileMtime = &file.Mtime
+	content.FileMtime = new(file.Mtime.UTC())
 	content.FileSize = new(int(file.Size))
 	content.OrderParts = orderParts
 	content.CoverURI = coverURI

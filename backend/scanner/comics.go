@@ -279,7 +279,7 @@ func (cs *ComicsScanner) ScanFile(r *repository, libraryID string, file FSFile) 
 	content.Valid = true
 	content.ParentID = &series.ID
 	content.UpdatedAt = now
-	content.FileMtime = &file.Mtime
+	content.FileMtime = new(file.Mtime.UTC())
 	content.FileSize = new(int(file.Size))
 
 	var orderParts []*float32
@@ -341,7 +341,7 @@ func (cs *ComicsScanner) scanSeriesCover(series *models.Content) {
 		coverPath := filepath.Join(*series.FileURI, name)
 		if info, err := os.Stat(coverPath); err == nil && !info.IsDir() {
 			series.CoverURI = new(coverPath)
-			series.FileMtime = new(info.ModTime())
+			series.FileMtime = new(info.ModTime().UTC())
 			return
 		}
 	}

@@ -7,10 +7,17 @@ import (
 	"sync"
 
 	"voltis/db"
+	"voltis/lib/fp"
 	"voltis/models"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// QueueBroadcaster is implemented by the WebSocket hub.
+type QueueBroadcaster interface {
+	db.TaskEventBroadcaster
+	BroadcastScanQueue(libraryIDs []string)
+}
 
 type scanJob struct {
 	LibraryID   string
@@ -19,14 +26,15 @@ type scanJob struct {
 }
 
 type Queue struct {
-	pool *pgxpool.Pool
-	mu   sync.Mutex
-	jobs []scanJob
+	pool    *pgxpool.Pool
+	hub     QueueBroadcaster
+	mu      sync.Mutex
+	jobs    []scanJob
 	running bool
 }
 
-func NewQueue(pool *pgxpool.Pool) *Queue {
-	return &Queue{pool: pool}
+func NewQueue(pool *pgxpool.Pool, hub QueueBroadcaster) *Queue {
+	return &Queue{pool: pool, hub: hub}
 }
 
 func (q *Queue) Enqueue(libraryID string, force bool, filterPaths []string) {
@@ -56,19 +64,35 @@ func (q *Queue) Enqueue(libraryID string, force bool, filterPaths []string) {
 	}
 }
 
+func (q *Queue) broadcastQueue() {
+	q.mu.Lock()
+	ids := fp.Map(q.jobs, func(j scanJob) string { return j.LibraryID })
+	q.mu.Unlock()
+	q.hub.BroadcastScanQueue(ids)
+}
+
 func (q *Queue) process() {
+	stopBroadcast := fp.NewTicker(1000, func() {
+		q.broadcastQueue()
+	})
+	defer stopBroadcast()
+
 	for {
-		q.mu.Lock()
-		if len(q.jobs) == 0 {
-			q.running = false
-			q.mu.Unlock()
+		var job *scanJob
+		fp.WithMutex(&q.mu, func() {
+			if len(q.jobs) == 0 {
+				q.running = false
+			} else {
+				job = &q.jobs[0]
+				q.jobs = q.jobs[1:]
+			}
+		})
+		if job == nil {
 			return
 		}
-		job := q.jobs[0]
-		q.jobs = q.jobs[1:]
-		q.mu.Unlock()
 
-		q.runJob(job)
+		q.broadcastQueue()
+		q.runJob(*job)
 	}
 }
 
@@ -97,6 +121,7 @@ func (q *Queue) runJob(job scanJob) {
 	result, err := Scan(ctx, q.pool, lib.ID, lib.Type, paths, ScanOptions{
 		Force:       job.Force,
 		FilterPaths: job.FilterPaths,
+		Hub:         q.hub,
 	})
 	if err != nil {
 		slog.Error("[scanner] scan failed", "library", lib.ID, "err", err)

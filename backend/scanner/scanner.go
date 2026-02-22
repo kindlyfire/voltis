@@ -7,8 +7,11 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"voltis/db"
+	"voltis/lib/fp"
 	"voltis/models"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -39,6 +42,7 @@ type ScanOptions struct {
 	Force       bool
 	FilterPaths []string
 	Concurrency int
+	Hub         db.TaskEventBroadcaster
 }
 
 func newFileScanner(libraryType string) FileScanner {
@@ -62,6 +66,52 @@ func Scan(ctx context.Context, pool *pgxpool.Pool, libraryID string, libraryType
 		return nil, nil
 	}
 
+	slog_scan("starting scan", "library", libraryID, "type", libraryType, "force", opts.Force, "filter_paths", opts.FilterPaths)
+
+	// Create task
+	var task *models.Task
+	if opts.Hub != nil {
+		now := time.Now().UTC()
+		input, _ := json.Marshal(map[string]any{
+			"library_id":   libraryID,
+			"force":        opts.Force,
+			"filter_paths": opts.FilterPaths,
+		})
+		task = &models.Task{
+			ID:        models.MakeTaskID(),
+			CreatedAt: now,
+			UpdatedAt: now,
+			Name:      "scan",
+			Status:    models.TaskStatusInProgress,
+			Input:     input,
+			Output:    json.RawMessage("{}"),
+		}
+		if err := db.TaskCreate(ctx, pool, task); err != nil {
+			return nil, err
+		}
+	}
+
+	var taskUpdateMutex sync.Mutex
+	taskUpdate := func(tuOpts db.TaskUpdateOpts) {
+		if task == nil || opts.Hub == nil {
+			return
+		}
+		fp.WithMutex(&taskUpdateMutex, func() {
+			if err := db.TaskUpdate(ctx, pool, opts.Hub, task, tuOpts); err != nil {
+				slog.Error("[scanner] task update failed", "err", err)
+			}
+		})
+	}
+
+	// On failure, mark task as failed
+	var scanErr error
+	defer func() {
+		if scanErr != nil && task != nil {
+			failed := models.TaskStatusFailed
+			taskUpdate(db.TaskUpdateOpts{Status: &failed})
+		}
+	}()
+
 	// Determine sources
 	scanSources := sources
 	if len(opts.FilterPaths) > 0 {
@@ -71,6 +121,7 @@ func Scan(ctx context.Context, pool *pgxpool.Pool, libraryID string, libraryType
 	// Walk filesystem
 	files, err := walkSources(scanSources, s.FileEligible)
 	if err != nil {
+		scanErr = err
 		return nil, err
 	}
 	slog.Info("[scanner] found files", "count", len(files), "library", libraryID)
@@ -78,6 +129,7 @@ func Scan(ctx context.Context, pool *pgxpool.Pool, libraryID string, libraryType
 	// Load existing content
 	r := newRepository(pool, libraryID)
 	if err := r.load(ctx); err != nil {
+		scanErr = err
 		return nil, err
 	}
 
@@ -88,6 +140,16 @@ func Scan(ctx context.Context, pool *pgxpool.Pool, libraryID string, libraryType
 		"add", len(toAdd), "update", len(toUpdate),
 		"unchanged", len(unchanged), "remove", len(toRemove),
 	)
+
+	// Emit summary
+	taskUpdate(db.TaskUpdateOpts{
+		Output: map[string]int{
+			"to_add":    len(toAdd),
+			"to_update": len(toUpdate),
+			"to_remove": len(toRemove),
+			"unchanged": len(unchanged),
+		},
+	})
 
 	// Move removed items to deleted list
 	for _, file := range toRemove {
@@ -101,29 +163,18 @@ func Scan(ctx context.Context, pool *pgxpool.Pool, libraryID string, libraryType
 
 	// Process added + updated files concurrently
 	toProcess := append(toAdd, toUpdate...)
+	progressTotal := len(toProcess)
+	var progressProcessed atomic.Int64
 	parentsWithUpdates := &sync.Map{}
-	sem := make(chan struct{}, opts.Concurrency)
-	var wg sync.WaitGroup
+
 	var mu sync.Mutex
-
-	for _, file := range toProcess {
-		wg.Add(1)
-		go func(f FSFile) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			result := s.ScanFile(r, libraryID, f)
-
-			mu.Lock()
-			defer mu.Unlock()
-
+	fp.MapConcurrently(toProcess, opts.Concurrency, func(f FSFile) {
+		result := s.ScanFile(r, libraryID, f)
+		fp.WithMutex(&mu, func() {
 			if result != nil {
 				if !r.checkURIAvailable(result) {
 					slog.Warn("[scanner] URI conflict, skipping", "file", f.Path, "uri", result.URI)
-					return
-				}
-				if result.ParentID != nil {
+				} else if result.ParentID != nil {
 					parentsWithUpdates.Store(*result.ParentID, true)
 				}
 			} else {
@@ -136,9 +187,15 @@ func Scan(ctx context.Context, pool *pgxpool.Pool, libraryID string, libraryType
 				}
 				slog.Warn("[scanner] failed to parse file", "path", f.Path)
 			}
-		}(file)
-	}
-	wg.Wait()
+		})
+		processed := int(progressProcessed.Add(1))
+		taskUpdate(db.TaskUpdateOpts{
+			Progress: map[string]int{
+				"total":     progressTotal,
+				"processed": processed,
+			},
+		})
+	})
 
 	// Update series that had changes
 	parentsWithUpdates.Range(func(key, _ any) bool {
@@ -168,10 +225,12 @@ func Scan(ctx context.Context, pool *pgxpool.Pool, libraryID string, libraryType
 		return true
 	})
 
-	// Commit
 	if err := r.commit(ctx); err != nil {
+		scanErr = err
 		return nil, err
 	}
+
+	taskUpdate(db.TaskUpdateOpts{Status: new(models.TaskStatusCompleted)})
 
 	return &ScanResult{
 		Added:     len(toAdd),

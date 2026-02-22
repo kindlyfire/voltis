@@ -6,17 +6,23 @@
         <VCard>
             <VCardText class="space-y-3!">
                 <div
-                    v-for="item in scanStatus"
-                    :key="item.library_id"
+                    v-for="item in scans"
+                    :key="item.libraryId"
                     class="border rounded pa-3 min-w-[300px]"
                 >
                     <div class="font-medium flex items-center gap-2">
-                        {{ item.library_name }}
+                        {{ getLibraryName(item.libraryId) }}
                         <VIcon
-                            v-if="item.status === 'done'"
+                            v-if="item.status === 'completed'"
                             icon="mdi-check"
                             size="small"
                             color="success"
+                        />
+                        <VIcon
+                            v-else-if="item.status === 'failed'"
+                            icon="mdi-alert-circle"
+                            size="small"
+                            color="error"
                         />
                     </div>
                     <template v-if="item.status === 'running'">
@@ -37,10 +43,10 @@
                             {{ item.progress?.total ?? '?' }}
                         </div>
                     </template>
-                    <template v-else-if="item.status === 'done'">
+                    <template v-else-if="item.status === 'completed' || item.status === 'failed'">
                         <VProgressLinear
                             :model-value="100"
-                            color="success"
+                            :color="item.status === 'completed' ? 'success' : 'error'"
                             class="mt-2"
                             rounded
                             height="6"
@@ -54,14 +60,29 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onUnmounted } from 'vue'
-import { useWsOnScanStatus, type ScanStatusItem } from '@/utils/ws'
+import { computed, watch, onUnmounted } from 'vue'
+import { useScanTracker } from '@/utils/ws'
+import { librariesApi } from '@/utils/api/libraries'
+import { ref } from 'vue'
 
-const scanStatus = ref<ScanStatusItem[]>([])
+const { scans, clear } = useScanTracker()
+const libraries = librariesApi.useList()
 const menuOpen = ref(false)
-const active = computed(() => scanStatus.value.some(i => i.status !== 'done'))
 const pendingClear = ref(false)
-const visible = computed(() => scanStatus.value.length > 0)
+
+const active = computed(() =>
+    scans.value.some(i => i.status === 'running' || i.status === 'queued')
+)
+const visible = computed(() => scans.value.length > 0)
+const allDone = computed(
+    () =>
+        scans.value.length > 0 &&
+        scans.value.every(i => i.status === 'completed' || i.status === 'failed')
+)
+
+function getLibraryName(id: string): string {
+    return libraries.data?.value?.find(l => l.id === id)?.name ?? id
+}
 
 let clearTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -72,44 +93,19 @@ function scheduleClear() {
         if (menuOpen.value) {
             pendingClear.value = true
         } else {
-            scanStatus.value = []
+            clear()
         }
     }, 10000)
 }
 
+watch(allDone, done => {
+    if (done) scheduleClear()
+})
+
 watch(menuOpen, open => {
     if (!open && pendingClear.value) {
         pendingClear.value = false
-        scanStatus.value = []
-    }
-})
-
-useWsOnScanStatus(msg => {
-    if (clearTimer) {
-        clearTimeout(clearTimer)
-        clearTimer = null
-    }
-    pendingClear.value = false
-
-    const queueIds = new Set(msg.queue.map(i => i.library_id))
-
-    for (const item of scanStatus.value) {
-        if (item.status !== 'done' && !queueIds.has(item.library_id)) {
-            item.status = 'done'
-        }
-    }
-
-    for (const incoming of msg.queue) {
-        const existing = scanStatus.value.find(i => i.library_id === incoming.library_id)
-        if (existing) {
-            Object.assign(existing, incoming)
-        } else {
-            scanStatus.value.push(incoming)
-        }
-    }
-
-    if (msg.queue.length === 0) {
-        scheduleClear()
+        clear()
     }
 })
 

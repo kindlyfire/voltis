@@ -14,7 +14,7 @@ type FSFile struct {
 }
 
 func (f FSFile) HasChanged(other FSFile) bool {
-	return !f.Mtime.Equal(other.Mtime) || f.Size != other.Size
+	return !f.Mtime.Truncate(time.Millisecond).Equal(other.Mtime.Truncate(time.Millisecond)) || f.Size != other.Size
 }
 
 var comicExtensions = map[string]bool{

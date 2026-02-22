@@ -11,7 +11,8 @@ import (
 )
 
 func Register(e *echo.Echo, pool *pgxpool.Pool) {
-	scanQueue := scanner.NewQueue(pool)
+	hub := NewHub()
+	scanQueue := scanner.NewQueue(pool, hub)
 
 	e.Use(middleware.GzipWithConfig(middleware.GzipConfig{
 		MinLength: 860,
@@ -31,6 +32,8 @@ func Register(e *echo.Echo, pool *pgxpool.Pool) {
 	(&FileRoutes{pool: pool}).Register(api.Group("/files"))
 	(&ContentRefRoutes{pool: pool}).Register(api.Group("/content"))
 	(&CustomListRoutes{pool: pool}).Register(api.Group("/custom-lists"))
+
+	e.GET("/api/ws", wsHandler(pool, hub))
 
 	registerStaticRoutes(e)
 }
