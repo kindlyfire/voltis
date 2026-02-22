@@ -1,9 +1,9 @@
 # Comics
 
-Voltis supports scanning comics in `.cbz` containers, and supports the
-`ComicInfo.xml` metadata format.
+Voltis supports scanning comics in `.cbz`, `.zip`, `.cbr`, `.rar` and `.pdf`
+containers, and supports the `ComicInfo.xml` metadata format.
 
-The reader has paged (comics, manga) and longstrip modes.
+The reader has paged (comics, manga) and longstrip (webtoons) modes.
 
 ## Filesystem layout
 
