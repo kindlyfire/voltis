@@ -14,6 +14,16 @@ func Register(e *echo.Echo, pool *pgxpool.Pool) {
 	hub := NewHub()
 	scanQueue := scanner.NewQueue(pool, hub)
 
+	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+		AllowOriginFunc: func(origin string) (bool, error) {
+			return strings.HasPrefix(origin, "http://localhost:") ||
+				strings.HasPrefix(origin, "https://localhost:") ||
+				origin == "http://localhost" ||
+				origin == "https://localhost", nil
+		},
+		AllowCredentials: true,
+	}))
+
 	e.Use(middleware.GzipWithConfig(middleware.GzipConfig{
 		MinLength: 860,
 		Skipper: func(c echo.Context) bool {
