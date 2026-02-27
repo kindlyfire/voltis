@@ -225,5 +225,3 @@ func getLibrary(ctx context.Context, pool *pgxpool.Pool, id string) (models.Libr
 	}
 	return lib, err
 }
-
-

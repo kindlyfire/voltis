@@ -1,5 +1,5 @@
-import { useMutation, useQuery, type UseQueryOptions } from '@tanstack/vue-query'
-import { toValue, type MaybeRefOrGetter, type UnwrapRef } from 'vue'
+import { useMutation, useQuery } from '@tanstack/vue-query'
+import { toValue, type MaybeRefOrGetter } from 'vue'
 import { API_URL, apiFetch } from '../fetch'
 import type {
     BookChapter,
@@ -17,10 +17,8 @@ import type {
     UserToContent,
     UserToContentUpdate,
 } from './types'
-import { isEnabled } from './_utils'
+import { isEnabled, type QueryOptions } from './_utils'
 import { queryClient } from '../misc'
-
-type QueryOptions<T> = Omit<UnwrapRef<UseQueryOptions<T>>, 'queryKey' | 'queryFn'>
 
 export const contentApi = {
     useGet: (

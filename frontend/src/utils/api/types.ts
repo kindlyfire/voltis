@@ -279,3 +279,29 @@ export interface CustomListReorderRequest {
 export interface OkResponse {
     success: boolean
 }
+
+export const TaskStatus = {
+    IN_PROGRESS: 1,
+    COMPLETED: 2,
+    FAILED: 3,
+} as const
+
+export interface Task {
+    id: string
+    created_at: string
+    updated_at: string
+    name: string
+    status: number
+    input: Record<string, unknown>
+    output: Record<string, unknown>
+    logs: string | null
+    user_id: string | null
+    library_id: string | null
+}
+
+export interface TaskListParams {
+    limit?: number
+    offset?: number
+    sort?: 'created_at' | 'updated_at'
+    sort_order?: 'asc' | 'desc'
+}

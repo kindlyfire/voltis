@@ -10,6 +10,7 @@ import SettingsUsersPage from './pages/settings/UsersPage.vue'
 import SettingsLibrariesPage from './pages/settings/LibrariesPage.vue'
 import SettingsInterfacePage from './pages/settings/InterfacePage.vue'
 import SettingsBrokenRefsPage from './pages/settings/BrokenRefsPage.vue'
+import SettingsTasksPage from './pages/settings/TasksPage.vue'
 import ListsPage from './pages/lists/ListsPage.vue'
 import ListPage from './pages/lists/ListPage.vue'
 import ReadPage from './pages/read/ReadPage.vue'
@@ -75,6 +76,11 @@ const router = createRouter({
                     path: '/settings/broken-refs',
                     name: 'settings-broken-refs',
                     component: SettingsBrokenRefsPage,
+                },
+                {
+                    path: '/settings/tasks',
+                    name: 'settings-tasks',
+                    component: SettingsTasksPage,
                 },
             ],
         },

@@ -1,4 +1,7 @@
-import { computed, toValue, type MaybeRefOrGetter, type Ref } from 'vue'
+import { computed, toValue, type MaybeRefOrGetter, type Ref, type UnwrapRef } from 'vue'
+import type { UseQueryOptions } from '@tanstack/vue-query'
+
+export type QueryOptions<T> = Omit<UnwrapRef<UseQueryOptions<T>>, 'queryKey' | 'queryFn'>
 
 /** Used to conditionally enable queries depending on if their input data is
  * available or not. */

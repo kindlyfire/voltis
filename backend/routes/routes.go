@@ -42,6 +42,7 @@ func Register(e *echo.Echo, pool *pgxpool.Pool) {
 	(&FileRoutes{pool: pool}).Register(api.Group("/files"))
 	(&ContentRefRoutes{pool: pool}).Register(api.Group("/content"))
 	(&CustomListRoutes{pool: pool}).Register(api.Group("/custom-lists"))
+	(&TaskRoutes{pool: pool}).Register(api.Group("/tasks"))
 
 	e.GET("/api/ws", wsHandler(pool, hub))
 

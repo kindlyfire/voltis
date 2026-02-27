@@ -1,5 +1,5 @@
-import { useMutation, useQuery, useQueryClient, type UseQueryOptions } from '@tanstack/vue-query'
-import { computed, toValue, type MaybeRefOrGetter, type UnwrapRef } from 'vue'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { computed, toValue, type MaybeRefOrGetter } from 'vue'
 import { apiFetch } from '../fetch'
 import type {
     CustomListPartial,
@@ -10,9 +10,7 @@ import type {
     CustomListUpsert,
     OkResponse,
 } from './types'
-import { isEnabled } from './_utils'
-
-type QueryOptions<T> = Omit<UnwrapRef<UseQueryOptions<T>>, 'queryKey' | 'queryFn'>
+import { isEnabled, type QueryOptions } from './_utils'
 
 const listsKey = ['custom-lists']
 const detailKey = (id: string | undefined | null) => [...listsKey, id]

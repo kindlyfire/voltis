@@ -56,6 +56,9 @@
                     <VListItem to="/settings/libraries" prepend-icon="mdi-bookshelf">
                         <VListItemTitle>Libraries</VListItemTitle>
                     </VListItem>
+                    <VListItem to="/settings/tasks" prepend-icon="mdi-clipboard-list">
+                        <VListItemTitle>Tasks</VListItemTitle>
+                    </VListItem>
                 </template>
             </VList>
             <VList v-else nav>
