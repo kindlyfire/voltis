@@ -1,5 +1,5 @@
 <template>
-    <div>
+    <div class="AContentGridItem">
         <VCard class="relative content-grid-item">
             <RouterLink :to="to" class="block" :title="content.title">
                 <img
@@ -9,6 +9,7 @@
                         objectFit: 'cover',
                         width: '100%',
                     }"
+                    class="block"
                 />
             </RouterLink>
 

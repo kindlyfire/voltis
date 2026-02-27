@@ -1,6 +1,6 @@
 <template>
     <VContainer>
-        <h1 class="text-h4 mb-6">Tasks</h1>
+        <h1 class="text-3xl mb-6">Tasks</h1>
 
         <VDataTableServer
             v-model:items-per-page="itemsPerPage"
@@ -30,27 +30,26 @@
 
             <template #expanded-row="{ columns, item }">
                 <tr class="shadow-inner bg-neutral-50">
-                    <td :colspan="columns.length" class="pa-4">
-                        <div class="d-flex flex-column ga-4">
+                    <td :colspan="columns.length" class="p-4">
+                        <div class="flex flex-col gap-4">
                             <div>
-                                <div class="text-subtitle-2 mb-1">Input</div>
+                                <div class="text-sm font-semibold mb-1">Input</div>
                                 <pre
-                                    class="text-body-2 font-mono! bg-surface-variant pa-3 rounded overflow-auto"
+                                    class="text-sm font-mono bg-surface-variant p-3 rounded overflow-auto"
                                     >{{ formatJson(item.input) }}</pre
                                 >
                             </div>
                             <div>
-                                <div class="text-subtitle-2 mb-1">Output</div>
+                                <div class="text-sm font-semibold mb-1">Output</div>
                                 <pre
-                                    class="text-body-2 font-mono! bg-surface-variant pa-3 rounded overflow-auto"
+                                    class="text-sm font-mono bg-surface-variant p-3 rounded overflow-auto"
                                     >{{ formatJson(item.output) }}</pre
                                 >
                             </div>
                             <div v-if="item.logs">
-                                <div class="text-subtitle-2 mb-1">Logs</div>
+                                <div class="text-sm font-semibold mb-1">Logs</div>
                                 <pre
-                                    class="text-body-2 font-mono! bg-surface-variant pa-3 rounded overflow-auto"
-                                    style="max-height: 400px"
+                                    class="text-sm font-mono bg-surface-variant p-3 rounded overflow-auto max-h-100"
                                     >{{ item.logs }}</pre
                                 >
                             </div>

@@ -24,7 +24,7 @@
                             <img
                                 v-if="content?.cover_uri"
                                 :src="`${API_URL}/files/cover/${content.id}`"
-                                class="rounded"
+                                class="rounded block"
                                 :style="{
                                     aspectRatio: '2 / 3',
                                     objectFit: 'cover',
@@ -150,7 +150,7 @@
                             <img
                                 v-if="content?.cover_uri"
                                 :src="`${API_URL}/files/cover/${content.id}`"
-                                class="rounded"
+                                class="rounded block"
                                 :style="{
                                     aspectRatio: '2 / 3',
                                     objectFit: 'cover',
