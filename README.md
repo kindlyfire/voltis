@@ -16,7 +16,7 @@ I will release alpha and beta versions of Voltis roughly in this order:
 For 1.0.0-alpha.X:
 
 - [ ] Feature-parity of the Go backend with the old Python backend
-- [ ] View scan history and logs in the frontend
+- [x] View scan history and logs in the frontend
 
 For 1.0.0-beta.X:
 
