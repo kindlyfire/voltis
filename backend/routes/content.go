@@ -225,7 +225,7 @@ func (cr *ContentRoutes) listsForContent(c echo.Context) error {
 type contentListQuery struct {
 	ParentID      string `query:"parent_id"`
 	LibraryID     string `query:"library_id"`
-	Type          string `query:"type"`
+	Type          []string `query:"type"`
 	Valid         string `query:"valid"           validate:"omitempty,oneof=true false"`
 	ReadingStatus string `query:"reading_status"  validate:"omitempty,oneof=reading completed on_hold dropped plan_to_read"`
 	Starred       string `query:"starred"         validate:"omitempty,oneof=true false"`
@@ -274,8 +274,8 @@ func (cr *ContentRoutes) list(c echo.Context) error {
 		args["library_id"] = q.LibraryID
 		where = append(where, "c.library_id = @library_id")
 	}
-	if q.Type != "" {
-		args["types"] = strings.Split(q.Type, ",")
+	if len(q.Type) > 0 {
+		args["types"] = q.Type
 		where = append(where, "c.type = ANY(@types)")
 	}
 	if q.ReadingStatus != "" {

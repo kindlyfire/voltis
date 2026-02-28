@@ -162,6 +162,14 @@ func QueryToStruct[T any](c echo.Context) (T, error) {
 		}
 
 		switch fv.Kind() {
+		case reflect.Slice:
+			if fv.Type().Elem().Kind() == reflect.String {
+				vals := c.QueryParams()[name]
+				if len(vals) > 0 {
+					fv.Set(reflect.ValueOf(vals))
+				}
+			}
+			continue
 		case reflect.String:
 			fv.SetString(raw)
 		case reflect.Bool:
