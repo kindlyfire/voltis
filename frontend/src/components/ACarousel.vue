@@ -1,7 +1,7 @@
 <template>
     <section class="carousel-section">
         <div class="section-header">
-            <h2 class="text-h5 mb-0">{{ title }}</h2>
+            <h2 class="text-h5">{{ title }}</h2>
             <div class="controls">
                 <VBtn
                     icon="mdi-chevron-left"

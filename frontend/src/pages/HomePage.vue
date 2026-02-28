@@ -17,7 +17,7 @@
                 </div>
             </template>
         </div>
-        <div v-else class="space-y-12">
+        <div v-else class="space-y-4">
             <section v-if="lastRead?.length">
                 <ACarousel title="Recently Read">
                     <template v-if="qLastRead.isLoading.value">

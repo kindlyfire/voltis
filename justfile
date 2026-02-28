@@ -1,5 +1,5 @@
 app *args='':
-    cd backend && go run . {{ args }}
+    cd backend && gow run . {{ args }}
 
 frontend *args='':
     cd frontend && pnpm dev {{ args }}
