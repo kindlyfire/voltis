@@ -133,7 +133,9 @@ func (q *Queue) runJob(job scanJob) {
 			"added", result.Added,
 			"updated", result.Updated,
 			"removed", result.Removed,
+			"failed", result.Failed,
 			"unchanged", result.Unchanged,
+			"duration", result.Duration,
 		)
 	}
 }

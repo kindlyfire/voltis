@@ -284,52 +284,12 @@ func (r *repository) childrenOf(parentID string) []*models.Content {
 	return children
 }
 
-func (r *repository) commit(ctx context.Context) error {
+func (r *repository) commitGroup(ctx context.Context) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-
-	// Delete removed content
-	if len(r.contentD) > 0 {
-		ids := make([]string, len(r.contentD))
-		for i, c := range r.contentD {
-			ids[i] = c.ID
-		}
-		_, err := tx.Exec(ctx, "DELETE FROM content WHERE id = ANY($1)", ids)
-		if err != nil {
-			return fmt.Errorf("delete content: %w", err)
-		}
-	}
-
-	// Delete orphaned series
-	parentIDs := map[string]bool{}
-	for i := range r.content {
-		if r.content[i].ParentID != nil {
-			parentIDs[*r.content[i].ParentID] = true
-		}
-	}
-	var orphanIDs []string
-	var orphanIdxs []int
-	for i := range r.content {
-		c := &r.content[i]
-		if isGroupingType(c.Type) && !parentIDs[c.ID] {
-			orphanIDs = append(orphanIDs, c.ID)
-			orphanIdxs = append(orphanIdxs, i)
-		}
-	}
-	if len(orphanIDs) > 0 {
-		_, err := tx.Exec(ctx, "DELETE FROM content WHERE id = ANY($1)", orphanIDs)
-		if err != nil {
-			return fmt.Errorf("delete orphans: %w", err)
-		}
-		// Remove from content slice (reverse order to preserve indices)
-		for i := len(orphanIdxs) - 1; i >= 0; i-- {
-			idx := orphanIdxs[i]
-			r.content = append(r.content[:idx], r.content[idx+1:]...)
-		}
-	}
 
 	// Upsert modified content
 	for i := range r.content {
@@ -391,6 +351,66 @@ func (r *repository) commit(ctx context.Context) error {
 		`, m.URI, m.LibraryID, dataJSON, dataRawJSON, now)
 		if err != nil {
 			return fmt.Errorf("upsert metadata %s: %w", m.URI, err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+
+	// Clear dirty state after successful commit
+	r.dirtyIDs = map[string]bool{}
+	r.uriRenames = map[string]string{}
+	for _, m := range r.metadata {
+		m.dirty = false
+	}
+	return nil
+}
+
+func (r *repository) commitFinal(ctx context.Context) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Delete removed content
+	if len(r.contentD) > 0 {
+		ids := make([]string, len(r.contentD))
+		for i, c := range r.contentD {
+			ids[i] = c.ID
+		}
+		_, err := tx.Exec(ctx, "DELETE FROM content WHERE id = ANY($1)", ids)
+		if err != nil {
+			return fmt.Errorf("delete content: %w", err)
+		}
+	}
+
+	// Delete orphaned series
+	parentIDs := map[string]bool{}
+	for i := range r.content {
+		if r.content[i].ParentID != nil {
+			parentIDs[*r.content[i].ParentID] = true
+		}
+	}
+	var orphanIDs []string
+	var orphanIdxs []int
+	for i := range r.content {
+		c := &r.content[i]
+		if isGroupingType(c.Type) && !parentIDs[c.ID] {
+			orphanIDs = append(orphanIDs, c.ID)
+			orphanIdxs = append(orphanIdxs, i)
+		}
+	}
+	if len(orphanIDs) > 0 {
+		_, err := tx.Exec(ctx, "DELETE FROM content WHERE id = ANY($1)", orphanIDs)
+		if err != nil {
+			return fmt.Errorf("delete orphans: %w", err)
+		}
+		// Remove from content slice (reverse order to preserve indices)
+		for i := len(orphanIdxs) - 1; i >= 0; i-- {
+			idx := orphanIdxs[i]
+			r.content = append(r.content[:idx], r.content[idx+1:]...)
 		}
 	}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -56,7 +57,9 @@ type ScanResult struct {
 	Added     int
 	Updated   int
 	Removed   int
+	Failed    int
 	Unchanged int
+	Duration  time.Duration
 }
 
 type ScanOptions struct {
@@ -81,6 +84,8 @@ func Scan(ctx context.Context, pool *pgxpool.Pool, libraryID string, libraryType
 	if opts.Concurrency <= 0 {
 		opts.Concurrency = 10
 	}
+
+	scanStart := time.Now()
 
 	s := newFileScanner(libraryType)
 	if s == nil {
@@ -172,7 +177,7 @@ func Scan(ctx context.Context, pool *pgxpool.Pool, libraryID string, libraryType
 		},
 	})
 
-	// Move removed items to deleted list
+	// Move removed items to deleted list (in-memory; DB delete in commitFinal)
 	for _, file := range toRemove {
 		for i := range r.content {
 			if r.content[i].FileURI != nil && *r.content[i].FileURI == file.Path {
@@ -182,88 +187,153 @@ func Scan(ctx context.Context, pool *pgxpool.Pool, libraryID string, libraryType
 		}
 	}
 
-	// Process added + updated files concurrently
+	// Snapshot contentD IDs to compute accurate Removed count later
+	removedIDs := map[string]bool{}
+	for _, c := range r.contentD {
+		removedIDs[c.ID] = true
+	}
+
+	// Group toProcess files by folder and build sorted work list
 	toProcess := append(toAdd, toUpdate...)
+	addSet := map[string]bool{}
+	for _, f := range toAdd {
+		addSet[f.Path] = true
+	}
+	groups := groupByFolder(toProcess)
+
+	type groupedFile struct {
+		file     FSFile
+		groupIdx int
+	}
+	var workList []groupedFile
+	for i, g := range groups {
+		for _, f := range g {
+			workList = append(workList, groupedFile{file: f, groupIdx: i})
+		}
+	}
+
+	// Per-group completion tracking
+	type groupState struct {
+		mu      sync.Mutex
+		done    int
+		size    int
+		parents map[string]bool
+	}
+	states := fp.Map(groups, func(g []FSFile) groupState {
+		return groupState{size: len(g), parents: map[string]bool{}}
+	})
+
+	// Process files concurrently, commit per group
 	progressTotal := len(toProcess)
 	var progressProcessed atomic.Int64
-	parentsWithUpdates := map[string]bool{}
+	var commitMu sync.Mutex
+	var commitErr error
+	var resultAdded, resultUpdated, resultFailed atomic.Int64
 
-	type parsedResult struct {
-		file   FSFile
-		parsed *ParsedItem
-	}
-	parsedResults := make([]parsedResult, len(toProcess))
-	fp.MapConcurrently(toProcess, opts.Concurrency, func(f FSFile) {
-		item := s.ParseFile(libraryID, f)
-		idx := int(progressProcessed.Add(1)) - 1
-		parsedResults[idx] = parsedResult{file: f, parsed: item}
+	fp.MapConcurrently(workList, opts.Concurrency, func(gf groupedFile) {
+		parsed := s.ParseFile(libraryID, gf.file)
+
+		var parentID *string
+		fp.WithMutex(&commitMu, func() {
+			if commitErr != nil {
+				return
+			}
+			if parsed != nil {
+				content := applyParsedItem(r, libraryID, parsed)
+				if !r.checkURIAvailable(content) {
+					slog.Warn("[scanner] URI conflict, skipping", "file", gf.file.Path, "uri", content.URI)
+					resultFailed.Add(1)
+				} else {
+					if addSet[gf.file.Path] {
+						resultAdded.Add(1)
+					} else {
+						resultUpdated.Add(1)
+					}
+					if content.ParentID != nil {
+						parentID = content.ParentID
+					}
+				}
+			} else {
+				existing := r.findContentByFileURI(gf.file.Path)
+				if existing != nil {
+					parentID = existing.ParentID
+					r.removeContent(existing)
+				}
+				slog.Warn("[scanner] failed to parse file", "path", gf.file.Path)
+				resultFailed.Add(1)
+			}
+		})
+
+		state := &states[gf.groupIdx]
+		var complete bool
+		fp.WithMutex(&state.mu, func() {
+			state.done++
+			if parentID != nil {
+				state.parents[*parentID] = true
+			}
+			complete = state.done == state.size
+		})
+
+		if complete {
+			fp.WithMutex(&commitMu, func() {
+				if commitErr != nil {
+					return
+				}
+				updateGroupSeries(s, r, state.parents)
+				commitErr = r.commitGroup(ctx)
+			})
+		}
+
+		processed := int(progressProcessed.Add(1))
 		taskUpdate(db.TaskUpdateOpts{
 			Progress: map[string]int{
 				"total":     progressTotal,
-				"processed": idx + 1,
+				"processed": processed,
 			},
 		})
 	})
 
-	for _, pr := range parsedResults {
-		if pr.parsed != nil {
-			result := applyParsedItem(r, libraryID, pr.parsed)
-			if !r.checkURIAvailable(result) {
-				slog.Warn("[scanner] URI conflict, skipping", "file", pr.file.Path, "uri", result.URI)
-			} else if result.ParentID != nil {
-				parentsWithUpdates[*result.ParentID] = true
-			}
-		} else {
-			existing := r.findContentByFileURI(pr.file.Path)
-			if existing != nil {
-				if existing.ParentID != nil {
-					parentsWithUpdates[*existing.ParentID] = true
-				}
-				r.removeContent(existing)
-			}
-			slog.Warn("[scanner] failed to parse file", "path", pr.file.Path)
-		}
+	if commitErr != nil {
+		scanErr = commitErr
+		return nil, commitErr
 	}
 
-	// Update series that had changes
-	for parentID := range parentsWithUpdates {
-		var parent *models.Content
-		for i := range r.content {
-			if r.content[i].ID == parentID {
-				parent = &r.content[i]
-				break
-			}
-		}
-		if parent == nil {
-			continue
-		}
-		items := r.childrenOf(parentID)
-
-		// Sort and assign order (generic across all scanner types)
-		sort.Slice(items, func(i, j int) bool {
-			return compareOrderParts(items[i].OrderParts, items[j].OrderParts) < 0
-		})
-		for i, item := range items {
-			item.Order = new(i)
-			r.markDirty(item)
-		}
-
-		s.UpdateSeries(r, parent, items)
-	}
-
-	if err := r.commit(ctx); err != nil {
+	if err := r.commitFinal(ctx); err != nil {
 		scanErr = err
 		return nil, err
 	}
 
+	// Compute accurate Removed count: initial toRemove items still in contentD
+	resultRemoved := 0
+	for _, c := range r.contentD {
+		if removedIDs[c.ID] {
+			resultRemoved++
+		}
+	}
+
+	result := &ScanResult{
+		Added:     int(resultAdded.Load()),
+		Updated:   int(resultUpdated.Load()),
+		Removed:   resultRemoved,
+		Failed:    int(resultFailed.Load()),
+		Unchanged: len(unchanged),
+		Duration:  time.Since(scanStart),
+	}
+
+	// Emit actual counts
+	taskUpdate(db.TaskUpdateOpts{
+		Output: map[string]int{
+			"added":     result.Added,
+			"updated":   result.Updated,
+			"removed":   result.Removed,
+			"failed":    result.Failed,
+			"unchanged": result.Unchanged,
+		},
+	})
+
 	taskUpdate(db.TaskUpdateOpts{Status: new(models.TaskStatusCompleted)})
 
-	return &ScanResult{
-		Added:     len(toAdd),
-		Updated:   len(toUpdate),
-		Removed:   len(toRemove),
-		Unchanged: len(unchanged),
-	}, nil
+	return result, nil
 }
 
 func applyParsedItem(r *repository, libraryID string, p *ParsedItem) *models.Content {
@@ -375,6 +445,48 @@ func inheritChildMetadata(r *repository, series *models.Content, items []*models
 		existing[k] = v
 	}
 	metaRow.setSource("file", existing, nil)
+}
+
+func groupByFolder(files []FSFile) [][]FSFile {
+	byFolder := map[string][]FSFile{}
+	for _, f := range files {
+		folder := filepath.Dir(f.Path)
+		byFolder[folder] = append(byFolder[folder], f)
+	}
+	folders := make([]string, 0, len(byFolder))
+	for folder := range byFolder {
+		folders = append(folders, folder)
+	}
+	sort.Strings(folders)
+	return fp.Map(folders, func(folder string) []FSFile {
+		return byFolder[folder]
+	})
+}
+
+func updateGroupSeries(s FileScanner, r *repository, parents map[string]bool) {
+	for parentID := range parents {
+		var parent *models.Content
+		for i := range r.content {
+			if r.content[i].ID == parentID {
+				parent = &r.content[i]
+				break
+			}
+		}
+		if parent == nil {
+			continue
+		}
+		items := r.childrenOf(parentID)
+
+		sort.Slice(items, func(i, j int) bool {
+			return compareOrderParts(items[i].OrderParts, items[j].OrderParts) < 0
+		})
+		for i, item := range items {
+			item.Order = new(i)
+			r.markDirty(item)
+		}
+
+		s.UpdateSeries(r, parent, items)
+	}
 }
 
 func matchFiles(r *repository, files []FSFile, opts ScanOptions) (toAdd, toUpdate, unchanged, toRemove []FSFile) {
