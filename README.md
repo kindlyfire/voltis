@@ -9,17 +9,16 @@ This repository is a mirror from
 [git.tijlvdb.me](https://git.tijlvdb.me/tijlvdb/voltis), and does not accept
 issues or pull requests at the moment.
 
+![Voltis home screen](docs/home.png)
+
 ## Roadmap
 
 I will release alpha and beta versions of Voltis roughly in this order:
 
 For 1.0.0-alpha.X:
 
-- [ ] Feature-parity of the Go backend with the old Python backend
+- [x] Feature-parity of the Go backend with the old Python backend
 - [x] View scan history and logs in the frontend
-
-For 1.0.0-beta.X:
-
 - [ ] Tests for every endpoint + scanner
 - [ ] Keep track of multiple reading tracks per content
 - [ ] MangaBaka integration

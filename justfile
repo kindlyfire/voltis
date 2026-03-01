@@ -1,4 +1,5 @@
 app *args='':
+    # https://github.com/mitranim/gow
     cd backend && gow run . {{ args }}
 
 frontend *args='':
