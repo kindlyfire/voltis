@@ -1,7 +1,6 @@
 package scanner
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -74,13 +73,14 @@ func scanArchivePages(path string) ([]pageInfo, *ComicInfo) {
 			continue
 		}
 
-		data, err := a.ReadFile(entry.Name)
+		rc, err := a.OpenFile(entry.Name)
 		if err != nil {
 			pages = append(pages, pageInfo{Name: entry.Name})
 			continue
 		}
 
-		cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+		cfg, _, err := image.DecodeConfig(rc)
+		_ = rc.Close()
 		if err != nil {
 			pages = append(pages, pageInfo{Name: entry.Name})
 			continue

@@ -24,6 +24,7 @@ type Entry struct {
 type Archive interface {
 	List() ([]Entry, error)
 	ReadFile(name string) ([]byte, error)
+	OpenFile(name string) (io.ReadCloser, error)
 	Close() error
 }
 
@@ -68,14 +69,18 @@ func (z *zipArchive) List() ([]Entry, error) {
 }
 
 func (z *zipArchive) ReadFile(name string) ([]byte, error) {
+	rc, err := z.OpenFile(name)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rc.Close() }()
+	return io.ReadAll(rc)
+}
+
+func (z *zipArchive) OpenFile(name string) (io.ReadCloser, error) {
 	for _, f := range z.r.File {
 		if f.Name == name {
-			rc, err := f.Open()
-			if err != nil {
-				return nil, err
-			}
-			defer func() { _ = rc.Close() }()
-			return io.ReadAll(rc)
+			return f.Open()
 		}
 	}
 	return nil, fmt.Errorf("%w: %s", ErrFileNotFound, name)
@@ -120,11 +125,27 @@ func (r *rarArchive) List() ([]Entry, error) {
 }
 
 func (r *rarArchive) ReadFile(name string) ([]byte, error) {
-	rc, err := rardecode.OpenReader(r.path)
+	rc, err := r.OpenFile(name)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rc.Close() }()
+	return io.ReadAll(rc)
+}
+
+// rarFileReader wraps a rardecode.ReadCloser positioned at a specific entry.
+type rarFileReader struct {
+	archive *rardecode.ReadCloser
+}
+
+func (r *rarFileReader) Read(p []byte) (int, error) { return r.archive.Read(p) }
+func (r *rarFileReader) Close() error               { return r.archive.Close() }
+
+func (r *rarArchive) OpenFile(name string) (io.ReadCloser, error) {
+	rc, err := rardecode.OpenReader(r.path)
+	if err != nil {
+		return nil, err
+	}
 
 	for {
 		header, err := rc.Next()
@@ -132,12 +153,14 @@ func (r *rarArchive) ReadFile(name string) ([]byte, error) {
 			break
 		}
 		if err != nil {
+			_ = rc.Close()
 			return nil, err
 		}
 		if header.Name == name {
-			return io.ReadAll(rc)
+			return &rarFileReader{archive: rc}, nil
 		}
 	}
+	_ = rc.Close()
 	return nil, fmt.Errorf("%w: %s", ErrFileNotFound, name)
 }
 
