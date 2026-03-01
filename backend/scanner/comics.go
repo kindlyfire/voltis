@@ -16,11 +16,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	_ "golang.org/x/image/webp"
 
 	"voltis/lib/archive"
+	"voltis/lib/fp"
 	"voltis/models"
 )
 
@@ -137,7 +137,7 @@ func scanPDFPages(path string) []pageInfo {
 	return pages
 }
 
-func (cs *ComicsScanner) ScanFile(r *repository, libraryID string, file FSFile) *models.Content {
+func (cs *ComicsScanner) ParseFile(libraryID string, file FSFile) *ParsedItem {
 	path := file.Path
 
 	var pages []pageInfo
@@ -182,14 +182,6 @@ func (cs *ComicsScanner) ScanFile(r *repository, libraryID string, file FSFile) 
 	if seriesYear != nil {
 		seriesURIPart = fmt.Sprintf("%s_%d", seriesName, *seriesYear)
 	}
-
-	series := r.getSeries(
-		"comic/"+seriesURIPart,
-		seriesURIPart,
-		new(dir),
-		"comic_series",
-		seriesName,
-	)
 
 	// Parse volume/chapter from filename
 	stem := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
@@ -253,35 +245,11 @@ func (cs *ComicsScanner) ScanFile(r *repository, libraryID string, file FSFile) 
 	if title == "" {
 		title = filename
 	}
-
-	// Create or update content
-	existing := r.findContentByFileURI(file.Path)
-	content := existing
-	if content == nil {
-		content = r.matchDeletedItem(uriPart, &series.ID)
+	if _, ok := meta["title"]; !ok {
+		meta["title"] = title
 	}
 
-	now := time.Now().UTC()
-	if content == nil {
-		newContent := models.Content{
-			ID:        models.MakeContentID(),
-			LibraryID: libraryID,
-			Type:      "comic",
-			CreatedAt: now,
-		}
-		r.content = append(r.content, newContent)
-		content = &r.content[len(r.content)-1]
-	}
-
-	content.FileURI = new(file.Path)
-	content.URIPart = uriPart
-	content.URI = series.URI + "/" + uriPart
-	content.Valid = true
-	content.ParentID = &series.ID
-	content.UpdatedAt = now
-	content.FileMtime = new(file.Mtime.UTC())
-	content.FileSize = new(int(file.Size))
-
+	// Build order parts
 	var orderParts []*float32
 	if volNum != nil {
 		f := float32(*volNum)
@@ -295,28 +263,31 @@ func (cs *ComicsScanner) ScanFile(r *repository, libraryID string, file FSFile) 
 	} else {
 		orderParts = append(orderParts, nil)
 	}
-	content.OrderParts = orderParts
-	content.CoverURI = new(file.Path + "/" + pages[0].Name)
 
-	// Store pages in file_data
-	pageTuples := make([]any, len(pages))
-	for i, p := range pages {
-		pageTuples[i] = []any{p.Name, p.Width, p.Height}
+	// Build file data (pages)
+	pageTuples := fp.Map(pages, func(p pageInfo) any {
+		return []any{p.Name, p.Width, p.Height}
+	})
+	fd, _ := json.Marshal(map[string]any{"pages": pageTuples})
+
+	return &ParsedItem{
+		File:        file,
+		URIPrefix:   "comic",
+		ContentType: "comic",
+		URIPart:     uriPart,
+		OrderParts:  orderParts,
+		CoverSuffix: new(pages[0].Name),
+		FileData:    fd,
+		Meta:        meta,
+		MetaRaw:     comicInfoRaw,
+		Series: &ParsedSeries{
+			URIPrefix:   "comic",
+			URIPart:     seriesURIPart,
+			ContentType: "comic_series",
+			Title:       seriesName,
+			FileURI:     new(dir),
+		},
 	}
-	fd := map[string]any{"pages": pageTuples}
-	fdJSON, _ := json.Marshal(fd)
-	content.FileData = fdJSON
-
-	r.markDirty(content)
-
-	// Set metadata
-	if _, ok := meta["title"]; !ok {
-		meta["title"] = title
-	}
-	metaRow := r.getMetadata(content.URI)
-	metaRow.setSource("file", meta, comicInfoRaw)
-
-	return content
 }
 
 func (cs *ComicsScanner) UpdateSeries(r *repository, series *models.Content, items []*models.Content) {

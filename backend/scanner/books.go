@@ -3,7 +3,6 @@ package scanner
 import (
 	"path/filepath"
 	"strings"
-	"time"
 
 	"voltis/lib/epub"
 	"voltis/models"
@@ -16,7 +15,7 @@ func (bs *BooksScanner) FileEligible(path string) bool {
 	return strings.ToLower(filepath.Ext(path)) == ".epub"
 }
 
-func (bs *BooksScanner) ScanFile(r *repository, libraryID string, file FSFile) *models.Content {
+func (bs *BooksScanner) ParseFile(libraryID string, file FSFile) *ParsedItem {
 	path := file.Path
 
 	meta, err := epub.ReadMetadata(path)
@@ -25,22 +24,12 @@ func (bs *BooksScanner) ScanFile(r *repository, libraryID string, file FSFile) *
 		return nil
 	}
 
-	// Resolve series if present
-	var series *models.Content
-	if meta.Series != "" {
-		seriesURIPart := meta.Series
-		seriesURI := "book/" + seriesURIPart
-		series = r.getSeries(seriesURI, seriesURIPart, nil, "book_series", meta.Series)
-	}
-
 	// Title from metadata, falling back to filename stem
 	stem := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	title := meta.Title
 	if title == "" {
 		title = stem
 	}
-
-	uriPart := stem
 
 	// Order parts
 	var orderParts []*float32
@@ -52,52 +41,11 @@ func (bs *BooksScanner) ScanFile(r *repository, libraryID string, file FSFile) *
 		orderParts = append(orderParts, &f)
 	}
 
-	// Cover URI
-	var coverURI *string
+	// Cover suffix
+	var coverSuffix *string
 	if meta.CoverPath != "" && epub.ValidateCoverPath(path, meta.CoverPath) {
-		coverURI = new(path + "/" + meta.CoverPath)
+		coverSuffix = new(meta.CoverPath)
 	}
-
-	// Find or create content
-	existing := r.findContentByFileURI(file.Path)
-	content := existing
-	var parentID *string
-	if series != nil {
-		parentID = &series.ID
-	}
-	if content == nil {
-		content = r.matchDeletedItem(uriPart, parentID)
-	}
-
-	now := time.Now().UTC()
-	if content == nil {
-		newContent := models.Content{
-			ID:        models.MakeContentID(),
-			LibraryID: libraryID,
-			Type:      "book",
-			CreatedAt: now,
-		}
-		r.content = append(r.content, newContent)
-		content = &r.content[len(r.content)-1]
-	}
-
-	content.FileURI = new(file.Path)
-	content.URIPart = uriPart
-	content.Valid = true
-	content.ParentID = parentID
-	content.UpdatedAt = now
-	content.FileMtime = new(file.Mtime.UTC())
-	content.FileSize = new(int(file.Size))
-	content.OrderParts = orderParts
-	content.CoverURI = coverURI
-
-	if series != nil {
-		content.URI = series.URI + "/" + uriPart
-	} else {
-		content.URI = "book/" + uriPart
-	}
-
-	r.markDirty(content)
 
 	// Metadata
 	fileMeta := map[string]any{"title": title}
@@ -123,10 +71,27 @@ func (bs *BooksScanner) ScanFile(r *repository, libraryID string, file FSFile) *
 		fileMeta["series_index"] = meta.SeriesIndex
 	}
 
-	metaRow := r.getMetadata(content.URI)
-	metaRow.setSource("file", fileMeta, nil)
+	// Series
+	var series *ParsedSeries
+	if meta.Series != "" {
+		series = &ParsedSeries{
+			URIPrefix:   "book",
+			URIPart:     meta.Series,
+			ContentType: "book_series",
+			Title:       meta.Series,
+		}
+	}
 
-	return content
+	return &ParsedItem{
+		File:        file,
+		Series:      series,
+		URIPrefix:   "book",
+		ContentType: "book",
+		URIPart:     stem,
+		OrderParts:  orderParts,
+		CoverSuffix: coverSuffix,
+		Meta:        fileMeta,
+	}
 }
 
 func (bs *BooksScanner) UpdateSeries(r *repository, series *models.Content, items []*models.Content) {

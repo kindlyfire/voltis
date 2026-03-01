@@ -22,13 +22,34 @@ type FileScanner interface {
 	// FileEligible returns whether a file should be scanned.
 	FileEligible(path string) bool
 
-	// ScanFile scans a single file and returns the resulting content, or nil if
-	// the file could not be parsed.
-	ScanFile(r *repository, libraryID string, file FSFile) *models.Content
+	// ParseFile parses a file and returns the extracted data, or nil if the
+	// file could not be parsed. Should be safe to call concurrently.
+	ParseFile(libraryID string, file FSFile) *ParsedItem
 
 	// UpdateSeries is called for each series that had at least one child
 	// added, updated, or removed.
 	UpdateSeries(r *repository, series *models.Content, items []*models.Content)
+}
+
+type ParsedSeries struct {
+	URIPrefix   string // "comic" or "book"
+	URIPart     string
+	ContentType string // "comic_series" or "book_series"
+	Title       string
+	FileURI     *string // directory path for comics, nil for books
+}
+
+type ParsedItem struct {
+	File        FSFile
+	Series      *ParsedSeries // nil if standalone (book without series)
+	URIPrefix   string        // "comic" or "book"
+	ContentType string        // "comic" or "book"
+	URIPart     string
+	OrderParts  []*float32
+	CoverSuffix *string // appended to file path for cover URI
+	FileData    json.RawMessage
+	Meta        map[string]any
+	MetaRaw     map[string]any // ComicInfo raw, nil for books
 }
 
 type ScanResult struct {
@@ -66,7 +87,7 @@ func Scan(ctx context.Context, pool *pgxpool.Pool, libraryID string, libraryType
 		return nil, nil
 	}
 
-	slog_scan("starting scan", "library", libraryID, "type", libraryType, "force", opts.Force, "filter_paths", opts.FilterPaths)
+	slog_scan("starting scan", "library", libraryID, "type", libraryType, "force", opts.Force, "filter_paths", opts.FilterPaths, "concurrency", opts.Concurrency)
 
 	// Create task
 	var task *models.Task
@@ -165,41 +186,47 @@ func Scan(ctx context.Context, pool *pgxpool.Pool, libraryID string, libraryType
 	toProcess := append(toAdd, toUpdate...)
 	progressTotal := len(toProcess)
 	var progressProcessed atomic.Int64
-	parentsWithUpdates := &sync.Map{}
+	parentsWithUpdates := map[string]bool{}
 
-	var mu sync.Mutex
+	type parsedResult struct {
+		file   FSFile
+		parsed *ParsedItem
+	}
+	parsedResults := make([]parsedResult, len(toProcess))
 	fp.MapConcurrently(toProcess, opts.Concurrency, func(f FSFile) {
-		result := s.ScanFile(r, libraryID, f)
-		fp.WithMutex(&mu, func() {
-			if result != nil {
-				if !r.checkURIAvailable(result) {
-					slog.Warn("[scanner] URI conflict, skipping", "file", f.Path, "uri", result.URI)
-				} else if result.ParentID != nil {
-					parentsWithUpdates.Store(*result.ParentID, true)
-				}
-			} else {
-				existing := r.findContentByFileURI(f.Path)
-				if existing != nil {
-					if existing.ParentID != nil {
-						parentsWithUpdates.Store(*existing.ParentID, true)
-					}
-					r.removeContent(existing)
-				}
-				slog.Warn("[scanner] failed to parse file", "path", f.Path)
-			}
-		})
-		processed := int(progressProcessed.Add(1))
+		item := s.ParseFile(libraryID, f)
+		idx := int(progressProcessed.Add(1)) - 1
+		parsedResults[idx] = parsedResult{file: f, parsed: item}
 		taskUpdate(db.TaskUpdateOpts{
 			Progress: map[string]int{
 				"total":     progressTotal,
-				"processed": processed,
+				"processed": idx + 1,
 			},
 		})
 	})
 
+	for _, pr := range parsedResults {
+		if pr.parsed != nil {
+			result := applyParsedItem(r, libraryID, pr.parsed)
+			if !r.checkURIAvailable(result) {
+				slog.Warn("[scanner] URI conflict, skipping", "file", pr.file.Path, "uri", result.URI)
+			} else if result.ParentID != nil {
+				parentsWithUpdates[*result.ParentID] = true
+			}
+		} else {
+			existing := r.findContentByFileURI(pr.file.Path)
+			if existing != nil {
+				if existing.ParentID != nil {
+					parentsWithUpdates[*existing.ParentID] = true
+				}
+				r.removeContent(existing)
+			}
+			slog.Warn("[scanner] failed to parse file", "path", pr.file.Path)
+		}
+	}
+
 	// Update series that had changes
-	parentsWithUpdates.Range(func(key, _ any) bool {
-		parentID := key.(string)
+	for parentID := range parentsWithUpdates {
 		var parent *models.Content
 		for i := range r.content {
 			if r.content[i].ID == parentID {
@@ -208,7 +235,7 @@ func Scan(ctx context.Context, pool *pgxpool.Pool, libraryID string, libraryType
 			}
 		}
 		if parent == nil {
-			return true
+			continue
 		}
 		items := r.childrenOf(parentID)
 
@@ -222,8 +249,7 @@ func Scan(ctx context.Context, pool *pgxpool.Pool, libraryID string, libraryType
 		}
 
 		s.UpdateSeries(r, parent, items)
-		return true
-	})
+	}
 
 	if err := r.commit(ctx); err != nil {
 		scanErr = err
@@ -238,6 +264,61 @@ func Scan(ctx context.Context, pool *pgxpool.Pool, libraryID string, libraryType
 		Removed:   len(toRemove),
 		Unchanged: len(unchanged),
 	}, nil
+}
+
+func applyParsedItem(r *repository, libraryID string, p *ParsedItem) *models.Content {
+	var series *models.Content
+	var parentID *string
+	if p.Series != nil {
+		uri := p.Series.URIPrefix + "/" + p.Series.URIPart
+		series = r.getSeries(uri, p.Series.URIPart, p.Series.FileURI, p.Series.ContentType, p.Series.Title)
+		parentID = &series.ID
+	}
+
+	existing := r.findContentByFileURI(p.File.Path)
+	content := existing
+	if content == nil {
+		content = r.matchDeletedItem(p.URIPart, parentID)
+	}
+
+	now := time.Now().UTC()
+	if content == nil {
+		newContent := models.Content{
+			ID:        models.MakeContentID(),
+			LibraryID: libraryID,
+			Type:      p.ContentType,
+			CreatedAt: now,
+		}
+		r.content = append(r.content, newContent)
+		content = &r.content[len(r.content)-1]
+	}
+
+	content.FileURI = new(p.File.Path)
+	content.URIPart = p.URIPart
+	content.Valid = true
+	content.ParentID = parentID
+	content.UpdatedAt = now
+	content.FileMtime = new(p.File.Mtime.UTC())
+	content.FileSize = new(int(p.File.Size))
+	content.OrderParts = p.OrderParts
+	content.FileData = p.FileData
+
+	if series != nil {
+		content.URI = series.URI + "/" + p.URIPart
+	} else {
+		content.URI = p.URIPrefix + "/" + p.URIPart
+	}
+
+	if p.CoverSuffix != nil {
+		content.CoverURI = new(p.File.Path + "/" + *p.CoverSuffix)
+	}
+
+	r.markDirty(content)
+
+	metaRow := r.getMetadata(content.URI)
+	metaRow.setSource("file", p.Meta, p.MetaRaw)
+
+	return content
 }
 
 var seriesInheritedFields = []string{

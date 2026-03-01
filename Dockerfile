@@ -26,7 +26,7 @@ RUN --mount=type=cache,target=/root/go/pkg/mod go mod download
 COPY backend/ ./
 RUN --mount=type=cache,target=/root/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=1 go build -o /app/voltis .
+    CGO_ENABLED=1 go build -ldflags="-s -w" -o /app/voltis .
 
 #
 # Runtime
