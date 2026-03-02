@@ -46,4 +46,4 @@ ENV APP_STATIC_DIR=/app/frontend/dist
 LABEL org.opencontainers.image.source=https://github.com/kindlyfire/voltis
 
 EXPOSE 8080
-CMD ["/app/voltis"]
+CMD ["/app/voltis", "server"]
