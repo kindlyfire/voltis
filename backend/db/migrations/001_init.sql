@@ -113,16 +113,3 @@ CREATE UNIQUE INDEX content_metadata_id_idx ON content_metadata (id);
 CREATE INDEX content_search_idx ON content_metadata
 USING bm25 (id, uri, library_id, (data::pdb.icu))
 WITH (key_field='id');
-
-CREATE TABLE tasks (
-    id TEXT PRIMARY KEY,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    name TEXT NOT NULL,
-    status INTEGER NOT NULL,
-    input JSONB NOT NULL DEFAULT '{}',
-    output JSONB NOT NULL DEFAULT '{}',
-    logs TEXT,
-    user_id TEXT,
-    library_id TEXT
-);

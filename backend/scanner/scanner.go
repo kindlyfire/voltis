@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"voltis/db"
+	"voltis/lib/bufchan"
 	"voltis/lib/fp"
 	"voltis/models"
 
@@ -117,16 +118,25 @@ func Scan(ctx context.Context, pool *pgxpool.Pool, libraryID string, libraryType
 		}
 	}
 
-	var taskUpdateMutex sync.Mutex
+	taskBC := bufchan.NewBufChan(db.MergeTaskUpdateOpts, 200*time.Millisecond, func(tuOpts db.TaskUpdateOpts) error {
+		return db.TaskUpdate(ctx, pool, opts.Hub, task, tuOpts)
+	})
+	defer taskBC.Close()
+
 	taskUpdate := func(tuOpts db.TaskUpdateOpts) {
 		if task == nil || opts.Hub == nil {
 			return
 		}
-		fp.WithMutex(&taskUpdateMutex, func() {
-			if err := db.TaskUpdate(ctx, pool, opts.Hub, task, tuOpts); err != nil {
-				slog.Error("[scanner] task update failed", "err", err)
-			}
-		})
+		immediate := tuOpts.Status != nil || tuOpts.Output != nil
+		var err error
+		if immediate {
+			err = taskBC.SendNow(tuOpts)
+		} else {
+			err = taskBC.Send(tuOpts)
+		}
+		if err != nil {
+			slog.Error("[scanner] task update failed", "err", err)
+		}
 	}
 
 	// On failure, mark task as failed

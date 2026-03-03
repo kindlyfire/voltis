@@ -20,6 +20,31 @@ type TaskUpdateOpts struct {
 	Progress any
 }
 
+func MergeTaskUpdateOpts(a, b TaskUpdateOpts) TaskUpdateOpts {
+	if b.Status != nil {
+		a.Status = b.Status
+	}
+	if b.Output != nil {
+		a.Output = b.Output
+	}
+	if b.Logs != nil {
+		if a.Logs == nil {
+			a.Logs = b.Logs
+		} else {
+			s := *a.Logs
+			if len(s) > 0 && s[len(s)-1] != '\n' {
+				s += "\n"
+			}
+			s += *b.Logs
+			a.Logs = &s
+		}
+	}
+	if b.Progress != nil {
+		a.Progress = b.Progress
+	}
+	return a
+}
+
 // TaskUpdate updates a task row in the DB and broadcasts it via the hub.
 func TaskUpdate(ctx context.Context, q Querier, hub TaskEventBroadcaster, task *models.Task, opts TaskUpdateOpts) error {
 	if opts.Status != nil {
