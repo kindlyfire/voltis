@@ -30,7 +30,7 @@
                                 {{ list.visibility }}
                             </div>
                             <div class="text-caption text-medium-emphasis mt-1">
-                                {{ new Date(list.updated_at + 'Z').toLocaleDateString() }}
+                                {{ new Date(list.updated_at).toLocaleDateString() }}
                             </div>
                         </div>
                         <div class="d-flex align-start pa-2">

@@ -91,7 +91,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { contentApi } from '@/utils/api/content'
 import { librariesApi } from '@/utils/api/libraries'
 import { useScanTracker } from '@/utils/ws'
@@ -116,6 +116,16 @@ const scanComplete = computed(
         scans.value.every(i => i.status === 'completed' || i.status === 'failed')
 )
 
+const queryClient = useQueryClient()
+watch(
+    () => scanComplete.value,
+    complete => {
+        if (complete) {
+            queryClient.invalidateQueries()
+        }
+    }
+)
+
 const title = computed(() => {
     if (isContentScan.value) return 'Scan Content'
     if (props.libraryIds.length === 0) return 'Scan All Libraries'
@@ -128,21 +138,17 @@ function getLibraryName(id: string): string {
 }
 
 async function startScan() {
-    if (isContentScan.value) {
-        await contentApi.scanContent(props.contentId!)
-        scanning.value = true
-    } else {
-        scan.mutate(
-            {
+    try {
+        if (isContentScan.value) {
+            await contentApi.scanContent(props.contentId!)
+        } else {
+            await scan.mutateAsync({
                 ids: props.libraryIds.length > 0 ? props.libraryIds : undefined,
                 force: forceScan.value,
-            },
-            {
-                onSuccess: () => {
-                    scanning.value = true
-                },
-            }
-        )
+            })
+        }
+    } finally {
+        scanning.value = true
     }
 }
 </script>
@@ -150,6 +156,7 @@ async function startScan() {
 <script lang="ts">
 import { Modals } from '@/utils/modals'
 import Self from './ScanModal.vue'
+import { useQueryClient } from '@tanstack/vue-query'
 
 export function showScanModal(libraryIds: string[]): Promise<void>
 export function showScanModal(opts: { contentId: string }): Promise<void>
