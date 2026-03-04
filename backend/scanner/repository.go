@@ -152,38 +152,15 @@ func (r *repository) matchDeletedItem(uriPart string, parentID *string) *models.
 	return nil
 }
 
-func (r *repository) checkURIAvailable(c *models.Content) bool {
+func (r *repository) checkURIAvailable(parsed *ParsedItem, parentID *string) bool {
 	count := 0
 	for i := range r.content {
 		other := &r.content[i]
-		if other.URIPart == c.URIPart && ptrEq(other.ParentID, c.ParentID) {
-			if !r.isDeleted(other) {
-				count++
-			}
+		if other.URIPart == parsed.URIPart && ptrEq(other.ParentID, parentID) && (other.FileURI == nil || *other.FileURI != parsed.File.Path) {
+			count++
 		}
-	}
-	if r.isInContent(c) {
-		return count <= 1
 	}
 	return count == 0
-}
-
-func (r *repository) isDeleted(c *models.Content) bool {
-	for i := range r.contentD {
-		if r.contentD[i].ID == c.ID {
-			return true
-		}
-	}
-	return false
-}
-
-func (r *repository) isInContent(c *models.Content) bool {
-	for i := range r.content {
-		if r.content[i].ID == c.ID {
-			return true
-		}
-	}
-	return false
 }
 
 func (r *repository) removeContent(c *models.Content) {

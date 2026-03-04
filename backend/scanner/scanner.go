@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"path/filepath"
 	"sort"
@@ -249,19 +250,31 @@ func Scan(ctx context.Context, pool *pgxpool.Pool, libraryID string, libraryType
 				return
 			}
 			if parsed != nil {
-				content := applyParsedItem(r, libraryID, parsed)
-				if !r.checkURIAvailable(content) {
-					slog.Warn("[scanner] URI conflict, skipping", "file", gf.file.Path, "uri", content.URI)
+				parent := findParent(r, parsed)
+				if parent != nil {
+					parentID = &parent.ID
+				}
+
+				if !r.checkURIAvailable(parsed, parentID) {
+					uri := makeURI(parsed, parent)
+					slog.Warn("[scanner] URI conflict, skipping", "file", gf.file.Path, "uri", uri, "parent_id", fp.DerefString(parentID))
+					taskUpdate(db.TaskUpdateOpts{
+						Logs: new(
+							fmt.Sprintf("URI conflict for file %s, skipping (uri: %s, parent_id: %s)\n",
+								gf.file.Path,
+								uri,
+								fp.DerefString(parentID)),
+						),
+					})
 					resultFailed.Add(1)
 				} else {
+					content := applyParsedItem(r, libraryID, parsed)
 					if addSet[gf.file.Path] {
 						resultAdded.Add(1)
 					} else {
 						resultUpdated.Add(1)
 					}
-					if content.ParentID != nil {
-						parentID = content.ParentID
-					}
+					parentID = content.ParentID
 				}
 			} else {
 				existing := r.findContentByFileURI(gf.file.Path)
@@ -346,12 +359,25 @@ func Scan(ctx context.Context, pool *pgxpool.Pool, libraryID string, libraryType
 	return result, nil
 }
 
+func findParent(r *repository, p *ParsedItem) *models.Content {
+	if p.Series == nil {
+		return nil
+	}
+	uri := p.Series.URIPrefix + "/" + p.Series.URIPart
+	return r.getSeries(uri, p.Series.URIPart, p.Series.FileURI, p.Series.ContentType, p.Series.Title)
+}
+
+func makeURI(p *ParsedItem, series *models.Content) string {
+	if series != nil {
+		return series.URI + "/" + p.URIPart
+	}
+	return p.URIPrefix + "/" + p.URIPart
+}
+
 func applyParsedItem(r *repository, libraryID string, p *ParsedItem) *models.Content {
-	var series *models.Content
 	var parentID *string
-	if p.Series != nil {
-		uri := p.Series.URIPrefix + "/" + p.Series.URIPart
-		series = r.getSeries(uri, p.Series.URIPart, p.Series.FileURI, p.Series.ContentType, p.Series.Title)
+	series := findParent(r, p)
+	if series != nil {
 		parentID = &series.ID
 	}
 
@@ -363,13 +389,12 @@ func applyParsedItem(r *repository, libraryID string, p *ParsedItem) *models.Con
 
 	now := time.Now().UTC()
 	if content == nil {
-		newContent := models.Content{
+		r.content = append(r.content, models.Content{
 			ID:        models.MakeContentID(),
 			LibraryID: libraryID,
 			Type:      p.ContentType,
 			CreatedAt: now,
-		}
-		r.content = append(r.content, newContent)
+		})
 		content = &r.content[len(r.content)-1]
 	}
 
@@ -382,12 +407,7 @@ func applyParsedItem(r *repository, libraryID string, p *ParsedItem) *models.Con
 	content.FileSize = new(int(p.File.Size))
 	content.OrderParts = p.OrderParts
 	content.FileData = p.FileData
-
-	if series != nil {
-		content.URI = series.URI + "/" + p.URIPart
-	} else {
-		content.URI = p.URIPrefix + "/" + p.URIPart
-	}
+	content.URI = makeURI(p, series)
 
 	if p.CoverSuffix != nil {
 		content.CoverURI = new(p.File.Path + "/" + *p.CoverSuffix)

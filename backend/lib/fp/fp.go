@@ -53,3 +53,10 @@ func WithMutex(mu *sync.Mutex, fn func()) {
 	defer mu.Unlock()
 	fn()
 }
+
+func DerefString(s *string) string {
+	if s == nil {
+		return "<nil>"
+	}
+	return *s
+}
