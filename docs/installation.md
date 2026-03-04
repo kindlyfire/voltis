@@ -1,6 +1,7 @@
 # Installation
 
 Voltis has a single supported installation method, using the [Docker container](https://github.com/kindlyfire/voltis/pkgs/container/voltis).
+This tutorial assumes you have [Docker](https://docs.docker.com/get-docker/) installed.
 
 Here's an example Docker Compose file to get started:
 
@@ -9,10 +10,9 @@ services:
     app:
         image: ghcr.io/kindlyfire/voltis:dev
         ports:
-            - '127.0.0.1:8000:8000'
+            - '127.0.0.1:8080:8080'
         environment:
-            APP_DB_URL: postgresql+psycopg://postgres:postgres@postgres:5432/voltis
-            APP_REGISTRATION_ENABLED: 'true'
+            APP_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/voltis
         depends_on:
             - postgres
         volumes:
@@ -20,31 +20,45 @@ services:
             - /my/library/2:/app/library/2
 
     postgres:
-        image: postgres:18
+        image: paradedb/paradedb:0.21.8-pg18
         environment:
             POSTGRES_DB: voltis
             POSTGRES_USER: postgres
             POSTGRES_PASSWORD: postgres
         volumes:
-            - ./postgres_data/:/var/lib/postgresql
+            - ./data_postgres:/var/lib/postgresql
 ```
+
+::: warning
+Voltis requires [ParadeDB](https://www.paradedb.com/) for full-text search. A
+standard PostgreSQL image will not work. The image above includes it.
+:::
 
 Follow these steps to install:
 
 ```bash
 # Pick a directory to install Voltis in
 cd /path/to/install/dir
-# Create a compose.yml file with the above content
+
+# Download the compose file
+wget https://voltis.tijlvdb.me/compose.yml
+
+# Edit the volume mounts to point to your libraries
 nano compose.yml
+
 # Bring up the containers
 docker compose up -d
 ```
 
-After the containers are up, you can access Voltis at `http://localhost:8000`.
+After the containers are up, you can access Voltis at `http://localhost:8080`.
 
 ## Creating an admin user
 
-You can create an admin account through the CLI:
+When no admin user exists yet, Voltis automatically enables the registration
+page. The first user to register is granted admin permissions. Once the first
+user is created, registration is disabled by default.
+
+Alternatively, you can create an admin account through the CLI:
 
 ```bash
 # Connect to the container
@@ -56,14 +70,4 @@ docker compose exec app sh
 ## Adding libraries and scanning
 
 Under "Settings" in the web interface, you can manage users and libraries, and
-scan your libraries to add content. It is possible to scan through the CLI as
-well to get additional details:
-
-```bash
-# Connect to the container
-docker compose exec app sh
-# Scan libraries
-./voltis devtools scan --library l_00000000
-```
-
-Where `l_00000000` is the library ID, which can be copied from the interface.
+scan your libraries to add content.

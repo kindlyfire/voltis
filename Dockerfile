@@ -44,6 +44,7 @@ COPY --from=frontend /app/frontend/dist /app/frontend/dist
 ENV APP_STATIC_DIR=/app/frontend/dist
 
 LABEL org.opencontainers.image.source=https://github.com/kindlyfire/voltis
+WORKDIR /app
 
 EXPOSE 8080
 CMD ["/app/voltis", "server"]

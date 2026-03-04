@@ -7,6 +7,9 @@ hero:
     tagline: Comics and books in one place
     actions:
         - theme: brand
+          text: Overview
+          link: /overview
+        - theme: alt
           text: Installation
           link: /installation
 

@@ -29,3 +29,6 @@ File names and series names are cleaned up prior to analysis: Groups of `[]` and
 The series title will be inherited from the chapter/volume `Series` field in
 `ComicInfo.xml` if available, otherwise it will take the cleaned up parent
 folder name.
+
+A custom cover image can be set by placing a `cover.jpg`, `cover.jpeg`,
+`cover.png` or `cover.webp` file in the series directory.

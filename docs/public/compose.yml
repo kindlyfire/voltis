@@ -1,0 +1,21 @@
+services:
+    app:
+        image: ghcr.io/kindlyfire/voltis:dev
+        ports:
+            - '127.0.0.1:8080:8080'
+        environment:
+            APP_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/voltis
+        depends_on:
+            - postgres
+        volumes:
+            - /my/library/1:/app/library/1
+            - /my/library/2:/app/library/2
+
+    postgres:
+        image: paradedb/paradedb:0.21.8-pg18
+        environment:
+            POSTGRES_DB: voltis
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: postgres
+        volumes:
+            - ./data_postgres:/var/lib/postgresql
