@@ -1,101 +1,176 @@
 <template>
-    <VContainer>
+    <VContainer class="py-4">
         <AQueryError :query="qList" class="mb-4" />
+        <AQueryError :mutation="mReorderEntries" class="mb-4" />
+        <AQueryError :mutation="mDeleteEntry" class="mb-4" />
 
         <div v-if="!list" class="flex items-center justify-center py-16">
             <VProgressCircular indeterminate size="64" />
         </div>
 
         <template v-else>
-            <div class="d-flex align-center mb-4">
-                <div>
-                    <h1 class="text-h4 mb-1">{{ list.name }}</h1>
-                    <div class="text-caption text-medium-emphasis">
-                        Visibility: {{ list.visibility }} • Entries: {{ list.entry_count ?? 0 }}
-                    </div>
-                </div>
-                <VSpacer />
-                <RouterLink :to="{ name: 'lists' }">
-                    <VBtn variant="text" prepend-icon="mdi-arrow-left">Back</VBtn>
-                </RouterLink>
-            </div>
+            <div class="flex flex-col xl:flex-row xl:items-start gap-6">
+                <div class="w-full xl:w-1/3">
+                    <VCard variant="tonal">
+                        <VCardText class="space-y-4! p-5">
+                            <h1 class="text-3xl my-0">{{ list.name }}</h1>
+                            <div class="flex flex-wrap gap-2 mt-3">
+                                <VChip size="small" variant="flat" class="capitalize">
+                                    {{ list.visibility }}
+                                </VChip>
+                                <VChip size="small" variant="text">
+                                    {{ list.entry_count ?? 0 }} entries
+                                </VChip>
+                            </div>
 
-            <VTable v-if="entries.length">
-                <thead>
-                    <tr>
-                        <th style="width: 70px">Order</th>
-                        <th>Content</th>
-                        <th>Notes</th>
-                        <th style="width: 160px">Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr v-for="(entry, idx) in entries" :key="entry.id">
-                        <td>#{{ entry.order ?? idx }}</td>
-                        <td>
-                            <div class="flex items-center gap-2">
-                                <RouterLink
-                                    v-if="entry.content?.id"
-                                    :to="`/${entry.content.id}`"
-                                    class="text-primary"
-                                >
-                                    {{ entry.uri }}
-                                </RouterLink>
-                                <span v-else>{{ entry.uri }}</span>
-                                <CopyIdButton v-if="entry.content?.id" :id="entry.content.id" />
+                            <div
+                                v-if="list.description"
+                                class="text-sm opacity-60 whitespace-pre-wrap"
+                            >
+                                {{ list.description }}
                             </div>
-                            <div class="text-caption text-medium-emphasis">
-                                {{ entry.library_id }}
-                            </div>
-                        </td>
-                        <td>
-                            <!-- <VTextarea
-								v-model="noteDrafts[entry.id]"
-								variant="underlined"
-								auto-grow
-								rows="1"
-								hide-details
-							/> -->
-                        </td>
-                        <td class="flex items-center gap-2">
+
+                            <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+                                <dt class="opacity-60">Created</dt>
+                                <dd class="m-0">{{ formatDate(list.created_at) }}</dd>
+                                <dt class="opacity-60">Updated</dt>
+                                <dd class="m-0">{{ formatDate(list.updated_at) }}</dd>
+                            </dl>
+
                             <VBtn
-                                icon="mdi-chevron-up"
-                                variant="text"
-                                size="small"
-                                :disabled="idx === 0 || reorder.isPending.value"
-                                @click="moveEntry(entry.id, -1)"
-                                title="Move up"
-                            />
-                            <VBtn
-                                icon="mdi-chevron-down"
-                                variant="text"
-                                size="small"
-                                :disabled="idx === entries.length - 1 || reorder.isPending.value"
-                                @click="moveEntry(entry.id, 1)"
-                                title="Move down"
-                            />
-                            <!-- <VBtn
-								icon="mdi-content-save"
-								variant="text"
-								size="small"
-								:loading="updateEntry.isPending.value"
-								@click="saveNotes(entry.id)"
-								title="Save notes"
-							/> -->
-                            <VBtn
-                                icon="mdi-delete"
-                                color="error"
-                                variant="text"
-                                size="small"
-                                :loading="deleteEntry.isPending.value"
-                                @click="handleDelete(entry.id)"
-                                title="Delete entry"
-                            />
-                        </td>
-                    </tr>
-                </tbody>
-            </VTable>
-            <div v-else class="text-medium-emphasis">No entries yet.</div>
+                                prepend-icon="mdi-pencil"
+                                variant="tonal"
+                                @click="showListModal(list.id)"
+                            >
+                                Edit
+                            </VBtn>
+                        </VCardText>
+                    </VCard>
+                </div>
+
+                <div class="w-full xl:w-2/3">
+                    <h2 class="text-1xl">Entries</h2>
+
+                    <div v-if="entries.length" class="space-y-4!">
+                        <template v-for="(entry, idx) in entries" :key="entry.id">
+                            <VCard v-if="entry.content">
+                                <div class="flex flex-col sm:flex-row">
+                                    <div>
+                                        <div
+                                            class="relative w-full sm:w-[100px] aspect-[2.1/3] bg-surface-variant/40"
+                                        >
+                                            <img
+                                                v-if="entryCoverUri(entry)"
+                                                :src="entryCoverUri(entry)!"
+                                                class="absolute w-full h-full object-cover"
+                                            />
+                                            <div
+                                                v-else
+                                                class="flex items-center justify-center absolute w-full h-full opacity-60"
+                                            >
+                                                <div class="text-center">
+                                                    <VIcon icon="mdi-image-off-outline" size="36" />
+                                                    <div class="text-xs mt-2">No cover</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <VCardText class="grow min-w-0 p-2 px-4">
+                                        <div
+                                            class="flex items-start gap-4 flex-wrap sm:flex-nowrap h-full"
+                                        >
+                                            <div class="grow min-w-0">
+                                                <div class="flex items-center flex-wrap gap-2 mb-2">
+                                                    <RouterLink
+                                                        :to="`/${entry.content.id}`"
+                                                        class="text-h6 font-medium min-w-0"
+                                                    >
+                                                        {{ entryTitle(entry) }}
+                                                    </RouterLink>
+                                                </div>
+
+                                                <div class="flex flex-wrap gap-2 mb-4">
+                                                    <VChip size="small" variant="tonal">
+                                                        #{{ displayOrder(entry, idx) }}
+                                                    </VChip>
+                                                    <VChip size="small" variant="tonal">
+                                                        {{ formatType(entry.content.type) }}
+                                                    </VChip>
+                                                    <VChip
+                                                        size="small"
+                                                        variant="tonal"
+                                                        :to="`/${entry.library_id}`"
+                                                    >
+                                                        {{ libraryName(entry.library_id) }}
+                                                    </VChip>
+                                                </div>
+
+                                                <div class="mt-auto" v-if="entry.notes">
+                                                    <div class="text-xs opacity-60 mb-1">Notes</div>
+                                                    <div class="text-sm whitespace-pre-wrap">
+                                                        {{ entry.notes }}
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div class="flex flex-row gap-1">
+                                                <VBtn
+                                                    icon="mdi-pencil"
+                                                    variant="text"
+                                                    size="x-small"
+                                                    @click="
+                                                        showEntryModal({
+                                                            listId: list.id,
+                                                            entryId: entry.id,
+                                                            title: entryTitle(entry),
+                                                            notes: entry.notes,
+                                                        })
+                                                    "
+                                                    title="Edit notes"
+                                                />
+                                                <VBtn
+                                                    icon="mdi-chevron-up"
+                                                    variant="text"
+                                                    size="x-small"
+                                                    :disabled="
+                                                        idx === 0 || mReorderEntries.isPending.value
+                                                    "
+                                                    @click="moveEntry(entry.id, -1)"
+                                                    title="Move up"
+                                                />
+                                                <VBtn
+                                                    icon="mdi-chevron-down"
+                                                    variant="text"
+                                                    size="x-small"
+                                                    :disabled="
+                                                        idx === entries.length - 1 ||
+                                                        mReorderEntries.isPending.value
+                                                    "
+                                                    @click="moveEntry(entry.id, 1)"
+                                                    title="Move down"
+                                                />
+                                                <VBtn
+                                                    icon="mdi-delete"
+                                                    color="error"
+                                                    variant="text"
+                                                    size="x-small"
+                                                    :loading="mDeleteEntry.isPending.value"
+                                                    @click="handleDelete(entry.id)"
+                                                    title="Delete entry"
+                                                />
+                                            </div>
+                                        </div>
+                                    </VCardText>
+                                </div>
+                            </VCard>
+                        </template>
+                    </div>
+                    <VCard v-else variant="tonal">
+                        <VCardText class="opacity-60">No entries yet.</VCardText>
+                    </VCard>
+                </div>
+            </div>
         </template>
     </VContainer>
 </template>
@@ -105,8 +180,12 @@ import { computed } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
 import { useHead } from '@unhead/vue'
 import { customListsApi } from '@/utils/api/custom-lists'
-import CopyIdButton from '@/pages/settings/CopyIdButton.vue'
+import { librariesApi } from '@/utils/api/libraries'
+import type { ContentType, CustomListEntry } from '@/utils/api/types'
+import { API_URL } from '@/utils/fetch'
 import AQueryError from '@/components/AQueryError.vue'
+import { showListModal } from './ListModal.vue'
+import { showEntryModal } from './EntryModal.vue'
 
 const route = useRoute()
 const listId = computed(() => route.params.id as string)
@@ -115,8 +194,9 @@ const qList = customListsApi.useGet(listId)
 const list = computed(() => qList.data.value)
 const entries = computed(() => list.value?.entries ?? [])
 
-const deleteEntry = customListsApi.useDeleteEntry()
-const reorder = customListsApi.useReorderEntries()
+const qLibraries = librariesApi.useList()
+const mDeleteEntry = customListsApi.useDeleteEntry()
+const mReorderEntries = customListsApi.useReorderEntries()
 
 useHead({
     title() {
@@ -124,8 +204,40 @@ useHead({
     },
 })
 
+const typeLabels: Record<ContentType, string> = {
+    comic: 'Comic',
+    comic_series: 'Comic Series',
+    book: 'Book',
+    book_series: 'Book Series',
+}
+
+function libraryName(id: string) {
+    return qLibraries.data.value?.find(l => l.id === id)?.name ?? id
+}
+
+function formatType(type: ContentType) {
+    return typeLabels[type] ?? type
+}
+
+function formatDate(value: string) {
+    return new Date(value).toLocaleDateString()
+}
+
+function displayOrder(entry: CustomListEntry, idx: number) {
+    return entry.order ?? idx
+}
+
+function entryTitle(entry: CustomListEntry) {
+    return entry.content?.title || entry.uri
+}
+
+function entryCoverUri(entry: CustomListEntry) {
+    if (!entry.content?.cover_uri) return null
+    return `${API_URL}/files/cover/${entry.content.id}?v=${entry.content.file_mtime}`
+}
+
 async function handleDelete(entryId: string) {
-    await deleteEntry.mutateAsync({ listId: listId.value, entryId })
+    await mDeleteEntry.mutateAsync({ listId: listId.value, entryId })
 }
 
 async function moveEntry(entryId: string, delta: number) {
@@ -138,6 +250,6 @@ async function moveEntry(entryId: string, delta: number) {
     const newOrder = [...orderIds]
     const [moved] = newOrder.splice(idx, 1)
     newOrder.splice(newIdx, 0, moved!)
-    await reorder.mutateAsync({ listId: listId.value, ctc_ids: newOrder })
+    await mReorderEntries.mutateAsync({ listId: listId.value, ctc_ids: newOrder })
 }
 </script>

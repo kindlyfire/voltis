@@ -3,6 +3,7 @@ package routes
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -212,13 +213,14 @@ func (cr *CustomListRoutes) get(c echo.Context) error {
 		var contentDTO *ContentDTO
 		if r.ContentID != nil && r.ContentData != nil {
 			var content models.Content
-			if json.Unmarshal(r.ContentData, &content) == nil {
-				dto := contentToDTO(content, contentDTOOpts{
-					meta:        r.MetaData,
-					includeMeta: true,
-				})
-				contentDTO = &dto
+			if err := json.Unmarshal(r.ContentData, &content); err != nil {
+				return fmt.Errorf("unmarshal content %s: %w", *r.ContentID, err)
 			}
+			dto := contentToDTO(content, contentDTOOpts{
+				meta:        r.MetaData,
+				includeMeta: true,
+			})
+			contentDTO = &dto
 		}
 		entries[i] = customListEntryDTO{
 			ID:        r.ID,

@@ -13,6 +13,12 @@
         font-size: 1.5rem;
     }
 
+    .text-h6 {
+        margin-top: 0;
+        margin-bottom: 0;
+        font-size: 1.3rem;
+    }
+
     a {
         color: inherit;
         text-decoration: none;

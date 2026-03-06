@@ -1,39 +1,39 @@
 <template>
     <VContainer>
-        <div class="d-flex align-center mb-4">
+        <div class="flex items-center mb-4">
             <h1 class="text-h5">My Lists</h1>
-            <VSpacer />
+            <div class="grow" />
             <VBtn color="primary" @click="showListModal('new')">Create List</VBtn>
         </div>
 
-        <VRow>
-            <VCol v-for="list in lists.data?.value" :key="list.id" cols="12" sm="6" md="4">
-                <VCard :to="`/${list.id}`" hover>
-                    <div class="d-flex">
+        <div class="grid lg:grid-cols-3 gap-4">
+            <div v-for="list in lists.data?.value" :key="list.id">
+                <VCard :to="`/${list.id}`">
+                    <div class="flex">
                         <img
                             v-if="randomCover(list.cover_content_ids)"
                             :src="randomCover(list.cover_content_ids)!"
-                            class="object-cover w-[120px] h-[140px]"
+                            class="object-cover aspect-[2.1/3] w-[120px]"
                         />
                         <div
                             v-else
-                            class="d-flex align-center justify-center shrink-0 rounded-s bg-surface-variant w-[120px] h-[140px]"
+                            class="flex items-center justify-center shrink-0 rounded-s bg-surface-variant w-[120px] aspect-[2.1/3]"
                         >
                             <VIcon icon="mdi-playlist-play" size="40" />
                         </div>
-                        <div class="pa-4 d-flex flex-column justify-center grow">
-                            <div class="text-h6 mb-1">{{ list.name }}</div>
-                            <div class="text-body-2 text-medium-emphasis">
+                        <div class="p-4 flex flex-col grow">
+                            <div class="text-lg font-medium mb-1">{{ list.name }}</div>
+                            <div class="text-sm opacity-60">
                                 {{ list.entry_count ?? 0 }} entries
                             </div>
-                            <div class="text-caption text-medium-emphasis text-capitalize">
+                            <div class="text-sm opacity-60 capitalize">
                                 {{ list.visibility }}
                             </div>
-                            <div class="text-caption text-medium-emphasis mt-1">
+                            <div class="text-sm opacity-60 mt-auto">
                                 {{ new Date(list.updated_at).toLocaleDateString() }}
                             </div>
                         </div>
-                        <div class="d-flex align-start pa-2">
+                        <div class="flex items-start p-2">
                             <VBtn
                                 icon="mdi-pencil"
                                 variant="text"
@@ -43,8 +43,8 @@
                         </div>
                     </div>
                 </VCard>
-            </VCol>
-        </VRow>
+            </div>
+        </div>
     </VContainer>
 </template>
 
