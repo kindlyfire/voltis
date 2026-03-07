@@ -208,10 +208,20 @@ export interface ContentListParams {
     valid?: boolean
     reading_status?: ReadingStatus
     starred?: boolean
+    has_status?: boolean
+    has_rating?: boolean
     search?: string
     limit?: number
     offset?: number
-    sort?: 'order' | 'created_at' | 'progress_updated_at'
+    sort?:
+        | 'order'
+        | 'created_at'
+        | 'progress_updated_at'
+        | 'rating'
+        | 'user_rating'
+        | 'unread_children_count'
+        | 'release_date'
+        | 'title'
     sort_order?: 'asc' | 'desc'
 }
 

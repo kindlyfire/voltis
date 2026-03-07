@@ -223,18 +223,20 @@ func (cr *ContentRoutes) listsForContent(c echo.Context) error {
 }
 
 type contentListQuery struct {
-	ParentID      string `query:"parent_id"`
-	LibraryID     string `query:"library_id"`
+	ParentID      string   `query:"parent_id"`
+	LibraryID     string   `query:"library_id"`
 	Type          []string `query:"type"`
-	Valid         string `query:"valid"           validate:"omitempty,oneof=true false"`
-	ReadingStatus string `query:"reading_status"  validate:"omitempty,oneof=reading completed on_hold dropped plan_to_read"`
-	Starred       string `query:"starred"         validate:"omitempty,oneof=true false"`
-	Search        string `query:"search"`
-	Limit         *int   `query:"limit"           validate:"omitempty,min=0"`
-	Offset        int    `query:"offset"          validate:"min=0"`
-	Sort          string `query:"sort"            validate:"omitempty,oneof=progress_updated_at created_at order"`
-	SortOrder     string `query:"sort_order"      validate:"omitempty,oneof=asc desc" default:"desc"`
-	Include       string `query:"include"`
+	Valid         string   `query:"valid"           validate:"omitempty,oneof=true false"`
+	ReadingStatus string   `query:"reading_status"  validate:"omitempty,oneof=reading completed on_hold dropped plan_to_read"`
+	Starred       string   `query:"starred"         validate:"omitempty,oneof=true false"`
+	HasStatus     string   `query:"has_status"      validate:"omitempty,oneof=true false"`
+	HasRating     string   `query:"has_rating"      validate:"omitempty,oneof=true false"`
+	Search        string   `query:"search"`
+	Limit         *int     `query:"limit"           validate:"omitempty,min=0"`
+	Offset        int      `query:"offset"          validate:"min=0"`
+	Sort          string   `query:"sort"            validate:"omitempty,oneof=progress_updated_at created_at order rating user_rating unread_children_count release_date title"`
+	SortOrder     string   `query:"sort_order"      validate:"omitempty,oneof=asc desc" default:"desc"`
+	Include       string   `query:"include"`
 }
 
 func (cr *ContentRoutes) list(c echo.Context) error {
@@ -286,6 +288,18 @@ func (cr *ContentRoutes) list(c echo.Context) error {
 		args["starred"] = q.Starred == "true"
 		where = append(where, "utc.starred = @starred")
 	}
+	switch q.HasStatus {
+	case "true":
+		where = append(where, "utc.status IS NOT NULL")
+	case "false":
+		where = append(where, "(utc.user_id IS NULL OR utc.status IS NULL)")
+	}
+	switch q.HasRating {
+	case "true":
+		where = append(where, "utc.rating IS NOT NULL")
+	case "false":
+		where = append(where, "(utc.user_id IS NULL OR utc.rating IS NULL)")
+	}
 	if q.Search != "" {
 		fuzzyDist := 1
 		if len(q.Search) < 3 {
@@ -316,15 +330,29 @@ func (cr *ContentRoutes) list(c echo.Context) error {
 	}
 
 	// Sorting
+	nullsOrder := "NULLS LAST"
+	if q.SortOrder == "asc" {
+		nullsOrder = "NULLS FIRST"
+	}
+
 	var orderClause string
 	switch q.Sort {
 	case "progress_updated_at":
-		orderClause = fmt.Sprintf("ORDER BY utc.progress_updated_at %s", q.SortOrder)
-		baseFrom += " AND utc.user_id IS NOT NULL AND utc.progress_updated_at IS NOT NULL"
+		orderClause = fmt.Sprintf("ORDER BY utc.progress_updated_at %s %s", q.SortOrder, nullsOrder)
 	case "created_at":
 		orderClause = fmt.Sprintf("ORDER BY c.created_at %s", q.SortOrder)
 	case "order":
 		orderClause = fmt.Sprintf("ORDER BY c.\"order\" %s", q.SortOrder)
+	case "rating":
+		orderClause = fmt.Sprintf("ORDER BY (cm.data->>'community_rating')::numeric %s %s", q.SortOrder, nullsOrder)
+	case "user_rating":
+		orderClause = fmt.Sprintf("ORDER BY utc.rating %s %s", q.SortOrder, nullsOrder)
+	case "unread_children_count":
+		orderClause = fmt.Sprintf("ORDER BY unread_children_count %s", q.SortOrder)
+	case "release_date":
+		orderClause = fmt.Sprintf("ORDER BY (cm.data->>'publication_date')::date %s %s", q.SortOrder, nullsOrder)
+	case "title":
+		orderClause = fmt.Sprintf("ORDER BY cm.data->>'title' %s %s", q.SortOrder, nullsOrder)
 	default:
 		if q.Search != "" {
 			orderClause = "ORDER BY paradedb.score(cm.id) DESC"

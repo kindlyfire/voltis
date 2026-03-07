@@ -10,6 +10,7 @@ import {
     type MaybeRefOrGetter,
     type Ref,
 } from 'vue'
+import { useRouter } from 'vue-router'
 
 export const queryClient = new QueryClient({})
 
@@ -131,4 +132,53 @@ export function useSystemTheme() {
 
 export function jsonClone<T>(obj: T): T {
     return JSON.parse(JSON.stringify(obj))
+}
+
+/**
+ * Two-way sync multiple query params as plain values (not JSON). Returns an object of refs, one per
+ * key specified in defaults. Empty string values are omitted from the URL.
+ */
+export function useRouteQueryParams<T extends Record<string, string | null>>(
+    defaults: T
+): { [K in keyof T]: Ref<T[K]> } {
+    const router = useRouter()
+    const result = {} as { [K in keyof T]: Ref<T[K]> }
+
+    // Pending changes to batch multiple updates in the same tick. Necessary because
+    // router.currentRoute.value.query doesn't update immediately after router.replace, so doing two
+    // or more updates in the same tick will override previous ones.
+    let pending: Record<string, string | null> | null = null
+    function flushPending() {
+        if (!pending) return
+        const changes = pending
+        pending = null
+        const newQuery = { ...router.currentRoute.value.query }
+        for (const [k, v] of Object.entries(changes)) {
+            if (v === null) {
+                delete newQuery[k]
+            } else {
+                newQuery[k] = v
+            }
+        }
+        router.replace({ query: newQuery })
+    }
+
+    for (const key of Object.keys(defaults) as (keyof T)[]) {
+        result[key] = computed({
+            get: () => {
+                const val = router.currentRoute.value.query[key as string]
+                return (val as T[keyof T]) ?? defaults[key]
+            },
+            set: (value: T[keyof T]) => {
+                const shouldDelete = value === '' || value === defaults[key]
+                if (!pending) {
+                    pending = {}
+                    queueMicrotask(flushPending)
+                }
+                pending[key as string] = shouldDelete ? null : (value as string)
+            },
+        })
+    }
+
+    return result
 }
