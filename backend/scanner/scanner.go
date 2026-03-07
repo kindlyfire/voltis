@@ -16,6 +16,7 @@ import (
 	"voltis/lib/bufchan"
 	"voltis/lib/fp"
 	"voltis/models"
+	"voltis/models/contentmeta"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -51,8 +52,8 @@ type ParsedItem struct {
 	OrderParts  []*float32
 	CoverSuffix *string // appended to file path for cover URI
 	FileData    json.RawMessage
-	Meta        map[string]any
-	MetaRaw     map[string]any // ComicInfo raw, nil for books
+	Meta    contentmeta.Metadata
+	MetaRaw map[string]any // ComicInfo raw, nil for books
 }
 
 type ScanResult struct {
@@ -421,29 +422,42 @@ func applyParsedItem(r *repository, libraryID string, p *ParsedItem) *models.Con
 	return content
 }
 
-var seriesInheritedFields = []string{
-	"authors", "publisher", "language", "genre", "age_rating",
-	"manga", "imprint", "description", "publication_date",
-}
-
 func inheritChildMetadata(r *repository, series *models.Content, items []*models.Content) {
 	if len(items) == 0 {
 		return
 	}
 
-	inherited := map[string]any{}
+	var inherited contentmeta.Metadata
+	// Inherit from first child that has each field set
 	for _, item := range items {
 		childMeta := r.getMetadata(item.URI)
-		for _, field := range seriesInheritedFields {
-			if _, ok := inherited[field]; ok {
-				continue
-			}
-			if v, ok := childMeta.Data[field]; ok {
-				inherited[field] = v
-			}
+		m := childMeta.Data
+		if inherited.Staff == nil && len(m.Staff) > 0 {
+			inherited.Staff = m.Staff
 		}
-		if len(inherited) == len(seriesInheritedFields) {
-			break
+		if inherited.Publisher == "" {
+			inherited.Publisher = m.Publisher
+		}
+		if inherited.Language == "" {
+			inherited.Language = m.Language
+		}
+		if inherited.Genre == "" {
+			inherited.Genre = m.Genre
+		}
+		if inherited.AgeRating == "" {
+			inherited.AgeRating = m.AgeRating
+		}
+		if inherited.Manga == "" {
+			inherited.Manga = m.Manga
+		}
+		if inherited.Imprint == "" {
+			inherited.Imprint = m.Imprint
+		}
+		if inherited.Description == "" {
+			inherited.Description = m.Description
+		}
+		if inherited.PublicationDate == "" {
+			inherited.PublicationDate = m.PublicationDate
 		}
 	}
 
@@ -451,30 +465,26 @@ func inheritChildMetadata(r *repository, series *models.Content, items []*models
 	var seriesTitle string
 	for _, item := range items {
 		childMeta := r.getMetadata(item.URI)
-		if s, ok := childMeta.Data["series"].(string); ok && s != "" {
-			seriesTitle = s
+		if childMeta.Data.Series != "" {
+			seriesTitle = childMeta.Data.Series
 			break
 		}
 	}
 	if seriesTitle == "" {
 		seriesTitle = series.URIPart
 	}
-	inherited["title"] = seriesTitle
+	inherited.Title = seriesTitle
 
 	metaRow := r.getMetadata(series.URI)
-	existing := map[string]any{}
+	var existing contentmeta.Metadata
 	if raw, ok := metaRow.DataRaw["file"]; ok {
-		var entry struct {
-			Data map[string]any `json:"data"`
-		}
-		if json.Unmarshal(raw, &entry) == nil && entry.Data != nil {
-			existing = entry.Data
-		}
+		existing, _ = contentmeta.ParseLayerEntry(raw)
 	}
-	for k, v := range inherited {
-		existing[k] = v
-	}
-	metaRow.setSource("file", existing, nil)
+	// Merge: inherited fills in gaps in existing
+	result := contentmeta.Merge(inherited, existing)
+	// But always update title from inheritance
+	result.Title = inherited.Title
+	metaRow.setSource("file", result, nil)
 }
 
 func groupByFolder(files []FSFile) [][]FSFile {

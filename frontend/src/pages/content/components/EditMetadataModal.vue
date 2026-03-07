@@ -210,14 +210,7 @@ const metadataFields: FieldDef[] = [
     { key: 'number', label: 'Number', type: 'string' },
     { key: 'volume', label: 'Volume', type: 'number' },
     { key: 'count', label: 'Count', type: 'number' },
-    { key: 'authors', label: 'Authors', type: 'string' },
-    { key: 'writer', label: 'Writer', type: 'string' },
-    { key: 'penciller', label: 'Penciller', type: 'string' },
-    { key: 'inker', label: 'Inker', type: 'string' },
-    { key: 'colorist', label: 'Colorist', type: 'string' },
-    { key: 'letterer', label: 'Letterer', type: 'string' },
-    { key: 'cover_artist', label: 'Cover Artist', type: 'string' },
-    { key: 'editor', label: 'Editor', type: 'string' },
+    { key: 'staff', label: 'Staff', type: 'text' },
     { key: 'publisher', label: 'Publisher', type: 'string' },
     { key: 'imprint', label: 'Imprint', type: 'string' },
     { key: 'description', label: 'Description', type: 'text' },
@@ -226,19 +219,12 @@ const metadataFields: FieldDef[] = [
     { key: 'language', label: 'Language', type: 'string' },
     { key: 'publication_date', label: 'Publication Date', type: 'string' },
     { key: 'manga', label: 'Manga', type: 'string' },
-    { key: 'characters', label: 'Characters', type: 'string' },
-    { key: 'teams', label: 'Teams', type: 'string' },
-    { key: 'locations', label: 'Locations', type: 'string' },
-    { key: 'story_arc', label: 'Story Arc', type: 'string' },
     { key: 'series_group', label: 'Series Group', type: 'string' },
     { key: 'format', label: 'Format', type: 'string' },
     { key: 'web', label: 'Web', type: 'string' },
     { key: 'notes', label: 'Notes', type: 'text' },
     { key: 'scan_information', label: 'Scan Information', type: 'string' },
     { key: 'black_and_white', label: 'Black & White', type: 'string' },
-    { key: 'community_rating', label: 'Community Rating', type: 'number' },
-    { key: 'review', label: 'Review', type: 'text' },
-    { key: 'main_character_or_team', label: 'Main Character/Team', type: 'string' },
     { key: 'alternate_series', label: 'Alternate Series', type: 'string' },
     { key: 'alternate_number', label: 'Alternate Number', type: 'string' },
     { key: 'alternate_count', label: 'Alternate Count', type: 'number' },
@@ -329,7 +315,13 @@ const fieldsWithoutValues = computed(() =>
 
 function formatValue(val: any): string {
     if (val == null) return ''
-    if (Array.isArray(val)) return val.join(', ')
+    if (Array.isArray(val)) {
+        // Staff entries: [{name, role}, ...]
+        if (val.length > 0 && typeof val[0] === 'object' && 'name' in val[0]) {
+            return val.map((e: any) => `${e.name} (${e.role})`).join(', ')
+        }
+        return val.join(', ')
+    }
     return String(val)
 }
 
@@ -341,14 +333,36 @@ function hasOverride(key: keyof ContentMetadata): boolean {
 function openFieldEditor(key: keyof ContentMetadata) {
     editingField.value = key
     const val = (overridesLayer.value?.data as any)?.[key]
-    editValue.value = val != null ? formatValue(val) : ''
+    if (key === 'staff' && Array.isArray(val)) {
+        // One entry per line: "name (role)"
+        editValue.value = val.map((e: any) => `${e.name} (${e.role})`).join('\n')
+    } else {
+        editValue.value = val != null ? formatValue(val) : ''
+    }
 }
+
+const staffLineRe = /^(.+?)\s*\(([^)]+)\)\s*$/
 
 function confirmFieldEdit() {
     if (!editingField.value || !overridesLayer.value) return
     const data = overridesLayer.value.data as Record<string, any>
     if (editValue.value === '') {
         delete data[editingField.value]
+    } else if (editingField.value === 'staff') {
+        // Parse "name (role)" lines
+        const entries = editValue.value
+            .split('\n')
+            .map(line => line.trim())
+            .filter(Boolean)
+            .map(line => {
+                const m = staffLineRe.exec(line)
+                return m ? { name: m[1], role: m[2] } : { name: line, role: 'author' }
+            })
+        if (entries.length > 0) {
+            data[editingField.value] = entries
+        } else {
+            delete data[editingField.value]
+        }
     } else {
         data[editingField.value] = editValue.value
     }
@@ -368,11 +382,9 @@ const mSave = useMutation({
         for (const field of metadataFields) {
             const val = (raw as any)[field.key]
             if (val == null || val === '') continue
-            if (field.key === 'authors') {
-                payload[field.key] = String(val)
-                    .split(',')
-                    .map((s: string) => s.trim())
-                    .filter(Boolean)
+            if (field.key === 'staff') {
+                // Already stored as parsed array in the override layer
+                if (Array.isArray(val) && val.length > 0) payload[field.key] = val
             } else if (field.type === 'number') {
                 const num = Number(val)
                 if (!isNaN(num)) payload[field.key] = num

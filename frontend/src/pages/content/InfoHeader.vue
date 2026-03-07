@@ -117,9 +117,15 @@
                             v-if="content?.meta"
                             class="metadata-list text-shadow-md/40! text-white"
                         >
-                            <template v-if="content.meta.authors?.length">
-                                <dt>Author{{ content.meta.authors.length > 1 ? 's' : '' }}</dt>
-                                <dd>{{ content.meta.authors.join(', ') }}</dd>
+                            <template v-if="content.meta.staff?.length">
+                                <dt>Staff</dt>
+                                <dd>
+                                    {{
+                                        content.meta.staff
+                                            .map(s => `${s.name} (${s.role})`)
+                                            .join(', ')
+                                    }}
+                                </dd>
                             </template>
                             <template v-if="content.meta.publisher">
                                 <dt>Publisher</dt>

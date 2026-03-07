@@ -21,6 +21,7 @@ import (
 	"voltis/lib/archive"
 	"voltis/lib/fp"
 	"voltis/models"
+	"voltis/models/contentmeta"
 )
 
 // ComicsScanner implements FileScanner for comic archives.
@@ -154,7 +155,7 @@ func (cs *ComicsScanner) ParseFile(libraryID string, file FSFile) *ParsedItem {
 	}
 
 	// Extract metadata from ComicInfo
-	meta := map[string]any{}
+	var meta contentmeta.Metadata
 	var comicInfoRaw map[string]any
 	if comicInfo != nil {
 		meta = comicInfoToMetadata(comicInfo)
@@ -168,12 +169,12 @@ func (cs *ComicsScanner) ParseFile(libraryID string, file FSFile) *ParsedItem {
 	fallbackName, fallbackYear := parseSeriesName(dirName)
 
 	seriesName := fallbackName
-	if s, ok := meta["series"].(string); ok && s != "" {
-		seriesName = s
+	if meta.Series != "" {
+		seriesName = meta.Series
 	}
 	var seriesYear *int
-	if y, ok := meta["year"].(int); ok && y != 0 {
-		seriesYear = &y
+	if comicInfo != nil && comicInfo.Year != 0 {
+		seriesYear = &comicInfo.Year
 	} else {
 		seriesYear = fallbackYear
 	}
@@ -190,19 +191,19 @@ func (cs *ComicsScanner) ParseFile(libraryID string, file FSFile) *ParsedItem {
 	var volNum *float64
 	var chNum *float64
 
-	if v, ok := meta["volume"].(int); ok && v != 0 {
-		f := float64(v)
+	if meta.Volume != 0 {
+		f := float64(meta.Volume)
 		volNum = &f
 	} else {
 		volNum = parseVolume(filename)
 	}
 
-	if n, ok := meta["number"].(string); ok && n != "" {
-		f, err := parseFloatStr(n)
+	if meta.Number != "" {
+		f, err := parseFloatStr(meta.Number)
 		if err == nil {
 			chNum = &f
 		} else {
-			chNum = parseChapter(n)
+			chNum = parseChapter(meta.Number)
 		}
 	} else {
 		chNum = parseChapter(filename)
@@ -245,8 +246,8 @@ func (cs *ComicsScanner) ParseFile(libraryID string, file FSFile) *ParsedItem {
 	if title == "" {
 		title = filename
 	}
-	if _, ok := meta["title"]; !ok {
-		meta["title"] = title
+	if meta.Title == "" {
+		meta.Title = title
 	}
 
 	// Build order parts

@@ -6,6 +6,7 @@ import (
 
 	"voltis/lib/epub"
 	"voltis/models"
+	"voltis/models/contentmeta"
 )
 
 // BooksScanner implements FileScanner for EPUB books.
@@ -48,27 +49,17 @@ func (bs *BooksScanner) ParseFile(libraryID string, file FSFile) *ParsedItem {
 	}
 
 	// Metadata
-	fileMeta := map[string]any{"title": title}
-	if len(meta.Authors) > 0 {
-		fileMeta["authors"] = meta.Authors
+	fileMeta := contentmeta.Metadata{Title: title}
+	for _, a := range meta.Authors {
+		fileMeta.Staff = append(fileMeta.Staff, contentmeta.StaffEntry{Name: a, Role: "author"})
 	}
-	if meta.Description != "" {
-		fileMeta["description"] = meta.Description
-	}
-	if meta.Publisher != "" {
-		fileMeta["publisher"] = meta.Publisher
-	}
-	if meta.Language != "" {
-		fileMeta["language"] = meta.Language
-	}
-	if meta.PublicationDate != "" {
-		fileMeta["publication_date"] = meta.PublicationDate
-	}
-	if meta.Series != "" {
-		fileMeta["series"] = meta.Series
-	}
+	fileMeta.Description = meta.Description
+	fileMeta.Publisher = meta.Publisher
+	fileMeta.Language = meta.Language
+	fileMeta.PublicationDate = meta.PublicationDate
+	fileMeta.Series = meta.Series
 	if meta.HasSeriesIndex {
-		fileMeta["series_index"] = meta.SeriesIndex
+		fileMeta.SeriesIndex = meta.SeriesIndex
 	}
 
 	// Series

@@ -103,10 +103,7 @@ func cleanSeriesName(name string) string {
 }
 
 func removeCommonPrefix(a, b string) (string, string) {
-	minLen := len(a)
-	if len(b) < minLen {
-		minLen = len(b)
-	}
+	minLen := min(len(b), len(a))
 	i := 0
 	for i < minLen && a[i] == b[i] {
 		i++

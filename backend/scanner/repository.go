@@ -9,6 +9,7 @@ import (
 
 	"voltis/db"
 	"voltis/models"
+	"voltis/models/contentmeta"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -16,12 +17,12 @@ import (
 type metadataRow struct {
 	URI       string
 	LibraryID string
-	Data      map[string]any
+	Data      contentmeta.Metadata
 	DataRaw   map[string]json.RawMessage
 	dirty     bool
 }
 
-func (m *metadataRow) setSource(source string, data map[string]any, raw map[string]any) {
+func (m *metadataRow) setSource(source string, data contentmeta.Metadata, raw map[string]any) {
 	entry := map[string]any{"data": data}
 	if raw != nil {
 		entry["raw"] = raw
@@ -35,25 +36,8 @@ func (m *metadataRow) setSource(source string, data map[string]any, raw map[stri
 
 // merge recomputes merged data from all layers.
 func (m *metadataRow) merge() {
-	merged := map[string]any{}
-	for _, source := range metadataMergeOrder {
-		raw, ok := m.DataRaw[source]
-		if !ok {
-			continue
-		}
-		var entry struct {
-			Data map[string]any `json:"data"`
-		}
-		if json.Unmarshal(raw, &entry) == nil && entry.Data != nil {
-			for k, v := range entry.Data {
-				merged[k] = v
-			}
-		}
-	}
-	m.Data = merged
+	m.Data = contentmeta.MergeRawLayers(m.DataRaw)
 }
-
-var metadataMergeOrder = []string{"file", "mangabaka", "overrides"}
 
 type repository struct {
 	pool      *pgxpool.Pool
@@ -100,13 +84,9 @@ func (r *repository) load(ctx context.Context) error {
 
 	r.metadata = make([]*metadataRow, len(dbMeta))
 	for i, m := range dbMeta {
-		var data map[string]any
+		data := contentmeta.ParseMetadata(m.Data)
 		var dataRaw map[string]json.RawMessage
-		_ = json.Unmarshal(m.Data, &data)
 		_ = json.Unmarshal(m.DataRaw, &dataRaw)
-		if data == nil {
-			data = map[string]any{}
-		}
 		if dataRaw == nil {
 			dataRaw = map[string]json.RawMessage{}
 		}
@@ -133,7 +113,6 @@ func (r *repository) getMetadata(uri string) *metadataRow {
 	m := &metadataRow{
 		URI:       uri,
 		LibraryID: r.libraryID,
-		Data:      map[string]any{},
 		DataRaw:   map[string]json.RawMessage{},
 		dirty:     true,
 	}
@@ -221,7 +200,7 @@ func (r *repository) getSeries(uri, uriPart string, fileURI *string, contentType
 	r.markDirty(c)
 
 	meta := r.getMetadata(uri)
-	meta.setSource("file", map[string]any{"title": title}, nil)
+	meta.setSource("file", contentmeta.Metadata{Title: title}, nil)
 
 	r.parents[uri] = c
 	return c

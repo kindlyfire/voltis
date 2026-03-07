@@ -4,6 +4,8 @@ import (
 	"encoding/xml"
 	"fmt"
 	"strings"
+
+	"voltis/models/contentmeta"
 )
 
 // ComicInfo represents the ComicInfo.xml schema used in CBZ/CBR files.
@@ -53,75 +55,66 @@ func parseComicInfo(data []byte) (*ComicInfo, error) {
 	return &ci, nil
 }
 
-// comicInfoToMetadata converts a ComicInfo into a flat metadata map.
-func comicInfoToMetadata(ci *ComicInfo) map[string]any {
-	m := map[string]any{}
+// comicInfoToMetadata converts a ComicInfo into a Metadata struct.
+func comicInfoToMetadata(ci *ComicInfo) contentmeta.Metadata {
+	m := contentmeta.Metadata{}
 
-	if ci.Summary != "" {
-		m["description"] = ci.Summary
+	clean := func(s string) string {
+		if s == "Unknown" {
+			return ""
+		}
+		return s
 	}
-	if ci.LanguageISO != "" {
-		m["language"] = ci.LanguageISO
-	}
+
+	m.Title = clean(ci.Title)
+	m.Description = ci.Summary
+	m.Language = ci.LanguageISO
+	m.Series = clean(ci.Series)
+	m.Number = clean(ci.Number)
+	m.Publisher = clean(ci.Publisher)
+	m.Genre = clean(ci.Genre)
+	m.AgeRating = clean(ci.AgeRating)
+	m.Manga = clean(ci.Manga)
+	m.Imprint = clean(ci.Imprint)
+	m.Format = clean(ci.Format)
+	m.Web = clean(ci.Web)
+	m.Notes = clean(ci.Notes)
+	m.ScanInformation = clean(ci.ScanInformation)
+	m.BlackAndWhite = clean(ci.BlackAndWhite)
+	m.SeriesGroup = clean(ci.SeriesGroup)
+	m.AlternateSeries = clean(ci.AlternateSeries)
+	m.AlternateNumber = clean(ci.AlternateNumber)
+	m.Volume = ci.Volume
+	m.Count = ci.Count
+	m.AlternateCount = ci.AlternateCount
 
 	if ci.Year != 0 {
 		if ci.Month != 0 && ci.Day != 0 {
-			m["publication_date"] = fmt.Sprintf("%04d-%02d-%02d", ci.Year, ci.Month, ci.Day)
+			m.PublicationDate = fmt.Sprintf("%04d-%02d-%02d", ci.Year, ci.Month, ci.Day)
 		} else {
-			m["publication_date"] = fmt.Sprintf("%d", ci.Year)
+			m.PublicationDate = fmt.Sprintf("%d", ci.Year)
 		}
 	}
 
-	if ci.Writer != "" {
-		authors := strings.Split(ci.Writer, ",")
-		for i := range authors {
-			authors[i] = strings.TrimSpace(authors[i])
+	// Staff
+	addStaff := func(field, role string) {
+		if field == "" || field == "Unknown" {
+			return
 		}
-		m["authors"] = authors
-	}
-
-	// Direct fields
-	set := func(key, val string) {
-		if val != "" && val != "Unknown" {
-			m[key] = val
+		for name := range strings.SplitSeq(field, ",") {
+			name = strings.TrimSpace(name)
+			if name != "" {
+				m.Staff = append(m.Staff, contentmeta.StaffEntry{Name: name, Role: role})
+			}
 		}
 	}
-	set("title", ci.Title)
-	set("series", ci.Series)
-	set("number", ci.Number)
-	set("publisher", ci.Publisher)
-	set("genre", ci.Genre)
-	set("age_rating", ci.AgeRating)
-	set("manga", ci.Manga)
-	set("imprint", ci.Imprint)
-	set("format", ci.Format)
-	set("web", ci.Web)
-	set("notes", ci.Notes)
-	set("scan_information", ci.ScanInformation)
-	set("black_and_white", ci.BlackAndWhite)
-	set("characters", ci.Characters)
-	set("teams", ci.Teams)
-	set("locations", ci.Locations)
-	set("story_arc", ci.StoryArc)
-	set("series_group", ci.SeriesGroup)
-	set("penciller", ci.Penciller)
-	set("inker", ci.Inker)
-	set("colorist", ci.Colorist)
-	set("letterer", ci.Letterer)
-	set("cover_artist", ci.CoverArtist)
-	set("editor", ci.Editor)
-	set("alternate_series", ci.AlternateSeries)
-	set("alternate_number", ci.AlternateNumber)
-
-	if ci.Volume != 0 {
-		m["volume"] = ci.Volume
-	}
-	if ci.Count != 0 {
-		m["count"] = ci.Count
-	}
-	if ci.AlternateCount != 0 {
-		m["alternate_count"] = ci.AlternateCount
-	}
+	addStaff(ci.Writer, "writer")
+	addStaff(ci.Penciller, "penciller")
+	addStaff(ci.Inker, "inker")
+	addStaff(ci.Colorist, "colorist")
+	addStaff(ci.Letterer, "letterer")
+	addStaff(ci.CoverArtist, "cover_artist")
+	addStaff(ci.Editor, "editor")
 
 	return m
 }

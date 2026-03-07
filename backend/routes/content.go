@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"net/http"
 	"strings"
 	"time"
 
 	"voltis/db"
 	"voltis/models"
+	"voltis/models/contentmeta"
 	"voltis/scanner"
 
 	"github.com/jackc/pgx/v5"
@@ -623,8 +623,6 @@ func (cr *ContentRoutes) setSeriesItemStatuses(c echo.Context) error {
 	return okResponse(c)
 }
 
-var metadataMergeOrder = []string{"file", "mangabaka", "overrides"}
-
 type MetadataLayerDTO struct {
 	Source string          `json:"source"`
 	Data   json.RawMessage `json:"data"`
@@ -667,8 +665,8 @@ func (cr *ContentRoutes) getMetadataLayers(c echo.Context) error {
 		rawMap = map[string]json.RawMessage{}
 	}
 
-	layers := make([]MetadataLayerDTO, len(metadataMergeOrder))
-	for i, source := range metadataMergeOrder {
+	layers := make([]MetadataLayerDTO, len(contentmeta.MergeOrder))
+	for i, source := range contentmeta.MergeOrder {
 		entry := rawMap[source]
 		layerData := json.RawMessage("{}")
 		layerRaw := json.RawMessage("{}")
@@ -748,22 +746,7 @@ func (cr *ContentRoutes) updateMetadataOverride(c echo.Context) error {
 		rawMap["overrides"] = overrideEntry
 
 		// Recompute merged
-		merged := map[string]json.RawMessage{}
-		for _, source := range metadataMergeOrder {
-			if entry, ok := rawMap[source]; ok {
-				var entryMap map[string]json.RawMessage
-				if json.Unmarshal(entry, &entryMap) == nil {
-					if d, ok := entryMap["data"]; ok {
-						var sourceData map[string]json.RawMessage
-						if json.Unmarshal(d, &sourceData) == nil {
-							maps.Copy(merged, sourceData)
-						}
-					}
-				}
-			}
-		}
-
-		mergedJSON, _ := json.Marshal(merged)
+		mergedJSON, _ := json.Marshal(contentmeta.MergeRawLayers(rawMap))
 		updatedRaw, _ := json.Marshal(rawMap)
 
 		_, err = cr.pool.Exec(ctx, `

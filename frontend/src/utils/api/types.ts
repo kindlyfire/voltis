@@ -120,46 +120,38 @@ export interface ContentFileData {
     pages?: Array<[string, number, number]>
 }
 
+export interface StaffEntry {
+    name: string
+    role: string
+}
+
 export interface ContentMetadata {
-    // Shared fields
-    authors?: string[]
+    title?: string
     description?: string
+    staff?: StaffEntry[]
     publisher?: string
     language?: string
     publication_date?: string
     // Comic-specific fields
-    title?: string
     series?: string
-    writer?: string
-    penciller?: string
-    inker?: string
-    colorist?: string
-    letterer?: string
-    cover_artist?: string
-    editor?: string
+    number?: string
+    volume?: number
+    count?: number
     genre?: string
     age_rating?: string
     manga?: string
-    characters?: string
-    teams?: string
-    locations?: string
-    story_arc?: string
-    series_group?: string
     format?: string
     imprint?: string
     web?: string
     notes?: string
     scan_information?: string
     black_and_white?: string
-    community_rating?: number
-    review?: string
-    main_character_or_team?: string
+    series_group?: string
     alternate_series?: string
     alternate_number?: string
     alternate_count?: number
-    count?: number
-    number?: string
-    volume?: number
+    // Book-specific fields
+    series_index?: number
 }
 
 export interface MetadataLayer {
