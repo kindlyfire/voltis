@@ -95,7 +95,7 @@
                                                         #{{ displayOrder(entry, idx) }}
                                                     </VChip>
                                                     <VChip size="small" variant="tonal">
-                                                        {{ formatType(entry.content.type) }}
+                                                        {{ displayContentType(entry.content.type) }}
                                                     </VChip>
                                                     <VChip
                                                         size="small"
@@ -181,8 +181,9 @@ import { useRoute, RouterLink } from 'vue-router'
 import { useHead } from '@unhead/vue'
 import { customListsApi } from '@/utils/api/custom-lists'
 import { librariesApi } from '@/utils/api/libraries'
-import type { ContentType, CustomListEntry } from '@/utils/api/types'
+import type { CustomListEntry } from '@/utils/api/types'
 import { API_URL } from '@/utils/fetch'
+import { displayContentType } from '@/utils/misc'
 import AQueryError from '@/components/AQueryError.vue'
 import { showListModal } from './ListModal.vue'
 import { showEntryModal } from './EntryModal.vue'
@@ -204,19 +205,8 @@ useHead({
     },
 })
 
-const typeLabels: Record<ContentType, string> = {
-    comic: 'Comic',
-    comic_series: 'Comic Series',
-    book: 'Book',
-    book_series: 'Book Series',
-}
-
 function libraryName(id: string) {
     return qLibraries.data.value?.find(l => l.id === id)?.name ?? id
-}
-
-function formatType(type: ContentType) {
-    return typeLabels[type] ?? type
 }
 
 function formatDate(value: string) {

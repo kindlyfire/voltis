@@ -39,7 +39,7 @@
                             <div v-else class="search-cover bg-surface-variant" />
                         </template>
                         <VListItemTitle>{{ item.meta.title ?? item.title }}</VListItemTitle>
-                        <VListItemSubtitle>{{ item.type }}</VListItemSubtitle>
+                        <VListItemSubtitle>{{ displayContentType(item.type) }}</VListItemSubtitle>
                     </VListItem>
                 </template>
                 <VListItem v-else-if="query.isFetching?.value">
@@ -63,6 +63,7 @@ import { refDebounced, useMagicKeys, whenever } from '@vueuse/core'
 import { useRouter } from 'vue-router'
 import { contentApi } from '@/utils/api/content'
 import { API_URL } from '@/utils/fetch'
+import { displayContentType } from '@/utils/misc'
 import type { ContentListParams } from '@/utils/api/types'
 
 const router = useRouter()

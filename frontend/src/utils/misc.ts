@@ -2,7 +2,6 @@ import { QueryClient } from '@tanstack/vue-query'
 import { useEventListener } from '@vueuse/core'
 import {
     computed,
-    onBeforeMount,
     onMounted,
     onUnmounted,
     ref,
@@ -11,6 +10,7 @@ import {
     type Ref,
 } from 'vue'
 import { useRouter } from 'vue-router'
+import type { ContentType } from '@/utils/api/types'
 
 export const queryClient = new QueryClient({})
 
@@ -181,4 +181,15 @@ export function useRouteQueryParams<T extends Record<string, string | null>>(
     }
 
     return result
+}
+
+const contentTypeLabels: Record<ContentType, string> = {
+    comic: 'Comic',
+    comic_series: 'Comic Series',
+    book: 'Book',
+    book_series: 'Book Series',
+}
+
+export function displayContentType(type: ContentType): string {
+    return contentTypeLabels[type] ?? type
 }
