@@ -21,7 +21,8 @@ test *args='':
 docker-push-release:
     #!/usr/bin/env bash
     set -euo pipefail
-    version=$(grep '^version' pyproject.toml | sed 's/.*"\(.*\)"/\1/')
+    version=$(git describe --tags --abbrev=0)
+    version=${version#v}
     image="ghcr.io/kindlyfire/voltis:$version"
     echo "Image: $image"
     if docker manifest inspect "$image" > /dev/null 2>&1; then
