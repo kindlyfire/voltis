@@ -67,6 +67,7 @@ export const useLayoutStore = defineStore('layout', () => {
         () => effectiveTheme.value,
         theme => {
             vuetifyTheme.change(theme)
+            document.documentElement.classList.toggle('dark', theme === 'dark')
         },
         { immediate: true }
     )

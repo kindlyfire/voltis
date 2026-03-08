@@ -1,6 +1,6 @@
 <template>
     <div>
-        <div class="d-flex align-center mb-2 gap-1">
+        <div class="mb-2 flex flex-wrap items-center gap-1 gap-y-0">
             <Settings :store-key="storeKey" :width="width" />
             <VBtn
                 :icon="true"
@@ -26,11 +26,42 @@
                     filters.starred.value === 'true' ? 'mdi-star' : 'mdi-star-outline'
                 }}</VIcon>
             </VBtn>
-            <VProgressCircular v-if="loading" indeterminate size="16" width="2" class="ml-2" />
-            <span v-else class="pl-2">{{ items.length }} items</span>
+            <VBtn
+                :icon="true"
+                variant="text"
+                size="small"
+                :color="selectMode ? 'primary' : undefined"
+                title="Select items"
+                @click="toggleSelectMode"
+            >
+                <VIcon>{{
+                    selectMode
+                        ? 'mdi-checkbox-multiple-marked-outline'
+                        : 'mdi-checkbox-multiple-blank-outline'
+                }}</VIcon>
+            </VBtn>
+
+            <template v-if="!selectMode">
+                <VProgressCircular v-if="loading" indeterminate size="16" width="2" class="ml-2" />
+                <span v-else class="pl-2">{{ items.length }} items</span>
+            </template>
+
+            <div v-if="selectMode" class="basis-full sm:basis-auto" />
+            <template v-if="selectMode">
+                <VMenu>
+                    <template #activator="{ props: menuProps }">
+                        <VBtn variant="text" v-bind="menuProps">Actions</VBtn>
+                    </template>
+                    <VList density="compact">
+                        <VListItem title="Select all" @click="selectAll" />
+                    </VList>
+                </VMenu>
+                <VProgressCircular v-if="loading" indeterminate size="16" width="2" class="ml-2" />
+                <span v-else class="pl-2">{{ selectedIds.size }} selected</span>
+            </template>
         </div>
 
-        <div v-if="showFilters" class="d-flex align-center mb-3 flex-wrap gap-2">
+        <div v-if="showFilters" class="mb-3 flex flex-row flex-wrap gap-2 sm:items-center">
             <VSelect
                 v-model="filters.status.value"
                 :items="statusItems"
@@ -39,7 +70,7 @@
                 variant="outlined"
                 hide-details
                 clearable
-                class="max-w-52"
+                class="w-1/2 sm:w-full sm:max-w-52"
             />
 
             <VSelect
@@ -50,7 +81,7 @@
                 variant="outlined"
                 hide-details
                 clearable
-                class="max-w-52"
+                class="w-1/2 sm:w-full sm:max-w-52"
             />
 
             <VSelect
@@ -63,7 +94,7 @@
                 variant="outlined"
                 hide-details
                 :clearable="filters.sort.value !== 'title' || filters.sort_order.value !== 'asc'"
-                class="max-w-52"
+                class="w-1/2 sm:w-full sm:max-w-52"
             />
 
             <VBtn
@@ -97,6 +128,9 @@
                     :content="item"
                     :to-read-route="toReadRoute"
                     :store-key="storeKey"
+                    :selecting="selectMode"
+                    :selected="selectedIds.has(item.id)"
+                    @toggle-select="(shiftKey: boolean) => toggleSelect(item.id, shiftKey)"
                 />
             </template>
         </div>
@@ -106,7 +140,7 @@
 <script setup lang="ts">
 import { keepPreviousData } from '@tanstack/vue-query'
 import { useElementSize } from '@vueuse/core'
-import { computed, ref, toRef } from 'vue'
+import { computed, ref, toRef, watch } from 'vue'
 import { contentApi } from '@/utils/api/content'
 import {
     READING_STATUS_LABELS,
@@ -228,6 +262,50 @@ const qContents = contentApi.useList(queryParams, {
 })
 const items = computed(() => qContents.data.value?.data ?? [])
 const loading = qContents.isLoading
+
+const selectMode = ref(false)
+const selectedIds = ref(new Set<string>())
+const lastSelectedIndex = ref<number | null>(null)
+
+function toggleSelectMode() {
+    selectMode.value = !selectMode.value
+    selectedIds.value = new Set()
+    lastSelectedIndex.value = null
+}
+
+function toggleSelect(id: string, shiftKey: boolean) {
+    const next = new Set(selectedIds.value)
+    const currentIndex = items.value.findIndex(item => item.id === id)
+
+    if (shiftKey && lastSelectedIndex.value != null && currentIndex !== -1) {
+        const lo = Math.min(lastSelectedIndex.value, currentIndex)
+        const hi = Math.max(lastSelectedIndex.value, currentIndex)
+        for (let i = lo; i <= hi; i++) {
+            next.add(items.value[i]!.id)
+        }
+    } else {
+        if (next.has(id)) next.delete(id)
+        else next.add(id)
+    }
+
+    selectedIds.value = next
+    if (currentIndex !== -1) lastSelectedIndex.value = currentIndex
+}
+
+function selectAll() {
+    selectedIds.value = new Set(items.value.map(item => item.id))
+}
+
+watch(items, items => {
+    const newSelectedIds = new Set<string>()
+    for (const item of items) {
+        if (selectedIds.value.has(item.id)) {
+            newSelectedIds.add(item.id)
+        }
+    }
+    selectedIds.value = newSelectedIds
+    lastSelectedIndex.value = null
+})
 
 const gridRef = ref<HTMLElement>()
 const { width } = useElementSize(gridRef)

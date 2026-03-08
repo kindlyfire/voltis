@@ -1,7 +1,13 @@
 <template>
     <div class="AContentGridItem">
         <VCard class="content-grid-item relative">
-            <RouterLink :to="to" class="block" :title="content.title">
+            <component
+                :is="selecting ? 'div' : RouterLink"
+                :to="selecting ? undefined : to"
+                class="block cursor-pointer"
+                :title="content.title"
+                @click="selecting && emit('toggleSelect', $event.shiftKey)"
+            >
                 <img
                     :src="coverUri ?? ''"
                     :style="{
@@ -11,7 +17,7 @@
                     }"
                     class="block"
                 />
-            </RouterLink>
+            </component>
 
             <span
                 v-if="content.user_data?.status && !settings.hideStatus"
@@ -27,6 +33,15 @@
             >
                 {{ childrenCount }}
             </span>
+
+            <div class="absolute bottom-0 left-0 rounded-tr-md bg-white/70 p-1 dark:bg-black/60">
+                <VCheckboxBtn
+                    v-if="selecting"
+                    :model-value="selected"
+                    density="compact"
+                    @click.stop="emit('toggleSelect', $event.shiftKey)"
+                />
+            </div>
 
             <span
                 v-if="toReadRoute"
@@ -50,6 +65,7 @@
 
 <script setup lang="ts">
 import { computed, toRef } from 'vue'
+import { RouterLink } from 'vue-router'
 import { READING_STATUS_LABELS } from '@/utils/api/types'
 import type { Content, ReadingStatus } from '@/utils/api/types'
 import { API_URL } from '@/utils/fetch'
@@ -60,9 +76,15 @@ const props = withDefaults(
         content: Content
         toReadRoute?: boolean
         storeKey?: string
+        selecting?: boolean
+        selected?: boolean
     }>(),
     { storeKey: 'default' }
 )
+
+const emit = defineEmits<{
+    toggleSelect: [shiftKey: boolean]
+}>()
 
 const store = useContentGridStore()
 const settings = store.getForKey(toRef(props, 'storeKey'))
