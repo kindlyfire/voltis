@@ -5,12 +5,12 @@
             :style="store.navbarHidden.value && { transform: 'translateY(-64px)' }"
         >
             <VAppBarNavIcon @click="store.setSidebarOpen(!store.sidebarOpen.value)" />
-            <VAppBarTitle style="flex: 0 1 auto" class="hidden! md:flex! mr-6!">
+            <VAppBarTitle style="flex: 0 1 auto" class="mr-6! hidden! md:flex!">
                 <RouterLink to="/">Voltis</RouterLink>
             </VAppBarTitle>
             <VBtn icon="mdi-home" variant="text" to="/" class="md:hidden!" exact />
             <ScanIndicator />
-            <SearchBox class="grow md:grow-0 ms-2 me-2" />
+            <SearchBox class="ms-2 me-2 grow md:grow-0" />
             <VSpacer class="hidden! md:flex!" />
         </VAppBar>
         <VNavigationDrawer
@@ -23,7 +23,7 @@
                 height: '100vh',
             }"
         >
-            <div class="h-16 flex items-center ms-5!">
+            <div class="ms-5! flex h-16 items-center">
                 <VAppBarTitle>
                     <RouterLink to="/">Voltis</RouterLink>
                 </VAppBarTitle>
@@ -120,19 +120,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { ModalContainer } from '@/utils/modals'
-import { usersApi } from '@/utils/api/users'
-import { authApi } from '@/utils/api/auth'
-
-import { useRouter, useRoute } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
 import { onLongPress, useEventListener, useThrottleFn } from '@vueuse/core'
-import { useLayoutStore } from './useLayoutStore'
+import { computed, ref } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+import { authApi } from '@/utils/api/auth'
 import { contentApi } from '@/utils/api/content'
-import SearchBox from './SearchBox.vue'
+import { usersApi } from '@/utils/api/users'
+import { ModalContainer } from '@/utils/modals'
 import Libraries from './Libraries.vue'
 import ScanIndicator from './ScanIndicator.vue'
+import SearchBox from './SearchBox.vue'
+import { useLayoutStore } from './useLayoutStore'
 
 const store = useLayoutStore()
 

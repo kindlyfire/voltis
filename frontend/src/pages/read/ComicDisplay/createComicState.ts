@@ -1,10 +1,10 @@
-import type { Content, ReadingStatus, UserToContent } from '@/utils/api/types'
-import { reactive, readonly, toRefs } from 'vue'
-import { createPageLoader, getPagesInPreloadOrder, type PageLoaderState } from './usePageLoader'
-import { contentApi } from '@/utils/api/content'
-import type { PageDimensions } from './types'
-import { API_URL } from '@/utils/fetch'
 import { useDebounceFn } from '@vueuse/core'
+import { reactive, readonly, toRefs } from 'vue'
+import { contentApi } from '@/utils/api/content'
+import type { Content, ReadingStatus, UserToContent } from '@/utils/api/types'
+import { API_URL } from '@/utils/fetch'
+import type { PageDimensions } from './types'
+import { createPageLoader, getPagesInPreloadOrder, type PageLoaderState } from './usePageLoader'
 
 export interface ComicStateValues {
     initialPage: number | 'last' | 'resume'

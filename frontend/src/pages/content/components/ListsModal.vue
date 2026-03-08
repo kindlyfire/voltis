@@ -51,11 +51,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
-import { customListsApi } from '@/utils/api/custom-lists'
-import { contentApi } from '@/utils/api/content'
+import { computed, ref } from 'vue'
 import AQueryError from '@/components/AQueryError.vue'
+import { contentApi } from '@/utils/api/content'
+import { customListsApi } from '@/utils/api/custom-lists'
 
 const props = defineProps<{
     open: boolean

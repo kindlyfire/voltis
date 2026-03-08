@@ -7,7 +7,7 @@
                     <VCardText>
                         <div
                             v-if="infoQuery.isLoading.value"
-                            class="flex items-center justify-center my-4"
+                            class="my-4 flex items-center justify-center"
                         >
                             <VProgressCircular indeterminate size="64" />
                         </div>
@@ -16,7 +16,7 @@
                                 v-if="isFirstUserFlow"
                                 type="info"
                                 variant="tonal"
-                                class="mb-4 mt-2"
+                                class="mt-2 mb-4"
                             >
                                 Welcome! Create the first admin account below to get started.
                             </VAlert>
@@ -64,16 +64,16 @@
 </template>
 
 <script setup lang="ts">
+import { useQueryClient } from '@tanstack/vue-query'
+import { useHead } from '@unhead/vue'
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { z } from 'zod'
-import { useForm } from '@/utils/forms'
-import { authApi } from '@/utils/api/auth'
-import { miscApi } from '@/utils/api/misc'
 import AInput from '@/components/AInput.vue'
 import AQueryError from '@/components/AQueryError.vue'
-import { useRouter } from 'vue-router'
-import { useHead } from '@unhead/vue'
-import { useQueryClient } from '@tanstack/vue-query'
+import { authApi } from '@/utils/api/auth'
+import { miscApi } from '@/utils/api/misc'
+import { useForm } from '@/utils/forms'
 import { useAlreadyLoggedInRedirect } from './PageLogin.vue'
 
 useHead({

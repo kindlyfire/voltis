@@ -1,8 +1,8 @@
-import { computed, toValue, type MaybeRefOrGetter } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
+import { computed, toValue, type MaybeRefOrGetter } from 'vue'
 import { apiFetch } from '../fetch'
-import type { Paginated, Task, TaskListParams } from './types'
 import type { QueryOptions } from './_utils'
+import type { Paginated, Task, TaskListParams } from './types'
 
 export const tasksApi = {
     useList: (

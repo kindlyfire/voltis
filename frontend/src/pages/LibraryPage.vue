@@ -6,11 +6,11 @@
 </template>
 
 <script setup lang="ts">
+import { useHead } from '@unhead/vue'
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { librariesApi } from '@/utils/api/libraries'
-import { useHead } from '@unhead/vue'
 import AContentGrid from '@/components/AContentGrid/AContentGrid.vue'
+import { librariesApi } from '@/utils/api/libraries'
 
 const route = useRoute()
 const libraryId = computed(() => route.params.id as string)

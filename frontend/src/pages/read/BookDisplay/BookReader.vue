@@ -42,7 +42,7 @@
 
             <div v-if="chapters.next">
                 <VDivider />
-                <div class="d-flex justify-center pa-4">
+                <div class="d-flex pa-4 justify-center">
                     <VBtn color="primary" :to="`?ch=${encodeURIComponent(chapters.next.href)}`">
                         Next Chapter: {{ chapters.next.title || chapters.next.id }}
                     </VBtn>
@@ -55,11 +55,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import AQueryError from '@/components/AQueryError.vue'
+import { contentApi } from '@/utils/api/content'
+import { arrayAtNowrap } from '@/utils/misc'
 import { renderChapter } from './renderChapterHtml'
 import { useVisibleBookChapters } from './useBookDisplayStore'
-import AQueryError from '@/components/AQueryError.vue'
-import { arrayAtNowrap } from '@/utils/misc'
-import { contentApi } from '@/utils/api/content'
 
 const props = defineProps<{
     contentId: string

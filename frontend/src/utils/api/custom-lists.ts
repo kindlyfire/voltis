@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, toValue, type MaybeRefOrGetter } from 'vue'
 import { apiFetch } from '../fetch'
+import { isEnabled, type QueryOptions } from './_utils'
 import type {
     CustomListPartial,
     CustomList,
@@ -10,7 +11,6 @@ import type {
     CustomListUpsert,
     OkResponse,
 } from './types'
-import { isEnabled, type QueryOptions } from './_utils'
 
 const listsKey = ['custom-lists']
 const detailKey = (id: string | undefined | null) => [...listsKey, id]

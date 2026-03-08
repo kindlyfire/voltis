@@ -22,8 +22,8 @@
 </template>
 
 <script setup lang="ts">
-import { contentApi } from '@/utils/api/content'
 import { computed, ref } from 'vue'
+import { contentApi } from '@/utils/api/content'
 
 const props = defineProps<{
     contentId: string | null | undefined

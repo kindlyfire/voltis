@@ -15,13 +15,13 @@
 </template>
 
 <script setup lang="ts">
+import { useHead } from '@unhead/vue'
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { contentApi } from '@/utils/api/content'
-import { useHead } from '@unhead/vue'
 import AQueryError from '@/components/AQueryError.vue'
-import InfoHeader from './InfoHeader.vue'
+import { contentApi } from '@/utils/api/content'
 import ChildrenList from './ChildrenList/ChildrenList.vue'
+import InfoHeader from './InfoHeader.vue'
 
 const route = useRoute()
 const contentId = computed(() => route.params.id as string)

@@ -40,12 +40,12 @@
 </template>
 
 <script setup lang="ts">
+import { keepPreviousData, useQuery } from '@tanstack/vue-query'
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { usersApi } from '@/utils/api/users'
-import { librariesApi } from '@/utils/api/libraries'
 import { contentApi } from '@/utils/api/content'
-import { keepPreviousData, useQuery } from '@tanstack/vue-query'
+import { librariesApi } from '@/utils/api/libraries'
+import { usersApi } from '@/utils/api/users'
 
 const route = useRoute()
 const qMe = usersApi.useMe()

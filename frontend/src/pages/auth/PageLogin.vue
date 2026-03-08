@@ -35,16 +35,16 @@
 </template>
 
 <script setup lang="ts">
+import { useQueryClient } from '@tanstack/vue-query'
+import { useHead } from '@unhead/vue'
+import { watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { z } from 'zod'
-import { useForm } from '@/utils/forms'
-import { authApi } from '@/utils/api/auth'
 import AInput from '@/components/AInput.vue'
 import AQueryError from '@/components/AQueryError.vue'
-import { useRouter } from 'vue-router'
-import { useHead } from '@unhead/vue'
-import { useQueryClient } from '@tanstack/vue-query'
+import { authApi } from '@/utils/api/auth'
 import { usersApi } from '@/utils/api/users'
-import { watch } from 'vue'
+import { useForm } from '@/utils/forms'
 
 useHead({
     title: 'Login',

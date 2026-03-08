@@ -1,5 +1,5 @@
-import { computed, toValue, type MaybeRefOrGetter, type Ref, type UnwrapRef } from 'vue'
 import type { UseQueryOptions } from '@tanstack/vue-query'
+import { computed, toValue, type MaybeRefOrGetter, type Ref, type UnwrapRef } from 'vue'
 
 export type QueryOptions<T> = Omit<UnwrapRef<UseQueryOptions<T>>, 'queryKey' | 'queryFn'>
 

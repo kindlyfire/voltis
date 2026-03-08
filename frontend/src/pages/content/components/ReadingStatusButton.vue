@@ -9,14 +9,14 @@
         hide-details
         clearable
         @update:model-value="updateStatus"
-        class="sm:max-w-60 grow!"
+        class="grow! sm:max-w-60"
     />
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { contentApi } from '@/utils/api/content'
 import type { ReadingStatus } from '@/utils/api/types'
-import { computed } from 'vue'
 
 const props = defineProps<{
     contentId: string | null | undefined

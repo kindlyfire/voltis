@@ -16,15 +16,15 @@
 </template>
 
 <script setup lang="ts">
-import { watch, computed, onUnmounted } from 'vue'
 import { useScroll, useWindowSize } from '@vueuse/core'
-import { useReaderStore } from './useComicDisplayStore'
-import ReaderModePaged from './ReaderModePaged.vue'
-import ReaderModeLongstrip from './ReaderModeLongstrip.vue'
-import ReaderSidebar from './ReaderSidebar.vue'
-import { useReaderControls } from './useReaderControls'
+import { watch, computed, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useLayoutStore } from '@/pages/_layout/useLayoutStore'
+import ReaderModeLongstrip from './ReaderModeLongstrip.vue'
+import ReaderModePaged from './ReaderModePaged.vue'
+import ReaderSidebar from './ReaderSidebar.vue'
+import { useReaderStore } from './useComicDisplayStore'
+import { useReaderControls } from './useReaderControls'
 
 const props = defineProps<{
     contentId: string

@@ -1,7 +1,7 @@
 import { onMounted, onUnmounted } from 'vue'
-import { useReaderStore } from './useComicDisplayStore'
 import { getScrollParent, getViewportHeight } from '@/utils/css'
 import { getLayoutTop } from '@/utils/misc'
+import { useReaderStore } from './useComicDisplayStore'
 
 type ClickZone = 'prev' | 'next' | 'menu'
 

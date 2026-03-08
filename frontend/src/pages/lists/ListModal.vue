@@ -52,8 +52,8 @@ import { computed, watch } from 'vue'
 import { z } from 'zod'
 import AInput from '@/components/AInput.vue'
 import AQueryError from '@/components/AQueryError.vue'
-import { useForm } from '@/utils/forms'
 import { customListsApi } from '@/utils/api/custom-lists'
+import { useForm } from '@/utils/forms'
 
 const props = defineProps<{
     open: boolean

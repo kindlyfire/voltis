@@ -67,7 +67,7 @@
 
                     <div v-if="isEditable && fieldsWithoutValues.length" class="mt-2">
                         <span class="text-caption text-medium-emphasis">Add:</span>
-                        <div class="d-flex flex-wrap ga-1 mt-1">
+                        <div class="d-flex ga-1 mt-1 flex-wrap">
                             <VChip
                                 v-for="field in fieldsWithoutValues"
                                 :key="field.key"
@@ -147,7 +147,7 @@
         <VCard v-if="selectedViewLayer">
             <VCardTitle>Raw data — {{ sourceLabel(selectedViewLayer.source) }}</VCardTitle>
             <VCardText>
-                <div class="flex flex-col lg:flex-row gap-4">
+                <div class="flex flex-col gap-4 lg:flex-row">
                     <div class="flex-1">
                         <div class="text-caption text-medium-emphasis mb-1">Normalized Data</div>
                         <pre class="raw-json">{{
@@ -171,11 +171,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
+import { computed, ref, watch } from 'vue'
+import AQueryError from '@/components/AQueryError.vue'
 import { contentApi } from '@/utils/api/content'
 import type { ContentMetadata, MetadataLayersResponse } from '@/utils/api/types'
-import AQueryError from '@/components/AQueryError.vue'
 
 const props = defineProps<{
     open: boolean
@@ -402,9 +402,9 @@ const mSave = useMutation({
 </script>
 
 <script lang="ts">
+import { jsonClone } from '@/utils/misc'
 import { Modals } from '@/utils/modals'
 import Self from './EditMetadataModal.vue'
-import { jsonClone } from '@/utils/misc'
 
 export function showEditMetadataModal(contentId: string): Promise<void> {
     return Modals.show(Self, { contentId })

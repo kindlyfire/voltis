@@ -1,6 +1,8 @@
 import { useMutation, useQuery } from '@tanstack/vue-query'
 import { toValue, type MaybeRefOrGetter } from 'vue'
 import { API_URL, apiFetch } from '../fetch'
+import { queryClient } from '../misc'
+import { isEnabled, type QueryOptions } from './_utils'
 import type {
     BookChapter,
     BrokenRefsFixRequest,
@@ -17,8 +19,6 @@ import type {
     UserToContent,
     UserToContentUpdate,
 } from './types'
-import { isEnabled, type QueryOptions } from './_utils'
-import { queryClient } from '../misc'
 
 export const contentApi = {
     useGet: (

@@ -10,9 +10,9 @@
 </template>
 
 <script lang="ts" setup>
+import { computed } from 'vue'
 import AContentGrid from '@/components/AContentGrid/AContentGrid.vue'
 import type { Content } from '@/utils/api/types'
-import { computed } from 'vue'
 import BookChaptersList from './BookChaptersList.vue'
 
 const props = defineProps<{

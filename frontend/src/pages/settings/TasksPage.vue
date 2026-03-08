@@ -1,6 +1,6 @@
 <template>
     <VContainer>
-        <h1 class="text-3xl mb-6">Tasks</h1>
+        <h1 class="mb-6 text-3xl">Tasks</h1>
 
         <VDataTableServer
             v-model:items-per-page="itemsPerPage"
@@ -29,27 +29,27 @@
             </template>
 
             <template #expanded-row="{ columns, item }">
-                <tr class="shadow-inner bg-neutral-50">
+                <tr class="bg-neutral-50 shadow-inner">
                     <td :colspan="columns.length" class="p-4">
                         <div class="flex flex-col gap-4">
                             <div>
-                                <div class="text-sm font-semibold mb-1">Input</div>
+                                <div class="mb-1 text-sm font-semibold">Input</div>
                                 <pre
-                                    class="text-sm font-mono bg-surface-variant p-3 rounded overflow-auto"
+                                    class="bg-surface-variant overflow-auto rounded p-3 font-mono text-sm"
                                     >{{ formatJson(item.input) }}</pre
                                 >
                             </div>
                             <div>
-                                <div class="text-sm font-semibold mb-1">Output</div>
+                                <div class="mb-1 text-sm font-semibold">Output</div>
                                 <pre
-                                    class="text-sm font-mono bg-surface-variant p-3 rounded overflow-auto"
+                                    class="bg-surface-variant overflow-auto rounded p-3 font-mono text-sm"
                                     >{{ formatJson(item.output) }}</pre
                                 >
                             </div>
                             <div v-if="item.logs">
-                                <div class="text-sm font-semibold mb-1">Logs</div>
+                                <div class="mb-1 text-sm font-semibold">Logs</div>
                                 <pre
-                                    class="text-sm font-mono bg-surface-variant p-3 rounded overflow-auto max-h-100"
+                                    class="bg-surface-variant max-h-100 overflow-auto rounded p-3 font-mono text-sm"
                                     >{{ item.logs }}</pre
                                 >
                             </div>
@@ -62,11 +62,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
 import { keepPreviousData } from '@tanstack/vue-query'
+import { useHead } from '@unhead/vue'
+import { computed, ref } from 'vue'
 import { tasksApi } from '@/utils/api/tasks'
 import { TaskStatus } from '@/utils/api/types'
-import { useHead } from '@unhead/vue'
 
 useHead({ title: 'Tasks' })
 

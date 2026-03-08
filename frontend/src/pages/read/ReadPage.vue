@@ -12,14 +12,14 @@
 </template>
 
 <script setup lang="ts">
+import { useHead } from '@unhead/vue'
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { contentApi } from '@/utils/api/content'
-import ComicDisplay from '../read/ComicDisplay/ComicDisplay.vue'
-import BookDisplay from '../read/BookDisplay/BookDisplay.vue'
-import { useHead } from '@unhead/vue'
-import type { ContentType } from '@/utils/api/types'
 import AQueryError from '@/components/AQueryError.vue'
+import { contentApi } from '@/utils/api/content'
+import type { ContentType } from '@/utils/api/types'
+import BookDisplay from '../read/BookDisplay/BookDisplay.vue'
+import ComicDisplay from '../read/ComicDisplay/ComicDisplay.vue'
 
 const route = useRoute()
 const router = useRouter()

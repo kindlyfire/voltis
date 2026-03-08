@@ -1,6 +1,6 @@
 <template>
     <div>
-        <div class="d-flex align-center gap-1 mb-2">
+        <div class="d-flex align-center mb-2 gap-1">
             <Settings :store-key="storeKey" :width="width" />
             <VBtn
                 :icon="true"
@@ -30,7 +30,7 @@
             <span v-else class="pl-2">{{ items.length }} items</span>
         </div>
 
-        <div v-if="showFilters" class="d-flex align-center flex-wrap gap-2 mb-3">
+        <div v-if="showFilters" class="d-flex align-center mb-3 flex-wrap gap-2">
             <VSelect
                 v-model="filters.status.value"
                 :items="statusItems"
@@ -104,20 +104,20 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, toRef } from 'vue'
+import { keepPreviousData } from '@tanstack/vue-query'
 import { useElementSize } from '@vueuse/core'
+import { computed, ref, toRef } from 'vue'
+import { contentApi } from '@/utils/api/content'
 import {
     READING_STATUS_LABELS,
     type ContentListParams,
     type ReadingStatus,
 } from '@/utils/api/types'
-import { contentApi } from '@/utils/api/content'
 import { useRouteQueryParams } from '@/utils/misc'
-import ItemSkeleton from './ItemSkeleton.vue'
 import Item from './Item.vue'
+import ItemSkeleton from './ItemSkeleton.vue'
 import Settings from './Settings.vue'
 import { useContentGridStore } from './store'
-import { keepPreviousData } from '@tanstack/vue-query'
 
 const props = withDefaults(
     defineProps<{

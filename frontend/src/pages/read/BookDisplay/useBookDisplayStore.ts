@@ -1,8 +1,8 @@
+import { acceptHMRUpdate, defineStore } from 'pinia'
+import { computed, markRaw, readonly, ref, toValue, type MaybeRefOrGetter } from 'vue'
 import { contentApi } from '@/utils/api/content'
 import type { BookChapter } from '@/utils/api/types'
 import { useLocalStorage } from '@/utils/localStorage'
-import { acceptHMRUpdate, defineStore } from 'pinia'
-import { computed, markRaw, readonly, ref, toValue, type MaybeRefOrGetter } from 'vue'
 
 interface BookDisplaySettings {
     showHidden: Array<{

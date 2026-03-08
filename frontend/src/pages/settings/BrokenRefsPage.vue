@@ -7,7 +7,7 @@
             automatically, your data will show up here so that it can be reassigned or deleted.
         </p>
 
-        <div class="d-flex align-center gap-2 mb-6">
+        <div class="d-flex align-center mb-6 gap-2">
             <VSelect
                 v-model="selectedLibraryId"
                 :items="libraryItems"
@@ -124,7 +124,7 @@
                     </td>
                 </tr>
                 <tr v-if="qBrokenRefs.data.value?.data.length === 0">
-                    <td colspan="3" class="text-center text-medium-emphasis pa-4">
+                    <td colspan="3" class="text-medium-emphasis pa-4 text-center">
                         No broken references found.
                     </td>
                 </tr>
@@ -133,7 +133,7 @@
 
         <div
             v-if="selectedLibraryId && (qBrokenRefs.data.value?.total ?? 0) > PAGE_SIZE"
-            class="d-flex justify-center mt-4"
+            class="d-flex mt-4 justify-center"
         >
             <VPagination
                 :model-value="page"
@@ -145,15 +145,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, reactive } from 'vue'
-import { contentApi } from '@/utils/api/content'
-import { librariesApi } from '@/utils/api/libraries'
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import { useDebounceFn } from '@vueuse/core'
+import { ref, computed, watch, reactive } from 'vue'
+import AQueryError from '@/components/AQueryError.vue'
+import { contentApi } from '@/utils/api/content'
+import { librariesApi } from '@/utils/api/libraries'
 import { READING_STATUS_LABELS } from '@/utils/api/types'
 import type { BrokenUserToContent } from '@/utils/api/types'
 import { showBrokenRefDetailModal } from './BrokenRefDetailModal.vue'
-import AQueryError from '@/components/AQueryError.vue'
 
 const PAGE_SIZE = 50
 

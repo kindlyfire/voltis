@@ -63,11 +63,11 @@
 </template>
 
 <script setup lang="ts">
+import { useHead } from '@unhead/vue'
 import { librariesApi } from '@/utils/api/libraries'
+import CopyIdButton from './CopyIdButton.vue'
 import { showLibraryModal } from './LibraryModal.vue'
 import { showScanModal } from './ScanModal.vue'
-import CopyIdButton from './CopyIdButton.vue'
-import { useHead } from '@unhead/vue'
 
 useHead({
     title: 'Libraries',

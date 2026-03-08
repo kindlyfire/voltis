@@ -1,9 +1,9 @@
-import { createOverridableValue, useSystemTheme } from '@/utils/misc'
-import { useLocalStorage } from '@/utils/localStorage'
 import { useDebounceFn, useScroll } from '@vueuse/core'
 import { acceptHMRUpdate, defineStore } from 'pinia'
 import { computed, onBeforeMount, onUnmounted, ref, watch } from 'vue'
 import { useDisplay, useTheme } from 'vuetify'
+import { useLocalStorage } from '@/utils/localStorage'
+import { createOverridableValue, useSystemTheme } from '@/utils/misc'
 
 export const useLayoutStore = defineStore('layout', () => {
     const { mdAndUp } = useDisplay(undefined, 'composables')

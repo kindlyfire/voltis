@@ -33,9 +33,9 @@
 </template>
 
 <script setup lang="ts">
+import { useHead } from '@unhead/vue'
 import { usersApi } from '@/utils/api/users'
 import { showUserModal } from './UserModal.vue'
-import { useHead } from '@unhead/vue'
 
 useHead({
     title: 'Users',

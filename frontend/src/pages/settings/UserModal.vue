@@ -46,10 +46,10 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
 import { z } from 'zod'
-import { useForm } from '@/utils/forms'
-import { usersApi } from '@/utils/api/users'
 import AInput from '@/components/AInput.vue'
 import AQueryError from '@/components/AQueryError.vue'
+import { usersApi } from '@/utils/api/users'
+import { useForm } from '@/utils/forms'
 
 const props = defineProps<{
     open: boolean

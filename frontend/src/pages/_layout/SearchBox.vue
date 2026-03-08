@@ -43,12 +43,12 @@
                     </VListItem>
                 </template>
                 <VListItem v-else-if="query.isFetching?.value">
-                    <VListItemTitle class="text-center text-medium-emphasis">
+                    <VListItemTitle class="text-medium-emphasis text-center">
                         Searching...
                     </VListItemTitle>
                 </VListItem>
                 <VListItem v-else>
-                    <VListItemTitle class="text-center text-medium-emphasis">
+                    <VListItemTitle class="text-medium-emphasis text-center">
                         No results
                     </VListItemTitle>
                 </VListItem>
@@ -58,13 +58,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
 import { refDebounced, useMagicKeys, whenever } from '@vueuse/core'
+import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { contentApi } from '@/utils/api/content'
+import type { ContentListParams } from '@/utils/api/types'
 import { API_URL } from '@/utils/fetch'
 import { displayContentType } from '@/utils/misc'
-import type { ContentListParams } from '@/utils/api/types'
 
 const router = useRouter()
 const searchQuery = ref('')

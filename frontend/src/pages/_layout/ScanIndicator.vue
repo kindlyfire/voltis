@@ -8,9 +8,9 @@
                 <div
                     v-for="item in scans"
                     :key="item.libraryId"
-                    class="border rounded pa-3 min-w-[300px]"
+                    class="pa-3 min-w-[300px] rounded border"
                 >
-                    <div class="font-medium flex items-center gap-2">
+                    <div class="flex items-center gap-2 font-medium">
                         {{ getLibraryName(item.libraryId) }}
                         <VIcon
                             v-if="item.status === 'completed'"
@@ -38,7 +38,7 @@
                             rounded
                             height="6"
                         />
-                        <div class="text-xs text-medium-emphasis mt-1">
+                        <div class="text-medium-emphasis mt-1 text-xs">
                             {{ item.progress?.processed ?? 0 }} /
                             {{ item.progress?.total ?? '?' }}
                         </div>
@@ -52,7 +52,7 @@
                             height="6"
                         />
                     </template>
-                    <div v-else class="text-sm text-medium-emphasis mt-1">Queued</div>
+                    <div v-else class="text-medium-emphasis mt-1 text-sm">Queued</div>
                 </div>
             </VCardText>
         </VCard>
@@ -61,9 +61,9 @@
 
 <script setup lang="ts">
 import { computed, watch, onUnmounted } from 'vue'
-import { useScanTracker } from '@/utils/ws'
-import { librariesApi } from '@/utils/api/libraries'
 import { ref } from 'vue'
+import { librariesApi } from '@/utils/api/libraries'
+import { useScanTracker } from '@/utils/ws'
 
 const { scans, clear } = useScanTracker()
 const libraries = librariesApi.useList()

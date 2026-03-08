@@ -1,13 +1,13 @@
-import { ref, computed, type Ref } from 'vue'
-import { acceptHMRUpdate, defineStore } from 'pinia'
-import { useRouter } from 'vue-router'
-import type { ReaderMode, SiblingsInfo } from './types'
-import { contentApi } from '@/utils/api/content'
 import { keepPreviousData } from '@tanstack/vue-query'
+import { acceptHMRUpdate, defineStore } from 'pinia'
+import { ref, computed, type Ref } from 'vue'
+import { useRouter } from 'vue-router'
+import z from 'zod'
+import { contentApi } from '@/utils/api/content'
 import { useLocalStorage } from '@/utils/localStorage'
 import { arrayAtNowrap, getLayoutTop } from '@/utils/misc'
 import { createComicState, type ComicState } from './createComicState'
-import z from 'zod'
+import type { ReaderMode, SiblingsInfo } from './types'
 
 const zComicSettings = z.object({
     longstripWidth: z.number().min(10).max(100).default(100),

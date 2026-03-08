@@ -1,6 +1,6 @@
-import { useLocalStorage } from '@/utils/localStorage'
 import { acceptHMRUpdate, defineStore } from 'pinia'
 import { computed, toValue, type MaybeRefOrGetter } from 'vue'
+import { useLocalStorage } from '@/utils/localStorage'
 
 const DEFAULT_ITEM_SIZE = 170
 

@@ -28,10 +28,10 @@
 </template>
 
 <script setup lang="ts">
+import AQueryError from '@/components/AQueryError.vue'
 import { contentApi } from '@/utils/api/content'
 import { API_URL } from '@/utils/fetch'
 import { formatBytes } from '@/utils/format'
-import AQueryError from '@/components/AQueryError.vue'
 
 const props = defineProps<{
     open: boolean

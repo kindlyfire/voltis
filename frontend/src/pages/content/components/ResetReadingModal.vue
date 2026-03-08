@@ -29,9 +29,9 @@
 </template>
 
 <script setup lang="ts">
-import { contentApi } from '@/utils/api/content'
 import { useMutation } from '@tanstack/vue-query'
 import AQueryError from '@/components/AQueryError.vue'
+import { contentApi } from '@/utils/api/content'
 
 const props = defineProps<{
     open: boolean

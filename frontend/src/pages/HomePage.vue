@@ -52,8 +52,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
 import { useHead } from '@unhead/vue'
+import { computed } from 'vue'
 import ACarousel from '@/components/ACarousel.vue'
 import ACarouselItem from '@/components/ACarouselItem.vue'
 import AContentGridItem from '@/components/AContentGrid/Item.vue'

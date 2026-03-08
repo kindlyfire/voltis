@@ -32,10 +32,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
 import { useDebounceFn, useEventListener } from '@vueuse/core'
-import { useReaderStore } from './useComicDisplayStore'
+import { ref, onMounted } from 'vue'
 import { useNavbarScrollHide } from '@/pages/_layout/useLayoutStore'
+import { useReaderStore } from './useComicDisplayStore'
 
 const reader = useReaderStore()
 const containerRef = ref<HTMLElement | null>(null)

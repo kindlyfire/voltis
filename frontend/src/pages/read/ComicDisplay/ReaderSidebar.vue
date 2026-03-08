@@ -10,10 +10,10 @@
             height: '100vh',
         }"
     >
-        <div class="pa-4 pt-0 space-y-4! mt-16" v-if="reader.state">
+        <div class="pa-4 mt-16 space-y-4! pt-0" v-if="reader.state">
             <!-- mb-2!: The spacing of 4 with the element below feels kinda wrong,
             because of how much empty space there is in this element. -->
-            <div class="h-16 d-flex align-center mb-2!">
+            <div class="d-flex align-center mb-2! h-16">
                 <span class="text-h6">Reader</span>
                 <VSpacer />
                 <VBtn icon variant="text" @click="reader.sidebarOpen = false">
@@ -34,7 +34,7 @@
             </div>
 
             <div v-if="reader.siblings">
-                <div class="d-flex align-center gap-2 mb-2">
+                <div class="d-flex align-center mb-2 gap-2">
                     <VBtn
                         icon
                         size="small"
@@ -101,7 +101,7 @@
                     <VBtn value="null" class="flex-1">Auto</VBtn>
                 </VBtnToggle>
                 <template v-if="reader.seriesSettings.mode == null">
-                    <div class="text-xs text-medium-emphasis mt-1">
+                    <div class="text-medium-emphasis mt-1 text-xs">
                         Auto: {{ reader.mode === 'longstrip' ? 'Longstrip' : 'Paged' }}
                     </div>
                 </template>
@@ -135,13 +135,13 @@
 </template>
 
 <script setup lang="ts">
-import { onUnmounted, ref, watch, type Ref } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
-import { useReaderStore } from './useComicDisplayStore'
+import { onUnmounted, ref, watch, type Ref } from 'vue'
+import { useLayoutStore } from '@/pages/_layout/useLayoutStore'
 import { contentApi } from '@/utils/api/content'
 import type { Content } from '@/utils/api/types'
 import type { ReaderMode } from './types'
-import { useLayoutStore } from '@/pages/_layout/useLayoutStore'
+import { useReaderStore } from './useComicDisplayStore'
 
 const reader = useReaderStore()
 const layout = useLayoutStore()

@@ -4,7 +4,7 @@
             <VCardTitle>Reference Detail</VCardTitle>
             <VCardText>
                 <code>
-                    <pre class="overflow-auto bg-surface-variant rounded pa-2 font-mono!">{{
+                    <pre class="bg-surface-variant pa-2 overflow-auto rounded font-mono!">{{
                         formatted
                     }}</pre>
                 </code>
@@ -31,8 +31,8 @@ const formatted = computed(() => JSON.stringify(props.item, null, 2))
 </script>
 
 <script lang="ts">
-import { Modals } from '@/utils/modals'
 import type { BrokenUserToContent as BUC } from '@/utils/api/types'
+import { Modals } from '@/utils/modals'
 import Self from './BrokenRefDetailModal.vue'
 
 export function showBrokenRefDetailModal(item: BUC): Promise<void> {

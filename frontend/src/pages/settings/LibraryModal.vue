@@ -18,7 +18,7 @@
                         :error-messages="form.getInputProps('type').errors.map(e => e.message)"
                     />
                     <div>
-                        <div class="text-sm font-medium mb-2">Sources</div>
+                        <div class="mb-2 text-sm font-medium">Sources</div>
                         <div class="space-y-2!">
                             <div
                                 v-for="(source, index) in form.values.value.sources"
@@ -79,11 +79,11 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
 import { z } from 'zod'
-import { useForm } from '@/utils/forms'
-import { librariesApi } from '@/utils/api/libraries'
+import { showConfirmModal } from '@/components/AConfirmModal.vue'
 import AInput from '@/components/AInput.vue'
 import AQueryError from '@/components/AQueryError.vue'
-import { showConfirmModal } from '@/components/AConfirmModal.vue'
+import { librariesApi } from '@/utils/api/libraries'
+import { useForm } from '@/utils/forms'
 
 const props = defineProps<{
     open: boolean

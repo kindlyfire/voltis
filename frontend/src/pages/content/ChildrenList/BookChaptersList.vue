@@ -31,14 +31,14 @@
 </template>
 
 <script setup lang="ts">
+import { computed, toValue } from 'vue'
+import AQueryError from '@/components/AQueryError.vue'
+import { contentApi } from '@/utils/api/content'
 import type { Content } from '@/utils/api/types'
 import {
     useBookDisplaySettings,
     useVisibleBookChapters as useVisibleBookChapters,
 } from '../../read/BookDisplay/useBookDisplayStore'
-import AQueryError from '@/components/AQueryError.vue'
-import { contentApi } from '@/utils/api/content'
-import { computed, toValue } from 'vue'
 
 const props = defineProps<{
     content: Content

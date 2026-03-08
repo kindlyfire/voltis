@@ -9,12 +9,12 @@
         </div>
 
         <template v-else>
-            <div class="flex flex-col xl:flex-row xl:items-start gap-6">
+            <div class="flex flex-col gap-6 xl:flex-row xl:items-start">
                 <div class="w-full xl:w-1/3">
                     <VCard variant="tonal">
                         <VCardText class="space-y-4! p-5">
-                            <h1 class="text-3xl my-0">{{ list.name }}</h1>
-                            <div class="flex flex-wrap gap-2 mt-3">
+                            <h1 class="my-0 text-3xl">{{ list.name }}</h1>
+                            <div class="mt-3 flex flex-wrap gap-2">
                                 <VChip size="small" variant="flat" class="capitalize">
                                     {{ list.visibility }}
                                 </VChip>
@@ -25,7 +25,7 @@
 
                             <div
                                 v-if="list.description"
-                                class="text-sm opacity-60 whitespace-pre-wrap"
+                                class="text-sm whitespace-pre-wrap opacity-60"
                             >
                                 {{ list.description }}
                             </div>
@@ -57,40 +57,40 @@
                                 <div class="flex flex-col sm:flex-row">
                                     <div>
                                         <div
-                                            class="relative w-full sm:w-[100px] aspect-[2.1/3] bg-surface-variant/40"
+                                            class="bg-surface-variant/40 relative aspect-[2.1/3] w-full sm:w-[100px]"
                                         >
                                             <img
                                                 v-if="entryCoverUri(entry)"
                                                 :src="entryCoverUri(entry)!"
-                                                class="absolute w-full h-full object-cover"
+                                                class="absolute h-full w-full object-cover"
                                             />
                                             <div
                                                 v-else
-                                                class="flex items-center justify-center absolute w-full h-full opacity-60"
+                                                class="absolute flex h-full w-full items-center justify-center opacity-60"
                                             >
                                                 <div class="text-center">
                                                     <VIcon icon="mdi-image-off-outline" size="36" />
-                                                    <div class="text-xs mt-2">No cover</div>
+                                                    <div class="mt-2 text-xs">No cover</div>
                                                 </div>
                                             </div>
                                         </div>
                                     </div>
 
-                                    <VCardText class="grow min-w-0 p-2 px-4">
+                                    <VCardText class="min-w-0 grow p-2 px-4">
                                         <div
-                                            class="flex items-start gap-4 flex-wrap sm:flex-nowrap h-full"
+                                            class="flex h-full flex-wrap items-start gap-4 sm:flex-nowrap"
                                         >
-                                            <div class="grow min-w-0">
-                                                <div class="flex items-center flex-wrap gap-2 mb-2">
+                                            <div class="min-w-0 grow">
+                                                <div class="mb-2 flex flex-wrap items-center gap-2">
                                                     <RouterLink
                                                         :to="`/${entry.content.id}`"
-                                                        class="text-h6 font-medium min-w-0"
+                                                        class="text-h6 min-w-0 font-medium"
                                                     >
                                                         {{ entryTitle(entry) }}
                                                     </RouterLink>
                                                 </div>
 
-                                                <div class="flex flex-wrap gap-2 mb-4">
+                                                <div class="mb-4 flex flex-wrap gap-2">
                                                     <VChip size="small" variant="tonal">
                                                         #{{ displayOrder(entry, idx) }}
                                                     </VChip>
@@ -107,7 +107,7 @@
                                                 </div>
 
                                                 <div class="mt-auto" v-if="entry.notes">
-                                                    <div class="text-xs opacity-60 mb-1">Notes</div>
+                                                    <div class="mb-1 text-xs opacity-60">Notes</div>
                                                     <div class="text-sm whitespace-pre-wrap">
                                                         {{ entry.notes }}
                                                     </div>
@@ -176,17 +176,17 @@
 </template>
 
 <script setup lang="ts">
+import { useHead } from '@unhead/vue'
 import { computed } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
-import { useHead } from '@unhead/vue'
+import AQueryError from '@/components/AQueryError.vue'
 import { customListsApi } from '@/utils/api/custom-lists'
 import { librariesApi } from '@/utils/api/libraries'
 import type { CustomListEntry } from '@/utils/api/types'
 import { API_URL } from '@/utils/fetch'
 import { displayContentType } from '@/utils/misc'
-import AQueryError from '@/components/AQueryError.vue'
-import { showListModal } from './ListModal.vue'
 import { showEntryModal } from './EntryModal.vue'
+import { showListModal } from './ListModal.vue'
 
 const route = useRoute()
 const listId = computed(() => route.params.id as string)

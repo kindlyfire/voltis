@@ -1,6 +1,6 @@
 <template>
     <div class="AContentGridItem">
-        <VCard class="relative content-grid-item">
+        <VCard class="content-grid-item relative">
             <RouterLink :to="to" class="block" :title="content.title">
                 <img
                     :src="coverUri ?? ''"
@@ -15,7 +15,7 @@
 
             <span
                 v-if="content.user_data?.status && !settings.hideStatus"
-                class="absolute top-2 left-2 bg-black/80 text-white p-1 rounded-full aspect-square w-5 flex items-center justify-center"
+                class="absolute top-2 left-2 flex aspect-square w-5 items-center justify-center rounded-full bg-black/80 p-1 text-white"
                 :title="`Status: ${READING_STATUS_LABELS[content.user_data.status]}`"
             >
                 <VIcon :icon="statusIcon" size="12" />
@@ -23,18 +23,18 @@
 
             <span
                 v-if="childrenCount != null && !settings.hideItemCount"
-                class="absolute top-2 right-2 bg-black/80 text-white text-xs font-medium px-2 py-0.5 rounded-full"
+                class="absolute top-2 right-2 rounded-full bg-black/80 px-2 py-0.5 text-xs font-medium text-white"
             >
                 {{ childrenCount }}
             </span>
 
             <span
                 v-if="toReadRoute"
-                class="absolute bottom-2 right-2 bottom-actions flex items-center gap-1"
+                class="bottom-actions absolute right-2 bottom-2 flex items-center gap-1"
             >
                 <RouterLink
                     :to="`/${content.id}`"
-                    class="bg-black/80! p-1.5! rounded-full flex items-center justify-center text-white"
+                    class="flex items-center justify-center rounded-full bg-black/80! p-1.5! text-white"
                     :title="`Go to content page`"
                 >
                     <VIcon icon="mdi-information" size="16" />
@@ -42,16 +42,16 @@
             </span>
         </VCard>
 
-        <div v-if="!settings.hideTitle" class="text-body-2 pt-2 line-clamp-2">
+        <div v-if="!settings.hideTitle" class="text-body-2 line-clamp-2 pt-2">
             {{ content.title }}
         </div>
     </div>
 </template>
 
 <script setup lang="ts">
+import { computed, toRef } from 'vue'
 import { READING_STATUS_LABELS } from '@/utils/api/types'
 import type { Content, ReadingStatus } from '@/utils/api/types'
-import { computed, toRef } from 'vue'
 import { API_URL } from '@/utils/fetch'
 import { useContentGridStore } from './store'
 

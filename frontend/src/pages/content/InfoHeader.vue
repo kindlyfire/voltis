@@ -1,6 +1,6 @@
 <template>
     <!-- Mobile view -->
-    <div class="md:hidden relative">
+    <div class="relative md:hidden">
         <div v-if="content.cover_uri">
             <div
                 :style="{
@@ -18,13 +18,13 @@
                 <div class="shrink-0">
                     <VCard>
                         <div
-                            class="w-[100px] sm:w-[125px] md:w-[200px] cursor-pointer"
+                            class="w-[100px] cursor-pointer sm:w-[125px] md:w-[200px]"
                             @click="showCoverOverlay = true"
                         >
                             <img
                                 v-if="content?.cover_uri"
                                 :src="`${API_URL}/files/cover/${content.id}`"
-                                class="rounded block"
+                                class="block rounded"
                                 :style="{
                                     aspectRatio: '2 / 3',
                                     objectFit: 'cover',
@@ -40,7 +40,7 @@
                             {{ parent.title }}
                         </RouterLink>
                     </div>
-                    <h1 class="text-2xl md:text-5xl xl:text-5xl font-bold! text-shadow-md/10!">
+                    <h1 class="text-2xl font-bold! text-shadow-md/10! md:text-5xl xl:text-5xl">
                         {{ content?.title }}
                     </h1>
                     <div class="text-sm">
@@ -54,7 +54,7 @@
 
             <div class="space-y-2!">
                 <ReadingStatusButton :content-id="content.id" />
-                <div class="flex gap-3 flex-row w-full">
+                <div class="flex w-full flex-row gap-3">
                     <ContinueReadingButton class="grow!" :content-id="content.id" />
                     <OptionsButton :content-id="content.id" />
                     <VBtn
@@ -88,20 +88,20 @@
                 class="banner-desktop"
                 :class="!content.cover_uri && 'top-background--no-bg'"
             ></div>
-            <VContainer class="relative pt-30! min-h-60">
+            <VContainer class="relative min-h-60 pt-30!">
                 <div class="flex gap-6">
                     <div class="w-[200px] shrink-0"></div>
-                    <div class="space-y-4! grow text-white!">
+                    <div class="grow space-y-4! text-white!">
                         <div v-if="parent">
                             <RouterLink
                                 :to="`/${parent.id}`"
-                                class="text-shadow-md/10! font-bold text-lg"
+                                class="text-lg font-bold text-shadow-md/10!"
                             >
                                 {{ parent.title }}
                             </RouterLink>
                         </div>
                         <h1
-                            class="text-xl sm:text-2xl md:text-3xl xl:text-5xl font-bold! text-shadow-md/40!"
+                            class="text-xl font-bold! text-shadow-md/40! sm:text-2xl md:text-3xl xl:text-5xl"
                         >
                             {{ content?.title }}
                         </h1>
@@ -115,7 +115,7 @@
                         </div>
                         <dl
                             v-if="content?.meta"
-                            class="metadata-list text-shadow-md/40! text-white"
+                            class="metadata-list text-white text-shadow-md/40!"
                         >
                             <template v-if="content.meta.staff?.length">
                                 <dt>Staff</dt>
@@ -146,17 +146,17 @@
         </div>
 
         <VContainer class="pt-3!" :style="{ marginTop: -(300 - 84) + 'px' }">
-            <div class="flex gap-6 items-end">
+            <div class="flex items-end gap-6">
                 <div class="shrink-0">
                     <VCard>
                         <div
-                            class="w-[100px] sm:w-[125px] md:w-[200px] cursor-pointer"
+                            class="w-[100px] cursor-pointer sm:w-[125px] md:w-[200px]"
                             @click="showCoverOverlay = true"
                         >
                             <img
                                 v-if="content?.cover_uri"
                                 :src="`${API_URL}/files/cover/${content.id}`"
-                                class="rounded block"
+                                class="block rounded"
                                 :style="{
                                     aspectRatio: '2 / 3',
                                     objectFit: 'cover',
@@ -166,9 +166,9 @@
                         </div>
                     </VCard>
                 </div>
-                <div class="space-y-4! grow">
+                <div class="grow space-y-4!">
                     <div class="space-y-2!">
-                        <div class="flex gap-3 flex-col sm:flex-row w-full">
+                        <div class="flex w-full flex-col gap-3 sm:flex-row">
                             <ReadingStatusButton :content-id="content.id" />
                             <ContinueReadingButton :content-id="content.id" />
                             <OptionsButton :content-id="content.id" />
@@ -208,14 +208,14 @@
 </template>
 
 <script setup lang="ts">
-import { contentApi } from '@/utils/api/content'
-import { API_URL } from '@/utils/fetch'
 import { computed, ref } from 'vue'
-import ReadingStatusButton from './components/ReadingStatusButton.vue'
-import ContinueReadingButton from './components/ContinueReadingButton.vue'
-import RatingButton from './components/RatingButton.vue'
-import OptionsButton from './components/OptionsButton.vue'
+import { contentApi } from '@/utils/api/content'
 import type { Content } from '@/utils/api/types'
+import { API_URL } from '@/utils/fetch'
+import ContinueReadingButton from './components/ContinueReadingButton.vue'
+import OptionsButton from './components/OptionsButton.vue'
+import RatingButton from './components/RatingButton.vue'
+import ReadingStatusButton from './components/ReadingStatusButton.vue'
 
 const props = defineProps<{
     content: Content

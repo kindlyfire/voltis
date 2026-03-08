@@ -3,9 +3,9 @@
 </template>
 
 <script setup lang="ts">
+import { useHead } from '@unhead/vue'
 import BookReader from './BookReader.vue'
 import { useBookDisplayStore } from './useBookDisplayStore'
-import { useHead } from '@unhead/vue'
 
 const props = defineProps<{
     contentId: string

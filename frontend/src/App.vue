@@ -6,11 +6,11 @@
 </template>
 
 <script setup lang="ts">
-import { RouterView, useRouter } from 'vue-router'
-import { watch } from 'vue'
-import { usersApi } from './utils/api/users'
 import { useHead } from '@unhead/vue'
+import { watch } from 'vue'
+import { RouterView, useRouter } from 'vue-router'
 import { miscApi } from './utils/api/misc'
+import { usersApi } from './utils/api/users'
 
 const router = useRouter()
 const qMe = usersApi.useMe()

@@ -14,7 +14,7 @@
                             'Force scanning will re-scan all files, even if they have not changed since the last scan.',
                         ]"
                     />
-                    <div class="flex justify-end mt-6 gap-2">
+                    <div class="mt-6 flex justify-end gap-2">
                         <VBtn variant="text" @click="close()">Cancel</VBtn>
                         <VBtn color="primary" @click="startScan">Start Scan</VBtn>
                     </div>
@@ -22,7 +22,7 @@
 
                 <!-- Scanning -->
                 <template v-else>
-                    <div v-if="scans.length === 0 && !scanComplete" class="text-center py-4">
+                    <div v-if="scans.length === 0 && !scanComplete" class="py-4 text-center">
                         <VProgressCircular indeterminate class="mb-4" />
                         <div>Starting scan...</div>
                     </div>
@@ -32,7 +32,7 @@
                             <div
                                 v-for="item in scans"
                                 :key="item.libraryId"
-                                class="border rounded pa-3"
+                                class="pa-3 rounded border"
                             >
                                 <div class="font-medium">{{ getLibraryName(item.libraryId) }}</div>
                                 <template
@@ -63,25 +63,25 @@
                                         rounded
                                         height="6"
                                     />
-                                    <div class="text-xs text-medium-emphasis mt-1">
+                                    <div class="text-medium-emphasis mt-1 text-xs">
                                         {{ item.progress?.processed ?? 0 }} /
                                         {{ item.progress?.total ?? '?' }}
                                     </div>
                                     <div
                                         v-if="item.output"
-                                        class="text-sm text-medium-emphasis mt-1"
+                                        class="text-medium-emphasis mt-1 text-sm"
                                     >
                                         {{ item.output.to_add }} to add,
                                         {{ item.output.to_update }} to update,
                                         {{ item.output.to_remove }} to remove
                                     </div>
                                 </template>
-                                <div v-else class="text-sm text-medium-emphasis mt-1">Queued</div>
+                                <div v-else class="text-medium-emphasis mt-1 text-sm">Queued</div>
                             </div>
                         </div>
                     </template>
 
-                    <div class="flex justify-end mt-4">
+                    <div class="mt-4 flex justify-end">
                         <VBtn variant="text" @click="close()">Close</VBtn>
                     </div>
                 </template>
@@ -154,9 +154,9 @@ async function startScan() {
 </script>
 
 <script lang="ts">
+import { useQueryClient } from '@tanstack/vue-query'
 import { Modals } from '@/utils/modals'
 import Self from './ScanModal.vue'
-import { useQueryClient } from '@tanstack/vue-query'
 
 export function showScanModal(libraryIds: string[]): Promise<void>
 export function showScanModal(opts: { contentId: string }): Promise<void>

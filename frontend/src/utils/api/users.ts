@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { apiFetch, RequestError } from '../fetch'
-import type { UpdateMe, User, UserUpsert } from './types'
 import { ws } from '../ws'
+import type { UpdateMe, User, UserUpsert } from './types'
 
 export const usersApi = {
     useList: () =>

@@ -48,10 +48,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { contentApi } from '@/utils/api/content'
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
+import { computed, ref } from 'vue'
 import AQueryError from '@/components/AQueryError.vue'
+import { contentApi } from '@/utils/api/content'
 
 const props = defineProps<{
     open: boolean

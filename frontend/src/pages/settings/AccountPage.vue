@@ -45,13 +45,13 @@
 </template>
 
 <script setup lang="ts">
-import { z } from 'zod'
+import { useHead } from '@unhead/vue'
 import { watch } from 'vue'
-import { useForm } from '@/utils/forms'
-import { usersApi } from '@/utils/api/users'
+import { z } from 'zod'
 import AInput from '@/components/AInput.vue'
 import AQueryError from '@/components/AQueryError.vue'
-import { useHead } from '@unhead/vue'
+import { usersApi } from '@/utils/api/users'
+import { useForm } from '@/utils/forms'
 
 useHead({
     title: 'Account',

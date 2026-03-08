@@ -46,12 +46,12 @@
 </template>
 
 <script setup lang="ts">
+import { useHead } from '@unhead/vue'
 import { ref, watch } from 'vue'
-import { usersApi } from '@/utils/api/users'
+import AQueryError from '@/components/AQueryError.vue'
 import { librariesApi } from '@/utils/api/libraries'
 import type { LibraryPreference } from '@/utils/api/types'
-import AQueryError from '@/components/AQueryError.vue'
-import { useHead } from '@unhead/vue'
+import { usersApi } from '@/utils/api/users'
 import { jsonClone } from '@/utils/misc'
 
 useHead({ title: 'Interface' })

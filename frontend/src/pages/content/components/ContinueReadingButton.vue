@@ -21,10 +21,10 @@
 </template>
 
 <script setup lang="ts">
-import { contentApi } from '@/utils/api/content'
 import { useKeyModifier } from '@vueuse/core'
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { contentApi } from '@/utils/api/content'
 import { showResetReadingModal } from './ResetReadingModal.vue'
 
 const props = defineProps<{
