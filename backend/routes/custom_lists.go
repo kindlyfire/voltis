@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"voltis/db"
+	"voltis/lib/fp"
 	"voltis/models"
 
 	"github.com/jackc/pgx/v5"
@@ -24,6 +26,7 @@ func (cr *CustomListRoutes) Register(g *echo.Group) {
 	g.GET("", cr.list)
 	g.GET("/:list_id", cr.get)
 	g.POST("", cr.create)
+	g.POST("/entries", cr.bulkCreateEntries)
 	g.POST("/:list_id", cr.update)
 	g.DELETE("/:list_id", cr.delete)
 	g.POST("/:list_id/entries", cr.createEntry)
@@ -354,6 +357,40 @@ type createEntryRequest struct {
 	Notes     *string `json:"notes"`
 }
 
+func createEntryInner(ctx context.Context, tx pgx.Tx, listID string, contentID string, notes *string) error {
+	content, err := db.SelectOne[models.Content](ctx, tx, "SELECT * FROM content WHERE id = $1", contentID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return echo.NewHTTPError(http.StatusNotFound, "Content not found")
+	}
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	entryID := models.MakeCustomListContentID()
+
+	var query string
+	if notes != nil {
+		query = `
+			INSERT INTO custom_list_to_content (id, created_at, updated_at, custom_list_id, library_id, uri, notes, "order")
+			VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE((SELECT MAX("order") FROM custom_list_to_content WHERE custom_list_id = $4), 0) + 1)
+			ON CONFLICT (custom_list_id, library_id, uri) DO UPDATE SET notes = $7, updated_at = $3`
+	} else {
+		query = `
+			INSERT INTO custom_list_to_content (id, created_at, updated_at, custom_list_id, library_id, uri, notes, "order")
+			VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE((SELECT MAX("order") FROM custom_list_to_content WHERE custom_list_id = $4), 0) + 1)
+			ON CONFLICT (custom_list_id, library_id, uri) DO NOTHING`
+	}
+
+	_, err = tx.Exec(ctx, query, entryID, now, now, listID, content.LibraryID, content.URI, notes)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx, "UPDATE custom_lists SET updated_at = $1 WHERE id = $2", now, listID)
+	return err
+}
+
 func (cr *CustomListRoutes) createEntry(c echo.Context) error {
 	user, err := requireUser(c)
 	if err != nil {
@@ -371,50 +408,64 @@ func (cr *CustomListRoutes) createEntry(c echo.Context) error {
 	}
 
 	ctx := reqCtx(c)
-
-	tx, err := cr.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	content, err := db.SelectOne[models.Content](ctx, tx, "SELECT * FROM content WHERE id = $1", req.ContentID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return echo.NewHTTPError(http.StatusNotFound, "Content not found")
-	}
+	err = db.WithTx(ctx, cr.pool, func(q pgx.Tx) error {
+		return createEntryInner(ctx, q, cl.ID, req.ContentID, req.Notes)
+	})
 	if err != nil {
 		return err
 	}
 
-	var maxOrder *int
-	err = tx.QueryRow(ctx,
-		"SELECT MAX(\"order\") FROM custom_list_to_content WHERE custom_list_id = $1", cl.ID).Scan(&maxOrder)
-	if err != nil {
-		return err
-	}
-	orderValue := 1
-	if maxOrder != nil {
-		orderValue = *maxOrder + 1
-	}
+	return okResponse(c)
+}
 
-	now := time.Now().UTC()
-	entryID := models.MakeCustomListContentID()
+type bulkCreateEntry struct {
+	ListID    string  `json:"list_id"    validate:"required"`
+	ContentID string  `json:"content_id" validate:"required"`
+	Notes     *string `json:"notes"`
+}
 
-	_, err = tx.Exec(ctx, `
-		INSERT INTO custom_list_to_content (id, created_at, updated_at, custom_list_id, library_id, uri, notes, "order")
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`, entryID, now, now, cl.ID, content.LibraryID, content.URI, req.Notes, orderValue)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "Content already in list")
-	}
+type bulkCreateEntriesRequest struct {
+	Entries []bulkCreateEntry `json:"entries" validate:"required,min=1,dive"`
+}
 
-	// Update list timestamp
-	_, err = tx.Exec(ctx, "UPDATE custom_lists SET updated_at = $1 WHERE id = $2", now, cl.ID)
+func (cr *CustomListRoutes) bulkCreateEntries(c echo.Context) error {
+	user, err := requireUser(c)
 	if err != nil {
 		return err
 	}
 
-	if err := tx.Commit(ctx); err != nil {
+	var req bulkCreateEntriesRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid JSON")
+	}
+	if err := ValidateStruct(req); err != nil {
+		return err
+	}
+
+	ctx := reqCtx(c)
+
+	// Collect unique list IDs and verify ownership
+	listIDs := fp.Dedup(
+		fp.Map(req.Entries, func(e bulkCreateEntry) string { return e.ListID }),
+	)
+	ownedCount, err := db.SelectScalar[int](ctx, cr.pool,
+		"SELECT COUNT(*) FROM custom_lists WHERE id = ANY($1) AND user_id = $2", listIDs, user.ID)
+	if err != nil {
+		return err
+	}
+	if ownedCount != len(listIDs) {
+		return echo.NewHTTPError(http.StatusForbidden, "Not allowed")
+	}
+
+	err = db.WithTx(ctx, cr.pool, func(q pgx.Tx) error {
+		for _, e := range req.Entries {
+			if err := createEntryInner(ctx, q, e.ListID, e.ContentID, e.Notes); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 
@@ -459,23 +510,19 @@ func (cr *CustomListRoutes) reorderEntries(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Some entries do not belong to the list")
 	}
 
-	tx, err := cr.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	for i, id := range req.CTCIDs {
-		_, err = tx.Exec(ctx, `UPDATE custom_list_to_content SET "order" = $1 WHERE id = $2`, i, id)
-		if err != nil {
-			return err
+	err = db.WithTx(ctx, cr.pool, func(tx pgx.Tx) error {
+		for i, id := range req.CTCIDs {
+			_, err := tx.Exec(ctx, `UPDATE custom_list_to_content SET "order" = $1 WHERE id = $2`, i, id)
+			if err != nil {
+				return err
+			}
 		}
-	}
 
-	now := time.Now().UTC()
-	_, _ = tx.Exec(ctx, "UPDATE custom_lists SET updated_at = $1 WHERE id = $2", now, cl.ID)
-
-	if err := tx.Commit(ctx); err != nil {
+		now := time.Now().UTC()
+		_, _ = tx.Exec(ctx, "UPDATE custom_lists SET updated_at = $1 WHERE id = $2", now, cl.ID)
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 

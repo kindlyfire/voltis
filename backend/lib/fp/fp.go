@@ -13,6 +13,18 @@ func Map[T any, R any](in []T, fn func(T) R) []R {
 	return out
 }
 
+func Dedup[T comparable](in []T) []T {
+	seen := make(map[T]struct{})
+	out := make([]T, 0, len(in))
+	for _, v := range in {
+		if _, ok := seen[v]; !ok {
+			seen[v] = struct{}{}
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 func MapConcurrently[T any](in []T, concurrency int, fn func(T)) {
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup

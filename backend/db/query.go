@@ -5,6 +5,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Querier is satisfied by both *pgxpool.Pool and pgx.Tx.
@@ -19,6 +20,15 @@ func Select[T any](ctx context.Context, q Querier, query string, args ...any) ([
 		return nil, err
 	}
 	return pgx.CollectRows(rows, pgx.RowToStructByName[T])
+}
+
+func SelectOne[T any](ctx context.Context, q Querier, query string, args ...any) (T, error) {
+	rows, err := q.Query(ctx, query, args...)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	return pgx.CollectExactlyOneRow(rows, pgx.RowToStructByName[T])
 }
 
 func SelectScalars[T any](ctx context.Context, q Querier, query string, args ...any) ([]T, error) {
@@ -38,11 +48,16 @@ func SelectScalar[T any](ctx context.Context, q Querier, query string, args ...a
 	return pgx.CollectExactlyOneRow(rows, pgx.RowTo[T])
 }
 
-func SelectOne[T any](ctx context.Context, q Querier, query string, args ...any) (T, error) {
-	rows, err := q.Query(ctx, query, args...)
+func WithTx(ctx context.Context, pool *pgxpool.Pool, fn func(pgx.Tx) error) error {
+	tx, err := pool.Begin(ctx)
 	if err != nil {
-		var zero T
-		return zero, err
+		return err
 	}
-	return pgx.CollectExactlyOneRow(rows, pgx.RowToStructByName[T])
+	defer tx.Rollback(ctx)
+
+	if err := fn(tx); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 }

@@ -52,8 +52,8 @@ type ParsedItem struct {
 	OrderParts  []*float32
 	CoverSuffix *string // appended to file path for cover URI
 	FileData    json.RawMessage
-	Meta    contentmeta.Metadata
-	MetaRaw map[string]any // ComicInfo raw, nil for books
+	Meta        contentmeta.Metadata
+	MetaRaw     map[string]any // ComicInfo raw, nil for books
 }
 
 type ScanResult struct {
