@@ -1,7 +1,7 @@
 <template>
     <div>
         <div class="d-flex align-center gap-1 mb-2">
-            <AContentGridSettings :store-key="storeKey" :width="width" />
+            <Settings :store-key="storeKey" :width="width" />
             <VBtn
                 :icon="true"
                 variant="text"
@@ -85,13 +85,13 @@
 
         <div ref="gridRef" class="grid gap-4" :style="gridStyle">
             <template v-if="loading">
-                <AContentGridItemSkeleton />
-                <AContentGridItemSkeleton />
-                <AContentGridItemSkeleton />
+                <ItemSkeleton />
+                <ItemSkeleton />
+                <ItemSkeleton />
             </template>
 
             <template v-else>
-                <AContentGridItem
+                <Item
                     v-for="item in items"
                     :key="item.id"
                     :content="item"
@@ -113,10 +113,10 @@ import {
 } from '@/utils/api/types'
 import { contentApi } from '@/utils/api/content'
 import { useRouteQueryParams } from '@/utils/misc'
-import AContentGridItemSkeleton from './AContentGridItemSkeleton.vue'
-import AContentGridItem from './AContentGridItem.vue'
-import AContentGridSettings from './AContentGridSettings.vue'
-import { useContentGridStore } from './useContentGridStore'
+import ItemSkeleton from './ItemSkeleton.vue'
+import Item from './Item.vue'
+import Settings from './Settings.vue'
+import { useContentGridStore } from './store'
 import { keepPreviousData } from '@tanstack/vue-query'
 
 const props = withDefaults(

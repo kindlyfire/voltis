@@ -75,7 +75,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, toRef } from 'vue'
 import { useRepeatOnHold } from '@/utils/misc'
-import { useContentGridStore } from './useContentGridStore'
+import { useContentGridStore } from './store'
 
 const MIN_ITEM_SIZE = 120
 const MAX_ITEM_SIZE = 400

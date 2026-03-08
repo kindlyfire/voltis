@@ -10,7 +10,7 @@ import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { librariesApi } from '@/utils/api/libraries'
 import { useHead } from '@unhead/vue'
-import AContentGrid from '@/components/AContentGrid.vue'
+import AContentGrid from '@/components/AContentGrid/AContentGrid.vue'
 
 const route = useRoute()
 const libraryId = computed(() => route.params.id as string)

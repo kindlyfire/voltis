@@ -53,7 +53,7 @@ import { READING_STATUS_LABELS } from '@/utils/api/types'
 import type { Content, ReadingStatus } from '@/utils/api/types'
 import { computed, toRef } from 'vue'
 import { API_URL } from '@/utils/fetch'
-import { useContentGridStore } from './useContentGridStore'
+import { useContentGridStore } from './store'
 
 const props = withDefaults(
     defineProps<{

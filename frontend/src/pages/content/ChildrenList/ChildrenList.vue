@@ -10,7 +10,7 @@
 </template>
 
 <script lang="ts" setup>
-import AContentGrid from '@/components/AContentGrid.vue'
+import AContentGrid from '@/components/AContentGrid/AContentGrid.vue'
 import type { Content } from '@/utils/api/types'
 import { computed } from 'vue'
 import BookChaptersList from './BookChaptersList.vue'
