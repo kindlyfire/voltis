@@ -54,6 +54,11 @@
                     </template>
                     <VList density="compact">
                         <VListItem title="Select all" @click="selectAll" />
+                        <VListItem
+                            title="Add to list"
+                            :disabled="selectedIds.size === 0"
+                            @click="showBulkListsModal([...selectedIds])"
+                        />
                     </VList>
                 </VMenu>
                 <VProgressCircular v-if="loading" indeterminate size="16" width="2" class="ml-2" />
@@ -150,6 +155,7 @@ import {
 import { useRouteQueryParams } from '@/utils/misc'
 import Item from './Item.vue'
 import ItemSkeleton from './ItemSkeleton.vue'
+import { showBulkListsModal } from './ListsModal.vue'
 import Settings from './Settings.vue'
 import { useContentGridStore } from './store'
 

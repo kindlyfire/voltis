@@ -269,6 +269,12 @@ export interface CustomListEntryCreate {
     notes?: string | null
 }
 
+export interface CustomListBulkCreateEntry {
+    list_id: string
+    content_id: string
+    notes?: string | null
+}
+
 export interface CustomListEntryUpdate {
     notes?: string | null
     order?: number | null

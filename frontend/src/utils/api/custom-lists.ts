@@ -5,6 +5,7 @@ import { isEnabled, type QueryOptions } from './_utils'
 import type {
     CustomListPartial,
     CustomList,
+    CustomListBulkCreateEntry,
     CustomListEntryCreate,
     CustomListEntryUpdate,
     CustomListReorderRequest,
@@ -85,6 +86,20 @@ export const customListsApi = {
             onSuccess: (_data, id) => {
                 queryClient.invalidateQueries({ queryKey: listsKey })
                 queryClient.invalidateQueries({ queryKey: detailKey(id) })
+            },
+        })
+    },
+
+    useBulkCreateEntries: () => {
+        const queryClient = useQueryClient()
+        return useMutation({
+            mutationFn: async (entries: CustomListBulkCreateEntry[]) =>
+                apiFetch<OkResponse>(`/custom-lists/entries`, {
+                    method: 'POST',
+                    body: JSON.stringify({ entries }),
+                }),
+            onSuccess: () => {
+                queryClient.invalidateQueries({ queryKey: listsKey })
             },
         })
     },
