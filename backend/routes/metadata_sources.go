@@ -1,20 +1,14 @@
 package routes
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"voltis/lib/sources"
-	"voltis/models"
 	"voltis/models/contentmeta"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 )
@@ -203,9 +197,14 @@ func (r *MetadataSourceRoutes) mangabakaLink(c echo.Context) error {
 	}
 
 	meta := seriesToMetadata(series)
-	rawJSON, _ := json.Marshal(series)
-
-	return setSourceLayer(ctx, r.pool, content, "mangabaka", meta, rawJSON, c)
+	err = contentmeta.WithSourceLayers(ctx, r.pool, content.URI, content.LibraryID, func(layers contentmeta.SourceLayers) bool {
+		layers["mangabaka"] = contentmeta.BuildLayerEntry(meta, series)
+		return true
+	})
+	if err != nil {
+		return err
+	}
+	return okResponse(c)
 }
 
 type unlinkRequest struct {
@@ -237,101 +236,12 @@ func (r *MetadataSourceRoutes) unlink(c echo.Context) error {
 		return err
 	}
 
-	return removeSourceLayer(ctx, r.pool, content, req.Source, c)
-}
-
-// Helpers
-
-func setSourceLayer(
-	ctx context.Context,
-	pool *pgxpool.Pool, content models.Content,
-	source string, meta contentmeta.Metadata, rawJSON json.RawMessage,
-	c echo.Context,
-) error {
-	metaJSON, _ := json.Marshal(meta)
-	entry, _ := json.Marshal(map[string]json.RawMessage{
-		"data": metaJSON,
-		"raw":  rawJSON,
+	err = contentmeta.WithSourceLayers(ctx, r.pool, content.URI, content.LibraryID, func(layers contentmeta.SourceLayers) bool {
+		delete(layers, req.Source)
+		return true
 	})
-
-	now := time.Now().UTC()
-
-	var dataRaw json.RawMessage
-	err := pool.QueryRow(ctx, `
-		SELECT data_raw FROM content_metadata WHERE uri = $1 AND library_id = $2
-	`, content.URI, content.LibraryID).Scan(&dataRaw)
-
-	if errors.Is(err, pgx.ErrNoRows) {
-		newDataRaw, _ := json.Marshal(map[string]json.RawMessage{source: entry})
-		mergedJSON, _ := json.Marshal(contentmeta.MergeRawLayers(map[string]json.RawMessage{source: entry}))
-
-		_, err = pool.Exec(ctx, `
-			INSERT INTO content_metadata (id, uri, library_id, data, data_raw, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6)
-		`, models.MakeContentID(), content.URI, content.LibraryID, mergedJSON, newDataRaw, now)
-		if err != nil {
-			return err
-		}
-	} else if err != nil {
-		return err
-	} else {
-		rawMap := parseDataRaw(dataRaw)
-		rawMap[source] = entry
-
-		mergedJSON, _ := json.Marshal(contentmeta.MergeRawLayers(rawMap))
-		updatedRaw, _ := json.Marshal(rawMap)
-
-		_, err = pool.Exec(ctx, `
-			UPDATE content_metadata SET data = $1, data_raw = $2, updated_at = $3
-			WHERE uri = $4 AND library_id = $5
-		`, mergedJSON, updatedRaw, now, content.URI, content.LibraryID)
-		if err != nil {
-			return err
-		}
-	}
-
-	return okResponse(c)
-}
-
-func removeSourceLayer(
-	ctx context.Context,
-	pool *pgxpool.Pool, content models.Content, source string,
-	c echo.Context,
-) error {
-	var dataRaw json.RawMessage
-	err := pool.QueryRow(ctx, `
-		SELECT data_raw FROM content_metadata WHERE uri = $1 AND library_id = $2
-	`, content.URI, content.LibraryID).Scan(&dataRaw)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return okResponse(c)
-	}
 	if err != nil {
 		return err
 	}
-
-	rawMap := parseDataRaw(dataRaw)
-	delete(rawMap, source)
-
-	now := time.Now().UTC()
-	mergedJSON, _ := json.Marshal(contentmeta.MergeRawLayers(rawMap))
-	updatedRaw, _ := json.Marshal(rawMap)
-
-	_, err = pool.Exec(ctx, `
-		UPDATE content_metadata SET data = $1, data_raw = $2, updated_at = $3
-		WHERE uri = $4 AND library_id = $5
-	`, mergedJSON, updatedRaw, now, content.URI, content.LibraryID)
-	if err != nil {
-		return err
-	}
-
 	return okResponse(c)
-}
-
-func parseDataRaw(dataRaw json.RawMessage) map[string]json.RawMessage {
-	var rawMap map[string]json.RawMessage
-	_ = json.Unmarshal(dataRaw, &rawMap)
-	if rawMap == nil {
-		rawMap = map[string]json.RawMessage{}
-	}
-	return rawMap
 }

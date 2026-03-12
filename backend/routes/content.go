@@ -711,51 +711,12 @@ func (cr *ContentRoutes) updateMetadataOverride(c echo.Context) error {
 		return err
 	}
 
-	now := time.Now().UTC()
-
-	// Get existing data_raw or create new
-	var dataRaw json.RawMessage
-	err = cr.pool.QueryRow(ctx, `
-		SELECT data_raw FROM content_metadata WHERE uri = $1 AND library_id = $2
-	`, content.URI, content.LibraryID).Scan(&dataRaw)
-
-	if errors.Is(err, pgx.ErrNoRows) {
-		// Create new row
-		overrideEntry, _ := json.Marshal(map[string]json.RawMessage{"data": req.Data, "raw": json.RawMessage("{}")})
-		newDataRaw, _ := json.Marshal(map[string]json.RawMessage{"overrides": overrideEntry})
-		merged := req.Data
-
-		_, err = cr.pool.Exec(ctx, `
-			INSERT INTO content_metadata (id, uri, library_id, data, data_raw, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6)
-		`, models.MakeContentID(), content.URI, content.LibraryID, merged, newDataRaw, now)
-		if err != nil {
-			return err
-		}
-	} else if err != nil {
+	err = contentmeta.WithSourceLayers(ctx, cr.pool, content.URI, content.LibraryID, func(layers contentmeta.SourceLayers) bool {
+		layers["overrides"] = contentmeta.BuildLayerEntry(req.Data, nil)
+		return true
+	})
+	if err != nil {
 		return err
-	} else {
-		// Update existing
-		var rawMap map[string]json.RawMessage
-		_ = json.Unmarshal(dataRaw, &rawMap)
-		if rawMap == nil {
-			rawMap = map[string]json.RawMessage{}
-		}
-
-		overrideEntry, _ := json.Marshal(map[string]json.RawMessage{"data": req.Data, "raw": json.RawMessage("{}")})
-		rawMap["overrides"] = overrideEntry
-
-		// Recompute merged
-		mergedJSON, _ := json.Marshal(contentmeta.MergeRawLayers(rawMap))
-		updatedRaw, _ := json.Marshal(rawMap)
-
-		_, err = cr.pool.Exec(ctx, `
-			UPDATE content_metadata SET data = $1, data_raw = $2, updated_at = $3
-			WHERE uri = $4 AND library_id = $5
-		`, mergedJSON, updatedRaw, now, content.URI, content.LibraryID)
-		if err != nil {
-			return err
-		}
 	}
 
 	return cr.getMetadataLayers(c)
