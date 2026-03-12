@@ -3,6 +3,7 @@ package routes
 import (
 	"strings"
 
+	"voltis/lib/sources"
 	"voltis/scanner"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -43,6 +44,7 @@ func Register(e *echo.Echo, pool *pgxpool.Pool) {
 	(&ContentRefRoutes{pool: pool}).Register(api.Group("/content"))
 	(&CustomListRoutes{pool: pool}).Register(api.Group("/custom-lists"))
 	(&TaskRoutes{pool: pool}).Register(api.Group("/tasks"))
+	(&MetadataSourceRoutes{pool: pool, mangabaka: sources.NewMangaBaka()}).Register(api.Group("/metadata-sources"))
 
 	e.GET("/api/ws", wsHandler(pool, hub))
 

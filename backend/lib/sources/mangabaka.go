@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 )
 
@@ -320,7 +319,9 @@ func (m *MangaBaka) SeriesSearch(ctx context.Context, opts SeriesSearchOpts) (*S
 		query.Set("q", opts.Query)
 	}
 	if len(opts.Type) > 0 {
-		query.Set("type", strings.Join(opts.Type, ","))
+		for i := range opts.Type {
+			query.Add("type", opts.Type[i])
+		}
 	}
 	return get[SeriesSearchResponse](m, ctx, "/v1/series/search", query)
 }

@@ -28,6 +28,16 @@
                         >
                             Raw
                         </VBtn>
+                        <VBtn
+                            v-if="selectedView === 'mangabaka'"
+                            variant="tonal"
+                            color="error"
+                            :loading="mUnlink.isPending.value"
+                            @click="mUnlink.mutate()"
+                            class="h-10!"
+                        >
+                            Unlink
+                        </VBtn>
                     </div>
 
                     <div class="metadata-fields">
@@ -76,6 +86,20 @@
                                 @click="openFieldEditor(field.key)"
                             >
                                 {{ field.label }}
+                            </VChip>
+                        </div>
+                    </div>
+
+                    <div v-if="isEditable && isSeriesType" class="mt-2">
+                        <span class="text-caption text-medium-emphasis">Link Source:</span>
+                        <div class="d-flex ga-1 mt-1 flex-wrap">
+                            <VChip
+                                size="small"
+                                class="cursor-pointer"
+                                :color="hasMangabakaLayer ? 'primary' : undefined"
+                                @click="onMangaBakaChipClick()"
+                            >
+                                MangaBaka
                             </VChip>
                         </div>
                     </div>
@@ -175,6 +199,7 @@ import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import { computed, ref, watch } from 'vue'
 import AQueryError from '@/components/AQueryError.vue'
 import { contentApi } from '@/utils/api/content'
+import { metadataSourcesApi } from '@/utils/api/metadata-sources'
 import type { ContentMetadata, MetadataLayersResponse } from '@/utils/api/types'
 
 const props = defineProps<{
@@ -184,6 +209,7 @@ const props = defineProps<{
 }>()
 
 const queryClient = useQueryClient()
+const qContent = contentApi.useGet(() => props.contentId)
 const qLayers = contentApi.useMetadataLayers(() => props.contentId)
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -299,6 +325,35 @@ const isDirty = computed(
     () => JSON.stringify(overridesLayer.value?.data ?? {}) !== serverSnapshot.value
 )
 
+const isSeriesType = computed(() => {
+    const t = qContent.data?.value?.type
+    return t === 'comic_series' || t === 'book_series'
+})
+
+const mangabakaLayer = computed(() => localLayers.value?.layers.find(l => l.source === 'mangabaka'))
+
+const hasMangabakaLayer = computed(() => {
+    const data = mangabakaLayer.value?.data
+    return data != null && typeof data === 'object' && Object.keys(data).length > 0
+})
+
+function onMangaBakaChipClick() {
+    if (hasMangabakaLayer.value) {
+        selectedView.value = 'mangabaka'
+    } else {
+        showSearchMangaBakaModal(props.contentId)
+    }
+}
+
+const mUnlink = useMutation({
+    mutationFn: () => metadataSourcesApi.unlink(props.contentId, 'mangabaka'),
+    onSuccess() {
+        selectedView.value = 'merged'
+        queryClient.invalidateQueries({ queryKey: ['content', 'metadata-layers', props.contentId] })
+        queryClient.invalidateQueries({ queryKey: ['content', props.contentId] })
+    },
+})
+
 const editingFieldDef = computed(() =>
     editingField.value ? (metadataFields.find(f => f.key === editingField.value) ?? null) : null
 )
@@ -405,6 +460,7 @@ const mSave = useMutation({
 import { jsonClone } from '@/utils/misc'
 import { Modals } from '@/utils/modals'
 import Self from './EditMetadataModal.vue'
+import { showSearchMangaBakaModal } from './SearchMangaBakaModal.vue'
 
 export function showEditMetadataModal(contentId: string): Promise<void> {
     return Modals.show(Self, { contentId })

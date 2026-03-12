@@ -313,3 +313,18 @@ export interface TaskListParams {
     sort?: 'created_at' | 'updated_at'
     sort_order?: 'asc' | 'desc'
 }
+
+export interface MangaBakaSearchResult {
+    id: number
+    title: string
+    type: string
+    status: string
+    year: number | null
+    cover_url: string | null
+    authors: string[]
+    genres: string[]
+}
+
+export interface MangaBakaSearchResponse {
+    data: MangaBakaSearchResult[]
+}
