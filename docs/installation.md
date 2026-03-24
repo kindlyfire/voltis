@@ -27,6 +27,11 @@ services:
             POSTGRES_PASSWORD: postgres
         volumes:
             - ./data_postgres:/var/lib/postgresql
+        healthcheck:
+            test: ['CMD-SHELL', 'pg_isready -U postgres']
+            interval: 3s
+            timeout: 3s
+            retries: 10
 ```
 
 ::: warning
