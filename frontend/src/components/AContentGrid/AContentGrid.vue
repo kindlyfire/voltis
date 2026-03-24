@@ -59,6 +59,11 @@
                             :disabled="selectedIds.size === 0"
                             @click="showBulkListsModal([...selectedIds])"
                         />
+                        <VListItem
+                            title="Scan"
+                            :disabled="selectedIds.size === 0"
+                            @click="showScanModal({ contentIds: [...selectedIds] })"
+                        />
                     </VList>
                 </VMenu>
                 <VProgressCircular v-if="loading" indeterminate size="16" width="2" class="ml-2" />
@@ -155,6 +160,7 @@ import {
 import { useRouteQueryParams } from '@/utils/misc'
 import Item from './Item.vue'
 import ItemSkeleton from './ItemSkeleton.vue'
+import { showScanModal } from '@/pages/settings/ScanModal.vue'
 import { showBulkListsModal } from './ListsModal.vue'
 import Settings from './Settings.vue'
 import { useContentGridStore } from './store'

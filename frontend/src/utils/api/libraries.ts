@@ -39,15 +39,15 @@ export const librariesApi = {
     useScan: () => {
         const queryClient = useQueryClient()
         return useMutation({
-            mutationFn: async (opts?: { ids?: string[]; force?: boolean }) => {
-                const params = new URLSearchParams()
-                if (opts?.ids?.length) params.set('id', opts.ids.join(','))
-                if (opts?.force) params.set('force', 'true')
-                const qs = params.toString()
-                return apiFetch<OkResponse>(`/libraries/scan${qs ? `?${qs}` : ''}`, {
+            mutationFn: async (opts?: { ids?: string[]; force?: boolean; contentIds?: string[] }) =>
+                apiFetch<OkResponse>('/libraries/scan', {
                     method: 'POST',
-                })
-            },
+                    body: JSON.stringify({
+                        ids: opts?.ids,
+                        content_ids: opts?.contentIds,
+                        force: opts?.force,
+                    }),
+                }),
             onSuccess: () => {
                 queryClient.invalidateQueries({ queryKey: ['libraries'] })
             },

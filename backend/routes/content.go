@@ -12,7 +12,6 @@ import (
 	"voltis/db"
 	"voltis/models"
 	"voltis/models/contentmeta"
-	"voltis/scanner"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -20,8 +19,7 @@ import (
 )
 
 type ContentRoutes struct {
-	pool      *pgxpool.Pool
-	scanQueue *scanner.Queue
+	pool *pgxpool.Pool
 }
 
 func (cr *ContentRoutes) Register(g *echo.Group) {
@@ -32,7 +30,7 @@ func (cr *ContentRoutes) Register(g *echo.Group) {
 	g.POST("/:content_id/series-item-statuses", cr.setSeriesItemStatuses)
 	g.GET("/:content_id/metadata-layers", cr.getMetadataLayers)
 	g.POST("/:content_id/metadata-override", cr.updateMetadataOverride)
-	g.POST("/:content_id/scan", cr.scanContent)
+
 }
 
 type UserToContentDTO struct {
@@ -722,38 +720,7 @@ func (cr *ContentRoutes) updateMetadataOverride(c echo.Context) error {
 	return cr.getMetadataLayers(c)
 }
 
-func (cr *ContentRoutes) scanContent(c echo.Context) error {
-	if _, err := requireAdmin(c); err != nil {
-		return err
-	}
 
-	ctx := reqCtx(c)
-	contentID := c.Param("content_id")
-
-	content, err := getContent(ctx, cr.pool, contentID)
-	if err != nil {
-		return err
-	}
-
-	var fileURIs []string
-	if content.FileURI != nil {
-		fileURIs = append(fileURIs, *content.FileURI)
-	}
-
-	childURIs, err := db.SelectScalars[string](ctx, cr.pool, "SELECT file_uri FROM content WHERE parent_id = $1 AND file_uri IS NOT NULL", contentID)
-	if err != nil {
-		return err
-	}
-	fileURIs = append(fileURIs, childURIs...)
-
-	if len(fileURIs) == 0 {
-		return echo.NewHTTPError(http.StatusBadRequest, "No files to scan")
-	}
-
-	cr.scanQueue.Enqueue(content.LibraryID, true, fileURIs)
-
-	return c.JSON(http.StatusOK, map[string]string{"status": "queued"})
-}
 
 type contentWithUTCRow struct {
 	models.Content

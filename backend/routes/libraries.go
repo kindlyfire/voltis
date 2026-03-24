@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"voltis/db"
@@ -100,40 +99,91 @@ func (lr *LibraryRoutes) list(c echo.Context) error {
 	return c.JSON(http.StatusOK, result)
 }
 
+type scanRequest struct {
+	IDs        []string `json:"ids"`
+	ContentIDs []string `json:"content_ids"`
+	Force      bool     `json:"force"`
+}
+
 func (lr *LibraryRoutes) scan(c echo.Context) error {
 	if _, err := requireAdmin(c); err != nil {
 		return err
 	}
 
 	ctx := reqCtx(c)
-	idParam := c.QueryParam("id")
-	force := c.QueryParam("force") == "true"
+
+	var req scanRequest
+	if err := c.Bind(&req); err != nil {
+		return err
+	}
+
+	if len(req.IDs) > 0 && len(req.ContentIDs) > 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "ids and content_ids are mutually exclusive")
+	}
+
+	if len(req.ContentIDs) > 0 {
+		if err := lr.scanContentIDs(ctx, req.ContentIDs); err != nil {
+			return err
+		}
+		return okResponse(c)
+	}
 
 	var (
 		libraries []models.Library
 		err       error
 	)
-	if idParam != "" {
-		ids := strings.Split(idParam, ",")
-		for i := range ids {
-			ids[i] = strings.TrimSpace(ids[i])
-		}
-		libraries, err = db.Select[models.Library](ctx, lr.pool, "SELECT * FROM libraries WHERE id = ANY($1)", ids)
-		if err != nil {
-			return err
-		}
+	if len(req.IDs) > 0 {
+		libraries, err = db.Select[models.Library](ctx, lr.pool, "SELECT * FROM libraries WHERE id = ANY($1)", req.IDs)
 	} else {
 		libraries, err = db.Select[models.Library](ctx, lr.pool, "SELECT * FROM libraries")
-		if err != nil {
-			return err
-		}
+	}
+	if err != nil {
+		return err
 	}
 
 	for _, lib := range libraries {
-		lr.scanQueue.Enqueue(lib.ID, force, nil)
+		lr.scanQueue.Enqueue(lib.ID, req.Force, nil)
 	}
 
 	return okResponse(c)
+}
+
+func (lr *LibraryRoutes) scanContentIDs(ctx context.Context, contentIDs []string) error {
+	rows, err := db.Select[models.Content](ctx, lr.pool, "SELECT * FROM content WHERE id = ANY($1)", contentIDs)
+	if err != nil {
+		return err
+	}
+	if len(rows) != len(contentIDs) {
+		return echo.NewHTTPError(http.StatusNotFound, "One or more content IDs not found")
+	}
+
+	libraryID := rows[0].LibraryID
+	for _, r := range rows[1:] {
+		if r.LibraryID != libraryID {
+			return echo.NewHTTPError(http.StatusBadRequest, "All content IDs must belong to the same library")
+		}
+	}
+
+	var fileURIs []string
+	for _, r := range rows {
+		if r.FileURI != nil {
+			fileURIs = append(fileURIs, *r.FileURI)
+		}
+	}
+
+	childURIs, err := db.SelectScalars[string](ctx, lr.pool,
+		"SELECT file_uri FROM content WHERE parent_id = ANY($1) AND file_uri IS NOT NULL", contentIDs)
+	if err != nil {
+		return err
+	}
+	fileURIs = append(fileURIs, childURIs...)
+
+	if len(fileURIs) == 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "No files to scan")
+	}
+
+	lr.scanQueue.Enqueue(libraryID, true, fileURIs)
+	return nil
 }
 
 func (lr *LibraryRoutes) upsert(c echo.Context) error {

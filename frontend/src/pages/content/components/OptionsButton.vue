@@ -31,7 +31,7 @@
                 v-if="isAdmin"
                 prepend-icon="mdi-magnify-scan"
                 title="Scan"
-                @click="showScanModal({ contentId: props.contentId })"
+                @click="showScanModal({ contentIds: [props.contentId] })"
             />
             <VListItem
                 prepend-icon="mdi-book-sync"

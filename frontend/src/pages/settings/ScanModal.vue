@@ -92,7 +92,6 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { contentApi } from '@/utils/api/content'
 import { librariesApi } from '@/utils/api/libraries'
 import { useScanTracker } from '@/utils/ws'
 
@@ -100,16 +99,16 @@ const props = defineProps<{
     open: boolean
     close: () => void
     libraryIds: string[]
-    contentId?: string
+    contentIds?: string[]
 }>()
 
-const libraries = librariesApi.useList()
-const scan = librariesApi.useScan()
-const forceScan = ref(!!props.contentId)
+const qLibraries = librariesApi.useList()
+const mScan = librariesApi.useScan()
+const forceScan = ref(!!props.contentIds?.length)
 const scanning = ref(false)
 const { scans } = useScanTracker()
 
-const isContentScan = computed(() => !!props.contentId)
+const isContentScan = computed(() => !!props.contentIds?.length)
 const scanComplete = computed(
     () =>
         scans.value.length > 0 &&
@@ -134,15 +133,15 @@ const title = computed(() => {
 })
 
 function getLibraryName(id: string): string {
-    return libraries.data?.value?.find(l => l.id === id)?.name ?? id
+    return qLibraries.data?.value?.find(l => l.id === id)?.name ?? id
 }
 
 async function startScan() {
     try {
         if (isContentScan.value) {
-            await contentApi.scanContent(props.contentId!)
+            await mScan.mutateAsync({ contentIds: props.contentIds })
         } else {
-            await scan.mutateAsync({
+            await mScan.mutateAsync({
                 ids: props.libraryIds.length > 0 ? props.libraryIds : undefined,
                 force: forceScan.value,
             })
@@ -159,12 +158,12 @@ import { Modals } from '@/utils/modals'
 import Self from './ScanModal.vue'
 
 export function showScanModal(libraryIds: string[]): Promise<void>
-export function showScanModal(opts: { contentId: string }): Promise<void>
-export function showScanModal(arg: string[] | { contentId: string }): Promise<void> {
+export function showScanModal(opts: { contentIds: string[] }): Promise<void>
+export function showScanModal(arg: string[] | { contentIds: string[] }): Promise<void> {
     if (Array.isArray(arg)) {
         return Modals.show(Self, { libraryIds: arg })
     }
-    return Modals.show(Self, { libraryIds: [], contentId: arg.contentId })
+    return Modals.show(Self, { libraryIds: [], contentIds: arg.contentIds })
 }
 </script>
 

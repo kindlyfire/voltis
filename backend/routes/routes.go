@@ -39,7 +39,7 @@ func Register(e *echo.Echo, pool *pgxpool.Pool) {
 	(&AuthRoutes{pool: pool}).Register(api.Group("/auth"))
 	(&LibraryRoutes{pool: pool, scanQueue: scanQueue}).Register(api.Group("/libraries"))
 	(&UserRoutes{pool: pool}).Register(api.Group("/users"))
-	(&ContentRoutes{pool: pool, scanQueue: scanQueue}).Register(api.Group("/content"))
+	(&ContentRoutes{pool: pool}).Register(api.Group("/content"))
 	(&FileRoutes{pool: pool}).Register(api.Group("/files"))
 	(&ContentRefRoutes{pool: pool}).Register(api.Group("/content"))
 	(&CustomListRoutes{pool: pool}).Register(api.Group("/custom-lists"))
