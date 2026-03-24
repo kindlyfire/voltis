@@ -22,7 +22,7 @@ type BufChan[T any] struct {
 	err   error
 }
 
-func NewBufChan[T any](merge func(T, T) T, debounceTime time.Duration, fn func(T) error) *BufChan[T] {
+func New[T any](merge func(T, T) T, debounceTime time.Duration, fn func(T) error) *BufChan[T] {
 	b := &BufChan[T]{
 		merge:        merge,
 		debounceTime: debounceTime,

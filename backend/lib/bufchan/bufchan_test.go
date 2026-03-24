@@ -37,7 +37,7 @@ func mergeInts(a, b int) int { return a + b }
 
 func TestSingleSendImmediate(t *testing.T) {
 	c := &collector{}
-	bc := NewBufChan(mergeInts, 100*time.Millisecond, c.collect)
+	bc := New(mergeInts, 100*time.Millisecond, c.collect)
 	defer bc.Close()
 
 	bc.Send(42)
@@ -51,7 +51,7 @@ func TestSingleSendImmediate(t *testing.T) {
 
 func TestRapidSendsMerge(t *testing.T) {
 	c := &collector{}
-	bc := NewBufChan(mergeInts, 100*time.Millisecond, c.collect)
+	bc := New(mergeInts, 100*time.Millisecond, c.collect)
 	defer bc.Close()
 
 	bc.Send(1)
@@ -77,7 +77,7 @@ func TestRapidSendsMerge(t *testing.T) {
 
 func TestSendNowInterruptsDebounce(t *testing.T) {
 	c := &collector{}
-	bc := NewBufChan(mergeInts, 500*time.Millisecond, c.collect)
+	bc := New(mergeInts, 500*time.Millisecond, c.collect)
 	defer bc.Close()
 
 	bc.Send(1)
@@ -94,7 +94,7 @@ func TestSendNowInterruptsDebounce(t *testing.T) {
 
 func TestIdleAfterDebounce(t *testing.T) {
 	c := &collector{}
-	bc := NewBufChan(mergeInts, 50*time.Millisecond, c.collect)
+	bc := New(mergeInts, 50*time.Millisecond, c.collect)
 	defer bc.Close()
 
 	bc.Send(1)
@@ -114,7 +114,7 @@ func TestIdleAfterDebounce(t *testing.T) {
 
 func TestCloseFlushes(t *testing.T) {
 	c := &collector{}
-	bc := NewBufChan(mergeInts, 500*time.Millisecond, c.collect)
+	bc := New(mergeInts, 500*time.Millisecond, c.collect)
 
 	bc.Send(1)
 	time.Sleep(20 * time.Millisecond)
@@ -133,7 +133,7 @@ func TestErrorPropagation(t *testing.T) {
 	errBoom := errors.New("boom")
 	calls := 0
 
-	bc := NewBufChan(mergeInts, 50*time.Millisecond, func(v int) error {
+	bc := New(mergeInts, 50*time.Millisecond, func(v int) error {
 		calls++
 		if calls == 1 {
 			return errBoom
@@ -166,7 +166,7 @@ func TestErrorPropagation(t *testing.T) {
 func TestCloseReturnsError(t *testing.T) {
 	errBoom := errors.New("boom")
 
-	bc := NewBufChan(mergeInts, 500*time.Millisecond, func(v int) error {
+	bc := New(mergeInts, 500*time.Millisecond, func(v int) error {
 		return errBoom
 	})
 

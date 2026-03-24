@@ -1,7 +1,6 @@
 package scanner
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -12,13 +11,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"voltis/db"
-	"voltis/lib/bufchan"
 	"voltis/lib/fp"
+	"voltis/lib/tasks"
 	"voltis/models"
 	"voltis/models/contentmeta"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // FileScanner is the interface each scanner type must implement.
@@ -56,21 +52,29 @@ type ParsedItem struct {
 	MetaRaw     map[string]any // ComicInfo raw, nil for books
 }
 
-type ScanResult struct {
-	Added     int
-	Updated   int
-	Removed   int
-	Failed    int
-	Unchanged int
-	Duration  time.Duration
+type ScanInput struct {
+	LibraryID   string   `json:"library_id"`
+	LibraryType string   `json:"library_type"`
+	Sources     []string `json:"sources"`
+	Force       bool     `json:"force"`
+	FilterPaths []string `json:"filter_paths,omitempty"`
+	Concurrency int      `json:"concurrency"`
 }
 
-type ScanOptions struct {
-	Force       bool
-	FilterPaths []string
-	Concurrency int
-	Hub         db.TaskEventBroadcaster
+type ScanResult struct {
+	Added     int           `json:"added"`
+	Updated   int           `json:"updated"`
+	Removed   int           `json:"removed"`
+	Failed    int           `json:"failed"`
+	Unchanged int           `json:"unchanged"`
+	Duration  time.Duration `json:"duration"`
 }
+
+// ScanTask is the task definition for library scans.
+var ScanTask = tasks.Define(tasks.DefineOpts[ScanInput, ScanResult]{
+	Name:    "scan_library",
+	Process: runScan,
+})
 
 func newFileScanner(libraryType string) FileScanner {
 	switch libraryType {
@@ -83,96 +87,45 @@ func newFileScanner(libraryType string) FileScanner {
 	}
 }
 
-func Scan(ctx context.Context, pool *pgxpool.Pool, libraryID string, libraryType string, sources []string, opts ScanOptions) (*ScanResult, error) {
-	if opts.Concurrency <= 0 {
-		opts.Concurrency = 10
+func runScan(input ScanInput, tc *tasks.TaskContext[ScanResult]) error {
+	ctx := tc.Context()
+	pool := tc.Pool()
+
+	concurrency := input.Concurrency
+	if concurrency <= 0 {
+		concurrency = 10
 	}
 
 	scanStart := time.Now()
 
-	s := newFileScanner(libraryType)
+	s := newFileScanner(input.LibraryType)
 	if s == nil {
-		return nil, nil
+		return fmt.Errorf("unsupported library type: %s", input.LibraryType)
 	}
 
-	slog_scan("starting scan", "library", libraryID, "type", libraryType, "force", opts.Force, "filter_paths", opts.FilterPaths, "concurrency", opts.Concurrency)
-
-	// Create task
-	var task *models.Task
-	if opts.Hub != nil {
-		now := time.Now().UTC()
-		input, _ := json.Marshal(map[string]any{
-			"library_id":   libraryID,
-			"force":        opts.Force,
-			"filter_paths": opts.FilterPaths,
-		})
-		task = &models.Task{
-			ID:        models.MakeTaskID(),
-			CreatedAt: now,
-			UpdatedAt: now,
-			Name:      "scan",
-			Status:    models.TaskStatusInProgress,
-			Input:     input,
-			Output:    json.RawMessage("{}"),
-		}
-		if err := db.TaskCreate(ctx, pool, task); err != nil {
-			return nil, err
-		}
-	}
-
-	taskBC := bufchan.NewBufChan(db.MergeTaskUpdateOpts, 200*time.Millisecond, func(tuOpts db.TaskUpdateOpts) error {
-		return db.TaskUpdate(ctx, pool, opts.Hub, task, tuOpts)
-	})
-	defer taskBC.Close()
-
-	taskUpdate := func(tuOpts db.TaskUpdateOpts) {
-		if task == nil || opts.Hub == nil {
-			return
-		}
-		immediate := tuOpts.Status != nil || tuOpts.Output != nil
-		var err error
-		if immediate {
-			err = taskBC.SendNow(tuOpts)
-		} else {
-			err = taskBC.Send(tuOpts)
-		}
-		if err != nil {
-			slog.Error("[scanner] task update failed", "err", err)
-		}
-	}
-
-	// On failure, mark task as failed
-	var scanErr error
-	defer func() {
-		if scanErr != nil && task != nil {
-			failed := models.TaskStatusFailed
-			taskUpdate(db.TaskUpdateOpts{Status: &failed})
-		}
-	}()
+	slog_scan("starting scan", "library", input.LibraryID, "type", input.LibraryType, "force", input.Force, "filter_paths", input.FilterPaths, "concurrency", concurrency)
 
 	// Determine sources
-	scanSources := sources
-	if len(opts.FilterPaths) > 0 {
-		scanSources = opts.FilterPaths
+	scanSources := input.Sources
+	if len(input.FilterPaths) > 0 {
+		scanSources = input.FilterPaths
 	}
 
 	// Walk filesystem
 	files, err := walkSources(scanSources, s.FileEligible)
 	if err != nil {
-		scanErr = err
-		return nil, err
+		return err
 	}
-	slog.Info("[scanner] found files", "count", len(files), "library", libraryID)
+	slog.Info("[scanner] found files", "count", len(files), "library", input.LibraryID)
 
 	// Load existing content
-	r := newRepository(pool, libraryID)
+	r := newRepository(pool, input.LibraryID)
 	if err := r.load(ctx); err != nil {
-		scanErr = err
-		return nil, err
+		return err
 	}
 
 	// Diff
-	toAdd, toUpdate, unchanged, toRemove := matchFiles(r, files, opts)
+	toAdd, toUpdate, unchanged, toRemove := matchFiles(r, files, input.FilterPaths, input.Force)
 
 	slog.Info("[scanner] diff",
 		"add", len(toAdd), "update", len(toUpdate),
@@ -180,13 +133,11 @@ func Scan(ctx context.Context, pool *pgxpool.Pool, libraryID string, libraryType
 	)
 
 	// Emit summary
-	taskUpdate(db.TaskUpdateOpts{
-		Output: map[string]int{
-			"to_add":    len(toAdd),
-			"to_update": len(toUpdate),
-			"to_remove": len(toRemove),
-			"unchanged": len(unchanged),
-		},
+	tc.Progress(map[string]int{
+		"to_add":    len(toAdd),
+		"to_update": len(toUpdate),
+		"to_remove": len(toRemove),
+		"unchanged": len(unchanged),
 	})
 
 	// Move removed items to deleted list (in-memory; DB delete in commitFinal)
@@ -242,8 +193,8 @@ func Scan(ctx context.Context, pool *pgxpool.Pool, libraryID string, libraryType
 	var commitErr error
 	var resultAdded, resultUpdated, resultFailed atomic.Int64
 
-	fp.MapConcurrently(workList, opts.Concurrency, func(gf groupedFile) {
-		parsed := s.ParseFile(libraryID, gf.file)
+	fp.MapConcurrently(workList, concurrency, func(gf groupedFile) {
+		parsed := s.ParseFile(input.LibraryID, gf.file)
 
 		var parentID *string
 		fp.WithMutex(&commitMu, func() {
@@ -259,17 +210,11 @@ func Scan(ctx context.Context, pool *pgxpool.Pool, libraryID string, libraryType
 				if !r.checkURIAvailable(parsed, parentID) {
 					uri := makeURI(parsed, parent)
 					slog.Warn("[scanner] URI conflict, skipping", "file", gf.file.Path, "uri", uri, "parent_id", fp.DerefString(parentID))
-					taskUpdate(db.TaskUpdateOpts{
-						Logs: new(
-							fmt.Sprintf("URI conflict for file %s, skipping (uri: %s, parent_id: %s)\n",
-								gf.file.Path,
-								uri,
-								fp.DerefString(parentID)),
-						),
-					})
+					tc.Log("URI conflict for file %s, skipping (uri: %s, parent_id: %s)\n",
+						gf.file.Path, uri, fp.DerefString(parentID))
 					resultFailed.Add(1)
 				} else {
-					content := applyParsedItem(r, libraryID, parsed)
+					content := applyParsedItem(r, input.LibraryID, parsed)
 					if addSet[gf.file.Path] {
 						resultAdded.Add(1)
 					} else {
@@ -309,22 +254,18 @@ func Scan(ctx context.Context, pool *pgxpool.Pool, libraryID string, libraryType
 		}
 
 		processed := int(progressProcessed.Add(1))
-		taskUpdate(db.TaskUpdateOpts{
-			Progress: map[string]int{
-				"total":     progressTotal,
-				"processed": processed,
-			},
+		tc.Progress(map[string]int{
+			"total":     progressTotal,
+			"processed": processed,
 		})
 	})
 
 	if commitErr != nil {
-		scanErr = commitErr
-		return nil, commitErr
+		return commitErr
 	}
 
 	if err := r.commitFinal(ctx); err != nil {
-		scanErr = err
-		return nil, err
+		return err
 	}
 
 	// Compute accurate Removed count: initial toRemove items still in contentD
@@ -335,7 +276,7 @@ func Scan(ctx context.Context, pool *pgxpool.Pool, libraryID string, libraryType
 		}
 	}
 
-	result := &ScanResult{
+	result := ScanResult{
 		Added:     int(resultAdded.Load()),
 		Updated:   int(resultUpdated.Load()),
 		Removed:   resultRemoved,
@@ -344,20 +285,8 @@ func Scan(ctx context.Context, pool *pgxpool.Pool, libraryID string, libraryType
 		Duration:  time.Since(scanStart),
 	}
 
-	// Emit actual counts
-	taskUpdate(db.TaskUpdateOpts{
-		Output: map[string]int{
-			"added":     result.Added,
-			"updated":   result.Updated,
-			"removed":   result.Removed,
-			"failed":    result.Failed,
-			"unchanged": result.Unchanged,
-		},
-	})
-
-	taskUpdate(db.TaskUpdateOpts{Status: new(models.TaskStatusCompleted)})
-
-	return result, nil
+	tc.Result(result)
+	return nil
 }
 
 func findParent(r *repository, p *ParsedItem) *models.Content {
@@ -529,7 +458,7 @@ func updateGroupSeries(s FileScanner, r *repository, parents map[string]bool) {
 	}
 }
 
-func matchFiles(r *repository, files []FSFile, opts ScanOptions) (toAdd, toUpdate, unchanged, toRemove []FSFile) {
+func matchFiles(r *repository, files []FSFile, filterPaths []string, force bool) (toAdd, toUpdate, unchanged, toRemove []FSFile) {
 	leafContent := map[string]FSFile{}
 	for _, c := range r.content {
 		if c.Type != "comic" && c.Type != "book" {
@@ -559,9 +488,9 @@ func matchFiles(r *repository, files []FSFile, opts ScanOptions) (toAdd, toUpdat
 	}
 
 	for path, fsFile := range fsByPath {
-		if len(opts.FilterPaths) > 0 {
+		if len(filterPaths) > 0 {
 			matched := false
-			for _, fp := range opts.FilterPaths {
+			for _, fp := range filterPaths {
 				if strings.HasPrefix(path, fp) {
 					matched = true
 					break
@@ -584,9 +513,9 @@ func matchFiles(r *repository, files []FSFile, opts ScanOptions) (toAdd, toUpdat
 
 	for path, dbFile := range leafContent {
 		if _, exists := fsByPath[path]; !exists {
-			if len(opts.FilterPaths) > 0 {
+			if len(filterPaths) > 0 {
 				matched := false
-				for _, fp := range opts.FilterPaths {
+				for _, fp := range filterPaths {
 					if strings.HasPrefix(path, fp) {
 						matched = true
 						break
@@ -600,7 +529,7 @@ func matchFiles(r *repository, files []FSFile, opts ScanOptions) (toAdd, toUpdat
 		}
 	}
 
-	if opts.Force {
+	if force {
 		toUpdate = append(toUpdate, unchanged...)
 		unchanged = nil
 	}

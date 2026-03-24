@@ -13,6 +13,27 @@ func Map[T any, R any](in []T, fn func(T) R) []R {
 	return out
 }
 
+func Filter[T any](in []T, fn func(T) bool) []T {
+	out := make([]T, 0, len(in))
+	for _, v := range in {
+		if fn(v) {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// Remove removes the first occurrence of v from in, if it exists. It returns
+// the updated slice.
+func Remove[T comparable](in []T, v T) []T {
+	for i, item := range in {
+		if item == v {
+			return append(in[:i], in[i+1:]...)
+		}
+	}
+	return in
+}
+
 func Dedup[T comparable](in []T) []T {
 	seen := make(map[T]struct{})
 	out := make([]T, 0, len(in))

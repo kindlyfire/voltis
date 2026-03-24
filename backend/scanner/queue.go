@@ -15,7 +15,7 @@ import (
 
 // QueueBroadcaster is implemented by the WebSocket hub.
 type QueueBroadcaster interface {
-	db.TaskEventBroadcaster
+	BroadcastTaskEvent(task *models.Task, progress json.RawMessage)
 	BroadcastScanQueue(libraryIDs []string)
 }
 
@@ -34,6 +34,9 @@ type Queue struct {
 }
 
 func NewQueue(pool *pgxpool.Pool, hub QueueBroadcaster) *Queue {
+	ScanTask.OnUpdate = func(task *models.Task, progress json.RawMessage) {
+		hub.BroadcastTaskEvent(task, progress)
+	}
 	return &Queue{pool: pool, hub: hub}
 }
 
@@ -118,24 +121,31 @@ func (q *Queue) runJob(job scanJob) {
 		paths[i] = s.PathURI
 	}
 
-	result, err := Scan(ctx, q.pool, lib.ID, lib.Type, paths, ScanOptions{
+	handle, err := ScanTask.Start(ctx, q.pool, ScanInput{
+		LibraryID:   lib.ID,
+		LibraryType: lib.Type,
+		Sources:     paths,
 		Force:       job.Force,
 		FilterPaths: job.FilterPaths,
-		Hub:         q.hub,
-	})
+	}, nil)
+	if err != nil {
+		slog.Error("[scanner] failed to start scan task", "library", lib.ID, "err", err)
+		return
+	}
+
+	result, err := handle.Wait()
 	if err != nil {
 		slog.Error("[scanner] scan failed", "library", lib.ID, "err", err)
 		return
 	}
-	if result != nil {
-		slog.Info("[scanner] scan complete",
-			"library", lib.ID,
-			"added", result.Added,
-			"updated", result.Updated,
-			"removed", result.Removed,
-			"failed", result.Failed,
-			"unchanged", result.Unchanged,
-			"duration", result.Duration,
-		)
-	}
+
+	slog.Info("[scanner] scan complete",
+		"library", lib.ID,
+		"added", result.Added,
+		"updated", result.Updated,
+		"removed", result.Removed,
+		"failed", result.Failed,
+		"unchanged", result.Unchanged,
+		"duration", result.Duration,
+	)
 }
