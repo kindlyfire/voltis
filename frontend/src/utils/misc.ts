@@ -10,7 +10,7 @@ import {
     type Ref,
 } from 'vue'
 import { useRouter } from 'vue-router'
-import type { ContentType } from '@/utils/api/types'
+import type { ContentType, ReadingStatus } from '@/utils/api/types'
 
 export const queryClient = new QueryClient({})
 
@@ -193,3 +193,11 @@ const contentTypeLabels: Record<ContentType, string> = {
 export function displayContentType(type: ContentType): string {
     return contentTypeLabels[type] ?? type
 }
+
+export const readingStatusOptions: { value: ReadingStatus; title: string }[] = [
+    { value: 'reading', title: 'Reading' },
+    { value: 'completed', title: 'Completed' },
+    { value: 'on_hold', title: 'On Hold' },
+    { value: 'dropped', title: 'Dropped' },
+    { value: 'plan_to_read', title: 'Plan to Read' },
+]

@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- Added healthcheck to the Postgres container
+- Tests now create temporary databases to run in isolation, and clean them up
+  afterward
+- New actions in the content multi-select menu: Scan, set reading status, reset
+  reading progress
+
 ## [1.0.0-alpha.2] - 2026-03-15
 
 - Easily add content to lists with multi-select in content grids

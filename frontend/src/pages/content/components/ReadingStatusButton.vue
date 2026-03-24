@@ -1,7 +1,7 @@
 <template>
     <VSelect
         :model-value="currentStatus"
-        :items="statusOptions"
+        :items="readingStatusOptions"
         :loading="qContent.isLoading.value || mUpdateUserData.isPending.value"
         :placeholder="'Set status'"
         density="comfortable"
@@ -17,6 +17,7 @@
 import { computed } from 'vue'
 import { contentApi } from '@/utils/api/content'
 import type { ReadingStatus } from '@/utils/api/types'
+import { readingStatusOptions } from '@/utils/misc'
 
 const props = defineProps<{
     contentId: string | null | undefined
@@ -24,14 +25,6 @@ const props = defineProps<{
 
 const qContent = contentApi.useGet(() => props.contentId)
 const content = qContent.data
-
-const statusOptions: { value: ReadingStatus; title: string }[] = [
-    { value: 'reading', title: 'Reading' },
-    { value: 'completed', title: 'Completed' },
-    { value: 'on_hold', title: 'On Hold' },
-    { value: 'dropped', title: 'Dropped' },
-    { value: 'plan_to_read', title: 'Plan to Read' },
-]
 
 const currentStatus = computed(() => content.value?.user_data?.status ?? null)
 const mUpdateUserData = contentApi.useUpdateUserData()

@@ -64,6 +64,16 @@
                             :disabled="selectedIds.size === 0"
                             @click="showScanModal({ contentIds: [...selectedIds] })"
                         />
+                        <VListItem
+                            title="Set reading status"
+                            :disabled="selectedIds.size === 0"
+                            @click="showBulkStatusModal([...selectedIds])"
+                        />
+                        <VListItem
+                            title="Reset reading progress"
+                            :disabled="selectedIds.size === 0"
+                            @click="showBulkResetProgressModal([...selectedIds], selectedTitles, selectedSeriesIds)"
+                        />
                     </VList>
                 </VMenu>
                 <VProgressCircular v-if="loading" indeterminate size="16" width="2" class="ml-2" />
@@ -151,6 +161,7 @@
 import { keepPreviousData } from '@tanstack/vue-query'
 import { useElementSize } from '@vueuse/core'
 import { computed, ref, toRef, watch } from 'vue'
+import { showScanModal } from '@/pages/settings/ScanModal.vue'
 import { contentApi } from '@/utils/api/content'
 import {
     READING_STATUS_LABELS,
@@ -158,9 +169,10 @@ import {
     type ReadingStatus,
 } from '@/utils/api/types'
 import { useRouteQueryParams } from '@/utils/misc'
+import { showBulkResetProgressModal } from './BulkResetProgressModal.vue'
+import { showBulkStatusModal } from './BulkStatusModal.vue'
 import Item from './Item.vue'
 import ItemSkeleton from './ItemSkeleton.vue'
-import { showScanModal } from '@/pages/settings/ScanModal.vue'
 import { showBulkListsModal } from './ListsModal.vue'
 import Settings from './Settings.vue'
 import { useContentGridStore } from './store'
@@ -307,6 +319,23 @@ function toggleSelect(id: string, shiftKey: boolean) {
 function selectAll() {
     selectedIds.value = new Set(items.value.map(item => item.id))
 }
+
+const selectedTitles = computed(() => {
+    const titleMap = new Map(items.value.map(item => [item.id, item.title]))
+    return [...selectedIds.value].map(id => titleMap.get(id) ?? id)
+})
+
+const SERIES_TYPES = new Set(['comic_series', 'book_series'])
+
+const selectedSeriesIds = computed(() => {
+    const result = new Set<string>()
+    for (const item of items.value) {
+        if (selectedIds.value.has(item.id) && SERIES_TYPES.has(item.type)) {
+            result.add(item.id)
+        }
+    }
+    return result
+})
 
 watch(items, items => {
     const newSelectedIds = new Set<string>()
