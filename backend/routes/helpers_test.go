@@ -2,6 +2,8 @@ package routes
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,25 +23,57 @@ import (
 
 func newTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	url := os.Getenv("APP_TESTS_DATABASE_URL")
-	if url == "" {
-		url = "postgresql://postgres:postgres@localhost:5432/voltis_tests?sslmode=disable"
+	adminURL := os.Getenv("APP_TESTS_DATABASE_URL")
+	if adminURL == "" {
+		adminURL = "postgresql://postgres:postgres@localhost:5432/postgres?sslmode=disable"
 	}
 
 	ctx := context.Background()
-	pool, err := db.Connect(ctx, url)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
 
-	// Reset database
-	_, _ = pool.Exec(ctx, "DROP SCHEMA public CASCADE")
-	_, _ = pool.Exec(ctx, "CREATE SCHEMA public")
+	buf := make([]byte, 8)
+	if _, err := rand.Read(buf); err != nil {
+		t.Fatalf("rand: %v", err)
+	}
+	dbName := "voltis_tests_" + hex.EncodeToString(buf)
+
+	admin, err := db.Connect(ctx, adminURL)
+	if err != nil {
+		t.Fatalf("connect admin: %v", err)
+	}
+	if _, err := admin.Exec(ctx, "CREATE DATABASE "+dbName); err != nil {
+		admin.Close()
+		t.Fatalf("create database: %v", err)
+	}
+	admin.Close()
+
+	parsed, err := url.Parse(adminURL)
+	if err != nil {
+		t.Fatalf("parse admin url: %v", err)
+	}
+	parsed.Path = "/" + dbName
+	testURL := parsed.String()
+
+	pool, err := db.Connect(ctx, testURL)
+	if err != nil {
+		t.Fatalf("connect test db: %v", err)
+	}
 	if err := db.Migrate(ctx, pool); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 
-	t.Cleanup(func() { pool.Close() })
+	t.Cleanup(func() {
+		pool.Close()
+		admin, err := db.Connect(ctx, adminURL)
+		if err != nil {
+			t.Logf("cleanup connect admin: %v", err)
+			return
+		}
+		defer admin.Close()
+		if _, err := admin.Exec(ctx, "DROP DATABASE "+dbName); err != nil {
+			t.Logf("cleanup drop database: %v", err)
+		}
+	})
+
 	return pool
 }
 
