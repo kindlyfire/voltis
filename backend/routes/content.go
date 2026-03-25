@@ -720,8 +720,6 @@ func (cr *ContentRoutes) updateMetadataOverride(c echo.Context) error {
 	return cr.getMetadataLayers(c)
 }
 
-
-
 type contentWithUTCRow struct {
 	models.Content
 	UTCId                *string    `db:"utc_id"`

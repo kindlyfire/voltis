@@ -71,10 +71,27 @@ type ScanResult struct {
 }
 
 // ScanTask is the task definition for library scans.
-var ScanTask = tasks.Define(tasks.DefineOpts[ScanInput, ScanResult]{
-	Name:    "scan_library",
-	Process: runScan,
-})
+var ScanTask = &tasks.TaskDef{
+	Name: "scan_library",
+	Process: func(input any, tc *tasks.TaskContext) error {
+		return runScan(input.(ScanInput), tc)
+	},
+	UnmarshalInput: func(data json.RawMessage) (any, error) {
+		var v ScanInput
+		err := json.Unmarshal(data, &v)
+		return v, err
+	},
+	IsCompatibleWith: func(self any, other tasks.RunningInfo) bool {
+		if other.Name != "scan_library" {
+			return true
+		}
+		otherInput, ok := other.Input.(ScanInput)
+		if !ok {
+			return false
+		}
+		return self.(ScanInput).LibraryID != otherInput.LibraryID
+	},
+}
 
 func newFileScanner(libraryType string) FileScanner {
 	switch libraryType {
@@ -87,7 +104,7 @@ func newFileScanner(libraryType string) FileScanner {
 	}
 }
 
-func runScan(input ScanInput, tc *tasks.TaskContext[ScanResult]) error {
+func runScan(input ScanInput, tc *tasks.TaskContext) error {
 	ctx := tc.Context()
 	pool := tc.Pool()
 

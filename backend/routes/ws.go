@@ -16,8 +16,8 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
-// Hub manages WebSocket connections and broadcasts events.
-type Hub struct {
+// WebSocketHub manages WebSocket connections and broadcasts events.
+type WebSocketHub struct {
 	mu    sync.RWMutex
 	conns map[*userConn]struct{}
 }
@@ -29,23 +29,23 @@ type userConn struct {
 	tasks map[string]*models.Task // tracked tasks for diffing
 }
 
-func NewHub() *Hub {
-	return &Hub{conns: make(map[*userConn]struct{})}
+func NewHub() *WebSocketHub {
+	return &WebSocketHub{conns: make(map[*userConn]struct{})}
 }
 
-func (h *Hub) register(uc *userConn) {
+func (h *WebSocketHub) register(uc *userConn) {
 	h.mu.Lock()
 	h.conns[uc] = struct{}{}
 	h.mu.Unlock()
 }
 
-func (h *Hub) unregister(uc *userConn) {
+func (h *WebSocketHub) unregister(uc *userConn) {
 	h.mu.Lock()
 	delete(h.conns, uc)
 	h.mu.Unlock()
 }
 
-func (h *Hub) broadcast(msg []byte) {
+func (h *WebSocketHub) broadcast(msg []byte) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for uc := range h.conns {
@@ -60,7 +60,7 @@ func (h *Hub) broadcast(msg []byte) {
 
 // BroadcastTaskEvent sends a task_update to all connected users.
 // Per-user filtering: skips users that don't own the task when user_id is set.
-func (h *Hub) BroadcastTaskEvent(task *models.Task, progress json.RawMessage) {
+func (h *WebSocketHub) BroadcastTaskEvent(task *models.Task, progress json.RawMessage) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for uc := range h.conns {
@@ -96,7 +96,7 @@ func (h *Hub) BroadcastTaskEvent(task *models.Task, progress json.RawMessage) {
 }
 
 // BroadcastScanQueue sends a scan_queue_update with queued library IDs.
-func (h *Hub) BroadcastScanQueue(libraryIDs []string) {
+func (h *WebSocketHub) BroadcastScanQueue(libraryIDs []string) {
 	msg, _ := json.Marshal(map[string]any{
 		"type":        "scan_queue_update",
 		"library_ids": libraryIDs,
@@ -137,7 +137,7 @@ func ptrStr(s *string) string {
 	return *s
 }
 
-func wsHandler(pool *pgxpool.Pool, hub *Hub) echo.HandlerFunc {
+func wsHandler(pool *pgxpool.Pool, hub *WebSocketHub) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		user, err := resolveUser(c, pool)
 		if err != nil || user == nil {

@@ -1,9 +1,12 @@
 package routes
 
 import (
+	"context"
+	"log/slog"
 	"strings"
 
 	"voltis/lib/sources"
+	"voltis/lib/tasks"
 	"voltis/scanner"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -13,7 +16,14 @@ import (
 
 func Register(e *echo.Echo, pool *pgxpool.Pool) {
 	hub := NewHub()
-	scanQueue := scanner.NewQueue(pool, hub)
+
+	manager := tasks.NewManager(pool)
+	manager.Register(scanner.ScanTask)
+	if err := manager.Load(context.Background()); err != nil {
+		slog.Error("failed to load pending tasks", "err", err)
+	}
+
+	scanQueue := scanner.NewQueue(manager, pool, hub)
 
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOriginFunc: func(origin string) (bool, error) {

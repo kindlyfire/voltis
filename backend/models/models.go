@@ -99,9 +99,11 @@ type CustomListToContent struct {
 }
 
 const (
+	TaskStatusPending    = 0
 	TaskStatusInProgress = 1
 	TaskStatusCompleted  = 2
 	TaskStatusFailed     = 3
+	TaskStatusCancelled  = 4
 )
 
 type Task struct {
