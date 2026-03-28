@@ -14,8 +14,7 @@ import (
 	"voltis/lib/fp"
 	"voltis/lib/tasks"
 	"voltis/models"
-	"voltis/models/contentmeta"
-	"voltis/models/contentmetamerge"
+	"voltis/models/metaraw"
 )
 
 // FileScanner is the interface each scanner type must implement.
@@ -49,7 +48,7 @@ type ParsedItem struct {
 	OrderParts  []*float32
 	CoverSuffix *string // appended to file path for cover URI
 	FileData    json.RawMessage
-	MetaRaw     any
+	MetaRaw     models.Metadata
 }
 
 type ScanInput struct {
@@ -363,7 +362,8 @@ func applyParsedItem(r *repository, libraryID string, p *ParsedItem) *models.Con
 	r.markDirty(content)
 
 	metaRow := r.getMetadata(content.URI)
-	metaRow.setSource("file", p.MetaRaw)
+	metaRow.DataRaw.File = &metaraw.RawContainer[models.Metadata]{Raw: p.MetaRaw}
+	metaRow.dirty = true
 
 	return content
 }
@@ -373,11 +373,11 @@ func inheritChildMetadata(r *repository, series *models.Content, items []*models
 		return
 	}
 
-	var inherited contentmeta.Metadata
+	var inherited models.Metadata
 	// Inherit from first child that has each field set
 	for _, item := range items {
 		childMeta := r.getMetadata(item.URI)
-		m := childMeta.Data
+		m := childMeta.DataRaw.Merge()
 		if inherited.Staff == nil && len(m.Staff) > 0 {
 			inherited.Staff = m.Staff
 		}
@@ -411,8 +411,9 @@ func inheritChildMetadata(r *repository, series *models.Content, items []*models
 	var seriesTitle string
 	for _, item := range items {
 		childMeta := r.getMetadata(item.URI)
-		if childMeta.Data.Series != "" {
-			seriesTitle = childMeta.Data.Series
+		data := childMeta.DataRaw.Merge()
+		if data.Series != "" {
+			seriesTitle = data.Series
 			break
 		}
 	}
@@ -422,18 +423,16 @@ func inheritChildMetadata(r *repository, series *models.Content, items []*models
 	inherited.Title = seriesTitle
 
 	metaRow := r.getMetadata(series.URI)
-	var existing contentmeta.Metadata
-	if entry, ok := metaRow.DataRaw["file"]; ok {
-		raw := contentmetamerge.ExtractRaw(entry)
-		if raw != nil {
-			existing = contentmetamerge.MaterializeSource("file", raw)
-		}
+	var existing models.Metadata
+	if metaRow.DataRaw.File != nil {
+		existing = metaRow.DataRaw.File.Raw
 	}
 	// Merge: inherited fills in gaps in existing
-	result := contentmeta.Merge(inherited, existing)
+	result := models.MergeMetadata(inherited, existing)
 	// But always update title from inheritance
 	result.Title = inherited.Title
-	metaRow.setSource("file", result)
+	metaRow.DataRaw.File = &metaraw.RawContainer[models.Metadata]{Raw: result}
+	metaRow.dirty = true
 }
 
 func groupByFolder(files []FSFile) [][]FSFile {

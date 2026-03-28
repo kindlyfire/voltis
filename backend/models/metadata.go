@@ -1,4 +1,4 @@
-package contentmeta
+package models
 
 import (
 	"encoding/json"
@@ -45,12 +45,10 @@ type Metadata struct {
 	MangaBakaID *int `json:"mangabaka_id,omitempty"`
 }
 
-var MergeOrder = []string{"file", "mangabaka", "overrides"}
-
 // Merge combines multiple metadata layers in priority order. Later layers
 // override earlier ones. Staff is taken as a whole from the highest-priority
 // layer that has it set.
-func Merge(layers ...Metadata) Metadata {
+func MergeMetadata(layers ...Metadata) Metadata {
 	var result Metadata
 	typ := reflect.TypeFor[Metadata]()
 	resultElem := reflect.ValueOf(&result).Elem()

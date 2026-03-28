@@ -267,6 +267,10 @@ watch(
     () => qLayers.data?.value,
     data => {
         if (!data) return
+        data = jsonClone(data)
+        if (!data.layers.some(l => l.source === 'overrides')) {
+            data.layers.push({ source: 'overrides', data: {}, raw: {} })
+        }
         localLayers.value = jsonClone(data)
         const serverOverrides = data.layers.find(l => l.source === 'overrides')
         serverSnapshot.value = JSON.stringify(serverOverrides?.data ?? {})

@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 	"voltis/config"
-	"voltis/models/contentmeta"
+	"voltis/models"
 )
 
 const (
@@ -332,8 +332,8 @@ func (m *MangaBaka) SeriesSearch(ctx context.Context, opts SeriesSearchOpts) (*S
 }
 
 // MangaBakaSeriesToMetadata converts a MangaBaka Series into a Metadata struct.
-func MangaBakaSeriesToMetadata(s *Series) contentmeta.Metadata {
-	meta := contentmeta.Metadata{
+func MangaBakaSeriesToMetadata(s *Series) models.Metadata {
+	meta := models.Metadata{
 		Title:       s.Title,
 		MangaBakaID: &s.ID,
 	}
@@ -341,12 +341,12 @@ func MangaBakaSeriesToMetadata(s *Series) contentmeta.Metadata {
 		meta.Description = *s.Description
 	}
 
-	var staff []contentmeta.StaffEntry
+	var staff []models.StaffEntry
 	for _, a := range s.Authors {
-		staff = append(staff, contentmeta.StaffEntry{Name: a, Role: "author"})
+		staff = append(staff, models.StaffEntry{Name: a, Role: "author"})
 	}
 	for _, a := range s.Artists {
-		staff = append(staff, contentmeta.StaffEntry{Name: a, Role: "artist"})
+		staff = append(staff, models.StaffEntry{Name: a, Role: "artist"})
 	}
 	meta.Staff = staff
 

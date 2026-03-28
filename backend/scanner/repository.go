@@ -9,8 +9,7 @@ import (
 
 	"voltis/db"
 	"voltis/models"
-	"voltis/models/contentmeta"
-	"voltis/models/contentmetamerge"
+	"voltis/models/metaraw"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -18,19 +17,8 @@ import (
 type metadataRow struct {
 	URI       string
 	LibraryID string
-	Data      contentmeta.Metadata
-	DataRaw   map[string]json.RawMessage
+	DataRaw   metaraw.MetadataRaw
 	dirty     bool
-}
-
-func (m *metadataRow) setSource(source string, raw any) {
-	m.DataRaw[source] = contentmetamerge.BuildLayerEntry(raw)
-	m.dirty = true
-}
-
-// merge recomputes merged data from all layers.
-func (m *metadataRow) merge() {
-	m.Data = contentmetamerge.MergeRawLayers(m.DataRaw)
 }
 
 type repository struct {
@@ -78,16 +66,10 @@ func (r *repository) load(ctx context.Context) error {
 
 	r.metadata = make([]*metadataRow, len(dbMeta))
 	for i, m := range dbMeta {
-		data := contentmeta.ParseMetadata(m.Data)
-		var dataRaw map[string]json.RawMessage
-		_ = json.Unmarshal(m.DataRaw, &dataRaw)
-		if dataRaw == nil {
-			dataRaw = map[string]json.RawMessage{}
-		}
+		dataRaw := metaraw.From(m.DataRaw)
 		r.metadata[i] = &metadataRow{
 			URI:       m.URI,
 			LibraryID: m.LibraryID,
-			Data:      data,
 			DataRaw:   dataRaw,
 		}
 	}
@@ -101,14 +83,12 @@ func (r *repository) markDirty(c *models.Content) {
 func (r *repository) getMetadata(uri string) *metadataRow {
 	for _, m := range r.metadata {
 		if m.URI == uri {
-			m.merge()
 			return m
 		}
 	}
 	m := &metadataRow{
 		URI:       uri,
 		LibraryID: r.libraryID,
-		DataRaw:   map[string]json.RawMessage{},
 		dirty:     true,
 	}
 	r.metadata = append(r.metadata, m)
@@ -195,7 +175,8 @@ func (r *repository) getSeries(uri, uriPart string, fileURI *string, contentType
 	r.markDirty(c)
 
 	meta := r.getMetadata(uri)
-	meta.setSource("file", contentmeta.Metadata{Title: title})
+	meta.DataRaw.File = &metaraw.RawContainer[models.Metadata]{Raw: models.Metadata{Title: title}}
+	meta.dirty = true
 
 	r.parents[uri] = c
 	return c
@@ -289,9 +270,8 @@ func (r *repository) commitGroup(ctx context.Context) error {
 		if !m.dirty {
 			continue
 		}
-		m.merge()
-		dataJSON, _ := json.Marshal(m.Data)
-		dataRawJSON, _ := json.Marshal(m.DataRaw)
+		dataJSON, _ := json.Marshal(m.DataRaw.Merge())
+		dataRawJSON := m.DataRaw.Dump()
 		now := time.Now().UTC()
 
 		_, err := tx.Exec(ctx, `

@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"voltis/lib/sources"
-	"voltis/models/contentmetamerge"
+	"voltis/models/metaraw"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
@@ -152,8 +152,8 @@ func (r *MetadataSourceRoutes) mangabakaLink(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("MangaBaka error: %v", err))
 	}
 
-	err = contentmetamerge.WithSourceLayers(ctx, r.pool, content.URI, content.LibraryID, func(layers contentmetamerge.SourceLayers) bool {
-		layers["mangabaka"] = contentmetamerge.BuildLayerEntry(series)
+	err = editMetadataRaw(ctx, r.pool, content.URI, content.LibraryID, func(mr *metaraw.MetadataRaw) bool {
+		mr.MangaBaka = &metaraw.RawContainer[sources.Series]{Raw: *series}
 		return true
 	})
 	if err != nil {
@@ -191,8 +191,11 @@ func (r *MetadataSourceRoutes) unlink(c echo.Context) error {
 		return err
 	}
 
-	err = contentmetamerge.WithSourceLayers(ctx, r.pool, content.URI, content.LibraryID, func(layers contentmetamerge.SourceLayers) bool {
-		delete(layers, req.Source)
+	err = editMetadataRaw(ctx, r.pool, content.URI, content.LibraryID, func(mr *metaraw.MetadataRaw) bool {
+		switch req.Source {
+		case "mangabaka":
+			mr.MangaBaka = nil
+		}
 		return true
 	})
 	if err != nil {

@@ -10,7 +10,6 @@ import (
 	"voltis/lib/comic"
 	"voltis/lib/fp"
 	"voltis/models"
-	"voltis/models/contentmeta"
 )
 
 // ComicsScanner implements FileScanner for comic archives.
@@ -32,7 +31,7 @@ func (cs *ComicsScanner) ParseFile(libraryID string, file FSFile) *ParsedItem {
 	}
 
 	// Extract metadata from ComicInfo
-	var meta contentmeta.Metadata
+	var meta models.Metadata
 	if comicInfo != nil {
 		meta = comic.ComicInfoToMetadata(comicInfo)
 	}

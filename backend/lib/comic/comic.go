@@ -18,7 +18,7 @@ import (
 	_ "golang.org/x/image/webp"
 
 	"voltis/lib/archive"
-	"voltis/models/contentmeta"
+	"voltis/models"
 )
 
 // ComicInfo represents the ComicInfo.xml schema used in CBZ/CBR files.
@@ -75,8 +75,8 @@ func ParseComicInfo(data []byte) (*ComicInfo, error) {
 }
 
 // ComicInfoToMetadata converts a ComicInfo into a Metadata struct.
-func ComicInfoToMetadata(ci *ComicInfo) contentmeta.Metadata {
-	m := contentmeta.Metadata{}
+func ComicInfoToMetadata(ci *ComicInfo) models.Metadata {
+	m := models.Metadata{}
 
 	clean := func(s string) string {
 		if s == "Unknown" {
@@ -123,7 +123,7 @@ func ComicInfoToMetadata(ci *ComicInfo) contentmeta.Metadata {
 		for name := range strings.SplitSeq(field, ",") {
 			name = strings.TrimSpace(name)
 			if name != "" {
-				m.Staff = append(m.Staff, contentmeta.StaffEntry{Name: name, Role: role})
+				m.Staff = append(m.Staff, models.StaffEntry{Name: name, Role: role})
 			}
 		}
 	}

@@ -11,8 +11,7 @@ import (
 
 	"voltis/db"
 	"voltis/models"
-	"voltis/models/contentmeta"
-	"voltis/models/contentmetamerge"
+	"voltis/models/metaraw"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -658,30 +657,13 @@ func (cr *ContentRoutes) getMetadataLayers(c echo.Context) error {
 		return err
 	}
 
-	var rawMap map[string]json.RawMessage
-	_ = json.Unmarshal(dataRaw, &rawMap)
-	if rawMap == nil {
-		rawMap = map[string]json.RawMessage{}
-	}
+	mr := metaraw.From(dataRaw)
+	mrLayers := mr.Layers()
 
-	layers := make([]MetadataLayerDTO, len(contentmeta.MergeOrder))
-	for i, source := range contentmeta.MergeOrder {
-		entry := rawMap[source]
-		layerData := json.RawMessage("{}")
-		layerRaw := json.RawMessage("{}")
-
-		if entry != nil {
-			raw := contentmetamerge.ExtractRaw(entry)
-			if raw != nil {
-				layerRaw = raw
-				materialized := contentmetamerge.MaterializeSource(source, raw)
-				if d, err := json.Marshal(materialized); err == nil {
-					layerData = d
-				}
-			}
-		}
-
-		layers[i] = MetadataLayerDTO{Source: source, Data: layerData, Raw: layerRaw}
+	layers := make([]MetadataLayerDTO, len(mrLayers))
+	for i, l := range mrLayers {
+		layerData, _ := json.Marshal(l.Materialized)
+		layers[i] = MetadataLayerDTO{Source: l.Name, Data: layerData, Raw: l.Raw}
 	}
 
 	return c.JSON(http.StatusOK, MetadataLayersResponse{Merged: data, Layers: layers})
@@ -709,8 +691,10 @@ func (cr *ContentRoutes) updateMetadataOverride(c echo.Context) error {
 		return err
 	}
 
-	err = contentmetamerge.WithSourceLayers(ctx, cr.pool, content.URI, content.LibraryID, func(layers contentmetamerge.SourceLayers) bool {
-		layers["overrides"] = contentmetamerge.BuildLayerEntry(req.Data)
+	err = editMetadataRaw(ctx, cr.pool, content.URI, content.LibraryID, func(mr *metaraw.MetadataRaw) bool {
+		var overrides models.Metadata
+		_ = json.Unmarshal(req.Data, &overrides)
+		mr.Overrides = &metaraw.RawContainer[models.Metadata]{Raw: overrides}
 		return true
 	})
 	if err != nil {
@@ -767,4 +751,38 @@ func getContent(ctx context.Context, pool *pgxpool.Pool, id string) (models.Cont
 		return models.Content{}, echo.NewHTTPError(http.StatusNotFound, "Content not found")
 	}
 	return content, err
+}
+
+// editMetadataRaw loads the data_raw for a content_metadata row, calls fn, and
+// if fn returns true, persists the updated data_raw and recomputed merged data.
+func editMetadataRaw(
+	ctx context.Context, pool *pgxpool.Pool,
+	uri, libraryID string,
+	fn func(*metaraw.MetadataRaw) bool,
+) error {
+	var dataRaw json.RawMessage
+	err := pool.QueryRow(ctx,
+		`SELECT data_raw FROM content_metadata WHERE uri = $1 AND library_id = $2`,
+		uri, libraryID).Scan(&dataRaw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		dataRaw = json.RawMessage("{}")
+	} else if err != nil {
+		return err
+	}
+
+	merged, err := metaraw.EditInPlace(&dataRaw, fn)
+	if err != nil {
+		return err
+	}
+	if merged == nil {
+		return nil
+	}
+
+	_, err = pool.Exec(ctx, `
+		INSERT INTO content_metadata (uri, library_id, data, data_raw, updated_at)
+		VALUES ($1, $2, $3, $4, now())
+		ON CONFLICT (uri, library_id) DO UPDATE
+		SET data = EXCLUDED.data, data_raw = EXCLUDED.data_raw, updated_at = now()
+	`, uri, libraryID, merged, dataRaw)
+	return err
 }
