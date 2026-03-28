@@ -3,153 +3,29 @@ package scanner
 import (
 	"encoding/json"
 	"fmt"
-	"image"
-	_ "image/gif"
-	_ "image/jpeg"
-	_ "image/png"
-	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
-	"sort"
-	"strconv"
 	"strings"
 
-	_ "golang.org/x/image/webp"
-
-	"voltis/lib/archive"
+	"voltis/lib/comic"
 	"voltis/lib/fp"
 	"voltis/models"
 	"voltis/models/contentmeta"
-	"voltis/models/contentmetamerge"
 )
 
 // ComicsScanner implements FileScanner for comic archives.
 type ComicsScanner struct{}
 
-var imageExtensions = map[string]bool{
-	".jpg": true, ".jpeg": true, ".png": true, ".webp": true, ".gif": true,
-}
-
 var coverNames = []string{"cover.jpg", "cover.jpeg", "cover.png", "cover.webp"}
-
-type pageInfo struct {
-	Name   string `json:"name"`
-	Width  int    `json:"width"`
-	Height int    `json:"height"`
-}
 
 func (cs *ComicsScanner) FileEligible(path string) bool {
 	return isComicFile(path)
 }
 
-func scanArchivePages(path string) ([]pageInfo, *contentmetamerge.ComicInfo) {
-	a, err := archive.Open(path)
-	if err != nil {
-		slog_scan("failed to open archive", "path", path, "err", err)
-		return nil, nil
-	}
-	defer func() { _ = a.Close() }()
-
-	entries, err := a.List()
-	if err != nil {
-		slog_scan("failed to list archive", "path", path, "err", err)
-		return nil, nil
-	}
-
-	var pages []pageInfo
-	var comicInfo *contentmetamerge.ComicInfo
-
-	for _, entry := range entries {
-		if entry.Name == "ComicInfo.xml" {
-			data, err := a.ReadFile(entry.Name)
-			if err == nil {
-				comicInfo, _ = contentmetamerge.ParseComicInfo(data)
-			}
-			continue
-		}
-
-		ext := strings.ToLower(filepath.Ext(entry.Name))
-		if !imageExtensions[ext] {
-			continue
-		}
-
-		rc, err := a.OpenFile(entry.Name)
-		if err != nil {
-			pages = append(pages, pageInfo{Name: entry.Name})
-			continue
-		}
-
-		cfg, _, err := image.DecodeConfig(rc)
-		_ = rc.Close()
-		if err != nil {
-			pages = append(pages, pageInfo{Name: entry.Name})
-			continue
-		}
-		pages = append(pages, pageInfo{Name: entry.Name, Width: cfg.Width, Height: cfg.Height})
-	}
-
-	sort.Slice(pages, func(i, j int) bool {
-		return pages[i].Name < pages[j].Name
-	})
-
-	return pages, comicInfo
-}
-
-var pdfPagesRe = regexp.MustCompile(`^Pages:\s+(\d+)`)
-var pdfSizeRe = regexp.MustCompile(`([\d.]+)\s*x\s*([\d.]+)`)
-
-func scanPDFPages(path string) []pageInfo {
-	result, err := exec.Command("pdfinfo", path).Output()
-	if err != nil {
-		slog_scan("pdfinfo failed", "path", path, "err", err)
-		return nil
-	}
-
-	var pageCount int
-	var pageWidth, pageHeight int
-
-	for _, line := range strings.Split(string(result), "\n") {
-		if m := pdfPagesRe.FindStringSubmatch(line); m != nil {
-			pageCount, _ = strconv.Atoi(m[1])
-		} else if strings.HasPrefix(line, "Page size:") {
-			if m := pdfSizeRe.FindStringSubmatch(line); m != nil {
-				w, _ := strconv.ParseFloat(m[1], 64)
-				h, _ := strconv.ParseFloat(m[2], 64)
-				// Convert points to pixels at 250 DPI
-				pageWidth = int(math.Round(w * 250 / 72))
-				pageHeight = int(math.Round(h * 250 / 72))
-			}
-		}
-	}
-
-	if pageCount <= 0 {
-		return nil
-	}
-
-	pages := make([]pageInfo, pageCount)
-	for i := range pageCount {
-		pages[i] = pageInfo{
-			Name:   fmt.Sprintf("p%d", i+1),
-			Width:  pageWidth,
-			Height: pageHeight,
-		}
-	}
-	return pages
-}
-
 func (cs *ComicsScanner) ParseFile(libraryID string, file FSFile) *ParsedItem {
 	path := file.Path
 
-	var pages []pageInfo
-	var comicInfo *contentmetamerge.ComicInfo
-
-	if strings.ToLower(filepath.Ext(path)) == ".pdf" {
-		pages = scanPDFPages(path)
-	} else {
-		pages, comicInfo = scanArchivePages(path)
-	}
+	pages, comicInfo := comic.Scan(path)
 
 	if len(pages) == 0 {
 		return nil
@@ -158,7 +34,7 @@ func (cs *ComicsScanner) ParseFile(libraryID string, file FSFile) *ParsedItem {
 	// Extract metadata from ComicInfo
 	var meta contentmeta.Metadata
 	if comicInfo != nil {
-		meta = contentmetamerge.ComicInfoToMetadata(comicInfo)
+		meta = comic.ComicInfoToMetadata(comicInfo)
 	}
 
 	// Determine series
@@ -264,7 +140,7 @@ func (cs *ComicsScanner) ParseFile(libraryID string, file FSFile) *ParsedItem {
 	}
 
 	// Build file data (pages)
-	pageTuples := fp.Map(pages, func(p pageInfo) any {
+	pageTuples := fp.Map(pages, func(p comic.PageInfo) any {
 		return []any{p.Name, p.Width, p.Height}
 	})
 	fd, _ := json.Marshal(map[string]any{"pages": pageTuples})

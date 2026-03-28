@@ -1,10 +1,23 @@
-package contentmetamerge
+package comic
 
 import (
 	"encoding/xml"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
+	"math"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 
+	_ "golang.org/x/image/webp"
+
+	"voltis/lib/archive"
 	"voltis/models/contentmeta"
 )
 
@@ -45,6 +58,12 @@ type ComicInfo struct {
 	StoryArc        string `xml:"StoryArc" json:"story_arc,omitempty"`
 	SeriesGroup     string `xml:"SeriesGroup" json:"series_group,omitempty"`
 	ScanInformation string `xml:"ScanInformation" json:"scan_information,omitempty"`
+}
+
+type PageInfo struct {
+	Name   string `json:"name"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
 }
 
 func ParseComicInfo(data []byte) (*ComicInfo, error) {
@@ -117,4 +136,109 @@ func ComicInfoToMetadata(ci *ComicInfo) contentmeta.Metadata {
 	addStaff(ci.Editor, "editor")
 
 	return m
+}
+
+var imageExtensions = map[string]bool{
+	".jpg": true, ".jpeg": true, ".png": true, ".webp": true, ".gif": true,
+}
+
+var pdfPagesRe = regexp.MustCompile(`^Pages:\s+(\d+)`)
+var pdfSizeRe = regexp.MustCompile(`([\d.]+)\s*x\s*([\d.]+)`)
+
+// Scan reads pages and optional ComicInfo from a comic file. Supports PDF and
+// archive formats (CBZ, CBR, etc.).
+func Scan(path string) ([]PageInfo, *ComicInfo) {
+	if strings.ToLower(filepath.Ext(path)) == ".pdf" {
+		return scanPDFPages(path), nil
+	}
+	return scanArchivePages(path)
+}
+
+func scanArchivePages(path string) ([]PageInfo, *ComicInfo) {
+	a, err := archive.Open(path)
+	if err != nil {
+		return nil, nil
+	}
+	defer func() { _ = a.Close() }()
+
+	entries, err := a.List()
+	if err != nil {
+		return nil, nil
+	}
+
+	var pages []PageInfo
+	var comicInfo *ComicInfo
+
+	for _, entry := range entries {
+		if entry.Name == "ComicInfo.xml" {
+			data, err := a.ReadFile(entry.Name)
+			if err == nil {
+				comicInfo, _ = ParseComicInfo(data)
+			}
+			continue
+		}
+
+		ext := strings.ToLower(filepath.Ext(entry.Name))
+		if !imageExtensions[ext] {
+			continue
+		}
+
+		rc, err := a.OpenFile(entry.Name)
+		if err != nil {
+			pages = append(pages, PageInfo{Name: entry.Name})
+			continue
+		}
+
+		cfg, _, err := image.DecodeConfig(rc)
+		_ = rc.Close()
+		if err != nil {
+			pages = append(pages, PageInfo{Name: entry.Name})
+			continue
+		}
+		pages = append(pages, PageInfo{Name: entry.Name, Width: cfg.Width, Height: cfg.Height})
+	}
+
+	sort.Slice(pages, func(i, j int) bool {
+		return pages[i].Name < pages[j].Name
+	})
+
+	return pages, comicInfo
+}
+
+func scanPDFPages(path string) []PageInfo {
+	result, err := exec.Command("pdfinfo", path).Output()
+	if err != nil {
+		return nil
+	}
+
+	var pageCount int
+	var pageWidth, pageHeight int
+
+	for _, line := range strings.Split(string(result), "\n") {
+		if m := pdfPagesRe.FindStringSubmatch(line); m != nil {
+			pageCount, _ = strconv.Atoi(m[1])
+		} else if strings.HasPrefix(line, "Page size:") {
+			if m := pdfSizeRe.FindStringSubmatch(line); m != nil {
+				w, _ := strconv.ParseFloat(m[1], 64)
+				h, _ := strconv.ParseFloat(m[2], 64)
+				// Convert points to pixels at 250 DPI
+				pageWidth = int(math.Round(w * 250 / 72))
+				pageHeight = int(math.Round(h * 250 / 72))
+			}
+		}
+	}
+
+	if pageCount <= 0 {
+		return nil
+	}
+
+	pages := make([]PageInfo, pageCount)
+	for i := range pageCount {
+		pages[i] = PageInfo{
+			Name:   fmt.Sprintf("p%d", i+1),
+			Width:  pageWidth,
+			Height: pageHeight,
+		}
+	}
+	return pages
 }
