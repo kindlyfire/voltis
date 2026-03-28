@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+	"voltis/config"
 )
 
 const (
@@ -278,6 +279,7 @@ func get[T any](m *MangaBaka, ctx context.Context, path string, query url.Values
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "Voltis/"+config.AppVersion)
 
 	resp, err := m.doWithRetry(ctx, req)
 	if err != nil {

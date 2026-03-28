@@ -9,8 +9,6 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-const appVersion = "dev"
-
 type infoDTO struct {
 	Version             string `json:"version"`
 	RegistrationEnabled bool   `json:"registration_enabled"`
@@ -25,7 +23,7 @@ func infoHandler(pool *pgxpool.Pool) echo.HandlerFunc {
 			return err
 		}
 		return c.JSON(http.StatusOK, infoDTO{
-			Version:             appVersion,
+			Version:             config.AppVersion,
 			RegistrationEnabled: cfg.RegistrationEnabled,
 			FirstUserFlow:       first,
 		})

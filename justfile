@@ -29,7 +29,7 @@ docker-push-release:
         echo "Image $image already exists, skipping push"
         exit 0
     fi
-    docker build -t "$image" .
+    docker build --build-arg APP_VERSION="$version" -t "$image" .
     docker push "$image"
 
 docker-push-dev:
@@ -37,5 +37,5 @@ docker-push-dev:
     set -euo pipefail
     image="ghcr.io/kindlyfire/voltis:dev"
     echo "Image: $image"
-    docker build -t "$image" .
+    docker build --build-arg APP_VERSION=dev -t "$image" .
     docker push "$image"

@@ -7,6 +7,8 @@ import (
 	"github.com/joho/godotenv"
 )
 
+var AppVersion = "dev"
+
 type Config struct {
 	DatabaseURL         string
 	Port                string

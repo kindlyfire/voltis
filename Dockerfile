@@ -24,9 +24,10 @@ WORKDIR /app
 COPY backend/go.mod backend/go.sum ./
 RUN --mount=type=cache,target=/root/go/pkg/mod go mod download
 COPY backend/ ./
+ARG APP_VERSION=dev
 RUN --mount=type=cache,target=/root/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=1 go build -ldflags="-s -w" -o /app/voltis .
+    CGO_ENABLED=1 go build -ldflags="-s -w -X voltis/config.AppVersion=${APP_VERSION}" -o /app/voltis .
 
 #
 # Runtime
