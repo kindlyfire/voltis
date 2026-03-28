@@ -77,7 +77,7 @@
                             <VBtn
                                 size="small"
                                 variant="text"
-                                :href="`https://mangabaka.dev/${item.id}`"
+                                :href="`https://mangabaka.org/${item.id}`"
                                 target="_blank"
                                 append-icon="mdi-open-in-new"
                             >

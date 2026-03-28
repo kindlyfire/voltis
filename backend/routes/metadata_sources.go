@@ -124,7 +124,8 @@ func (r *MetadataSourceRoutes) mangabakaSearch(c echo.Context) error {
 
 func seriesToMetadata(s *sources.Series) contentmeta.Metadata {
 	meta := contentmeta.Metadata{
-		Title: s.Title,
+		Title:       s.Title,
+		MangaBakaID: &s.ID,
 	}
 	if s.Description != nil {
 		meta.Description = *s.Description

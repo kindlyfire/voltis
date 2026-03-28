@@ -139,6 +139,18 @@
                                 <dt>Language</dt>
                                 <dd>{{ content.meta.language }}</dd>
                             </template>
+                            <template v-if="content.meta.mangabaka_id">
+                                <dt>Links</dt>
+                                <dd>
+                                    <a
+                                        :href="`https://mangabaka.org/${content.meta.mangabaka_id}`"
+                                        target="_blank"
+                                        class="text-inherit underline"
+                                    >
+                                        MangaBaka
+                                    </a>
+                                </dd>
+                            </template>
                         </dl>
                     </div>
                 </div>

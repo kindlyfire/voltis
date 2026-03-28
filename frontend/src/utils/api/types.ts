@@ -152,6 +152,8 @@ export interface ContentMetadata {
     alternate_count?: number
     // Book-specific fields
     series_index?: number
+    // Source links
+    mangabaka_id?: number
 }
 
 export interface MetadataLayer {

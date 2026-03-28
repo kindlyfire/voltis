@@ -40,6 +40,9 @@ type Metadata struct {
 
 	// Book fields
 	SeriesIndex float64 `json:"series_index,omitempty"`
+
+	// Source links
+	MangaBakaID *int `json:"mangabaka_id,omitempty"`
 }
 
 var MergeOrder = []string{"file", "mangabaka", "overrides"}
