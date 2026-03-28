@@ -22,6 +22,7 @@ import (
 	"voltis/lib/fp"
 	"voltis/models"
 	"voltis/models/contentmeta"
+	"voltis/models/contentmetamerge"
 )
 
 // ComicsScanner implements FileScanner for comic archives.
@@ -43,7 +44,7 @@ func (cs *ComicsScanner) FileEligible(path string) bool {
 	return isComicFile(path)
 }
 
-func scanArchivePages(path string) ([]pageInfo, *ComicInfo) {
+func scanArchivePages(path string) ([]pageInfo, *contentmetamerge.ComicInfo) {
 	a, err := archive.Open(path)
 	if err != nil {
 		slog_scan("failed to open archive", "path", path, "err", err)
@@ -58,13 +59,13 @@ func scanArchivePages(path string) ([]pageInfo, *ComicInfo) {
 	}
 
 	var pages []pageInfo
-	var comicInfo *ComicInfo
+	var comicInfo *contentmetamerge.ComicInfo
 
 	for _, entry := range entries {
 		if entry.Name == "ComicInfo.xml" {
 			data, err := a.ReadFile(entry.Name)
 			if err == nil {
-				comicInfo, _ = parseComicInfo(data)
+				comicInfo, _ = contentmetamerge.ParseComicInfo(data)
 			}
 			continue
 		}
@@ -142,7 +143,7 @@ func (cs *ComicsScanner) ParseFile(libraryID string, file FSFile) *ParsedItem {
 	path := file.Path
 
 	var pages []pageInfo
-	var comicInfo *ComicInfo
+	var comicInfo *contentmetamerge.ComicInfo
 
 	if strings.ToLower(filepath.Ext(path)) == ".pdf" {
 		pages = scanPDFPages(path)
@@ -156,11 +157,8 @@ func (cs *ComicsScanner) ParseFile(libraryID string, file FSFile) *ParsedItem {
 
 	// Extract metadata from ComicInfo
 	var meta contentmeta.Metadata
-	var comicInfoRaw map[string]any
 	if comicInfo != nil {
-		meta = comicInfoToMetadata(comicInfo)
-		ciJSON, _ := json.Marshal(comicInfo)
-		_ = json.Unmarshal(ciJSON, &comicInfoRaw)
+		meta = contentmetamerge.ComicInfoToMetadata(comicInfo)
 	}
 
 	// Determine series
@@ -279,8 +277,7 @@ func (cs *ComicsScanner) ParseFile(libraryID string, file FSFile) *ParsedItem {
 		OrderParts:  orderParts,
 		CoverSuffix: new(pages[0].Name),
 		FileData:    fd,
-		Meta:        meta,
-		MetaRaw:     comicInfoRaw,
+		MetaRaw:     meta,
 		Series: &ParsedSeries{
 			URIPrefix:   "comic",
 			URIPart:     seriesURIPart,

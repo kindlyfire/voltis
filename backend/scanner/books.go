@@ -81,7 +81,7 @@ func (bs *BooksScanner) ParseFile(libraryID string, file FSFile) *ParsedItem {
 		URIPart:     stem,
 		OrderParts:  orderParts,
 		CoverSuffix: coverSuffix,
-		Meta:        fileMeta,
+		MetaRaw:     fileMeta,
 	}
 }
 

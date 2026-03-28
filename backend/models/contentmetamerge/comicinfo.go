@@ -1,4 +1,4 @@
-package scanner
+package contentmetamerge
 
 import (
 	"encoding/xml"
@@ -47,7 +47,7 @@ type ComicInfo struct {
 	ScanInformation string `xml:"ScanInformation" json:"scan_information,omitempty"`
 }
 
-func parseComicInfo(data []byte) (*ComicInfo, error) {
+func ParseComicInfo(data []byte) (*ComicInfo, error) {
 	var ci ComicInfo
 	if err := xml.Unmarshal(data, &ci); err != nil {
 		return nil, err
@@ -55,8 +55,8 @@ func parseComicInfo(data []byte) (*ComicInfo, error) {
 	return &ci, nil
 }
 
-// comicInfoToMetadata converts a ComicInfo into a Metadata struct.
-func comicInfoToMetadata(ci *ComicInfo) contentmeta.Metadata {
+// ComicInfoToMetadata converts a ComicInfo into a Metadata struct.
+func ComicInfoToMetadata(ci *ComicInfo) contentmeta.Metadata {
 	m := contentmeta.Metadata{}
 
 	clean := func(s string) string {

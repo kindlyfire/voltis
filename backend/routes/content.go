@@ -12,6 +12,7 @@ import (
 	"voltis/db"
 	"voltis/models"
 	"voltis/models/contentmeta"
+	"voltis/models/contentmetamerge"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -670,13 +671,12 @@ func (cr *ContentRoutes) getMetadataLayers(c echo.Context) error {
 		layerRaw := json.RawMessage("{}")
 
 		if entry != nil {
-			var entryMap map[string]json.RawMessage
-			if json.Unmarshal(entry, &entryMap) == nil {
-				if d, ok := entryMap["data"]; ok {
+			raw := contentmetamerge.ExtractRaw(entry)
+			if raw != nil {
+				layerRaw = raw
+				materialized := contentmetamerge.MaterializeSource(source, raw)
+				if d, err := json.Marshal(materialized); err == nil {
 					layerData = d
-				}
-				if r, ok := entryMap["raw"]; ok {
-					layerRaw = r
 				}
 			}
 		}
@@ -709,8 +709,8 @@ func (cr *ContentRoutes) updateMetadataOverride(c echo.Context) error {
 		return err
 	}
 
-	err = contentmeta.WithSourceLayers(ctx, cr.pool, content.URI, content.LibraryID, func(layers contentmeta.SourceLayers) bool {
-		layers["overrides"] = contentmeta.BuildLayerEntry(req.Data, nil)
+	err = contentmetamerge.WithSourceLayers(ctx, cr.pool, content.URI, content.LibraryID, func(layers contentmetamerge.SourceLayers) bool {
+		layers["overrides"] = contentmetamerge.BuildLayerEntry(req.Data)
 		return true
 	})
 	if err != nil {

@@ -115,28 +115,3 @@ func ParseMetadata(data []byte) Metadata {
 	}
 	return result
 }
-
-// MergeRawLayers iterates MergeOrder, parses each present layer entry, and
-// returns the merged Metadata.
-func MergeRawLayers(dataRaw map[string]json.RawMessage) Metadata {
-	var layers []Metadata
-	for _, source := range MergeOrder {
-		raw, ok := dataRaw[source]
-		if !ok {
-			continue
-		}
-		meta, _ := ParseLayerEntry(raw)
-		layers = append(layers, meta)
-	}
-	return Merge(layers...)
-}
-
-// ParseLayerEntry parses a layer entry ({"data": ..., "raw": ...}) and returns
-// the parsed Metadata and raw JSON. Never fails.
-func ParseLayerEntry(data []byte) (Metadata, json.RawMessage) {
-	var wrapper map[string]json.RawMessage
-	if json.Unmarshal(data, &wrapper) != nil {
-		return Metadata{}, nil
-	}
-	return ParseMetadata(wrapper["data"]), wrapper["raw"]
-}

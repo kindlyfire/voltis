@@ -1,26 +1,70 @@
-package contentmeta
+package contentmetamerge
 
 import (
 	"context"
 	"encoding/json"
 
 	"voltis/db"
+	"voltis/lib/sources"
+	"voltis/models/contentmeta"
 
 	"github.com/jackc/pgx/v5"
 )
 
-// SourceLayers is the parsed form of data_raw: source name → layer entry JSON.
-type SourceLayers map[string]json.RawMessage
+// MaterializeSource converts raw JSON for a given source into Metadata.
+func MaterializeSource(source string, raw json.RawMessage) contentmeta.Metadata {
+	switch source {
+	case "mangabaka":
+		var s sources.Series
+		if json.Unmarshal(raw, &s) == nil {
+			return sources.MangaBakaSeriesToMetadata(&s)
+		}
+		return contentmeta.Metadata{}
 
-// BuildLayerEntry builds the {"data": ..., "raw": ...} JSON blob stored as a
-// SourceLayers value. If raw is nil, an empty object is used.
-func BuildLayerEntry(data any, raw any) json.RawMessage {
+	default:
+		return contentmeta.ParseMetadata(raw)
+	}
+}
+
+// ExtractRaw extracts the "raw" value from a layer entry. The entry is expected
+// to be `{"raw": ...}`. Returns nil if parsing fails.
+func ExtractRaw(entry json.RawMessage) json.RawMessage {
+	var wrapper map[string]json.RawMessage
+	if json.Unmarshal(entry, &wrapper) != nil {
+		return nil
+	}
+	return wrapper["raw"]
+}
+
+// MergeRawLayers iterates MergeOrder, extracts the raw from each present layer
+// entry, materializes it, and returns the merged Metadata.
+func MergeRawLayers(dataRaw map[string]json.RawMessage) contentmeta.Metadata {
+	var layers []contentmeta.Metadata
+	for _, source := range contentmeta.MergeOrder {
+		entry, ok := dataRaw[source]
+		if !ok {
+			continue
+		}
+		raw := ExtractRaw(entry)
+		if raw == nil {
+			continue
+		}
+		layers = append(layers, MaterializeSource(source, raw))
+	}
+	return contentmeta.Merge(layers...)
+}
+
+// BuildLayerEntry builds the {"raw": ...} JSON blob stored as a layer value.
+func BuildLayerEntry(raw any) json.RawMessage {
 	if raw == nil {
 		raw = json.RawMessage("{}")
 	}
-	entry, _ := json.Marshal(map[string]any{"data": data, "raw": raw})
+	entry, _ := json.Marshal(map[string]any{"raw": raw})
 	return entry
 }
+
+// SourceLayers is the parsed form of data_raw: source name → layer entry JSON.
+type SourceLayers map[string]json.RawMessage
 
 // WithSourceLayers loads the source layers for a content_metadata row, calls fn
 // with them, and if fn returns true, serializes the layers back and upserts the

@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"voltis/lib/sources"
-	"voltis/models/contentmeta"
+	"voltis/models/contentmetamerge"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
@@ -122,51 +122,6 @@ func (r *MetadataSourceRoutes) mangabakaSearch(c echo.Context) error {
 	return c.JSON(http.StatusOK, mangaBakaSearchResponse{Data: data})
 }
 
-func seriesToMetadata(s *sources.Series) contentmeta.Metadata {
-	meta := contentmeta.Metadata{
-		Title:       s.Title,
-		MangaBakaID: &s.ID,
-	}
-	if s.Description != nil {
-		meta.Description = *s.Description
-	}
-
-	var staff []contentmeta.StaffEntry
-	for _, a := range s.Authors {
-		staff = append(staff, contentmeta.StaffEntry{Name: a, Role: "author"})
-	}
-	for _, a := range s.Artists {
-		staff = append(staff, contentmeta.StaffEntry{Name: a, Role: "artist"})
-	}
-	meta.Staff = staff
-
-	for _, p := range s.Publishers {
-		if p.Name != nil && *p.Name != "" {
-			meta.Publisher = *p.Name
-			break
-		}
-	}
-
-	if s.Year != nil {
-		meta.PublicationDate = strconv.Itoa(*s.Year)
-	}
-	if len(s.Genres) > 0 {
-		meta.Genre = strings.Join(s.Genres, ", ")
-	}
-	if s.ContentRating != "" {
-		meta.AgeRating = string(s.ContentRating)
-	}
-
-	switch s.Type {
-	case sources.SeriesTypeManga, sources.SeriesTypeManhwa, sources.SeriesTypeManhua:
-		meta.Manga = "Yes"
-	case sources.SeriesTypeNovel, sources.SeriesTypeOEL:
-		meta.Manga = "No"
-	}
-
-	return meta
-}
-
 type mangaBakaLinkRequest struct {
 	ContentID   string `json:"content_id" validate:"required"`
 	MangaBakaID int    `json:"mangabaka_id" validate:"required"`
@@ -197,9 +152,8 @@ func (r *MetadataSourceRoutes) mangabakaLink(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("MangaBaka error: %v", err))
 	}
 
-	meta := seriesToMetadata(series)
-	err = contentmeta.WithSourceLayers(ctx, r.pool, content.URI, content.LibraryID, func(layers contentmeta.SourceLayers) bool {
-		layers["mangabaka"] = contentmeta.BuildLayerEntry(meta, series)
+	err = contentmetamerge.WithSourceLayers(ctx, r.pool, content.URI, content.LibraryID, func(layers contentmetamerge.SourceLayers) bool {
+		layers["mangabaka"] = contentmetamerge.BuildLayerEntry(series)
 		return true
 	})
 	if err != nil {
@@ -237,7 +191,7 @@ func (r *MetadataSourceRoutes) unlink(c echo.Context) error {
 		return err
 	}
 
-	err = contentmeta.WithSourceLayers(ctx, r.pool, content.URI, content.LibraryID, func(layers contentmeta.SourceLayers) bool {
+	err = contentmetamerge.WithSourceLayers(ctx, r.pool, content.URI, content.LibraryID, func(layers contentmetamerge.SourceLayers) bool {
 		delete(layers, req.Source)
 		return true
 	})

@@ -10,6 +10,7 @@ import (
 	"voltis/db"
 	"voltis/models"
 	"voltis/models/contentmeta"
+	"voltis/models/contentmetamerge"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -22,21 +23,14 @@ type metadataRow struct {
 	dirty     bool
 }
 
-func (m *metadataRow) setSource(source string, data contentmeta.Metadata, raw map[string]any) {
-	entry := map[string]any{"data": data}
-	if raw != nil {
-		entry["raw"] = raw
-	} else {
-		entry["raw"] = map[string]any{}
-	}
-	entryJSON, _ := json.Marshal(entry)
-	m.DataRaw[source] = entryJSON
+func (m *metadataRow) setSource(source string, raw any) {
+	m.DataRaw[source] = contentmetamerge.BuildLayerEntry(raw)
 	m.dirty = true
 }
 
 // merge recomputes merged data from all layers.
 func (m *metadataRow) merge() {
-	m.Data = contentmeta.MergeRawLayers(m.DataRaw)
+	m.Data = contentmetamerge.MergeRawLayers(m.DataRaw)
 }
 
 type repository struct {
@@ -107,6 +101,7 @@ func (r *repository) markDirty(c *models.Content) {
 func (r *repository) getMetadata(uri string) *metadataRow {
 	for _, m := range r.metadata {
 		if m.URI == uri {
+			m.merge()
 			return m
 		}
 	}
@@ -200,7 +195,7 @@ func (r *repository) getSeries(uri, uriPart string, fileURI *string, contentType
 	r.markDirty(c)
 
 	meta := r.getMetadata(uri)
-	meta.setSource("file", contentmeta.Metadata{Title: title}, nil)
+	meta.setSource("file", contentmeta.Metadata{Title: title})
 
 	r.parents[uri] = c
 	return c

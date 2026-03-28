@@ -15,6 +15,7 @@ import (
 	"voltis/lib/tasks"
 	"voltis/models"
 	"voltis/models/contentmeta"
+	"voltis/models/contentmetamerge"
 )
 
 // FileScanner is the interface each scanner type must implement.
@@ -48,8 +49,7 @@ type ParsedItem struct {
 	OrderParts  []*float32
 	CoverSuffix *string // appended to file path for cover URI
 	FileData    json.RawMessage
-	Meta        contentmeta.Metadata
-	MetaRaw     map[string]any // ComicInfo raw, nil for books
+	MetaRaw     any
 }
 
 type ScanInput struct {
@@ -363,7 +363,7 @@ func applyParsedItem(r *repository, libraryID string, p *ParsedItem) *models.Con
 	r.markDirty(content)
 
 	metaRow := r.getMetadata(content.URI)
-	metaRow.setSource("file", p.Meta, p.MetaRaw)
+	metaRow.setSource("file", p.MetaRaw)
 
 	return content
 }
@@ -423,14 +423,17 @@ func inheritChildMetadata(r *repository, series *models.Content, items []*models
 
 	metaRow := r.getMetadata(series.URI)
 	var existing contentmeta.Metadata
-	if raw, ok := metaRow.DataRaw["file"]; ok {
-		existing, _ = contentmeta.ParseLayerEntry(raw)
+	if entry, ok := metaRow.DataRaw["file"]; ok {
+		raw := contentmetamerge.ExtractRaw(entry)
+		if raw != nil {
+			existing = contentmetamerge.MaterializeSource("file", raw)
+		}
 	}
 	// Merge: inherited fills in gaps in existing
 	result := contentmeta.Merge(inherited, existing)
 	// But always update title from inheritance
 	result.Title = inherited.Title
-	metaRow.setSource("file", result, nil)
+	metaRow.setSource("file", result)
 }
 
 func groupByFolder(files []FSFile) [][]FSFile {

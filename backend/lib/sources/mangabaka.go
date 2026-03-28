@@ -10,8 +10,11 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
+	"strings"
 	"time"
 	"voltis/config"
+	"voltis/models/contentmeta"
 )
 
 const (
@@ -326,4 +329,50 @@ func (m *MangaBaka) SeriesSearch(ctx context.Context, opts SeriesSearchOpts) (*S
 		}
 	}
 	return get[SeriesSearchResponse](m, ctx, "/v1/series/search", query)
+}
+
+// MangaBakaSeriesToMetadata converts a MangaBaka Series into a Metadata struct.
+func MangaBakaSeriesToMetadata(s *Series) contentmeta.Metadata {
+	meta := contentmeta.Metadata{
+		Title:       s.Title,
+		MangaBakaID: &s.ID,
+	}
+	if s.Description != nil {
+		meta.Description = *s.Description
+	}
+
+	var staff []contentmeta.StaffEntry
+	for _, a := range s.Authors {
+		staff = append(staff, contentmeta.StaffEntry{Name: a, Role: "author"})
+	}
+	for _, a := range s.Artists {
+		staff = append(staff, contentmeta.StaffEntry{Name: a, Role: "artist"})
+	}
+	meta.Staff = staff
+
+	for _, p := range s.Publishers {
+		if p.Name != nil && *p.Name != "" {
+			meta.Publisher = *p.Name
+			break
+		}
+	}
+
+	if s.Year != nil {
+		meta.PublicationDate = strconv.Itoa(*s.Year)
+	}
+	if len(s.Genres) > 0 {
+		meta.Genre = strings.Join(s.Genres, ", ")
+	}
+	if s.ContentRating != "" {
+		meta.AgeRating = string(s.ContentRating)
+	}
+
+	switch s.Type {
+	case SeriesTypeManga, SeriesTypeManhwa, SeriesTypeManhua:
+		meta.Manga = "Yes"
+	case SeriesTypeNovel, SeriesTypeOEL:
+		meta.Manga = "No"
+	}
+
+	return meta
 }
