@@ -6,11 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0-alpha.3] - 2026-03-29
+
 - Added healthcheck to the Postgres container
 - Tests now create temporary databases to run in isolation, and clean them up
   afterward
 - New actions in the content multi-select menu: Scan, set reading status, reset
   reading progress
+- Many task system updates
+- Refactoring of content metadata handling code
+- Requests to the MangaBaka API now include Voltis and the version in the user
+  agent string
 
 ## [1.0.0-alpha.2] - 2026-03-15
 

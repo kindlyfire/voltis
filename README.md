@@ -13,16 +13,5 @@ issues or pull requests at the moment.
 
 ## Roadmap
 
-I will release alpha and beta versions of Voltis roughly in this order:
-
-For 1.0.0-alpha.X:
-
-- [x] Feature-parity of the Go backend with the old Python backend
-- [x] View scan history and logs in the frontend
-- [ ] Tests for every endpoint + scanner
-- [ ] Keep track of multiple reading tracks per content
-- [ ] MangaBaka integration
-- [ ] Scan files per folder and commit to database for each, instead of scanning
-      the entire library at once
-- [ ] Improved books support
-- [ ] Track tags/genres/staff (based on MB tags v2)
+Milestones exist for the alpha and beta stages of development
+[here](https://git.tijlvdb.me/tijlvdb/voltis/milestones).

@@ -8,7 +8,7 @@ Here's an example Docker Compose file to get started:
 ```yml
 services:
     app:
-        image: ghcr.io/kindlyfire/voltis:1.0.0-alpha.2
+        image: ghcr.io/kindlyfire/voltis:1.0.0-alpha.3
         ports:
             - '127.0.0.1:8080:8080'
         environment:
