@@ -81,3 +81,56 @@ func TestUserCRUD(t *testing.T) {
 	users = other.Get("/api/users").Assert(t, 200).JSONArray()
 	assertLen(t, users, 1)
 }
+
+func countAdmins(t *testing.T, users []map[string]any) int {
+	t.Helper()
+	n := 0
+	for _, u := range users {
+		perms, _ := u["permissions"].([]any)
+		for _, p := range perms {
+			if s(p) == "ADMIN" {
+				n++
+				break
+			}
+		}
+	}
+	return n
+}
+
+func TestUserAdminDemotionGuards(t *testing.T) {
+	pool := newTestPool(t)
+	a := newAdminClient(t, pool)
+
+	users := a.Get("/api/users").Assert(t, 200).JSONArray()
+	assertLen(t, users, 1)
+	adminAID := s(users[0]["id"])
+
+	adminB := a.Post("/api/users/new", map[string]any{
+		"username": "admin2", "password": "admin2pass123", "permissions": []string{"ADMIN"},
+	}).Assert(t, 200).JSON()
+	adminBID := s(adminB["id"])
+
+	b := newClient(t, pool)
+	b.Post("/api/auth/login", map[string]any{
+		"username": "admin2", "password": "admin2pass123",
+	}).Assert(t, 200)
+
+	b.Post("/api/users/"+adminAID, map[string]any{
+		"username": "admin", "permissions": []string{},
+	}).Assert(t, 200)
+
+	a.Post("/api/users/"+adminBID, map[string]any{
+		"username": "admin2", "permissions": []string{},
+	}).Assert(t, 403)
+
+	users = b.Get("/api/users").Assert(t, 200).JSONArray()
+	assertLen(t, users, 2)
+	assertEq(t, countAdmins(t, users), 1)
+
+	b.Post("/api/users/"+adminBID, map[string]any{
+		"username": "admin2", "permissions": []string{},
+	}).Assert(t, 403)
+
+	users = b.Get("/api/users").Assert(t, 200).JSONArray()
+	assertEq(t, countAdmins(t, users), 1)
+}

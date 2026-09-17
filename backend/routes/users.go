@@ -157,10 +157,12 @@ func (ur *UserRoutes) upsert(c echo.Context) error {
 	ctx := reqCtx(c)
 	now := time.Now().UTC()
 
-	if idOrNew == "new" {
-		if req.Password == nil || *req.Password == "" {
-			return echo.NewHTTPError(http.StatusBadRequest, "Password is required for new users")
-		}
+	if idOrNew == "new" && (req.Password == nil || *req.Password == "") {
+		return echo.NewHTTPError(http.StatusBadRequest, "Password is required for new users")
+	}
+
+	newHash := ""
+	if req.Password != nil && *req.Password != "" {
 		if len(*req.Password) > 72 {
 			return echo.NewHTTPError(http.StatusBadRequest, "password must be at most 72 characters")
 		}
@@ -168,12 +170,15 @@ func (ur *UserRoutes) upsert(c echo.Context) error {
 		if err != nil {
 			return err
 		}
+		newHash = string(hash)
+	}
 
+	if idOrNew == "new" {
 		id := models.MakeUserID()
 		_, err = ur.pool.Exec(ctx, `
 			INSERT INTO users (id, created_at, updated_at, username, password_hash, permissions)
 			VALUES ($1, $2, $3, $4, $5, $6)
-		`, id, now, now, req.Username, string(hash), req.Permissions)
+		`, id, now, now, req.Username, newHash, req.Permissions)
 		if err != nil {
 			return err
 		}
@@ -185,32 +190,43 @@ func (ur *UserRoutes) upsert(c echo.Context) error {
 		return c.JSON(http.StatusOK, userToDTO(user))
 	}
 
-	existing, err := getUser(ctx, ur.pool, idOrNew)
-	if err != nil {
-		return err
-	}
-
-	passwordHash := existing.PasswordHash
-	if req.Password != nil && *req.Password != "" {
-		if len(*req.Password) > 72 {
-			return echo.NewHTTPError(http.StatusBadRequest, "password must be at most 72 characters")
+	var user models.User
+	err = db.WithTx(ctx, ur.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", adminMutationLockKey); err != nil {
+			return err
 		}
-		hash, err := bcrypt.GenerateFromPassword([]byte(*req.Password), bcrypt.DefaultCost)
+
+		existing, err := getUser(ctx, tx, idOrNew)
 		if err != nil {
 			return err
 		}
-		passwordHash = string(hash)
-	}
 
-	_, err = ur.pool.Exec(ctx, `
-		UPDATE users SET username = $1, password_hash = $2, permissions = $3, updated_at = $4
-		WHERE id = $5
-	`, req.Username, passwordHash, req.Permissions, now, idOrNew)
-	if err != nil {
+		if slices.Contains(existing.Permissions, "ADMIN") && !slices.Contains(req.Permissions, "ADMIN") {
+			otherAdmin, err := db.SelectScalar[bool](ctx, tx,
+				"SELECT EXISTS (SELECT 1 FROM users WHERE permissions @> ARRAY['ADMIN'] AND id <> $1)", idOrNew)
+			if err != nil {
+				return err
+			}
+			if !otherAdmin {
+				return echo.NewHTTPError(http.StatusForbidden, "Cannot remove the last admin")
+			}
+		}
+
+		passwordHash := existing.PasswordHash
+		if newHash != "" {
+			passwordHash = newHash
+		}
+
+		if _, err := tx.Exec(ctx, `
+			UPDATE users SET username = $1, password_hash = $2, permissions = $3, updated_at = $4
+			WHERE id = $5
+		`, req.Username, passwordHash, req.Permissions, now, idOrNew); err != nil {
+			return err
+		}
+
+		user, err = getUser(ctx, tx, idOrNew)
 		return err
-	}
-
-	user, err := getUser(ctx, ur.pool, idOrNew)
+	})
 	if err != nil {
 		return err
 	}
@@ -262,8 +278,8 @@ func (ur *UserRoutes) delete(c echo.Context) error {
 	return okResponse(c)
 }
 
-func getUser(ctx context.Context, pool *pgxpool.Pool, id string) (models.User, error) {
-	user, err := db.SelectOne[models.User](ctx, pool, "SELECT * FROM users WHERE id = $1", id)
+func getUser(ctx context.Context, q db.Querier, id string) (models.User, error) {
+	user, err := db.SelectOne[models.User](ctx, q, "SELECT * FROM users WHERE id = $1", id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return models.User{}, echo.NewHTTPError(http.StatusNotFound, "User not found")
 	}
