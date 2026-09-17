@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	defaultBaseURL = "https://api.mangabaka.dev"
+	defaultBaseURL = "https://api.mangabaka.org"
 	defaultTimeout = 15 * time.Second
 
 	maxRetries    = 3

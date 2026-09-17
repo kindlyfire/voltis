@@ -125,7 +125,7 @@ const searchInput = ref('')
 const committedQuery = ref<string | null>(null)
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
-const mangabakaUrlRe = /mangabaka\.dev\/series\/(\d+)/
+const mangabakaUrlRe = /mangabaka\.org\/manga\/(\d+)/
 
 function getSearchType(): 'comic' | 'book' {
     const t = qContent.data?.value?.type
