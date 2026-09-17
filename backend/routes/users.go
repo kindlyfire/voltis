@@ -217,19 +217,47 @@ func (ur *UserRoutes) upsert(c echo.Context) error {
 	return c.JSON(http.StatusOK, userToDTO(user))
 }
 
+const adminMutationLockKey int64 = 7263845190
+
 func (ur *UserRoutes) delete(c echo.Context) error {
-	if _, err := requireUser(c); err != nil {
+	if _, err := requireAdmin(c); err != nil {
 		return err
 	}
 
 	ctx := reqCtx(c)
 	userID := c.Param("user_id")
-	result, err := ur.pool.Exec(ctx, "DELETE FROM users WHERE id = $1", userID)
+
+	err := db.WithTx(ctx, ur.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", adminMutationLockKey); err != nil {
+			return err
+		}
+
+		wasAdmin, err := db.SelectScalar[bool](ctx, tx, `
+			DELETE FROM users WHERE id = $1
+			RETURNING permissions @> ARRAY['ADMIN']
+		`, userID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return echo.NewHTTPError(http.StatusNotFound, "User not found")
+		}
+		if err != nil {
+			return err
+		}
+		if !wasAdmin {
+			return nil
+		}
+
+		adminLeft, err := db.SelectScalar[bool](ctx, tx,
+			"SELECT EXISTS (SELECT 1 FROM users WHERE permissions @> ARRAY['ADMIN'])")
+		if err != nil {
+			return err
+		}
+		if !adminLeft {
+			return echo.NewHTTPError(http.StatusForbidden, "Cannot delete the last admin")
+		}
+		return nil
+	})
 	if err != nil {
 		return err
-	}
-	if result.RowsAffected() == 0 {
-		return echo.NewHTTPError(http.StatusNotFound, "User not found")
 	}
 	return okResponse(c)
 }
