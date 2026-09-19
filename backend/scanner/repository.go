@@ -127,6 +127,17 @@ func (r *repository) removeContent(c *models.Content) {
 	}
 }
 
+func (r *repository) invalidateFile(path string) *string {
+	c := r.findContentByFileURI(path)
+	if c == nil {
+		return nil
+	}
+	c.Valid = false
+	c.UpdatedAt = time.Now().UTC()
+	r.markDirty(c)
+	return c.ParentID
+}
+
 func (r *repository) findContentByFileURI(fileURI string) *models.Content {
 	for i := range r.content {
 		if r.content[i].FileURI != nil && *r.content[i].FileURI == fileURI {

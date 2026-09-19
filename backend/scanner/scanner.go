@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"path/filepath"
 	"sort"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -128,11 +127,24 @@ func runScan(input ScanInput, tc *tasks.TaskContext) error {
 	}
 
 	// Walk filesystem
-	files, err := walkSources(scanSources, s.FileEligible)
+	walked, err := walkSources(scanSources, s.FileEligible)
 	if err != nil {
 		return err
 	}
+	files := walked.Files
 	slog.Info("[scanner] found files", "count", len(files), "library", input.LibraryID)
+
+	var failedPaths []string
+	for _, f := range walked.Failures {
+		failedPaths = append(failedPaths, f.Path)
+		slog.Warn("[scanner] failed to read path, retaining missing entries at or below it and suppressing their deletion",
+			"path", f.Path, "err", f.Err, "library", input.LibraryID)
+		tc.Log("Failed to read %s: %v; missing entries at or below it were retained\n", f.Path, f.Err)
+	}
+	if len(failedPaths) > 0 {
+		slog.Warn("[scanner] inventory incomplete, deletion suppressed within failed scopes", "paths", len(failedPaths), "library", input.LibraryID)
+		tc.Log("Inventory incomplete at %d paths; deletion was suppressed within those scopes.\n", len(failedPaths))
+	}
 
 	// Load existing content
 	r := newRepository(pool, input.LibraryID)
@@ -141,7 +153,7 @@ func runScan(input ScanInput, tc *tasks.TaskContext) error {
 	}
 
 	// Diff
-	toAdd, toUpdate, unchanged, toRemove := matchFiles(r, files, input.FilterPaths, input.Force)
+	toAdd, toUpdate, unchanged, toRemove := matchFiles(r, files, input.FilterPaths, failedPaths, input.Force)
 
 	slog.Info("[scanner] diff",
 		"add", len(toAdd), "update", len(toUpdate),
@@ -207,7 +219,7 @@ func runScan(input ScanInput, tc *tasks.TaskContext) error {
 	var progressProcessed atomic.Int64
 	var commitMu sync.Mutex
 	var commitErr error
-	var resultAdded, resultUpdated, resultFailed atomic.Int64
+	var counts scanCounts
 
 	fp.MapConcurrently(workList, concurrency, func(gf groupedFile) {
 		parsed := s.ParseFile(input.LibraryID, gf.file)
@@ -217,36 +229,7 @@ func runScan(input ScanInput, tc *tasks.TaskContext) error {
 			if commitErr != nil {
 				return
 			}
-			if parsed != nil {
-				parent := findParent(r, parsed)
-				if parent != nil {
-					parentID = &parent.ID
-				}
-
-				if !r.checkURIAvailable(parsed, parentID) {
-					uri := makeURI(parsed, parent)
-					slog.Warn("[scanner] URI conflict, skipping", "file", gf.file.Path, "uri", uri, "parent_id", fp.DerefString(parentID))
-					tc.Log("URI conflict for file %s, skipping (uri: %s, parent_id: %s)\n",
-						gf.file.Path, uri, fp.DerefString(parentID))
-					resultFailed.Add(1)
-				} else {
-					content := applyParsedItem(r, input.LibraryID, parsed)
-					if addSet[gf.file.Path] {
-						resultAdded.Add(1)
-					} else {
-						resultUpdated.Add(1)
-					}
-					parentID = content.ParentID
-				}
-			} else {
-				existing := r.findContentByFileURI(gf.file.Path)
-				if existing != nil {
-					parentID = existing.ParentID
-					r.removeContent(existing)
-				}
-				slog.Warn("[scanner] failed to parse file", "path", gf.file.Path)
-				resultFailed.Add(1)
-			}
+			parentID = applyParseResult(r, input.LibraryID, gf.file, parsed, addSet[gf.file.Path], tc.Log, &counts)
 		})
 
 		state := &states[gf.groupIdx]
@@ -293,16 +276,53 @@ func runScan(input ScanInput, tc *tasks.TaskContext) error {
 	}
 
 	result := ScanResult{
-		Added:     int(resultAdded.Load()),
-		Updated:   int(resultUpdated.Load()),
+		Added:     int(counts.added.Load()),
+		Updated:   int(counts.updated.Load()),
 		Removed:   resultRemoved,
-		Failed:    int(resultFailed.Load()),
+		Failed:    int(counts.failed.Load()),
 		Unchanged: len(unchanged),
 		Duration:  time.Since(scanStart),
 	}
 
 	tc.Result(result)
 	return nil
+}
+
+type scanCounts struct {
+	added   atomic.Int64
+	updated atomic.Int64
+	failed  atomic.Int64
+}
+
+func applyParseResult(r *repository, libraryID string, file FSFile, parsed *ParsedItem, isAdd bool, logf func(string, ...any), counts *scanCounts) *string {
+	if parsed == nil {
+		parentID := r.invalidateFile(file.Path)
+		slog.Warn("[scanner] failed to parse file", "path", file.Path)
+		counts.failed.Add(1)
+		return parentID
+	}
+
+	var parentID *string
+	parent := findParent(r, parsed)
+	if parent != nil {
+		parentID = &parent.ID
+	}
+
+	if !r.checkURIAvailable(parsed, parentID) {
+		uri := makeURI(parsed, parent)
+		slog.Warn("[scanner] URI conflict, skipping", "file", file.Path, "uri", uri, "parent_id", fp.DerefString(parentID))
+		logf("URI conflict for file %s, skipping (uri: %s, parent_id: %s)\n", file.Path, uri, fp.DerefString(parentID))
+		counts.failed.Add(1)
+		return parentID
+	}
+
+	content := applyParsedItem(r, libraryID, parsed)
+	if isAdd {
+		counts.added.Add(1)
+	} else {
+		counts.updated.Add(1)
+	}
+	return content.ParentID
 }
 
 func findParent(r *repository, p *ParsedItem) *models.Content {
@@ -477,8 +497,9 @@ func updateGroupSeries(s FileScanner, r *repository, parents map[string]bool) {
 	}
 }
 
-func matchFiles(r *repository, files []FSFile, filterPaths []string, force bool) (toAdd, toUpdate, unchanged, toRemove []FSFile) {
+func matchFiles(r *repository, files []FSFile, filterPaths, failedPaths []string, force bool) (toAdd, toUpdate, unchanged, toRemove []FSFile) {
 	leafContent := map[string]FSFile{}
+	invalidPaths := map[string]bool{}
 	for _, c := range r.content {
 		if c.Type != "comic" && c.Type != "book" {
 			continue
@@ -499,6 +520,9 @@ func matchFiles(r *repository, files []FSFile, filterPaths []string, force bool)
 			Mtime: mtime,
 			Size:  size,
 		}
+		if !c.Valid {
+			invalidPaths[*c.FileURI] = true
+		}
 	}
 
 	fsByPath := map[string]FSFile{}
@@ -506,24 +530,19 @@ func matchFiles(r *repository, files []FSFile, filterPaths []string, force bool)
 		fsByPath[f.Path] = f
 	}
 
+	inScope := func(path string) bool {
+		return len(filterPaths) == 0 || withinAny(path, filterPaths)
+	}
+
 	for path, fsFile := range fsByPath {
-		if len(filterPaths) > 0 {
-			matched := false
-			for _, fp := range filterPaths {
-				if strings.HasPrefix(path, fp) {
-					matched = true
-					break
-				}
-			}
-			if !matched {
-				continue
-			}
+		if !inScope(path) {
+			continue
 		}
 
 		dbFile, exists := leafContent[path]
 		if !exists {
 			toAdd = append(toAdd, fsFile)
-		} else if fsFile.HasChanged(dbFile) {
+		} else if invalidPaths[path] || fsFile.HasChanged(dbFile) {
 			toUpdate = append(toUpdate, fsFile)
 		} else {
 			unchanged = append(unchanged, fsFile)
@@ -531,21 +550,13 @@ func matchFiles(r *repository, files []FSFile, filterPaths []string, force bool)
 	}
 
 	for path, dbFile := range leafContent {
-		if _, exists := fsByPath[path]; !exists {
-			if len(filterPaths) > 0 {
-				matched := false
-				for _, fp := range filterPaths {
-					if strings.HasPrefix(path, fp) {
-						matched = true
-						break
-					}
-				}
-				if !matched {
-					continue
-				}
-			}
-			toRemove = append(toRemove, dbFile)
+		if _, exists := fsByPath[path]; exists {
+			continue
 		}
+		if !inScope(path) || withinAny(path, failedPaths) {
+			continue
+		}
+		toRemove = append(toRemove, dbFile)
 	}
 
 	if force {
