@@ -46,7 +46,7 @@ func classifyBook(file FSFile, meta epub.Metadata, coverValid bool) ParsedItem {
 	if meta.Series != "" {
 		series = &ParsedSeries{
 			URIPrefix:   "book",
-			URIPart:     meta.Series,
+			URIPart:     sanitizeURIPart(meta.Series),
 			ContentType: "book_series",
 			Title:       meta.Series,
 		}
@@ -57,7 +57,7 @@ func classifyBook(file FSFile, meta epub.Metadata, coverValid bool) ParsedItem {
 		Series:      series,
 		URIPrefix:   "book",
 		ContentType: "book",
-		URIPart:     stem,
+		URIPart:     sanitizeURIPart(stem),
 		OrderParts:  []*float32{new(float32(index))},
 		CoverSuffix: coverSuffix,
 		MetaRaw:     fileMeta,
@@ -140,14 +140,14 @@ func classifyComic(file FSFile, meta models.Metadata, year int, pages []comic.Pa
 		File:        file,
 		URIPrefix:   "comic",
 		ContentType: "comic",
-		URIPart:     strings.Join(uriParts, "_"),
+		URIPart:     sanitizeURIPart(strings.Join(uriParts, "_")),
 		OrderParts:  orderParts,
 		CoverSuffix: new(pages[0].Name),
 		FileData:    fd,
 		MetaRaw:     meta,
 		Series: &ParsedSeries{
 			URIPrefix:   "comic",
-			URIPart:     seriesURIPart,
+			URIPart:     sanitizeURIPart(seriesURIPart),
 			ContentType: "comic_series",
 			Title:       seriesName,
 			FileURI:     new(dir),

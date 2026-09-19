@@ -198,12 +198,12 @@ func TestInheritConverges(t *testing.T) {
 		Staff: []models.StaffEntry{{Name: "Ann", Role: "author"}},
 	})
 
-	partial := inherit("s", order([]Child{a}))
+	partial := inherit(SeriesRef{URIPart: "s"}, order([]Child{a}))
 	if partial.Title != "The Series" || partial.Publisher != "Press" || partial.Genre != "" {
 		t.Fatalf("partial = %+v", partial)
 	}
 
-	full := inherit("s", order([]Child{a, b}))
+	full := inherit(SeriesRef{URIPart: "s"}, order([]Child{a, b}))
 	want := models.Metadata{
 		Title: "The Series", Publisher: "Press", Description: "From A",
 		Genre: "Action", Language: "en", AgeRating: "Teen", Manga: "Yes",
@@ -214,12 +214,12 @@ func TestInheritConverges(t *testing.T) {
 		t.Fatalf("full = %+v, want %+v", full, want)
 	}
 
-	reversed := inherit("s", order([]Child{b, a}))
+	reversed := inherit(SeriesRef{URIPart: "s"}, order([]Child{b, a}))
 	if !reflect.DeepEqual(reversed, full) {
 		t.Fatalf("arrival order matters: %+v != %+v", reversed, full)
 	}
 
-	if again := inherit("s", order([]Child{a, b})); !reflect.DeepEqual(again, full) {
+	if again := inherit(SeriesRef{URIPart: "s"}, order([]Child{a, b})); !reflect.DeepEqual(again, full) {
 		t.Fatalf("inherit not idempotent: %+v", again)
 	}
 }
@@ -238,7 +238,7 @@ func TestInheritIsPure(t *testing.T) {
 		}
 	}
 	children, snapshot := build(), build()
-	got := inherit("s", children)
+	got := inherit(SeriesRef{URIPart: "s"}, children)
 	if !reflect.DeepEqual(children, snapshot) {
 		t.Fatalf("children mutated: %+v", children)
 	}
@@ -247,7 +247,7 @@ func TestInheritIsPure(t *testing.T) {
 	if !reflect.DeepEqual(children, snapshot) {
 		t.Fatalf("result shares backing storage with input: %+v", children)
 	}
-	fresh := inherit("s", children)
+	fresh := inherit(SeriesRef{URIPart: "s"}, children)
 	if fresh.Publisher != "P" || !reflect.DeepEqual(fresh.Staff, snapshot[0].Meta.File.Raw.Staff) {
 		t.Fatalf("result aliases input: %+v", fresh)
 	}
@@ -258,19 +258,41 @@ func TestInheritRetainsInvalidChildren(t *testing.T) {
 	invalid.Valid = false
 	valid := childOf("b", []*float32{f32(2)}, models.Metadata{Series: "Other", Publisher: "Other Press", Genre: "Action"})
 
-	got := inherit("s", order([]Child{invalid, valid}))
+	got := inherit(SeriesRef{URIPart: "s"}, order([]Child{invalid, valid}))
 	if got.Title != "Retained Series" || got.Publisher != "Retained Press" || got.Genre != "Action" {
 		t.Fatalf("inherited = %+v", got)
 	}
 }
 
 func TestInheritTitleFallback(t *testing.T) {
-	if got := inherit("Fallback Part", nil); got.Title != "Fallback Part" {
+	if got := inherit(SeriesRef{URIPart: "Fallback Part"}, nil); got.Title != "Fallback Part" {
 		t.Fatalf("empty children title = %q", got.Title)
 	}
 	children := []Child{childOf("a", nil, models.Metadata{Publisher: "P"})}
-	if got := inherit("Fallback Part", children); got.Title != "Fallback Part" || got.Publisher != "P" {
+	if got := inherit(SeriesRef{URIPart: "Fallback Part"}, children); got.Title != "Fallback Part" || got.Publisher != "P" {
 		t.Fatalf("inherited = %+v", got)
+	}
+}
+
+func TestInheritTitleFallsBackToTheFolderOnlyWhenItSanitizesToTheKey(t *testing.T) {
+	for _, tc := range []struct {
+		dir, part, want string
+	}{
+		{"/lib/Foo\\bar", "Foo_bar", "Foo\\bar"},
+		{"/lib/Foo_bar", "Foo_bar", "Foo_bar"},
+		{"/lib/Foo (2019)", "Foo_2019", "Foo_2019"},
+		{"/lib/(2019)", "_2019", "_2019"},
+		{"/lib/Foo\\bar (2019)", "Foo_bar_2019", "Foo_bar_2019"},
+	} {
+		ref := SeriesRef{URIPart: tc.part, Type: "comic_series", FileURI: &tc.dir}
+		if got := inherit(ref, nil); got.Title != tc.want {
+			t.Errorf("%s title = %q, want %q", tc.dir, got.Title, tc.want)
+		}
+	}
+
+	book := SeriesRef{URIPart: "Foo_bar", Type: "book_series"}
+	if got := inherit(book, nil); got.Title != "Foo_bar" {
+		t.Errorf("book title = %q, want the uri part", got.Title)
 	}
 }
 

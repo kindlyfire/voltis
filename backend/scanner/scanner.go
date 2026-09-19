@@ -465,8 +465,16 @@ func applyParseResult(r *repository, libraryID string, file FSFile, parsed *Pars
 		return parentID
 	}
 
+	parent, ok := findParent(r, parsed)
+	if !ok {
+		uri := parsed.Series.URIPrefix + "/" + parsed.Series.URIPart
+		slog.Warn("[scanner] series key conflict, skipping", "file", file.Path, "uri", uri)
+		logf("Series key conflict for file %s, skipping (uri: %s)\n", file.Path, uri)
+		counts.failed.Add(1)
+		return nil
+	}
+
 	var parentID *string
-	parent := findParent(r, parsed)
 	if parent != nil {
 		parentID = &parent.ID
 	}
@@ -490,12 +498,13 @@ func applyParseResult(r *repository, libraryID string, file FSFile, parsed *Pars
 	return content.ParentID
 }
 
-func findParent(r *repository, p *ParsedItem) *models.Content {
+func findParent(r *repository, p *ParsedItem) (*models.Content, bool) {
 	if p.Series == nil {
-		return nil
+		return nil, true
 	}
 	uri := p.Series.URIPrefix + "/" + p.Series.URIPart
-	return r.getSeries(uri, p.Series.URIPart, p.Series.FileURI, p.Series.ContentType, p.Series.Title)
+	c := r.getSeries(uri, p.Series.URIPart, p.Series.FileURI, p.Series.ContentType, p.Series.Title)
+	return c, c != nil
 }
 
 func makeURI(p *ParsedItem, series *models.Content) string {
@@ -507,7 +516,7 @@ func makeURI(p *ParsedItem, series *models.Content) string {
 
 func applyParsedItem(r *repository, libraryID string, p *ParsedItem) *models.Content {
 	var parentID *string
-	series := findParent(r, p)
+	series, _ := findParent(r, p)
 	if series != nil {
 		parentID = &series.ID
 	}
@@ -544,7 +553,7 @@ func inheritChildMetadata(r *repository, series *models.Content, ordered []Child
 
 	metaRow := r.getMetadata(series.URI)
 	metaRow.DataRaw.File = &metaraw.RawContainer[models.Metadata]{
-		Raw: inherit(series.URIPart, ordered),
+		Raw: inherit(seriesRef(series), ordered),
 	}
 	metaRow.dirty = true
 }

@@ -276,7 +276,7 @@ func commit(ctx context.Context, tx pgx.Tx, s FileScanner, libraryID string, f f
 			return counts, err
 		}
 
-		seriesMeta = append(seriesMeta, metaWrite{uri: ref.URI, file: inherit(ref.URIPart, ordered)})
+		seriesMeta = append(seriesMeta, metaWrite{uri: ref.URI, file: inherit(ref, ordered)})
 	}
 	if err := writeMetadata(ctx, tx, libraryID, now, seriesMeta); err != nil {
 		return counts, err

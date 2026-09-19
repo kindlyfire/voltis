@@ -1,13 +1,16 @@
 package scanner
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"voltis/lib/epub"
 	"voltis/models"
 	"voltis/models/metaraw"
 )
@@ -343,5 +346,118 @@ func TestUpdateGroupSeriesRetainsInvalidChildren(t *testing.T) {
 				t.Fatalf("series mtime = %v", series.FileMtime)
 			}
 		})
+	}
+}
+
+func TestApplyParseResultRejectsSeriesKeyHeldByLeaf(t *testing.T) {
+	pool := newTestPool(t)
+	lib := newTestLibrary(t, pool, "books")
+	standalone := "/lib/Books/Foo_bar.epub"
+	seedContent(t, pool, models.Content{
+		ID: "b1", LibraryID: lib, Type: "book", URI: "book/Foo_bar", URIPart: "Foo_bar",
+		Valid: true, FileURI: new(standalone), FileMtime: &baseTime, FileSize: new(10),
+	})
+
+	r := newRepository(pool, lib)
+	if err := r.load(context.Background()); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	member := fsFile("/lib/Foo bar/x.epub", baseTime, 10)
+	item := classifyBook(member, epub.Metadata{Title: "X", Series: "Foo/bar"}, false)
+	if item.Series.URIPart != "Foo_bar" {
+		t.Fatalf("series part = %q, want the sanitized collision", item.Series.URIPart)
+	}
+
+	var counts scanCounts
+	var logs []string
+	logf := func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }
+	applyParseResult(r, lib, member, &item, true, logf, &counts, &Counts{})
+	if err := r.commitGroup(context.Background()); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	book := readContent(t, pool, "b1")
+	if deref(book.FileURI) != standalone || book.Type != "book" || !book.Valid {
+		t.Fatalf("book = %+v, want the existing row untouched", book)
+	}
+	if got := contentURIs(t, pool, lib); !slices.Equal(got, []string{"book/Foo_bar"}) {
+		t.Fatalf("uris = %v, want nothing placed beneath the book", got)
+	}
+	if counts.added.Load() != 0 || counts.failed.Load() != 1 || len(logs) != 1 {
+		t.Fatalf("counts = %d added / %d failed, logs = %v",
+			counts.added.Load(), counts.failed.Load(), logs)
+	}
+}
+
+func seedSeriesTitle(r *repository, uri, title string) {
+	r.getMetadata(uri).DataRaw.File = &metaraw.RawContainer[models.Metadata]{Raw: models.Metadata{Title: title}}
+}
+
+func comicItem(dir, number string, meta models.Metadata) (FSFile, *ParsedItem) {
+	meta.Number = number
+	file := fsFile(dir+"/ch"+number+".cbz", baseTime, 10)
+	return file, classifyComic(file, meta, 0, testPages)
+}
+
+func TestInheritedTitlePrefersExplicitChildSeriesOverFolderFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		child int
+		layer string
+	}{
+		{"comicinfo on the first chapter", 0, "file"},
+		{"comicinfo on the second chapter", 1, "file"},
+		{"override on the first chapter", 0, "overrides"},
+		{"override on the second chapter", 1, "overrides"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newRepository(nil, "library")
+			var counts scanCounts
+			var parentID *string
+			paths := make([]string, 2)
+			for i := range 2 {
+				var meta models.Metadata
+				if tc.layer == "file" && tc.child == i {
+					meta.Series = "Curated"
+				}
+				file, item := comicItem("/lib/Series", fmt.Sprint(i+1), meta)
+				paths[i] = file.Path
+				parentID = applyParseResult(r, "library", file, item, true, func(string, ...any) {}, &counts, &Counts{})
+			}
+			if parentID == nil {
+				t.Fatalf("no series, failed = %d", counts.failed.Load())
+			}
+			if tc.layer == "overrides" {
+				child := r.findContentByFileURI(paths[tc.child])
+				r.getMetadata(child.URI).DataRaw.Overrides = &metaraw.RawContainer[models.Metadata]{
+					Raw: models.Metadata{Series: "Curated"},
+				}
+			}
+
+			i := slices.IndexFunc(r.content, func(c models.Content) bool { return c.ID == *parentID })
+			seedSeriesTitle(r, r.content[i].URI, "Stale")
+			updateGroupSeries(&ComicsScanner{}, r, map[string]bool{*parentID: true})
+
+			if got := r.getMetadata(r.content[i].URI).DataRaw.File.Raw.Title; got != "Curated" {
+				t.Fatalf("series title = %q, want the explicit child series to beat the folder fallback", got)
+			}
+		})
+	}
+}
+
+func TestInheritedTitleFallsBackToTheSeriesKeyWhenTheFolderDiffers(t *testing.T) {
+	r := newRepository(nil, "library")
+	var counts scanCounts
+	file, item := comicItem("/lib/Foo (2019)", "1", models.Metadata{})
+	parentID := applyParseResult(r, "library", file, item, true, func(string, ...any) {}, &counts, &Counts{})
+	if parentID == nil {
+		t.Fatalf("no series, failed = %d", counts.failed.Load())
+	}
+	seedSeriesTitle(r, "comic/Foo_2019", "Stale")
+	updateGroupSeries(&ComicsScanner{}, r, map[string]bool{*parentID: true})
+
+	if got := r.getMetadata("comic/Foo_2019").DataRaw.File.Raw.Title; got != "Foo_2019" {
+		t.Fatalf("series title = %q, want the series key", got)
 	}
 }

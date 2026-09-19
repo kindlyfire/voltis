@@ -148,6 +148,9 @@ func (r *repository) getSeries(uri, uriPart string, fileURI *string, contentType
 	for i := range r.content {
 		c := &r.content[i]
 		if c.URI == uri || (fileURI != nil && c.FileURI != nil && *c.FileURI == *fileURI) {
+			if !isGroupingType(c.Type) {
+				return nil
+			}
 			if c.URI != uri {
 				r.updateURIs(c, uri)
 			}

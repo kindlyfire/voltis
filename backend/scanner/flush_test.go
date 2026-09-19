@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"voltis/db"
+	"voltis/lib/epub"
 	"voltis/models"
 	"voltis/models/metaraw"
 
@@ -748,5 +750,136 @@ func TestFlushKeepsSeriesRenameWhenLeafConflicts(t *testing.T) {
 	want := []string{"comic/S_2019", "comic/S_2019/ch1"}
 	if got := contentURIs(t, pool, lib); !slices.Equal(got, want) {
 		t.Fatalf("uris = %v, want the rename to survive the leaf conflict", got)
+	}
+}
+
+func bookResult(path string, meta epub.Metadata) Result {
+	item := classifyBook(fsFile(path, baseTime, 10), meta, false)
+	return Result{File: item.File, Item: &item}
+}
+
+func TestSlashSeriesAppearsWhileTheLeafItShadowsDeparts(t *testing.T) {
+	pool := newTestPool(t)
+	lib := newTestLibrary(t, pool, "books")
+	r := newScanRun(t, pool, lib, &BooksScanner{})
+
+	r.place(bookResult("/lib/Foo/bar.epub", epub.Metadata{Title: "Bar", Series: "Foo"}))
+	r.commit(false)
+	if got := contentURIs(t, pool, lib); !slices.Equal(got, []string{"book/Foo", "book/Foo/bar"}) {
+		t.Fatalf("uris = %v, want the leaf under its series", got)
+	}
+
+	r.reload()
+	r.place(bookResult("/lib/Foo/bar.epub", epub.Metadata{Title: "Bar"}))
+	r.place(bookResult("/lib/Foo bar/x.epub", epub.Metadata{Title: "X", Series: "Foo/bar"}))
+	r.commit(true)
+
+	want := []string{"book/Foo_bar", "book/Foo_bar/x", "book/bar"}
+	got := contentURIs(t, pool, lib)
+	slices.Sort(want)
+	slices.Sort(got)
+	if !slices.Equal(got, want) {
+		t.Fatalf("uris = %v, want %v", got, want)
+	}
+
+	series := readContent(t, pool, contentIDByURI(t, pool, lib, "book/Foo_bar"))
+	if series.Type != "book_series" || series.URIPart != "Foo_bar" {
+		t.Fatalf("series = %+v, want the sanitized series row", series)
+	}
+	if got := readMeta(t, pool, lib, "book/Foo_bar").File.Raw.Title; got != "Foo/bar" {
+		t.Fatalf("series title = %q, want the name kept verbatim", got)
+	}
+}
+
+func TestFlushInheritsTheRawFallbackSeriesTitle(t *testing.T) {
+	pool := newTestPool(t)
+	lib := newTestLibrary(t, pool, "comics")
+	r := newScanRun(t, pool, lib, &ComicsScanner{})
+
+	item := classifyComic(fsFile("/lib/Foo\\bar/ch1.cbz", baseTime, 10), models.Metadata{}, 0, testPages)
+	r.place(Result{File: item.File, Item: item})
+	r.commit(true)
+
+	want := []string{"comic/Foo_bar", "comic/Foo_bar/ch1"}
+	if got := contentURIs(t, pool, lib); !slices.Equal(got, want) {
+		t.Fatalf("uris = %v, want %v", got, want)
+	}
+	if got := readMeta(t, pool, lib, "comic/Foo_bar").File.Raw.Title; got != "Foo\\bar" {
+		t.Fatalf("series title = %q, want the raw directory name", got)
+	}
+}
+
+func TestFlushPrefersExplicitChildSeriesOverFolderFallback(t *testing.T) {
+	pool := newTestPool(t)
+	lib := newTestLibrary(t, pool, "comics")
+	r := newScanRun(t, pool, lib, &ComicsScanner{})
+
+	chapter := func(number string) Result {
+		file, item := comicItem("/lib/Series", number, models.Metadata{})
+		return Result{File: file, Item: item}
+	}
+	r.place(chapter("1"), chapter("2"))
+	r.commit(false)
+
+	mr := readMeta(t, pool, lib, "comic/Series/ch2")
+	mr.Overrides = &metaraw.RawContainer[models.Metadata]{Raw: models.Metadata{Series: "Curated"}}
+	seedMetadata(t, pool, lib, "comic/Series/ch2", mr)
+
+	r.reload()
+	r.place(chapter("1"))
+	r.commit(true)
+
+	if got := readMeta(t, pool, lib, "comic/Series").File.Raw.Title; got != "Curated" {
+		t.Fatalf("series title = %q, want the override on the later child to beat the folder fallback", got)
+	}
+}
+
+func TestFlushFallsBackToTheSeriesKeyWhenTheFolderDiffers(t *testing.T) {
+	pool := newTestPool(t)
+	lib := newTestLibrary(t, pool, "comics")
+	r := newScanRun(t, pool, lib, &ComicsScanner{})
+
+	file, item := comicItem("/lib/Foo (2019)", "1", models.Metadata{})
+	r.place(Result{File: file, Item: item})
+	r.commit(true)
+
+	if got := readMeta(t, pool, lib, "comic/Foo_2019").File.Raw.Title; got != "Foo_2019" {
+		t.Fatalf("series title = %q, want the series key", got)
+	}
+}
+
+func TestFallbackTitleAgreesAcrossRunnersWhenFoldersShareASeries(t *testing.T) {
+	pool := newTestPool(t)
+	dirs := []string{"/lib/Foo (2019)", "/lib/Foo_2019"}
+
+	for _, first := range []int{0, 1} {
+		seen := []int{first, 1 - first}
+
+		lib := newTestLibrary(t, pool, "comics")
+		run := newScanRun(t, pool, lib, &ComicsScanner{})
+		for n, i := range seen {
+			file, item := comicItem(dirs[i], fmt.Sprint(n+1), models.Metadata{})
+			run.place(Result{File: file, Item: item})
+		}
+		run.commit(true)
+		if got := readMeta(t, pool, lib, "comic/Foo_2019").File.Raw.Title; got != "Foo_2019" {
+			t.Errorf("new runner title = %q with %s first, want %q", got, dirs[first], "Foo_2019")
+		}
+
+		r := newRepository(nil, "library")
+		var counts scanCounts
+		var parentID *string
+		for n, i := range seen {
+			file, item := comicItem(dirs[i], fmt.Sprint(n+1), models.Metadata{})
+			parentID = applyParseResult(r, "library", file, item, true, func(string, ...any) {}, &counts, &Counts{})
+		}
+		if parentID == nil {
+			t.Fatalf("no series, failed = %d", counts.failed.Load())
+		}
+		seedSeriesTitle(r, "comic/Foo_2019", "Stale")
+		updateGroupSeries(&ComicsScanner{}, r, map[string]bool{*parentID: true})
+		if got := r.getMetadata("comic/Foo_2019").DataRaw.File.Raw.Title; got != "Foo_2019" {
+			t.Errorf("legacy runner title = %q with %s first, want %q", got, dirs[first], "Foo_2019")
+		}
 	}
 }

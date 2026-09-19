@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"maps"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -76,7 +77,7 @@ func order(children []Child) []Child {
 	return ordered
 }
 
-func inherit(uriPart string, ordered []Child) models.Metadata {
+func inherit(ref SeriesRef, ordered []Child) models.Metadata {
 	var inherited models.Metadata
 	for _, child := range ordered {
 		m := child.Meta.Merge()
@@ -93,8 +94,18 @@ func inherit(uriPart string, ordered []Child) models.Metadata {
 		inherited.PublicationDate = cmp.Or(inherited.PublicationDate, m.PublicationDate)
 		inherited.Title = cmp.Or(inherited.Title, m.Series)
 	}
-	inherited.Title = cmp.Or(inherited.Title, uriPart)
+	inherited.Title = cmp.Or(inherited.Title, fallbackTitle(ref))
 	return inherited
+}
+
+func fallbackTitle(ref SeriesRef) string {
+	if ref.FileURI == nil {
+		return ref.URIPart
+	}
+	if base := filepath.Base(*ref.FileURI); sanitizeURIPart(base) == ref.URIPart {
+		return base
+	}
+	return ref.URIPart
 }
 
 func leafRow(id, libraryID, uri string, p ParsedItem, parentID *string, old *models.Content, now time.Time) models.Content {
