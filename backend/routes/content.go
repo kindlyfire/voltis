@@ -445,68 +445,60 @@ func (cr *ContentRoutes) updateUserData(c echo.Context) error {
 		return err
 	}
 
-	// Get or create user_to_content
-	var utcID string
-	err = cr.pool.QueryRow(ctx, `
-		SELECT id FROM user_to_content
-		WHERE user_id = $1 AND library_id = $2 AND uri = $3
-	`, user.ID, content.LibraryID, content.URI).Scan(&utcID)
-
 	now := time.Now().UTC()
 
-	if errors.Is(err, pgx.ErrNoRows) {
-		utcID = models.MakeUserToContentID()
-		_, err = cr.pool.Exec(ctx, `
-			INSERT INTO user_to_content (id, user_id, library_id, uri)
-			VALUES ($1, $2, $3, $4)
-		`, utcID, user.ID, content.LibraryID, content.URI)
-		if err != nil {
-			return err
-		}
-	} else if err != nil {
-		return err
+	cols := []string{"id", "user_id", "library_id", "uri"}
+	vals := []string{"@utc_id", "@user_id", "@library_id", "@uri"}
+	sets := []string{"uri = EXCLUDED.uri"}
+	args := pgx.NamedArgs{
+		"utc_id":     models.MakeUserToContentID(),
+		"user_id":    user.ID,
+		"library_id": content.LibraryID,
+		"uri":        content.URI,
 	}
-
-	// Apply updates
-	sets := []string{}
-	args := pgx.NamedArgs{"utc_id": utcID}
+	set := func(col string, val any) {
+		cols = append(cols, col)
+		vals = append(vals, "@"+col)
+		sets = append(sets, col+" = EXCLUDED."+col)
+		args[col] = val
+	}
 
 	if _, ok := rawBody["starred"]; ok && req.Starred != nil {
-		sets = append(sets, "starred = @starred")
-		args["starred"] = *req.Starred
+		set("starred", *req.Starred)
 	}
 	if _, ok := rawBody["status"]; ok {
-		sets = append(sets, "status = @status", "status_updated_at = @status_updated_at")
-		args["status"] = req.Status
-		args["status_updated_at"] = now
+		set("status", req.Status)
+		set("status_updated_at", now)
 	}
 	if _, ok := rawBody["notes"]; ok {
-		sets = append(sets, "notes = @notes")
-		args["notes"] = req.Notes
+		set("notes", req.Notes)
 	}
 	if _, ok := rawBody["rating"]; ok {
-		sets = append(sets, "rating = @rating")
-		args["rating"] = req.Rating
+		set("rating", req.Rating)
 	}
 	if _, ok := rawBody["progress"]; ok {
-		sets = append(sets, "progress = @progress", "progress_updated_at = @progress_updated_at")
-		args["progress"] = []byte(*req.Progress)
-		if req.Progress != nil && string(*req.Progress) != "{}" && string(*req.Progress) != "null" {
-			args["progress_updated_at"] = now
+		progress := []byte("{}")
+		if req.Progress != nil {
+			var m map[string]json.RawMessage
+			if err := json.Unmarshal(*req.Progress, &m); err != nil {
+				return echo.NewHTTPError(http.StatusBadRequest, "progress must be a JSON object")
+			}
+			progress = []byte(*req.Progress)
+		}
+		set("progress", progress)
+		if string(progress) == "{}" {
+			set("progress_updated_at", nil)
 		} else {
-			args["progress_updated_at"] = nil
+			set("progress_updated_at", now)
 		}
 	}
 
-	if len(sets) > 0 {
-		query := "UPDATE user_to_content SET " + strings.Join(sets, ", ") + " WHERE id = @utc_id"
-		if _, err := cr.pool.Exec(ctx, query, args); err != nil {
-			return err
-		}
-	}
-
-	// Fetch updated record
-	utc, err := db.SelectOne[models.UserToContent](ctx, cr.pool, "SELECT * FROM user_to_content WHERE id = $1", utcID)
+	utc, err := db.SelectOne[models.UserToContent](ctx, cr.pool, fmt.Sprintf(`
+		INSERT INTO user_to_content (%s)
+		VALUES (%s)
+		ON CONFLICT (user_id, library_id, uri) DO UPDATE SET %s
+		RETURNING *
+	`, strings.Join(cols, ", "), strings.Join(vals, ", "), strings.Join(sets, ", ")), args)
 	if err != nil {
 		return err
 	}

@@ -5,6 +5,14 @@ app *args='':
 frontend *args='':
     cd frontend && pnpm dev {{ args }}
 
+dev:
+    pnpm dlx concurrently \
+        --names backend,frontend \
+        --prefix-colors blue,magenta \
+        --kill-others \
+        "just app server" \
+        "just frontend"
+
 fmt:
     cd backend && gofmt -w .
 
