@@ -87,11 +87,11 @@ func (cr *CustomListRoutes) getListForUser(c echo.Context, user *models.User, re
 	}
 
 	if cl.UserID != user.ID {
-		if requireOwner {
-			return cl, echo.NewHTTPError(http.StatusForbidden, "Not allowed")
-		}
 		if cl.Visibility == "private" {
 			return cl, echo.NewHTTPError(http.StatusNotFound, "List not found")
+		}
+		if requireOwner {
+			return cl, echo.NewHTTPError(http.StatusForbidden, "Not allowed")
 		}
 	}
 	return cl, nil
@@ -106,19 +106,15 @@ func (cr *CustomListRoutes) list(c echo.Context) error {
 	}
 
 	ctx := reqCtx(c)
-	userFilter := c.QueryParam("user")
-	if userFilter == "" {
-		userFilter = "all"
-	}
 
 	var whereClause string
-	switch userFilter {
+	switch c.QueryParam("user") {
 	case "me":
 		whereClause = "WHERE cl.user_id = $1"
 	case "others":
-		whereClause = "WHERE cl.user_id != $1 AND cl.visibility != 'private'"
+		whereClause = "WHERE cl.user_id != $1 AND cl.visibility = 'public'"
 	default:
-		whereClause = "WHERE (cl.user_id = $1 OR (cl.user_id != $1 AND cl.visibility != 'private'))"
+		whereClause = "WHERE (cl.user_id = $1 OR cl.visibility = 'public')"
 	}
 
 	type listRow struct {
