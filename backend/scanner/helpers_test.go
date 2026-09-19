@@ -165,12 +165,37 @@ func contentURIs(t *testing.T, pool *pgxpool.Pool, libraryID string) []string {
 	return uris
 }
 
+func assertCatalog(t *testing.T, pool *pgxpool.Pool, libraryID string, want []string) {
+	t.Helper()
+	if got := contentURIs(t, pool, libraryID); !slices.Equal(got, want) {
+		t.Fatalf("uris = %v, want %v", got, want)
+	}
+}
+
+func assertAnnotations(t *testing.T, pool *pgxpool.Pool, libraryID string, want []string) {
+	t.Helper()
+	got, err := db.SelectScalars[string](context.Background(), pool,
+		"SELECT uri FROM user_to_content WHERE library_id = $1 ORDER BY uri", libraryID)
+	if err != nil {
+		t.Fatalf("read annotations: %v", err)
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("annotations = %v, want %v", got, want)
+	}
+}
+
 type scanRun struct {
 	t    *testing.T
 	pool *pgxpool.Pool
 	lib  string
 	fs   FileScanner
 	w    *writer
+}
+
+func newTestScan(t *testing.T, libType string) *scanRun {
+	t.Helper()
+	pool := newTestPool(t)
+	return newScanRun(t, pool, newTestLibrary(t, pool, libType), newFileScanner(libType))
 }
 
 func newScanRun(t *testing.T, pool *pgxpool.Pool, libraryID string, s FileScanner) *scanRun {

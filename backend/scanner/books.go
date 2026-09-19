@@ -15,7 +15,7 @@ func (bs *BooksScanner) FileEligible(path string) bool {
 	return strings.ToLower(filepath.Ext(path)) == ".epub"
 }
 
-func (bs *BooksScanner) ParseFile(libraryID string, file FSFile) *ParsedItem {
+func (bs *BooksScanner) ParseFile(file FSFile) *ParsedItem {
 	meta, err := epub.ReadMetadata(file.Path)
 	if err != nil {
 		slog_scan("failed to read epub metadata", "path", file.Path, "err", err)

@@ -69,10 +69,7 @@ func (s *SeriesChanges) renamed() bool { return s.OldURI != "" && s.OldURI != s.
 func order(children []Child) []Child {
 	ordered := slices.Clone(children)
 	slices.SortStableFunc(ordered, func(a, b Child) int {
-		if c := compareOrderParts(a.OrderParts, b.OrderParts); c != 0 {
-			return c
-		}
-		return strings.Compare(a.ID, b.ID)
+		return cmp.Or(compareOrderParts(a.OrderParts, b.OrderParts), strings.Compare(a.ID, b.ID))
 	})
 	return ordered
 }

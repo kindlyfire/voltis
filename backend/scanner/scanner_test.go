@@ -381,9 +381,7 @@ func TestApplyParseResultRejectsSeriesKeyHeldByLeaf(t *testing.T) {
 	if deref(book.FileURI) != standalone || book.Type != "book" || !book.Valid {
 		t.Fatalf("book = %+v, want the existing row untouched", book)
 	}
-	if got := contentURIs(t, pool, lib); !slices.Equal(got, []string{"book/Foo_bar"}) {
-		t.Fatalf("uris = %v, want nothing placed beneath the book", got)
-	}
+	assertCatalog(t, pool, lib, []string{"book/Foo_bar"})
 	if counts.added.Load() != 0 || counts.failed.Load() != 1 || len(logs) != 1 {
 		t.Fatalf("counts = %d added / %d failed, logs = %v",
 			counts.added.Load(), counts.failed.Load(), logs)

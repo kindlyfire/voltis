@@ -17,7 +17,7 @@ func (cs *ComicsScanner) FileEligible(path string) bool {
 	return isComicFile(path)
 }
 
-func (cs *ComicsScanner) ParseFile(libraryID string, file FSFile) *ParsedItem {
+func (cs *ComicsScanner) ParseFile(file FSFile) *ParsedItem {
 	pages, comicInfo := comic.Scan(file.Path)
 
 	if len(pages) == 0 {

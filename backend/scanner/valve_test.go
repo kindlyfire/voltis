@@ -66,34 +66,26 @@ func TestWriterValveStopsRemovalsAfterAnUnverifiedListing(t *testing.T) {
 }
 
 func TestWriterValveDetectsADirectoryRetargetedAfterIndexing(t *testing.T) {
-	root := realTempDir(t)
-	writeFile(t, filepath.Join(root, "Lib", "Series", "ch1.cbz"), "one")
-	writeFile(t, filepath.Join(root, "Other", "Series", "ch1.cbz"), "another one")
-	alias := filepath.Join(root, "Alias")
-	symlink(t, filepath.Join(root, "Lib"), alias)
+	for _, c := range []struct {
+		name   string
+		walked func(series string) string
+	}{
+		{"stored spelling", func(series string) string { return series }},
+		{"different spelling", func(series string) string { return series + string(filepath.Separator) + "." }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, series, w := retargetFixture(t)
 
-	series := filepath.Join(alias, "Series")
-	w := testWriter([]Fingerprint{leafFP("l1", filepath.Join(root, "Lib", "Series", "ch1.cbz"), "ch1", "p1")},
-		[]SeriesRef{seriesRefOf("p1", "Series", series)})
+			walkInto(t, w, c.walked(series))
 
-	if err := os.Remove(alias); err != nil {
-		t.Fatal(err)
-	}
-	symlink(t, filepath.Join(root, "Other"), alias)
-
-	walkInto(t, w, series)
-
-	if w.trust {
-		t.Fatal("a directory that resolves elsewhere than it was indexed must open the valve")
-	}
-	if len(w.gone) != 0 {
-		t.Fatalf("gone = %v, want nothing proven absent", w.gone)
-	}
-	if _, ok := w.at(filepath.Join(series, "ch1.cbz")); ok {
-		t.Fatal("a file behind the retargeted alias was matched to the stored row")
-	}
-	if id, ok := w.dirSeries(series); ok {
-		t.Fatalf("the retargeted directory still resolves to series %s", id)
+			if w.trust {
+				t.Fatal("a directory that resolves elsewhere than it was indexed must open the valve")
+			}
+			if len(w.gone) != 0 {
+				t.Fatalf("gone = %v, want nothing proven absent", w.gone)
+			}
+			assertStoredRowUntouched(t, w, series)
+		})
 	}
 }
 
@@ -110,18 +102,15 @@ func TestScanValveKeepsRowsWhoseFileMovedDuringTheScan(t *testing.T) {
 	symlink(t, filepath.Join(root, "A"), alias)
 
 	stored := filepath.Join(alias, "ch1.cbz")
-	info, err := os.Stat(stored)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mtime := info.ModTime().UTC()
+	file := statFile(t, stored)
+	mtime := file.Mtime.UTC()
 	seedContent(t, pool,
 		models.Content{ID: "p1", LibraryID: lib, Type: "comic_series", URI: "comic/A", URIPart: "A",
 			Valid: true, FileURI: new(alias)},
 		models.Content{ID: "p2", LibraryID: lib, Type: "comic_series", URI: "comic/Empty", URIPart: "Empty",
 			Valid: true},
 		models.Content{ID: "l1", LibraryID: lib, Type: "comic", URI: "comic/A/ch1", URIPart: "ch1", Valid: true,
-			FileURI: new(stored), FileMtime: &mtime, FileSize: new(int(info.Size())), ParentID: new("p1")},
+			FileURI: new(stored), FileMtime: &mtime, FileSize: new(int(file.Size)), ParentID: new("p1")},
 	)
 
 	r := newScanRun(t, pool, lib, &ComicsScanner{})
@@ -144,23 +133,21 @@ func TestScanValveKeepsRowsWhoseFileMovedDuringTheScan(t *testing.T) {
 		t.Fatalf("counts = %+v, want a successful scan with no removals", counts)
 	}
 	want := []string{"comic/A", "comic/A/ch1", "comic/Empty"}
-	if got := contentURIs(t, pool, lib); !slices.Equal(got, want) {
-		t.Fatalf("uris = %v, want every row retained %v", got, want)
-	}
+	assertCatalog(t, pool, lib, want)
 	if at := libraryScannedAt(t, pool, lib); at == nil {
 		t.Fatal("scanned_at must still advance")
 	}
 }
 
 func TestScanPipelineRemovesDescendantsOfADirectoryReplacedByAFile(t *testing.T) {
-	run := func(t *testing.T, legacy bool) []string {
+	run := func(t *testing.T, rel string, legacy bool) []string {
 		p := newPipeline(t, "comics")
 		scan := p.mustScan
 		if legacy {
 			scan = p.mustLegacyScan
 		}
 		dir := filepath.Join(p.root, "S")
-		writeCBZFixture(t, filepath.Join(dir, "ch1.cbz"), "S", "1")
+		writeCBZFixture(t, filepath.Join(dir, filepath.FromSlash(rel)), "S", "1")
 		if r := scan(ScanInput{}); r.Added != 1 {
 			t.Fatalf("seed scan = %+v", r)
 		}
@@ -176,12 +163,16 @@ func TestScanPipelineRemovesDescendantsOfADirectoryReplacedByAFile(t *testing.T)
 		return contentURIs(t, p.pool, p.lib)
 	}
 
-	got, want := run(t, false), run(t, true)
-	if !slices.Equal(got, want) {
-		t.Fatalf("uris = %v, want the legacy outcome %v", got, want)
-	}
-	if len(got) != 0 {
-		t.Fatalf("uris = %v, want the series and its chapter gone", got)
+	for _, rel := range []string{"ch1.cbz", "Sub/ch1.cbz"} {
+		t.Run(rel, func(t *testing.T) {
+			got, want := run(t, rel, false), run(t, rel, true)
+			if !slices.Equal(got, want) {
+				t.Fatalf("uris = %v, want the legacy outcome %v", got, want)
+			}
+			if len(got) != 0 {
+				t.Fatalf("uris = %v, want the series and its chapter gone", got)
+			}
+		})
 	}
 }
 
@@ -232,20 +223,6 @@ func TestWriterValveRejectsAnIdentityItCouldNotVerify(t *testing.T) {
 	assertStoredRowUntouched(t, w, series)
 }
 
-func TestWriterValveDetectsARetargetUnderADifferentSpelling(t *testing.T) {
-	_, series, w := retargetFixture(t)
-
-	walkInto(t, w, series+string(filepath.Separator)+".")
-
-	if w.trust {
-		t.Fatal("a directory that resolves elsewhere than it was indexed must open the valve")
-	}
-	if len(w.gone) != 0 {
-		t.Fatalf("gone = %v, want nothing proven absent", w.gone)
-	}
-	assertStoredRowUntouched(t, w, series)
-}
-
 func TestWalkerIdentityRejectsAHandleWhosePathWasRetargeted(t *testing.T) {
 	root := realTempDir(t)
 	writeFile(t, filepath.Join(root, "Lib", "Series", "ch1.cbz"), "one")
@@ -272,39 +249,6 @@ func TestWalkerIdentityRejectsAHandleWhosePathWasRetargeted(t *testing.T) {
 
 	if id := w.identity(f, series); id != "" {
 		t.Fatalf("identity = %q, want a retained handle whose path now names another directory rejected", id)
-	}
-}
-
-func TestScanPipelineRemovesDeepDescendantsOfADirectoryReplacedByAFile(t *testing.T) {
-	run := func(t *testing.T, legacy bool) []string {
-		p := newPipeline(t, "comics")
-		scan := p.mustScan
-		if legacy {
-			scan = p.mustLegacyScan
-		}
-		dir := filepath.Join(p.root, "S")
-		writeCBZFixture(t, filepath.Join(dir, "Sub", "ch1.cbz"), "S", "1")
-		if r := scan(ScanInput{}); r.Added != 1 {
-			t.Fatalf("seed scan = %+v", r)
-		}
-
-		if err := os.RemoveAll(dir); err != nil {
-			t.Fatal(err)
-		}
-		writeFile(t, dir, "no longer a directory")
-
-		if r := scan(ScanInput{}); r.Removed != 1 {
-			t.Fatalf("rescan = %+v, want the orphaned chapter removed", r)
-		}
-		return contentURIs(t, p.pool, p.lib)
-	}
-
-	got, want := run(t, false), run(t, true)
-	if !slices.Equal(got, want) {
-		t.Fatalf("uris = %v, want the legacy outcome %v", got, want)
-	}
-	if len(got) != 0 {
-		t.Fatalf("uris = %v, want the series and its chapter gone", got)
 	}
 }
 

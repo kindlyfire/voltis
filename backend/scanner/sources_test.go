@@ -20,24 +20,14 @@ func sameDevice(a, b os.FileInfo) bool {
 
 func sourceTree(t *testing.T) string {
 	t.Helper()
-	root, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	root := realTempDir(t)
 	writeFile(t, filepath.Join(root, "A", "a1.cbz"), "a1")
 	writeFile(t, filepath.Join(root, "B", "b1.cbz"), "b1")
 	writeFile(t, filepath.Join(root, "B", "inner", "i1.cbz"), "i1")
 	writeFile(t, filepath.Join(root, "B", "inner", "Sub", "s1.cbz"), "s1")
 	writeFile(t, filepath.Join(root, "Lib", "Series", "ch1.cbz"), "ch1")
-	links := [][2]string{
-		{filepath.Join(root, "B", "inner"), filepath.Join(root, "A", "link")},
-		{filepath.Join(root, "Lib"), filepath.Join(root, "Alias")},
-	}
-	for _, l := range links {
-		if err := os.Symlink(l[0], l[1]); err != nil {
-			t.Skipf("symlinks unavailable: %v", err)
-		}
-	}
+	symlink(t, filepath.Join(root, "B", "inner"), filepath.Join(root, "A", "link"))
+	symlink(t, filepath.Join(root, "Lib"), filepath.Join(root, "Alias"))
 	return root
 }
 

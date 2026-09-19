@@ -154,7 +154,7 @@ func TestClassifyComicGoldens(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			path := writeCBZ(t, filepath.Join(root, c.name, c.rel), c.comicInfo)
 			file := statFile(t, path)
-			item := cs.ParseFile("library", file)
+			item := cs.ParseFile(file)
 			if got := summarize(item); got != c.want {
 				t.Errorf("got  %s\nwant %s", got, c.want)
 			}
@@ -218,7 +218,7 @@ func TestClassifyBookGoldens(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			path := writeEPUB(t, filepath.Join(root, c.name, c.rel), c.opf)
-			got := summarize(bs.ParseFile("library", statFile(t, path)))
+			got := summarize(bs.ParseFile(statFile(t, path)))
 			if got != c.want {
 				t.Errorf("got  %s\nwant %s", got, c.want)
 			}

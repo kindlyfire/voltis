@@ -154,15 +154,11 @@ func (r *resolver) evalDir(path string) (string, bool) {
 	if err == nil {
 		return r.abs(real), true
 	}
-	dir, base := filepath.Split(path)
+	_, base := filepath.Split(path)
 	if !errors.Is(err, fs.ErrNotExist) || base == "" || base == "." || base == ".." {
 		return "", false
 	}
-	parent, ok := r.dir(cmp.Or(dir, "."))
-	if !ok {
-		return "", false
-	}
-	return filepath.Join(parent, base), true
+	return r.file(path)
 }
 
 func (r *resolver) abs(path string) string {
@@ -181,10 +177,6 @@ func trimSeparators(path string) string {
 		return sep
 	}
 	return path
-}
-
-func childParent(path string) string {
-	return filepath.Clean(path)
 }
 
 func pathWithin(path, root string) bool {
@@ -352,9 +344,8 @@ func (w walker) dir(path string) error {
 		return err
 	}
 
-	parent := childParent(path)
 	for _, e := range entries {
-		child := filepath.Join(parent, e.Name())
+		child := filepath.Join(path, e.Name())
 		if e.IsDir() {
 			if err := w.dir(child); err != nil {
 				return err

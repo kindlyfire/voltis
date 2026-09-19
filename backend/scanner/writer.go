@@ -191,7 +191,7 @@ func (w *writer) run(ctx context.Context, events <-chan Event, walkDone <-chan e
 func (w *writer) event(ev Event) {
 	switch ev.Kind {
 	case Listed:
-		parent := childParent(ev.Path)
+		parent := filepath.Clean(ev.Path)
 		if ev.Dir == "" {
 			w.res.reject(parent)
 			w.distrust("a directory identity could not be verified", ev.Path)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"testing"
 	"time"
 
@@ -82,9 +81,7 @@ func TestMetadataScanRaceEditBeforeRename(t *testing.T) {
 		t.Fatalf("flush: %v", err)
 	}
 
-	if got := contentURIs(t, pool, lib); !slices.Equal(got, []string{"comic/S_2019", "comic/S_2019/ch1"}) {
-		t.Fatalf("uris = %v", got)
-	}
+	assertCatalog(t, pool, lib, []string{"comic/S_2019", "comic/S_2019/ch1"})
 	moved := readMeta(t, pool, lib, "comic/S_2019/ch1")
 	if moved.Overrides == nil || moved.Overrides.Raw.Title != "kept" {
 		t.Fatalf("override = %+v, want it carried through the rename", moved.Overrides)
@@ -166,85 +163,51 @@ func runCommitLoop(t *testing.T, pool *pgxpool.Pool, r *scanRun, final bool) com
 	}
 }
 
-func TestScanConcurrencyRetriesSerializationFailure(t *testing.T) {
-	for _, code := range []string{"40001", "40P01", "23505"} {
-		t.Run(code, func(t *testing.T) {
-			pool := newTestPool(t)
-			lib := newTestLibrary(t, pool, "comics")
-			failOnInsert(t, pool, "nextval('attempt_counter') = 3", code)
+func TestScanConcurrencyRetryPolicy(t *testing.T) {
+	for _, c := range []struct {
+		name      string
+		sqlstate  string
+		condition string
+		leaves    int
+		attempts  int64
+		wantErr   bool
+		counts    Counts
+		uris      []string
+	}{
+		{"serialization retry", "40001", "nextval('attempt_counter') = 3", 2, 6, false,
+			Counts{Added: 2}, []string{"comic/S", "comic/S/ch1", "comic/S/ch2"}},
+		{"deadlock code retry", "40P01", "nextval('attempt_counter') = 3", 2, 6, false,
+			Counts{Added: 2}, []string{"comic/S", "comic/S/ch1", "comic/S/ch2"}},
+		{"uniqueness retry", "23505", "nextval('attempt_counter') = 3", 2, 6, false,
+			Counts{Added: 2}, []string{"comic/S", "comic/S/ch1", "comic/S/ch2"}},
+		{"exhausted retries", "40001", "nextval('attempt_counter') % 3 = 0", 2, 9, true, Counts{}, nil},
+		{"non-retryable", "22000", "nextval('attempt_counter') > 0", 1, 1, true, Counts{}, nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := newTestScan(t, "comics")
+			failOnInsert(t, r.pool, c.condition, c.sqlstate)
 
-			r := newScanRun(t, pool, lib, &ComicsScanner{})
-			r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
-			r.place(comicResult("/lib/S/ch2.cbz", "ch2", "S", "/lib/S"))
+			for i := range c.leaves {
+				part := fmt.Sprintf("ch%d", i+1)
+				r.place(comicResult("/lib/S/"+part+".cbz", part, "S", "/lib/S"))
+			}
 
-			c := runCommitLoop(t, pool, r, false)
-			if c.err != nil {
-				t.Fatalf("commit: %v", c.err)
+			got := runCommitLoop(t, r.pool, r, false)
+			if (got.err != nil) != c.wantErr {
+				t.Fatalf("commit err = %v, want an error: %v", got.err, c.wantErr)
 			}
-			if c.counts != (Counts{Added: 2}) {
-				t.Fatalf("counts = %+v, want only the successful attempt", c.counts)
+			if got.counts != c.counts {
+				t.Fatalf("counts = %+v, want %+v", got.counts, c.counts)
 			}
-			want := []string{"comic/S", "comic/S/ch1", "comic/S/ch2"}
-			if got := contentURIs(t, pool, lib); !slices.Equal(got, want) {
-				t.Fatalf("uris = %v, want %v", got, want)
-			}
-			attempts, err := db.SelectScalar[int64](context.Background(), pool, "SELECT last_value FROM attempt_counter")
+			assertCatalog(t, r.pool, r.lib, c.uris)
+			attempts, err := db.SelectScalar[int64](context.Background(), r.pool, "SELECT last_value FROM attempt_counter")
 			if err != nil {
 				t.Fatal(err)
 			}
-			if attempts != 6 {
-				t.Fatalf("trigger fired %d times, want a failure after a counted write then a clean retry", attempts)
+			if attempts != c.attempts {
+				t.Fatalf("trigger fired %d times, want %d", attempts, c.attempts)
 			}
 		})
-	}
-}
-
-func TestScanConcurrencyCountersUnchangedAfterFailedAttempts(t *testing.T) {
-	pool := newTestPool(t)
-	lib := newTestLibrary(t, pool, "comics")
-	failOnInsert(t, pool, "nextval('attempt_counter') % 3 = 0", "40001")
-
-	r := newScanRun(t, pool, lib, &ComicsScanner{})
-	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
-	r.place(comicResult("/lib/S/ch2.cbz", "ch2", "S", "/lib/S"))
-
-	c := runCommitLoop(t, pool, r, false)
-	if c.err == nil {
-		t.Fatal("expected the commit to fail")
-	}
-	if c.counts != (Counts{}) {
-		t.Fatalf("counts = %+v, want zero after a failed flush that had already counted a write", c.counts)
-	}
-	if got := contentURIs(t, pool, lib); len(got) != 0 {
-		t.Fatalf("uris = %v, want none", got)
-	}
-	attempts, err := db.SelectScalar[int64](context.Background(), pool, "SELECT last_value FROM attempt_counter")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if attempts != 9 {
-		t.Fatalf("attempts = %d, want three attempts of three inserts", attempts)
-	}
-}
-
-func TestScanConcurrencyDoesNotRetryOtherErrors(t *testing.T) {
-	pool := newTestPool(t)
-	lib := newTestLibrary(t, pool, "comics")
-	failOnInsert(t, pool, "nextval('attempt_counter') > 0", "22000")
-
-	r := newScanRun(t, pool, lib, &ComicsScanner{})
-	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
-
-	c := runCommitLoop(t, pool, r, false)
-	if c.err == nil {
-		t.Fatal("expected the commit to fail")
-	}
-	attempts, err := db.SelectScalar[int64](context.Background(), pool, "SELECT last_value FROM attempt_counter")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if attempts != 1 {
-		t.Fatalf("attempts = %d, want a single attempt", attempts)
 	}
 }
 
@@ -366,9 +329,7 @@ func TestScanConcurrencyRetriesForcedDeadlock(t *testing.T) {
 		t.Fatalf("counts = %+v", c.counts)
 	}
 	want := []string{"comic/S", "comic/S/ch1"}
-	if got := contentURIs(t, pool, lib); !slices.Equal(got, want) {
-		t.Fatalf("uris = %v, want %v", got, want)
-	}
+	assertCatalog(t, pool, lib, want)
 	attempts, err := db.SelectScalar[int64](context.Background(), pool, "SELECT last_value FROM attempt_counter")
 	if err != nil {
 		t.Fatal(err)

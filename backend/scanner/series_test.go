@@ -537,6 +537,14 @@ func TestOrderSteps(t *testing.T) {
 			want: "Z,y,x",
 		},
 		{
+			name: "self rename",
+			sets: map[string]*SeriesChanges{
+				"p1": {Ref: SeriesRef{ID: "p1", URI: "comic/S", URIPart: "S"}, OldURI: "comic/S"},
+			},
+			key:  map[string]Key{},
+			want: "",
+		},
+		{
 			name: "absent hydrated key claims no release",
 			sets: map[string]*SeriesChanges{
 				"S": {Ref: SeriesRef{ID: "S", URIPart: "S"}, Writes: []write{leafWrite("B", "ch1"), leafWrite("A", "ch2")}},
@@ -600,16 +608,5 @@ func TestOrderSteps(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestOrderStepsSkipsSelfRename(t *testing.T) {
-	set := &SeriesChanges{Ref: SeriesRef{ID: "p1", URI: "comic/S", URIPart: "S"}, OldURI: "comic/S"}
-	steps, err := orderSteps(flush{sets: map[string]*SeriesChanges{"p1": set}}, map[string]Key{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(steps) != 0 {
-		t.Fatalf("steps = %+v, want no identity step for a self-rename", steps)
 	}
 }

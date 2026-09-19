@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"slices"
 	"sync"
 	"syscall"
 	"testing"
@@ -143,29 +142,24 @@ func TestScanPipelineMatchesRowsStoredWithAnotherSpelling(t *testing.T) {
 
 	ch1 := filepath.Join("S", "ch1.cbz")
 	writeCBZFixture(t, ch1, "S", "1")
-	info, err := os.Stat(ch1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	file := statFile(t, ch1)
 	abs, err := filepath.Abs(ch1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	mtime := info.ModTime().UTC()
+	mtime := file.Mtime.UTC()
 	seedContent(t, p.pool,
 		models.Content{ID: "p1", LibraryID: p.lib, Type: "comic_series", URI: "comic/S", URIPart: "S", Valid: true,
 			FileURI: new(filepath.Join(p.root, "S"))},
 		models.Content{ID: "l1", LibraryID: p.lib, Type: "comic", URI: "comic/S/ch1", URIPart: "ch1", Valid: true,
-			FileURI: new(abs), FileMtime: &mtime, FileSize: new(int(info.Size())), ParentID: new("p1")},
+			FileURI: new(abs), FileMtime: &mtime, FileSize: new(int(file.Size)), ParentID: new("p1")},
 	)
 
 	r := p.mustScan(ScanInput{Sources: []string{"."}})
 	if r.Unchanged != 1 || r.Added != 0 || r.Updated != 0 || r.Removed != 0 {
 		t.Fatalf("scan = %+v, want the absolutely stored row recognised through the relative walk", r)
 	}
-	if got := contentURIs(t, p.pool, p.lib); !slices.Equal(got, []string{"comic/S", "comic/S/ch1"}) {
-		t.Fatalf("uris = %v, want no duplicate row", got)
-	}
+	assertCatalog(t, p.pool, p.lib, []string{"comic/S", "comic/S/ch1"})
 	if c := readContent(t, p.pool, "l1"); deref(c.FileURI) != abs {
 		t.Fatalf("file_uri = %v, want the stored spelling left alone", c.FileURI)
 	}
@@ -183,9 +177,7 @@ func TestScanPipelineComics(t *testing.T) {
 		t.Fatalf("first scan = %+v", result)
 	}
 	want := []string{"comic/Foo_2019", "comic/Foo_2019/ch1", "comic/Foo_2019/ch2"}
-	if got := contentURIs(t, p.pool, p.lib); !slices.Equal(got, want) {
-		t.Fatalf("uris = %v, want %v", got, want)
-	}
+	assertCatalog(t, p.pool, p.lib, want)
 	if meta := readMeta(t, p.pool, p.lib, "comic/Foo_2019").File.Raw; meta.Title != "Foo" {
 		t.Fatalf("series metadata = %+v", meta)
 	}
@@ -210,9 +202,7 @@ func TestScanPipelineComics(t *testing.T) {
 	if removed.Removed != 1 || removed.Unchanged != 1 {
 		t.Fatalf("removal scan = %+v", removed)
 	}
-	if got := contentURIs(t, p.pool, p.lib); !slices.Equal(got, want[:2]) {
-		t.Fatalf("uris = %v, want %v", got, want[:2])
-	}
+	assertCatalog(t, p.pool, p.lib, want[:2])
 }
 
 func TestScanPipelineBooks(t *testing.T) {
@@ -225,9 +215,7 @@ func TestScanPipelineBooks(t *testing.T) {
 		t.Fatalf("scan = %+v", result)
 	}
 	want := []string{"book/Bar", "book/Bar/Bar v1", "book/Solo"}
-	if got := contentURIs(t, p.pool, p.lib); !slices.Equal(got, want) {
-		t.Fatalf("uris = %v, want %v", got, want)
-	}
+	assertCatalog(t, p.pool, p.lib, want)
 }
 
 func TestScanPipelineRetainsRowsUnderUnreadableDirectories(t *testing.T) {
@@ -250,9 +238,7 @@ func TestScanPipelineRetainsRowsUnderUnreadableDirectories(t *testing.T) {
 	if result.Removed != 0 {
 		t.Fatalf("scan = %+v, want nothing removed", result)
 	}
-	if got := contentURIs(t, p.pool, p.lib); !slices.Equal(got, before) {
-		t.Fatalf("uris = %v, want %v", got, before)
-	}
+	assertCatalog(t, p.pool, p.lib, before)
 }
 
 func TestScanPipelineFilterPaths(t *testing.T) {
@@ -266,17 +252,13 @@ func TestScanPipelineFilterPaths(t *testing.T) {
 	if result.Added != 1 {
 		t.Fatalf("filtered scan = %+v", result)
 	}
-	if got := contentURIs(t, p.pool, p.lib); !slices.Equal(got, []string{"comic/Foo_2019", "comic/Foo_2019/ch1"}) {
-		t.Fatalf("uris = %v", got)
-	}
+	assertCatalog(t, p.pool, p.lib, []string{"comic/Foo_2019", "comic/Foo_2019/ch1"})
 
 	full := []string{"comic/Bar_2020", "comic/Bar_2020/ch1", "comic/Foo_2019", "comic/Foo_2019/ch1"}
 	if got := p.mustScan(ScanInput{}); got.Added != 1 {
 		t.Fatalf("full scan = %+v", got)
 	}
-	if got := contentURIs(t, p.pool, p.lib); !slices.Equal(got, full) {
-		t.Fatalf("uris = %v, want %v", got, full)
-	}
+	assertCatalog(t, p.pool, p.lib, full)
 
 	if err := os.RemoveAll(bar); err != nil {
 		t.Fatal(err)
@@ -284,9 +266,7 @@ func TestScanPipelineFilterPaths(t *testing.T) {
 	if result := p.mustScan(ScanInput{FilterPaths: []string{foo}}); result.Removed != 0 {
 		t.Fatalf("scan outside the filter removed rows: %+v", result)
 	}
-	if got := contentURIs(t, p.pool, p.lib); !slices.Equal(got, full) {
-		t.Fatalf("uris = %v, want the catalogued rows outside the filter retained", got)
-	}
+	assertCatalog(t, p.pool, p.lib, full)
 }
 
 func TestScanPipelineFailedParsesInvalidateAndRetry(t *testing.T) {
@@ -426,9 +406,7 @@ func TestScanConcurrencyCancellation(t *testing.T) {
 	if _, err := handle.Wait(); err == nil {
 		t.Fatal("cancelled scan must report an error")
 	}
-	if got := contentURIs(t, p.pool, p.lib); len(got) != 0 {
-		t.Fatalf("uris = %v, want nothing committed", got)
-	}
+	assertCatalog(t, p.pool, p.lib, nil)
 }
 
 func TestScanPipelineRelativeRootProvesAbsence(t *testing.T) {
@@ -454,9 +432,7 @@ func TestScanPipelineRelativeRootProvesAbsence(t *testing.T) {
 		t.Fatalf("second scan = %+v, want both removals proven", got)
 	}
 	want := []string{"comic/Foo_2019", "comic/Foo_2019/ch1"}
-	if uris := contentURIs(t, p.pool, p.lib); !slices.Equal(uris, want) {
-		t.Fatalf("uris = %v, want %v", uris, want)
-	}
+	assertCatalog(t, p.pool, p.lib, want)
 }
 
 func TestScanPipelineSourcesOutsideTheWorkingDirectory(t *testing.T) {
@@ -479,17 +455,13 @@ func TestScanPipelineSourcesOutsideTheWorkingDirectory(t *testing.T) {
 		t.Fatalf("first scan = %+v, want both roots catalogued", got)
 	}
 	want := []string{"comic/Bar_2020", "comic/Bar_2020/ch1", "comic/Foo_2019", "comic/Foo_2019/ch1"}
-	if got := contentURIs(t, p.pool, p.lib); !slices.Equal(got, want) {
-		t.Fatalf("uris = %v, want %v", got, want)
-	}
+	assertCatalog(t, p.pool, p.lib, want)
 
 	again := p.mustScan(ScanInput{Sources: sources})
 	if again.Removed != 0 || again.Unchanged != 2 {
 		t.Fatalf("second scan = %+v, want nothing removed while both files exist", again)
 	}
-	if got := contentURIs(t, p.pool, p.lib); !slices.Equal(got, want) {
-		t.Fatalf("uris after rescan = %v, want %v", got, want)
-	}
+	assertCatalog(t, p.pool, p.lib, want)
 
 	mixed := p.mustScan(ScanInput{Sources: []string{here, filepath.Join("..", "Other")}})
 	if mixed.Removed != 0 || mixed.Added != 0 || mixed.Unchanged != 2 {
@@ -500,9 +472,7 @@ func TestScanPipelineSourcesOutsideTheWorkingDirectory(t *testing.T) {
 	if filtered.Removed != 0 {
 		t.Fatalf("filtered scan = %+v, want rows outside the filter retained", filtered)
 	}
-	if got := contentURIs(t, p.pool, p.lib); !slices.Equal(got, want) {
-		t.Fatalf("uris after the filtered scan = %v, want %v", got, want)
-	}
+	assertCatalog(t, p.pool, p.lib, want)
 }
 
 func TestScanPipelineRetainsRowsWhoseAncestryCannotBeResolved(t *testing.T) {
@@ -516,21 +486,16 @@ func TestScanPipelineRetainsRowsWhoseAncestryCannotBeResolved(t *testing.T) {
 	}
 	book := filepath.Join(p.root, "B", "Book ch1.cbz")
 	writeCBZFixture(t, book, "Book", "1")
-	if err := os.Symlink(filepath.Join(p.root, "B", "inner"), filepath.Join(p.root, "A", "link")); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
-	}
+	symlink(t, filepath.Join(p.root, "B", "inner"), filepath.Join(p.root, "A", "link"))
 
 	stored := spell("A", "link", "..", "Book ch1.cbz")
-	info, err := os.Stat(stored)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mtime := info.ModTime().UTC()
+	file := statFile(t, stored)
+	mtime := file.Mtime.UTC()
 	seedContent(t, p.pool,
 		models.Content{ID: "p1", LibraryID: p.lib, Type: "comic_series", URI: "comic/Book", URIPart: "Book",
 			Valid: true, FileURI: new(spell("A", "link", ".."))},
 		models.Content{ID: "l1", LibraryID: p.lib, Type: "comic", URI: "comic/Book/ch1", URIPart: "ch1", Valid: true,
-			FileURI: new(stored), FileMtime: &mtime, FileSize: new(int(info.Size())), ParentID: new("p1")},
+			FileURI: new(stored), FileMtime: &mtime, FileSize: new(int(file.Size)), ParentID: new("p1")},
 	)
 
 	if err := os.RemoveAll(filepath.Join(p.root, "B", "inner")); err != nil {
@@ -541,9 +506,7 @@ func TestScanPipelineRetainsRowsWhoseAncestryCannotBeResolved(t *testing.T) {
 	if result.Removed != 0 {
 		t.Fatalf("scan = %+v, want nothing removed while the archive is still on disk", result)
 	}
-	if got := contentURIs(t, p.pool, p.lib); !slices.Equal(got, []string{"comic/Book", "comic/Book/ch1"}) {
-		t.Fatalf("uris = %v, want the catalogue intact", got)
-	}
+	assertCatalog(t, p.pool, p.lib, []string{"comic/Book", "comic/Book/ch1"})
 	if _, err := os.Stat(book); err != nil {
 		t.Fatalf("archive missing from disk: %v", err)
 	}

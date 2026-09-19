@@ -68,14 +68,10 @@ func changed(f FSFile, fp Fingerprint, exists, force bool) bool {
 	if !exists || force || !fp.Valid {
 		return true
 	}
-	var old FSFile
-	if fp.Mtime != nil {
-		old.Mtime = *fp.Mtime
-	}
-	if fp.Size != nil {
-		old.Size = int64(*fp.Size)
-	}
-	return f.HasChanged(old)
+	return f.HasChanged(FSFile{
+		Mtime: deref(fp.Mtime),
+		Size:  int64(deref(fp.Size)),
+	})
 }
 
 type node struct {
@@ -149,9 +145,9 @@ func (c *coverage) listed(dir string, names []string) []string {
 	return out
 }
 
-func deref(s *string) string {
-	if s == nil {
-		return ""
+func deref[T any](p *T) (v T) {
+	if p != nil {
+		v = *p
 	}
-	return *s
+	return v
 }

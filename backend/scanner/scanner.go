@@ -20,10 +20,7 @@ import (
 
 type FileScanner interface {
 	FileEligible(path string) bool
-
-	// ParseFile must be safe to call concurrently. It returns nil when the
-	// file could not be parsed.
-	ParseFile(libraryID string, file FSFile) *ParsedItem
+	ParseFile(file FSFile) *ParsedItem
 
 	SeriesCover(series SeriesRef, ordered []Child) (*string, *time.Time)
 	UpdateSeries(r *repository, series *models.Content, ordered []Child)
@@ -154,12 +151,12 @@ func NewScanTask(notify Notifier) *tasks.TaskDef {
 	}
 }
 
-func parseWorker(ctx context.Context, s FileScanner, libraryID string, jobs <-chan FSFile, results chan<- Result) {
+func parseWorker(ctx context.Context, s FileScanner, jobs <-chan FSFile, results chan<- Result) {
 	for f := range jobs {
 		if ctx.Err() != nil {
 			return
 		}
-		item := s.ParseFile(libraryID, f)
+		item := s.ParseFile(f)
 		select {
 		case results <- Result{File: f, Item: item}:
 		case <-ctx.Done():
@@ -218,7 +215,7 @@ func runScan(ctx context.Context, in ScanInput, tc *tasks.TaskContext, notify No
 		walkDone <- err
 	})
 	for range workers {
-		wg.Go(func() { parseWorker(ctx, s, in.LibraryID, jobs, results) })
+		wg.Go(func() { parseWorker(ctx, s, jobs, results) })
 	}
 	wg.Go(func() { commitLoop(ctx, pool, s, in.LibraryID, flushes, done) })
 
@@ -363,7 +360,7 @@ func runLegacyScan(input ScanInput, tc *tasks.TaskContext) (ScanResult, error) {
 	})
 
 	fp.MapConcurrently(workList, concurrency, func(gf groupedFile) {
-		parsed := s.ParseFile(input.LibraryID, gf.file)
+		parsed := s.ParseFile(gf.file)
 
 		var parentID *string
 		fp.WithMutex(&commitMu, func() {

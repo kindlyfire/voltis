@@ -96,18 +96,17 @@ func commit(ctx context.Context, tx pgx.Tx, s FileScanner, libraryID string, f f
 
 	cur := map[string]models.Content{}
 	key := map[string]Key{}
+	var c models.Content
 	err := query(ctx, tx, `
 		SELECT id, created_at, uri, uri_part, type, file_uri, cover_uri, file_mtime, parent_id
 		FROM content WHERE library_id = $1 AND id = ANY($2::text[])
-	`, []any{libraryID, ids}, func(rows pgx.Rows) error {
-		var c models.Content
-		if err := rows.Scan(&c.ID, &c.CreatedAt, &c.URI, &c.URIPart, &c.Type, &c.FileURI, &c.CoverURI, &c.FileMtime, &c.ParentID); err != nil {
-			return err
-		}
-		cur[c.ID] = c
-		key[c.ID] = Key{deref(c.ParentID), c.URIPart}
-		return nil
-	})
+	`, []any{libraryID, ids},
+		[]any{&c.ID, &c.CreatedAt, &c.URI, &c.URIPart, &c.Type, &c.FileURI, &c.CoverURI, &c.FileMtime, &c.ParentID},
+		func() error {
+			cur[c.ID] = c
+			key[c.ID] = Key{deref(c.ParentID), c.URIPart}
+			return nil
+		})
 	if err != nil {
 		return counts, err
 	}
@@ -127,12 +126,9 @@ func commit(ctx context.Context, tx pgx.Tx, s FileScanner, libraryID string, f f
 			continue
 		}
 		list := []rename{{Old: set.OldURI, New: set.Ref.URI}}
+		var childID, part string
 		err := query(ctx, tx, `SELECT id, uri_part FROM content WHERE parent_id = $1`,
-			[]any{set.Ref.ID}, func(rows pgx.Rows) error {
-				var childID, part string
-				if err := rows.Scan(&childID, &part); err != nil {
-					return err
-				}
+			[]any{set.Ref.ID}, []any{&childID, &part}, func() error {
 				if !dropped[childID] {
 					list = append(list, rename{Old: set.OldURI + "/" + part, New: set.Ref.URI + "/" + part})
 				}
@@ -218,26 +214,24 @@ func commit(ctx context.Context, tx pgx.Tx, s FileScanner, libraryID string, f f
 
 	children := map[string][]Child{}
 	if len(seriesIDs) > 0 {
+		var kid Child
+		var parentID string
+		var raw json.RawMessage
 		err := query(ctx, tx, `
 			SELECT c.id, c.uri, c.uri_part, c."order", c.order_parts, c.cover_uri, c.file_mtime, c.valid, c.parent_id,
 			       COALESCE(m.data_raw, '{}') AS data_raw
 			FROM content c LEFT JOIN content_metadata m ON m.library_id = c.library_id AND m.uri = c.uri
 			WHERE c.library_id = $1 AND c.parent_id = ANY($2::text[])
-		`, []any{libraryID, seriesIDs}, func(rows pgx.Rows) error {
-			var kid Child
-			var parentID string
-			var raw json.RawMessage
-			if err := rows.Scan(&kid.ID, &kid.URI, &kid.URIPart, &kid.Order, &kid.OrderParts,
-				&kid.CoverURI, &kid.FileMtime, &kid.Valid, &parentID, &raw); err != nil {
-				return err
-			}
-			if dropped[kid.ID] {
+		`, []any{libraryID, seriesIDs},
+			[]any{&kid.ID, &kid.URI, &kid.URIPart, &kid.Order, &kid.OrderParts,
+				&kid.CoverURI, &kid.FileMtime, &kid.Valid, &parentID, &raw}, func() error {
+				if dropped[kid.ID] {
+					return nil
+				}
+				kid.Meta = metaraw.From(raw)
+				children[parentID] = append(children[parentID], kid)
 				return nil
-			}
-			kid.Meta = metaraw.From(raw)
-			children[parentID] = append(children[parentID], kid)
-			return nil
-		})
+			})
 		if err != nil {
 			return counts, err
 		}
@@ -375,13 +369,10 @@ func writeMetadata(ctx context.Context, tx pgx.Tx, libraryID string, now time.Ti
 
 	uris := fp.Map(rows, func(m metaWrite) string { return m.uri })
 	existing := map[string]json.RawMessage{}
+	var uri string
+	var raw json.RawMessage
 	err := query(ctx, tx, "SELECT uri, data_raw FROM content_metadata WHERE library_id = $1 AND uri = ANY($2::text[])",
-		[]any{libraryID, uris}, func(qr pgx.Rows) error {
-			var uri string
-			var raw json.RawMessage
-			if err := qr.Scan(&uri, &raw); err != nil {
-				return err
-			}
+		[]any{libraryID, uris}, []any{&uri, &raw}, func() error {
 			existing[uri] = raw
 			return nil
 		})
@@ -425,16 +416,11 @@ func upsertContent(ctx context.Context, tx pgx.Tx, c models.Content) error {
 	return err
 }
 
-func query(ctx context.Context, tx pgx.Tx, sql string, args []any, scan func(pgx.Rows) error) error {
+func query(ctx context.Context, tx pgx.Tx, sql string, args, dest []any, visit func() error) error {
 	rows, err := tx.Query(ctx, sql, args...)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		if err := scan(rows); err != nil {
-			return err
-		}
-	}
-	return rows.Err()
+	_, err = pgx.ForEachRow(rows, dest, visit)
+	return err
 }

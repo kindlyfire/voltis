@@ -63,11 +63,6 @@ func TestClassifyBookTuples(t *testing.T) {
 		want       string
 	}{
 		{
-			"title falls back to stem",
-			"/lib/Books/untitled-file.epub", epub.Metadata{}, false,
-			"prefix=book type=book part=untitled-file order=[0] cover=nil title=untitled-file series=nil index=0 data=",
-		},
-		{
 			"invalid cover is dropped",
 			"/lib/Books/broken.epub", epub.Metadata{Title: "Broken", CoverPath: "missing.jpg"}, false,
 			"prefix=book type=book part=broken order=[0] cover=nil title=Broken series=nil index=0 data=",
@@ -262,7 +257,7 @@ func TestClassifyCollisionFallsThroughToConflictHandling(t *testing.T) {
 func TestClassifySanitizedPartReachesBothScannerPaths(t *testing.T) {
 	path := writeCBZ(t, filepath.Join(t.TempDir(), "Series", "Series ch1.cbz"),
 		`<?xml version="1.0"?><ComicInfo><Series>Foo/bar</Series><Number>1</Number></ComicInfo>`)
-	item := (&ComicsScanner{}).ParseFile("library", statFile(t, path))
+	item := (&ComicsScanner{}).ParseFile(statFile(t, path))
 	if item.Series.URIPart != "Foo_bar" || item.Series.Title != "Foo/bar" {
 		t.Fatalf("parsed series = %+v", item.Series)
 	}

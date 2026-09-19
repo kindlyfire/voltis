@@ -158,9 +158,7 @@ func TestFingerprintNarrowRead(t *testing.T) {
 }
 
 func TestFlushHydratesOnlyTheRowsTheFlushTouches(t *testing.T) {
-	pool := newTestPool(t)
-	lib := newTestLibrary(t, pool, "comics")
-	r := newScanRun(t, pool, lib, &ComicsScanner{})
+	r := newTestScan(t, "comics")
 
 	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
 	r.place(comicResult("/lib/T/ch1.cbz", "ch1", "T", "/lib/T"))
@@ -201,9 +199,7 @@ func TestFlushHydratesOnlyTheRowsTheFlushTouches(t *testing.T) {
 }
 
 func TestFlushKeepsManifestThroughInvalidationAndSeriesPatch(t *testing.T) {
-	pool := newTestPool(t)
-	lib := newTestLibrary(t, pool, "comics")
-	r := newScanRun(t, pool, lib, &ComicsScanner{})
+	r := newTestScan(t, "comics")
 
 	manifest := `{"pages": [["001.jpg", 4, 2]]}`
 	r.place(withCover(withFileData(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"), manifest), "001.jpg"))
@@ -214,9 +210,9 @@ func TestFlushKeepsManifestThroughInvalidationAndSeriesPatch(t *testing.T) {
 	seriesID := r.w.byURI["comic/S"]
 	leafID := r.w.keys[Key{seriesID, "ch1"}]
 	seriesManifest := `{"pages": [["cover.jpg", 2, 3]]}`
-	exec(t, pool, "UPDATE content SET file_data = $2 WHERE id = $1", seriesID, seriesManifest)
+	exec(t, r.pool, "UPDATE content SET file_data = $2 WHERE id = $1", seriesID, seriesManifest)
 
-	leafBefore, seriesBefore := readContent(t, pool, leafID), readContent(t, pool, seriesID)
+	leafBefore, seriesBefore := readContent(t, r.pool, leafID), readContent(t, r.pool, seriesID)
 	var stored map[string]any
 	if err := json.Unmarshal(leafBefore.FileData, &stored); err != nil || stored["pages"] == nil {
 		t.Fatalf("file_data = %s", leafBefore.FileData)
@@ -227,7 +223,7 @@ func TestFlushKeepsManifestThroughInvalidationAndSeriesPatch(t *testing.T) {
 	r.place(comicResult("/lib/S2/ch2.cbz", "ch2", "S", "/lib/S2"))
 	r.commit(false)
 
-	leafAfter, seriesAfter := readContent(t, pool, leafID), readContent(t, pool, seriesID)
+	leafAfter, seriesAfter := readContent(t, r.pool, leafID), readContent(t, r.pool, seriesID)
 	if leafAfter.Valid {
 		t.Fatal("row must be invalidated")
 	}
@@ -252,15 +248,13 @@ func TestFlushKeepsManifestThroughInvalidationAndSeriesPatch(t *testing.T) {
 }
 
 func TestFlushReReducesSeriesAfterLaterMember(t *testing.T) {
-	pool := newTestPool(t)
-	lib := newTestLibrary(t, pool, "comics")
-	r := newScanRun(t, pool, lib, &ComicsScanner{})
+	r := newTestScan(t, "comics")
 
 	r.place(withOrder(withMeta(comicResult("/lib/S/ch2.cbz", "ch2", "S", "/lib/S"),
 		models.Metadata{Series: "S", Publisher: "Beta", Language: "fr"}), 0, 2))
 	r.commit(false)
 
-	if got := readMeta(t, pool, lib, "comic/S").File.Raw; got.Publisher != "Beta" || got.Title != "S" {
+	if got := readMeta(t, r.pool, r.lib, "comic/S").File.Raw; got.Publisher != "Beta" || got.Title != "S" {
 		t.Fatalf("series metadata = %+v", got)
 	}
 
@@ -269,7 +263,7 @@ func TestFlushReReducesSeriesAfterLaterMember(t *testing.T) {
 		models.Metadata{Series: "S", Publisher: "Alpha"}), 0, 1))
 	r.commit(false)
 
-	got := readMeta(t, pool, lib, "comic/S").File.Raw
+	got := readMeta(t, r.pool, r.lib, "comic/S").File.Raw
 	if got.Publisher != "Alpha" {
 		t.Fatalf("publisher = %q, want the earlier member to win", got.Publisher)
 	}
@@ -278,7 +272,7 @@ func TestFlushReReducesSeriesAfterLaterMember(t *testing.T) {
 	}
 
 	seriesID := r.w.byURI["comic/S"]
-	kids, err := db.SelectScalars[string](context.Background(), pool,
+	kids, err := db.SelectScalars[string](context.Background(), r.pool,
 		`SELECT uri_part FROM content WHERE parent_id = $1 ORDER BY "order"`, seriesID)
 	if err != nil {
 		t.Fatal(err)
@@ -289,9 +283,7 @@ func TestFlushReReducesSeriesAfterLaterMember(t *testing.T) {
 }
 
 func TestFlushCrossSeriesKeyReuse(t *testing.T) {
-	pool := newTestPool(t)
-	lib := newTestLibrary(t, pool, "comics")
-	r := newScanRun(t, pool, lib, &ComicsScanner{})
+	r := newTestScan(t, "comics")
 
 	r.place(comicResult("/lib/A/ch1.cbz", "ch1", "A", "/lib/A"))
 	r.place(comicResult("/lib/B/ch1.cbz", "ch1", "B", "/lib/B"))
@@ -308,27 +300,21 @@ func TestFlushCrossSeriesKeyReuse(t *testing.T) {
 	if counts.Removed != 1 || counts.Updated != 1 {
 		t.Fatalf("counts = %+v", counts)
 	}
-	if got := contentURIs(t, pool, lib); !slices.Equal(got, []string{"comic/B", "comic/B/ch1"}) {
-		t.Fatalf("uris = %v", got)
-	}
-	moved := readContent(t, pool, r.w.keys[Key{seriesB, "ch1"}])
+	assertCatalog(t, r.pool, r.lib, []string{"comic/B", "comic/B/ch1"})
+	moved := readContent(t, r.pool, r.w.keys[Key{seriesB, "ch1"}])
 	if deref(moved.FileURI) != "/lib/A/ch1.cbz" || deref(moved.ParentID) != seriesB {
 		t.Fatalf("moved row = %+v", moved)
 	}
 }
 
 func TestFlushStandaloneKeyReleasedBeforeSeriesInsert(t *testing.T) {
-	pool := newTestPool(t)
-	lib := newTestLibrary(t, pool, "comics")
-	r := newScanRun(t, pool, lib, &ComicsScanner{})
+	r := newTestScan(t, "comics")
 
 	r.place(comicResult("/lib/X/ch1.cbz", "ch1", "X", "/lib/X"))
 	r.place(comicResult("/lib/Foo.cbz", "Foo", "", ""))
 	r.commit(false)
 
-	if got := contentURIs(t, pool, lib); !slices.Equal(got, []string{"comic/Foo", "comic/X", "comic/X/ch1"}) {
-		t.Fatalf("uris = %v", got)
-	}
+	assertCatalog(t, r.pool, r.lib, []string{"comic/Foo", "comic/X", "comic/X/ch1"})
 
 	r.reload()
 	r.place(comicResult("/lib/Foo.cbz", "Foo", "X", "/lib/X"))
@@ -336,11 +322,9 @@ func TestFlushStandaloneKeyReleasedBeforeSeriesInsert(t *testing.T) {
 	r.commit(false)
 
 	want := []string{"comic/Foo", "comic/Foo/ch1", "comic/X", "comic/X/ch1", "comic/X/Foo"}
-	if got := contentURIs(t, pool, lib); !slices.Equal(got, want) {
-		t.Fatalf("uris = %v, want %v", got, want)
-	}
-	newSeries, err := db.SelectOne[models.Content](context.Background(), pool,
-		"SELECT * FROM content WHERE library_id = $1 AND uri = 'comic/Foo'", lib)
+	assertCatalog(t, r.pool, r.lib, want)
+	newSeries, err := db.SelectOne[models.Content](context.Background(), r.pool,
+		"SELECT * FROM content WHERE library_id = $1 AND uri = 'comic/Foo'", r.lib)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,18 +334,16 @@ func TestFlushStandaloneKeyReleasedBeforeSeriesInsert(t *testing.T) {
 }
 
 func TestFlushRenameMovesAnnotationsWithChildKeyChange(t *testing.T) {
-	pool := newTestPool(t)
-	lib := newTestLibrary(t, pool, "comics")
-	r := newScanRun(t, pool, lib, &ComicsScanner{})
+	r := newTestScan(t, "comics")
 
 	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
 	r.place(comicResult("/lib/S/ch9.cbz", "ch9", "S", "/lib/S"))
 	r.commit(false)
 
-	exec(t, pool, "INSERT INTO users (id, username, password_hash) VALUES ('u1', 'u', 'x')")
-	exec(t, pool, "INSERT INTO user_to_content (id, user_id, library_id, uri, starred) VALUES ('a1', 'u1', $1, 'comic/S/ch1', true)", lib)
-	exec(t, pool, "INSERT INTO user_to_content (id, user_id, library_id, uri, starred) VALUES ('a2', 'u1', $1, 'comic/S', true)", lib)
-	seedMetadata(t, pool, lib, "comic/S/ch1", metaraw.MetadataRaw{
+	exec(t, r.pool, "INSERT INTO users (id, username, password_hash) VALUES ('u1', 'u', 'x')")
+	exec(t, r.pool, "INSERT INTO user_to_content (id, user_id, library_id, uri, starred) VALUES ('a1', 'u1', $1, 'comic/S/ch1', true)", r.lib)
+	exec(t, r.pool, "INSERT INTO user_to_content (id, user_id, library_id, uri, starred) VALUES ('a2', 'u1', $1, 'comic/S', true)", r.lib)
+	seedMetadata(t, r.pool, r.lib, "comic/S/ch1", metaraw.MetadataRaw{
 		Overrides: &metaraw.RawContainer[models.Metadata]{Raw: models.Metadata{Title: "kept"}},
 	})
 
@@ -370,32 +352,21 @@ func TestFlushRenameMovesAnnotationsWithChildKeyChange(t *testing.T) {
 	r.commit(false)
 
 	want := []string{"comic/S_2019", "comic/S_2019/ch2", "comic/S_2019/ch9"}
-	if got := contentURIs(t, pool, lib); !slices.Equal(got, want) {
-		t.Fatalf("uris = %v, want %v", got, want)
-	}
+	assertCatalog(t, r.pool, r.lib, want)
 
-	annotations, err := db.SelectScalars[string](context.Background(), pool,
-		"SELECT uri FROM user_to_content WHERE library_id = $1 ORDER BY uri", lib)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(annotations, []string{"comic/S_2019", "comic/S_2019/ch1"}) {
-		t.Fatalf("annotations = %v, want the rename pair at the old child part", annotations)
-	}
-	if got := readMeta(t, pool, lib, "comic/S_2019/ch1").Overrides; got == nil || got.Raw.Title != "kept" {
+	assertAnnotations(t, r.pool, r.lib, []string{"comic/S_2019", "comic/S_2019/ch1"})
+	if got := readMeta(t, r.pool, r.lib, "comic/S_2019/ch1").Overrides; got == nil || got.Raw.Title != "kept" {
 		t.Fatalf("override = %+v, want it to follow the rename", got)
 	}
 }
 
 func TestFlushDeletesOrphansAndStampsScannedAt(t *testing.T) {
-	pool := newTestPool(t)
-	lib := newTestLibrary(t, pool, "comics")
-	r := newScanRun(t, pool, lib, &ComicsScanner{})
+	r := newTestScan(t, "comics")
 
 	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
 	r.place(comicResult("/lib/T/ch1.cbz", "ch1", "T", "/lib/T"))
 	r.commit(false)
-	if at := libraryScannedAt(t, pool, lib); at != nil {
+	if at := libraryScannedAt(t, r.pool, r.lib); at != nil {
 		t.Fatalf("scanned_at = %v, want nil before the final flush", at)
 	}
 
@@ -406,10 +377,8 @@ func TestFlushDeletesOrphansAndStampsScannedAt(t *testing.T) {
 	if counts.Removed != 1 {
 		t.Fatalf("counts = %+v", counts)
 	}
-	if got := contentURIs(t, pool, lib); !slices.Equal(got, []string{"comic/T", "comic/T/ch1"}) {
-		t.Fatalf("uris = %v, want the emptied series gone", got)
-	}
-	if at := libraryScannedAt(t, pool, lib); at == nil {
+	assertCatalog(t, r.pool, r.lib, []string{"comic/T", "comic/T/ch1"})
+	if at := libraryScannedAt(t, r.pool, r.lib); at == nil {
 		t.Fatal("scanned_at was not stamped")
 	}
 }
@@ -439,101 +408,56 @@ func TestFlushNoOpFinalStillEmits(t *testing.T) {
 	}
 }
 
-func TestFlushRoundTripRenameKeepsMetadata(t *testing.T) {
-	pool := newTestPool(t)
-	lib := newTestLibrary(t, pool, "comics")
-	r := newScanRun(t, pool, lib, &ComicsScanner{})
+func TestFlushRenameHistory(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		series []string
+		final  string
+	}{
+		{"round trip", []string{"T", "S"}, "comic/S"},
+		{"round trip then rename", []string{"T", "S", "U"}, "comic/U"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := newTestScan(t, "comics")
+			parts := []string{"ch1", "ch2", "ch3"}
+			for _, part := range parts {
+				r.place(comicResult("/lib/S/"+part+".cbz", part, "S", "/lib/S"))
+			}
+			r.commit(false)
 
-	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
-	r.place(comicResult("/lib/S/ch2.cbz", "ch2", "S", "/lib/S"))
-	r.place(comicResult("/lib/S/ch3.cbz", "ch3", "S", "/lib/S"))
-	r.commit(false)
+			layered := []string{"", "/ch1", "/ch3"}
+			for _, suffix := range layered {
+				seedMetadata(t, r.pool, r.lib, "comic/S"+suffix, metaraw.MetadataRaw{
+					Overrides: &metaraw.RawContainer[models.Metadata]{Raw: models.Metadata{Title: "kept comic/S" + suffix}},
+				})
+			}
+			exec(t, r.pool, "INSERT INTO users (id, username, password_hash) VALUES ('u1', 'u', 'x')")
+			exec(t, r.pool, "INSERT INTO user_to_content (id, user_id, library_id, uri, starred) VALUES ('a1', 'u1', $1, 'comic/S/ch3', true)", r.lib)
 
-	layered := []string{"comic/S", "comic/S/ch1", "comic/S/ch3"}
-	for _, uri := range layered {
-		seedMetadata(t, pool, lib, uri, metaraw.MetadataRaw{
-			Overrides: &metaraw.RawContainer[models.Metadata]{Raw: models.Metadata{Title: "kept " + uri}},
+			r.reload()
+			for i, series := range c.series {
+				r.place(comicResult("/lib/S/"+parts[i]+".cbz", parts[i], series, "/lib/S"))
+			}
+			r.commit(false)
+
+			assertCatalog(t, r.pool, r.lib, []string{c.final, c.final + "/ch1", c.final + "/ch2", c.final + "/ch3"})
+			for _, suffix := range layered {
+				if got := readMeta(t, r.pool, r.lib, c.final+suffix).Overrides; got == nil || got.Raw.Title != "kept comic/S"+suffix {
+					t.Fatalf("override at %s = %+v, want the one from comic/S%s", c.final+suffix, got, suffix)
+				}
+			}
+			assertAnnotations(t, r.pool, r.lib, []string{c.final + "/ch3"})
 		})
-	}
-	exec(t, pool, "INSERT INTO users (id, username, password_hash) VALUES ('u1', 'u', 'x')")
-	exec(t, pool, "INSERT INTO user_to_content (id, user_id, library_id, uri, starred) VALUES ('a1', 'u1', $1, 'comic/S/ch3', true)", lib)
-
-	r.reload()
-	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "T", "/lib/S"))
-	r.place(comicResult("/lib/S/ch2.cbz", "ch2", "S", "/lib/S"))
-	r.commit(false)
-
-	want := []string{"comic/S", "comic/S/ch1", "comic/S/ch2", "comic/S/ch3"}
-	if got := contentURIs(t, pool, lib); !slices.Equal(got, want) {
-		t.Fatalf("uris = %v, want %v", got, want)
-	}
-	for _, uri := range layered {
-		if got := readMeta(t, pool, lib, uri).Overrides; got == nil || got.Raw.Title != "kept "+uri {
-			t.Fatalf("override at %s = %+v, want it preserved", uri, got)
-		}
-	}
-	annotations, err := db.SelectScalars[string](context.Background(), pool,
-		"SELECT uri FROM user_to_content WHERE library_id = $1 ORDER BY uri", lib)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(annotations, []string{"comic/S/ch3"}) {
-		t.Fatalf("annotations = %v", annotations)
-	}
-}
-
-func TestFlushRoundTripThenRenameStillMoves(t *testing.T) {
-	pool := newTestPool(t)
-	lib := newTestLibrary(t, pool, "comics")
-	r := newScanRun(t, pool, lib, &ComicsScanner{})
-
-	for _, part := range []string{"ch1", "ch2", "ch3"} {
-		r.place(comicResult("/lib/S/"+part+".cbz", part, "S", "/lib/S"))
-	}
-	r.commit(false)
-
-	for _, uri := range []string{"comic/S", "comic/S/ch1", "comic/S/ch3"} {
-		seedMetadata(t, pool, lib, uri, metaraw.MetadataRaw{
-			Overrides: &metaraw.RawContainer[models.Metadata]{Raw: models.Metadata{Title: "kept " + uri}},
-		})
-	}
-	exec(t, pool, "INSERT INTO users (id, username, password_hash) VALUES ('u1', 'u', 'x')")
-	exec(t, pool, "INSERT INTO user_to_content (id, user_id, library_id, uri, starred) VALUES ('a1', 'u1', $1, 'comic/S/ch3', true)", lib)
-
-	r.reload()
-	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "T", "/lib/S"))
-	r.place(comicResult("/lib/S/ch2.cbz", "ch2", "S", "/lib/S"))
-	r.place(comicResult("/lib/S/ch3.cbz", "ch3", "U", "/lib/S"))
-	r.commit(false)
-
-	want := []string{"comic/U", "comic/U/ch1", "comic/U/ch2", "comic/U/ch3"}
-	if got := contentURIs(t, pool, lib); !slices.Equal(got, want) {
-		t.Fatalf("uris = %v, want %v", got, want)
-	}
-	for _, pair := range [][2]string{{"comic/U", "comic/S"}, {"comic/U/ch1", "comic/S/ch1"}, {"comic/U/ch3", "comic/S/ch3"}} {
-		if got := readMeta(t, pool, lib, pair[0]).Overrides; got == nil || got.Raw.Title != "kept "+pair[1] {
-			t.Fatalf("override at %s = %+v, want the one from %s", pair[0], got, pair[1])
-		}
-	}
-	annotations, err := db.SelectScalars[string](context.Background(), pool,
-		"SELECT uri FROM user_to_content WHERE library_id = $1 ORDER BY uri", lib)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(annotations, []string{"comic/U/ch3"}) {
-		t.Fatalf("annotations = %v, want the chain to land at the final name", annotations)
 	}
 }
 
 func TestFlushIgnoresSelfRenameFromAnyProducer(t *testing.T) {
-	pool := newTestPool(t)
-	lib := newTestLibrary(t, pool, "comics")
-	r := newScanRun(t, pool, lib, &ComicsScanner{})
+	r := newTestScan(t, "comics")
 
 	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
 	r.commit(false)
 	for _, uri := range []string{"comic/S", "comic/S/ch1"} {
-		seedMetadata(t, pool, lib, uri, metaraw.MetadataRaw{
+		seedMetadata(t, r.pool, r.lib, uri, metaraw.MetadataRaw{
 			Overrides: &metaraw.RawContainer[models.Metadata]{Raw: models.Metadata{Title: "kept " + uri}},
 		})
 	}
@@ -544,29 +468,27 @@ func TestFlushIgnoresSelfRenameFromAnyProducer(t *testing.T) {
 	r.commit(false)
 
 	for _, uri := range []string{"comic/S", "comic/S/ch1"} {
-		if got := readMeta(t, pool, lib, uri).Overrides; got == nil || got.Raw.Title != "kept "+uri {
+		if got := readMeta(t, r.pool, r.lib, uri).Overrides; got == nil || got.Raw.Title != "kept "+uri {
 			t.Fatalf("override at %s = %+v, want it preserved", uri, got)
 		}
 	}
 }
 
 func TestFlushRenameChainAcrossSeries(t *testing.T) {
-	pool := newTestPool(t)
-	lib := newTestLibrary(t, pool, "comics")
-	r := newScanRun(t, pool, lib, &ComicsScanner{})
+	r := newTestScan(t, "comics")
 
 	r.place(comicResult("/lib/A/ch1.cbz", "ch1", "A", "/lib/A"))
 	r.place(comicResult("/lib/B/ch1.cbz", "ch1", "B", "/lib/B"))
 	r.commit(false)
 
 	seeded := []string{"comic/A", "comic/A/ch1", "comic/B", "comic/B/ch1"}
-	exec(t, pool, "INSERT INTO users (id, username, password_hash) VALUES ('u1', 'u', 'x')")
+	exec(t, r.pool, "INSERT INTO users (id, username, password_hash) VALUES ('u1', 'u', 'x')")
 	for i, uri := range seeded {
-		seedMetadata(t, pool, lib, uri, metaraw.MetadataRaw{
+		seedMetadata(t, r.pool, r.lib, uri, metaraw.MetadataRaw{
 			Overrides: &metaraw.RawContainer[models.Metadata]{Raw: models.Metadata{Title: uri}},
 		})
-		exec(t, pool, "INSERT INTO user_to_content (id, user_id, library_id, uri, starred) VALUES ($1, 'u1', $2, $3, true)",
-			"a"+string(rune('1'+i)), lib, uri)
+		exec(t, r.pool, "INSERT INTO user_to_content (id, user_id, library_id, uri, starred) VALUES ($1, 'u1', $2, $3, true)",
+			"a"+string(rune('1'+i)), r.lib, uri)
 	}
 
 	r.reload()
@@ -575,49 +497,38 @@ func TestFlushRenameChainAcrossSeries(t *testing.T) {
 	r.commit(false)
 
 	want := []string{"comic/B", "comic/B/ch1", "comic/C", "comic/C/ch1"}
-	if got := contentURIs(t, pool, lib); !slices.Equal(got, want) {
-		t.Fatalf("uris = %v, want %v", got, want)
-	}
+	assertCatalog(t, r.pool, r.lib, want)
 	moved := map[string]string{
 		"comic/B": "comic/A", "comic/B/ch1": "comic/A/ch1",
 		"comic/C": "comic/B", "comic/C/ch1": "comic/B/ch1",
 	}
 	for uri, from := range moved {
-		if got := readMeta(t, pool, lib, uri).Overrides; got == nil || got.Raw.Title != from {
+		if got := readMeta(t, r.pool, r.lib, uri).Overrides; got == nil || got.Raw.Title != from {
 			t.Fatalf("metadata at %s = %+v, want the layer from %s", uri, got, from)
 		}
 	}
-	annotations, err := db.SelectScalars[string](context.Background(), pool,
-		"SELECT uri FROM user_to_content WHERE library_id = $1 ORDER BY uri", lib)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(annotations, want) {
-		t.Fatalf("annotations = %v, want %v", annotations, want)
-	}
+	assertAnnotations(t, r.pool, r.lib, want)
 }
 
 func TestFlushCustomListAnnotationCollision(t *testing.T) {
-	pool := newTestPool(t)
-	lib := newTestLibrary(t, pool, "comics")
-	r := newScanRun(t, pool, lib, &ComicsScanner{})
+	r := newTestScan(t, "comics")
 
 	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
 	r.commit(false)
 
-	exec(t, pool, "INSERT INTO users (id, username, password_hash) VALUES ('u1', 'u', 'x')")
-	exec(t, pool, "INSERT INTO custom_lists (id, name, visibility, user_id) VALUES ('cl1', 'list', 'private', 'u1')")
-	exec(t, pool, "INSERT INTO custom_lists (id, name, visibility, user_id) VALUES ('cl2', 'other', 'private', 'u1')")
-	exec(t, pool, "INSERT INTO custom_list_to_content (id, custom_list_id, library_id, uri, notes) VALUES ('src', 'cl1', $1, 'comic/S/ch1', 'source')", lib)
-	exec(t, pool, "INSERT INTO custom_list_to_content (id, custom_list_id, library_id, uri, notes) VALUES ('dst', 'cl1', $1, 'comic/S_2019/ch1', 'destination')", lib)
-	exec(t, pool, "INSERT INTO custom_list_to_content (id, custom_list_id, library_id, uri, notes) VALUES ('free', 'cl2', $1, 'comic/S/ch1', 'free')", lib)
+	exec(t, r.pool, "INSERT INTO users (id, username, password_hash) VALUES ('u1', 'u', 'x')")
+	exec(t, r.pool, "INSERT INTO custom_lists (id, name, visibility, user_id) VALUES ('cl1', 'list', 'private', 'u1')")
+	exec(t, r.pool, "INSERT INTO custom_lists (id, name, visibility, user_id) VALUES ('cl2', 'other', 'private', 'u1')")
+	exec(t, r.pool, "INSERT INTO custom_list_to_content (id, custom_list_id, library_id, uri, notes) VALUES ('src', 'cl1', $1, 'comic/S/ch1', 'source')", r.lib)
+	exec(t, r.pool, "INSERT INTO custom_list_to_content (id, custom_list_id, library_id, uri, notes) VALUES ('dst', 'cl1', $1, 'comic/S_2019/ch1', 'destination')", r.lib)
+	exec(t, r.pool, "INSERT INTO custom_list_to_content (id, custom_list_id, library_id, uri, notes) VALUES ('free', 'cl2', $1, 'comic/S/ch1', 'free')", r.lib)
 
 	r.reload()
 	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S_2019", "/lib/S"))
 	r.commit(false)
 
-	rows, err := db.Select[models.CustomListToContent](context.Background(), pool,
-		"SELECT * FROM custom_list_to_content WHERE library_id = $1 ORDER BY id", lib)
+	rows, err := db.Select[models.CustomListToContent](context.Background(), r.pool,
+		"SELECT * FROM custom_list_to_content WHERE library_id = $1 ORDER BY id", r.lib)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -632,16 +543,14 @@ func TestFlushCustomListAnnotationCollision(t *testing.T) {
 }
 
 func TestFlushIntermediateReductionExcludesGone(t *testing.T) {
-	pool := newTestPool(t)
-	lib := newTestLibrary(t, pool, "comics")
-	r := newScanRun(t, pool, lib, &ComicsScanner{})
+	r := newTestScan(t, "comics")
 
 	r.place(withOrder(withMeta(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"),
 		models.Metadata{Series: "S", Publisher: "Alpha"}), 0, 1))
 	r.place(withOrder(withMeta(comicResult("/lib/S/ch2.cbz", "ch2", "S", "/lib/S"),
 		models.Metadata{Publisher: "Beta", Language: "fr"}), 0, 2))
 	r.commit(false)
-	if got := readMeta(t, pool, lib, "comic/S").File.Raw; got.Publisher != "Alpha" {
+	if got := readMeta(t, r.pool, r.lib, "comic/S").File.Raw; got.Publisher != "Alpha" {
 		t.Fatalf("series metadata = %+v", got)
 	}
 
@@ -657,13 +566,13 @@ func TestFlushIntermediateReductionExcludesGone(t *testing.T) {
 		models.Metadata{Publisher: "Beta", Language: "fr"}), 0, 2))
 	r.commit(false)
 
-	if got := readMeta(t, pool, lib, "comic/S").File.Raw; got.Publisher != "Beta" {
+	if got := readMeta(t, r.pool, r.lib, "comic/S").File.Raw; got.Publisher != "Beta" {
 		t.Fatalf("publisher = %q, want the proven-missing child excluded", got.Publisher)
 	}
-	if row := readContent(t, pool, goneID); row.URI != "comic/S/ch1" {
+	if row := readContent(t, r.pool, goneID); row.URI != "comic/S/ch1" {
 		t.Fatalf("proven-missing row = %+v, want it kept until the final flush", row)
 	}
-	kept := readContent(t, pool, r.w.keys[Key{seriesID, "ch2"}])
+	kept := readContent(t, r.pool, r.w.keys[Key{seriesID, "ch2"}])
 	if kept.Order == nil || *kept.Order != 0 {
 		t.Fatalf("order = %v, want the remaining child first", kept.Order)
 	}
@@ -688,27 +597,21 @@ func TestFlushFailedFinalRollsBackScannedAt(t *testing.T) {
 	if at := libraryScannedAt(t, pool, lib); at != nil {
 		t.Fatalf("scanned_at = %v, want the failed final flush rolled back", at)
 	}
-	if got := contentURIs(t, pool, lib); len(got) != 0 {
-		t.Fatalf("uris = %v, want the whole flush rolled back", got)
-	}
+	assertCatalog(t, pool, lib, nil)
 }
 
 func TestFlushSharedSeriesAcrossDirectories(t *testing.T) {
-	pool := newTestPool(t)
-	lib := newTestLibrary(t, pool, "comics")
-	r := newScanRun(t, pool, lib, &ComicsScanner{})
+	r := newTestScan(t, "comics")
 
 	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
 	r.place(comicResult("/lib/S2/ch2.cbz", "ch2", "S", "/lib/S2"))
 	r.commit(false)
 
 	want := []string{"comic/S", "comic/S/ch1", "comic/S/ch2"}
-	if got := contentURIs(t, pool, lib); !slices.Equal(got, want) {
-		t.Fatalf("uris = %v, want %v", got, want)
-	}
+	assertCatalog(t, r.pool, r.lib, want)
 	seriesID := r.w.byURI["comic/S"]
 	for _, part := range []string{"ch1", "ch2"} {
-		if row := readContent(t, pool, r.w.keys[Key{seriesID, part}]); deref(row.ParentID) != seriesID {
+		if row := readContent(t, r.pool, r.w.keys[Key{seriesID, part}]); deref(row.ParentID) != seriesID {
 			t.Fatalf("%s parent = %v, want the shared series", part, row.ParentID)
 		}
 	}
@@ -719,18 +622,14 @@ func TestFlushSharedSeriesAcrossDirectories(t *testing.T) {
 	if counts.Added != 0 || counts.Updated != 1 {
 		t.Fatalf("counts = %+v, want the shared series reused", counts)
 	}
-	if got := contentURIs(t, pool, lib); !slices.Equal(got, want) {
-		t.Fatalf("uris = %v, want %v", got, want)
-	}
-	if deref(readContent(t, pool, seriesID).FileURI) != "/lib/S" {
-		t.Fatalf("series file_uri = %v, want the latest directory", readContent(t, pool, seriesID).FileURI)
+	assertCatalog(t, r.pool, r.lib, want)
+	if deref(readContent(t, r.pool, seriesID).FileURI) != "/lib/S" {
+		t.Fatalf("series file_uri = %v, want the latest directory", readContent(t, r.pool, seriesID).FileURI)
 	}
 }
 
 func TestFlushKeepsSeriesRenameWhenLeafConflicts(t *testing.T) {
-	pool := newTestPool(t)
-	lib := newTestLibrary(t, pool, "comics")
-	r := newScanRun(t, pool, lib, &ComicsScanner{})
+	r := newTestScan(t, "comics")
 
 	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
 	r.commit(false)
@@ -748,9 +647,7 @@ func TestFlushKeepsSeriesRenameWhenLeafConflicts(t *testing.T) {
 	r.commit(false)
 
 	want := []string{"comic/S_2019", "comic/S_2019/ch1"}
-	if got := contentURIs(t, pool, lib); !slices.Equal(got, want) {
-		t.Fatalf("uris = %v, want the rename to survive the leaf conflict", got)
-	}
+	assertCatalog(t, r.pool, r.lib, want)
 }
 
 func bookResult(path string, meta epub.Metadata) Result {
@@ -759,15 +656,11 @@ func bookResult(path string, meta epub.Metadata) Result {
 }
 
 func TestSlashSeriesAppearsWhileTheLeafItShadowsDeparts(t *testing.T) {
-	pool := newTestPool(t)
-	lib := newTestLibrary(t, pool, "books")
-	r := newScanRun(t, pool, lib, &BooksScanner{})
+	r := newTestScan(t, "books")
 
 	r.place(bookResult("/lib/Foo/bar.epub", epub.Metadata{Title: "Bar", Series: "Foo"}))
 	r.commit(false)
-	if got := contentURIs(t, pool, lib); !slices.Equal(got, []string{"book/Foo", "book/Foo/bar"}) {
-		t.Fatalf("uris = %v, want the leaf under its series", got)
-	}
+	assertCatalog(t, r.pool, r.lib, []string{"book/Foo", "book/Foo/bar"})
 
 	r.reload()
 	r.place(bookResult("/lib/Foo/bar.epub", epub.Metadata{Title: "Bar"}))
@@ -775,44 +668,38 @@ func TestSlashSeriesAppearsWhileTheLeafItShadowsDeparts(t *testing.T) {
 	r.commit(true)
 
 	want := []string{"book/Foo_bar", "book/Foo_bar/x", "book/bar"}
-	got := contentURIs(t, pool, lib)
+	got := contentURIs(t, r.pool, r.lib)
 	slices.Sort(want)
 	slices.Sort(got)
 	if !slices.Equal(got, want) {
 		t.Fatalf("uris = %v, want %v", got, want)
 	}
 
-	series := readContent(t, pool, contentIDByURI(t, pool, lib, "book/Foo_bar"))
+	series := readContent(t, r.pool, contentIDByURI(t, r.pool, r.lib, "book/Foo_bar"))
 	if series.Type != "book_series" || series.URIPart != "Foo_bar" {
 		t.Fatalf("series = %+v, want the sanitized series row", series)
 	}
-	if got := readMeta(t, pool, lib, "book/Foo_bar").File.Raw.Title; got != "Foo/bar" {
+	if got := readMeta(t, r.pool, r.lib, "book/Foo_bar").File.Raw.Title; got != "Foo/bar" {
 		t.Fatalf("series title = %q, want the name kept verbatim", got)
 	}
 }
 
 func TestFlushInheritsTheRawFallbackSeriesTitle(t *testing.T) {
-	pool := newTestPool(t)
-	lib := newTestLibrary(t, pool, "comics")
-	r := newScanRun(t, pool, lib, &ComicsScanner{})
+	r := newTestScan(t, "comics")
 
 	item := classifyComic(fsFile("/lib/Foo\\bar/ch1.cbz", baseTime, 10), models.Metadata{}, 0, testPages)
 	r.place(Result{File: item.File, Item: item})
 	r.commit(true)
 
 	want := []string{"comic/Foo_bar", "comic/Foo_bar/ch1"}
-	if got := contentURIs(t, pool, lib); !slices.Equal(got, want) {
-		t.Fatalf("uris = %v, want %v", got, want)
-	}
-	if got := readMeta(t, pool, lib, "comic/Foo_bar").File.Raw.Title; got != "Foo\\bar" {
+	assertCatalog(t, r.pool, r.lib, want)
+	if got := readMeta(t, r.pool, r.lib, "comic/Foo_bar").File.Raw.Title; got != "Foo\\bar" {
 		t.Fatalf("series title = %q, want the raw directory name", got)
 	}
 }
 
 func TestFlushPrefersExplicitChildSeriesOverFolderFallback(t *testing.T) {
-	pool := newTestPool(t)
-	lib := newTestLibrary(t, pool, "comics")
-	r := newScanRun(t, pool, lib, &ComicsScanner{})
+	r := newTestScan(t, "comics")
 
 	chapter := func(number string) Result {
 		file, item := comicItem("/lib/Series", number, models.Metadata{})
@@ -821,29 +708,27 @@ func TestFlushPrefersExplicitChildSeriesOverFolderFallback(t *testing.T) {
 	r.place(chapter("1"), chapter("2"))
 	r.commit(false)
 
-	mr := readMeta(t, pool, lib, "comic/Series/ch2")
+	mr := readMeta(t, r.pool, r.lib, "comic/Series/ch2")
 	mr.Overrides = &metaraw.RawContainer[models.Metadata]{Raw: models.Metadata{Series: "Curated"}}
-	seedMetadata(t, pool, lib, "comic/Series/ch2", mr)
+	seedMetadata(t, r.pool, r.lib, "comic/Series/ch2", mr)
 
 	r.reload()
 	r.place(chapter("1"))
 	r.commit(true)
 
-	if got := readMeta(t, pool, lib, "comic/Series").File.Raw.Title; got != "Curated" {
+	if got := readMeta(t, r.pool, r.lib, "comic/Series").File.Raw.Title; got != "Curated" {
 		t.Fatalf("series title = %q, want the override on the later child to beat the folder fallback", got)
 	}
 }
 
 func TestFlushFallsBackToTheSeriesKeyWhenTheFolderDiffers(t *testing.T) {
-	pool := newTestPool(t)
-	lib := newTestLibrary(t, pool, "comics")
-	r := newScanRun(t, pool, lib, &ComicsScanner{})
+	r := newTestScan(t, "comics")
 
 	file, item := comicItem("/lib/Foo (2019)", "1", models.Metadata{})
 	r.place(Result{File: file, Item: item})
 	r.commit(true)
 
-	if got := readMeta(t, pool, lib, "comic/Foo_2019").File.Raw.Title; got != "Foo_2019" {
+	if got := readMeta(t, r.pool, r.lib, "comic/Foo_2019").File.Raw.Title; got != "Foo_2019" {
 		t.Fatalf("series title = %q, want the series key", got)
 	}
 }
