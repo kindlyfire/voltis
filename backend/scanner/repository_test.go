@@ -10,7 +10,7 @@ import (
 )
 
 func populatedLeaf() models.Content {
-	c := leafRow("leaf", "comic", "/lib/s/ch1.cbz", baseTime, 42, true)
+	c := testLeaf("leaf", "comic", "/lib/s/ch1.cbz", baseTime, 42, true)
 	c.URI = "comic/s/ch1"
 	c.URIPart = "ch1"
 	c.ParentID = new("parent")
@@ -27,7 +27,7 @@ func TestInvalidatedRowLifecycle(t *testing.T) {
 		r.content = []models.Content{
 			{ID: "parent", LibraryID: "library", Type: "comic_series", URIPart: "s", URI: "comic/s", Valid: true},
 			populatedLeaf(),
-			leafRow("sibling", "comic", "/lib/s/ch2.cbz", baseTime, 10, true),
+			testLeaf("sibling", "comic", "/lib/s/ch2.cbz", baseTime, 10, true),
 		}
 		r.metadata = []*metadataRow{{
 			URI:       "comic/s/ch1",

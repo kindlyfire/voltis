@@ -25,9 +25,11 @@ type FileScanner interface {
 	// file could not be parsed. Should be safe to call concurrently.
 	ParseFile(libraryID string, file FSFile) *ParsedItem
 
+	SeriesCover(series SeriesRef, ordered []Child) (*string, *time.Time)
+
 	// UpdateSeries is called for each series that had at least one child
 	// added, updated, or removed.
-	UpdateSeries(r *repository, series *models.Content, items []*models.Content)
+	UpdateSeries(r *repository, series *models.Content, ordered []Child)
 }
 
 type ParsedSeries struct {
@@ -347,38 +349,22 @@ func applyParsedItem(r *repository, libraryID string, p *ParsedItem) *models.Con
 		parentID = &series.ID
 	}
 
-	existing := r.findContentByFileURI(p.File.Path)
-	content := existing
+	content := r.findContentByFileURI(p.File.Path)
 	if content == nil {
 		content = r.matchDeletedItem(p.URIPart, parentID)
 	}
 
-	now := time.Now().UTC()
+	var old *models.Content
 	if content == nil {
-		r.content = append(r.content, models.Content{
-			ID:        models.MakeContentID(),
-			LibraryID: libraryID,
-			Type:      p.ContentType,
-			CreatedAt: now,
-		})
+		r.content = append(r.content, models.Content{ID: models.MakeContentID()})
 		content = &r.content[len(r.content)-1]
+	} else {
+		previous := *content
+		old = &previous
 	}
+	id := content.ID
 
-	content.FileURI = new(p.File.Path)
-	content.URIPart = p.URIPart
-	content.Valid = true
-	content.ParentID = parentID
-	content.UpdatedAt = now
-	content.FileMtime = new(p.File.Mtime.UTC())
-	content.FileSize = new(int(p.File.Size))
-	content.OrderParts = p.OrderParts
-	content.FileData = p.FileData
-	content.URI = makeURI(p, series)
-
-	if p.CoverSuffix != nil {
-		content.CoverURI = new(p.File.Path + "/" + *p.CoverSuffix)
-	}
-
+	*content = leafRow(id, libraryID, makeURI(p, series), *p, parentID, old, time.Now().UTC())
 	r.markDirty(content)
 
 	metaRow := r.getMetadata(content.URI)
@@ -388,70 +374,15 @@ func applyParsedItem(r *repository, libraryID string, p *ParsedItem) *models.Con
 	return content
 }
 
-func inheritChildMetadata(r *repository, series *models.Content, items []*models.Content) {
-	if len(items) == 0 {
+func inheritChildMetadata(r *repository, series *models.Content, ordered []Child) {
+	if len(ordered) == 0 {
 		return
 	}
 
-	var inherited models.Metadata
-	// Inherit from first child that has each field set
-	for _, item := range items {
-		childMeta := r.getMetadata(item.URI)
-		m := childMeta.DataRaw.Merge()
-		if inherited.Staff == nil && len(m.Staff) > 0 {
-			inherited.Staff = m.Staff
-		}
-		if inherited.Publisher == "" {
-			inherited.Publisher = m.Publisher
-		}
-		if inherited.Language == "" {
-			inherited.Language = m.Language
-		}
-		if inherited.Genre == "" {
-			inherited.Genre = m.Genre
-		}
-		if inherited.AgeRating == "" {
-			inherited.AgeRating = m.AgeRating
-		}
-		if inherited.Manga == "" {
-			inherited.Manga = m.Manga
-		}
-		if inherited.Imprint == "" {
-			inherited.Imprint = m.Imprint
-		}
-		if inherited.Description == "" {
-			inherited.Description = m.Description
-		}
-		if inherited.PublicationDate == "" {
-			inherited.PublicationDate = m.PublicationDate
-		}
-	}
-
-	// Derive title from first child's "series" field
-	var seriesTitle string
-	for _, item := range items {
-		childMeta := r.getMetadata(item.URI)
-		data := childMeta.DataRaw.Merge()
-		if data.Series != "" {
-			seriesTitle = data.Series
-			break
-		}
-	}
-	if seriesTitle == "" {
-		seriesTitle = series.URIPart
-	}
-	inherited.Title = seriesTitle
-
 	metaRow := r.getMetadata(series.URI)
-	var existing models.Metadata
-	if metaRow.DataRaw.File != nil {
-		existing = metaRow.DataRaw.File.Raw
+	metaRow.DataRaw.File = &metaraw.RawContainer[models.Metadata]{
+		Raw: inherit(series.URIPart, ordered),
 	}
-	// Merge: inherited fills in gaps in existing
-	result := models.MergeMetadata(inherited, existing)
-	// But always update title from inheritance
-	result.Title = inherited.Title
-	metaRow.DataRaw.File = &metaraw.RawContainer[models.Metadata]{Raw: result}
 	metaRow.dirty = true
 }
 
@@ -483,17 +414,21 @@ func updateGroupSeries(s FileScanner, r *repository, parents map[string]bool) {
 		if parent == nil {
 			continue
 		}
-		items := r.childrenOf(parentID)
 
-		sort.Slice(items, func(i, j int) bool {
-			return compareOrderParts(items[i].OrderParts, items[j].OrderParts) < 0
-		})
-		for i, item := range items {
-			item.Order = new(i)
-			r.markDirty(item)
+		children := r.childrenOf(parentID)
+		byID := map[string]*models.Content{}
+		for _, c := range children {
+			byID[c.ID] = c
+		}
+		ordered := order(r.children(children))
+		for i := range ordered {
+			row := byID[ordered[i].ID]
+			row.Order = new(i)
+			ordered[i].Order = row.Order
+			r.markDirty(row)
 		}
 
-		s.UpdateSeries(r, parent, items)
+		s.UpdateSeries(r, parent, ordered)
 	}
 }
 

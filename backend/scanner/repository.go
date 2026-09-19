@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"voltis/db"
+	"voltis/lib/fp"
 	"voltis/models"
 	"voltis/models/metaraw"
 
@@ -217,6 +218,26 @@ func (r *repository) updateURIs(c *models.Content, newURI string) {
 	}
 }
 
+func (r *repository) children(items []*models.Content) []Child {
+	return fp.Map(items, func(c *models.Content) Child {
+		return Child{
+			ID:         c.ID,
+			URI:        c.URI,
+			URIPart:    c.URIPart,
+			Order:      c.Order,
+			OrderParts: c.OrderParts,
+			CoverURI:   c.CoverURI,
+			FileMtime:  c.FileMtime,
+			Valid:      c.Valid,
+			Meta:       r.getMetadata(c.URI).DataRaw,
+		}
+	})
+}
+
+func seriesRef(c *models.Content) SeriesRef {
+	return SeriesRef{ID: c.ID, URI: c.URI, URIPart: c.URIPart, Type: c.Type, FileURI: c.FileURI}
+}
+
 func (r *repository) childrenOf(parentID string) []*models.Content {
 	var children []*models.Content
 	for i := range r.content {
@@ -378,28 +399,6 @@ func ptrEq(a, b *string) bool {
 		return false
 	}
 	return *a == *b
-}
-
-func compareOrderParts(a, b []*float32) int {
-	for i := 0; i < len(a) && i < len(b); i++ {
-		ai, bi := a[i], b[i]
-		if ai == nil && bi == nil {
-			continue
-		}
-		if ai == nil {
-			return 1
-		}
-		if bi == nil {
-			return -1
-		}
-		if *ai < *bi {
-			return -1
-		}
-		if *ai > *bi {
-			return 1
-		}
-	}
-	return len(a) - len(b)
 }
 
 func slog_scan(msg string, args ...any) {

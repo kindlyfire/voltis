@@ -1,6 +1,7 @@
-package scanner
+package keys
 
 import (
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -14,7 +15,7 @@ var (
 	trailingTags   = regexp.MustCompile(`\s*[\[\(][^\[\]\(\)]*[\]\)]\s*$`)
 )
 
-func parseVolume(name string) *float64 {
+func ParseVolume(name string) *float64 {
 	m := volumePattern.FindStringSubmatch(name)
 	if m == nil {
 		return nil
@@ -26,7 +27,7 @@ func parseVolume(name string) *float64 {
 	return &v
 }
 
-func parseChapter(name string) *float64 {
+func ParseChapter(name string) *float64 {
 	m := chapterPattern.FindStringSubmatch(name)
 	if m == nil {
 		return nil
@@ -38,8 +39,8 @@ func parseChapter(name string) *float64 {
 	return &v
 }
 
-func parseFallbackChapter(name string) *float64 {
-	name = cleanSeriesName(name)
+func ParseFallbackChapter(name string) *float64 {
+	name = CleanSeriesName(name)
 	matches := numberPattern.FindAllStringSubmatch(name, -1)
 	if len(matches) == 0 {
 		return nil
@@ -70,13 +71,13 @@ func digitCount(s string) int {
 	return n
 }
 
-func parseSeriesName(name string) (string, *int) {
-	year := parseSeriesYear(name)
-	cleaned := cleanSeriesName(name)
+func ParseSeriesName(name string) (string, *int) {
+	year := ParseSeriesYear(name)
+	cleaned := CleanSeriesName(name)
 	return cleaned, year
 }
 
-func parseSeriesYear(name string) *int {
+func ParseSeriesYear(name string) *int {
 	matches := yearPattern.FindAllStringSubmatch(name, -1)
 	// Search from right to left for a 4-digit year
 	for i := len(matches) - 1; i >= 0; i-- {
@@ -91,7 +92,7 @@ func parseSeriesYear(name string) *int {
 	return nil
 }
 
-func cleanSeriesName(name string) string {
+func CleanSeriesName(name string) string {
 	for {
 		cleaned := trailingTags.ReplaceAllString(name, "")
 		if cleaned == name {
@@ -102,11 +103,24 @@ func cleanSeriesName(name string) string {
 	return strings.TrimSpace(name)
 }
 
-func removeCommonPrefix(a, b string) (string, string) {
+func RemoveCommonPrefix(a, b string) (string, string) {
 	minLen := min(len(b), len(a))
 	i := 0
 	for i < minLen && a[i] == b[i] {
 		i++
 	}
 	return a[i:], b[i:]
+}
+
+func FormatNum(f float64) string {
+	if f == float64(int(f)) {
+		return fmt.Sprintf("%d", int(f))
+	}
+	return fmt.Sprintf("%g", f)
+}
+
+func ParseFloatStr(s string) (float64, error) {
+	f := 0.0
+	_, err := fmt.Sscanf(s, "%f", &f)
+	return f, err
 }

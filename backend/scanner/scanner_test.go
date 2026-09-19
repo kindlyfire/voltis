@@ -14,7 +14,7 @@ import (
 
 var baseTime = time.Unix(1700000000, 0).UTC()
 
-func leafRow(id, typ, path string, mtime time.Time, size int, valid bool) models.Content {
+func testLeaf(id, typ, path string, mtime time.Time, size int, valid bool) models.Content {
 	return models.Content{
 		ID:        id,
 		LibraryID: "library",
@@ -72,10 +72,10 @@ func TestMatchFilesFilterBoundaries(t *testing.T) {
 	newRepo := func() *repository {
 		r := newRepository(nil, "library")
 		r.content = []models.Content{
-			leafRow("a", "comic", "/lib/Foo/ch1.cbz", baseTime, 10, true),
-			leafRow("b", "comic", "/lib/Foo/ch2.cbz", baseTime, 10, true),
-			leafRow("c", "comic", "/lib/Foo Extra/ch3.cbz", baseTime, 10, true),
-			leafRow("d", "comic", "/lib/Foo/Sub/ch4.cbz", baseTime, 10, true),
+			testLeaf("a", "comic", "/lib/Foo/ch1.cbz", baseTime, 10, true),
+			testLeaf("b", "comic", "/lib/Foo/ch2.cbz", baseTime, 10, true),
+			testLeaf("c", "comic", "/lib/Foo Extra/ch3.cbz", baseTime, 10, true),
+			testLeaf("d", "comic", "/lib/Foo/Sub/ch4.cbz", baseTime, 10, true),
 		}
 		return r
 	}
@@ -105,8 +105,8 @@ func TestMatchFilesFilterBoundaries(t *testing.T) {
 
 	exact := newRepository(nil, "library")
 	exact.content = []models.Content{
-		leafRow("a", "comic", "/lib/Foo/ch1.cbz", baseTime, 10, true),
-		leafRow("b", "comic", "/lib/Foo/ch1.cbz.bak", baseTime, 10, true),
+		testLeaf("a", "comic", "/lib/Foo/ch1.cbz", baseTime, 10, true),
+		testLeaf("b", "comic", "/lib/Foo/ch1.cbz.bak", baseTime, 10, true),
 	}
 	toAdd, toUpdate, unchanged, toRemove = matchFiles(exact, nil, []string{"/lib/Foo/ch1.cbz"}, nil, false)
 	assertPaths(t, "exact toAdd", toAdd)
@@ -119,12 +119,12 @@ func TestMatchFilesFailedScopes(t *testing.T) {
 	newRepo := func() *repository {
 		r := newRepository(nil, "library")
 		r.content = []models.Content{
-			leafRow("a", "comic", "/lib/Broken/ch1.cbz", baseTime, 10, true),
-			leafRow("b", "comic", "/lib/Broken/Sub/ch2.cbz", baseTime, 10, true),
-			leafRow("c", "comic", "/lib/Odd/ch9.cbz", baseTime, 10, true),
-			leafRow("d", "comic", "/lib/Broken Extra/ch3.cbz", baseTime, 10, true),
-			leafRow("e", "comic", "/lib/Ok/ch4.cbz", baseTime, 10, true),
-			leafRow("f", "comic", "/lib/Broken/ch5.cbz", baseTime, 10, true),
+			testLeaf("a", "comic", "/lib/Broken/ch1.cbz", baseTime, 10, true),
+			testLeaf("b", "comic", "/lib/Broken/Sub/ch2.cbz", baseTime, 10, true),
+			testLeaf("c", "comic", "/lib/Odd/ch9.cbz", baseTime, 10, true),
+			testLeaf("d", "comic", "/lib/Broken Extra/ch3.cbz", baseTime, 10, true),
+			testLeaf("e", "comic", "/lib/Ok/ch4.cbz", baseTime, 10, true),
+			testLeaf("f", "comic", "/lib/Broken/ch5.cbz", baseTime, 10, true),
 		}
 		return r
 	}
@@ -151,10 +151,10 @@ func TestMatchFilesInvalidRetries(t *testing.T) {
 	newRepo := func() *repository {
 		r := newRepository(nil, "library")
 		r.content = []models.Content{
-			leafRow("valid", "comic", "/lib/s/a.cbz", baseTime, 10, true),
-			leafRow("invalid", "comic", "/lib/s/b.cbz", baseTime, 10, false),
-			leafRow("changed", "comic", "/lib/s/c.cbz", baseTime, 10, true),
-			leafRow("gone", "comic", "/lib/s/d.cbz", baseTime, 10, false),
+			testLeaf("valid", "comic", "/lib/s/a.cbz", baseTime, 10, true),
+			testLeaf("invalid", "comic", "/lib/s/b.cbz", baseTime, 10, false),
+			testLeaf("changed", "comic", "/lib/s/c.cbz", baseTime, 10, true),
+			testLeaf("gone", "comic", "/lib/s/d.cbz", baseTime, 10, false),
 		}
 		return r
 	}
@@ -241,7 +241,7 @@ func TestApplyParseResult(t *testing.T) {
 func TestInvalidFileRecovers(t *testing.T) {
 	path := "/lib/books/story.epub"
 	r := newRepository(nil, "library")
-	r.content = []models.Content{leafRow("book1", "book", path, baseTime, 10, true)}
+	r.content = []models.Content{testLeaf("book1", "book", path, baseTime, 10, true)}
 
 	if parentID := r.invalidateFile(path); parentID != nil {
 		t.Fatalf("parentID = %v, want nil", *parentID)
@@ -294,14 +294,14 @@ func TestUpdateGroupSeriesRetainsInvalidChildren(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.kind, func(t *testing.T) {
-			invalid := leafRow("first", c.kind, c.firstPath, baseTime, 10, false)
+			invalid := testLeaf("first", c.kind, c.firstPath, baseTime, 10, false)
 			invalid.URI = c.kind + "/s/first"
 			invalid.ParentID = new("p")
 			invalid.OrderParts = []*float32{new(float32(1))}
 			invalid.CoverURI = new(c.firstPath + "/p1.jpg")
 			invalid.FileData = json.RawMessage(`{"pages":1}`)
 
-			valid := leafRow("second", c.kind, c.secondPath, baseTime.Add(time.Hour), 20, true)
+			valid := testLeaf("second", c.kind, c.secondPath, baseTime.Add(time.Hour), 20, true)
 			valid.URI = c.kind + "/s/second"
 			valid.ParentID = new("p")
 			valid.OrderParts = []*float32{new(float32(2))}

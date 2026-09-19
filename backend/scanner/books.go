@@ -3,6 +3,7 @@ package scanner
 import (
 	"path/filepath"
 	"strings"
+	"time"
 
 	"voltis/lib/epub"
 	"voltis/models"
@@ -16,81 +17,29 @@ func (bs *BooksScanner) FileEligible(path string) bool {
 }
 
 func (bs *BooksScanner) ParseFile(libraryID string, file FSFile) *ParsedItem {
-	path := file.Path
-
-	meta, err := epub.ReadMetadata(path)
+	meta, err := epub.ReadMetadata(file.Path)
 	if err != nil {
-		slog_scan("failed to read epub metadata", "path", path, "err", err)
+		slog_scan("failed to read epub metadata", "path", file.Path, "err", err)
 		return nil
 	}
 
-	// Title from metadata, falling back to filename stem
-	stem := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-	title := meta.Title
-	if title == "" {
-		title = stem
-	}
-
-	// Order parts
-	var orderParts []*float32
-	if meta.HasSeriesIndex {
-		f := float32(meta.SeriesIndex)
-		orderParts = append(orderParts, &f)
-	} else {
-		f := float32(0)
-		orderParts = append(orderParts, &f)
-	}
-
-	// Cover suffix
-	var coverSuffix *string
-	if meta.CoverPath != "" && epub.ValidateCoverPath(path, meta.CoverPath) {
-		coverSuffix = new(meta.CoverPath)
-	}
-
-	// Metadata
-	fileMeta := models.Metadata{Title: title}
-	for _, a := range meta.Authors {
-		fileMeta.Staff = append(fileMeta.Staff, models.StaffEntry{Name: a, Role: "author"})
-	}
-	fileMeta.Description = meta.Description
-	fileMeta.Publisher = meta.Publisher
-	fileMeta.Language = meta.Language
-	fileMeta.PublicationDate = meta.PublicationDate
-	fileMeta.Series = meta.Series
-	if meta.HasSeriesIndex {
-		fileMeta.SeriesIndex = meta.SeriesIndex
-	}
-
-	// Series
-	var series *ParsedSeries
-	if meta.Series != "" {
-		series = &ParsedSeries{
-			URIPrefix:   "book",
-			URIPart:     meta.Series,
-			ContentType: "book_series",
-			Title:       meta.Series,
-		}
-	}
-
-	return &ParsedItem{
-		File:        file,
-		Series:      series,
-		URIPrefix:   "book",
-		ContentType: "book",
-		URIPart:     stem,
-		OrderParts:  orderParts,
-		CoverSuffix: coverSuffix,
-		MetaRaw:     fileMeta,
-	}
+	coverValid := meta.CoverPath != "" && epub.ValidateCoverPath(file.Path, meta.CoverPath)
+	item := classifyBook(file, *meta, coverValid)
+	return &item
 }
 
-func (bs *BooksScanner) UpdateSeries(r *repository, series *models.Content, items []*models.Content) {
-	inheritChildMetadata(r, series, items)
+func (bs *BooksScanner) SeriesCover(series SeriesRef, ordered []Child) (*string, *time.Time) {
+	if len(ordered) == 0 {
+		return nil, nil
+	}
+	return ordered[0].CoverURI, ordered[0].FileMtime
+}
 
-	// Set series cover from first child's cover
-	if len(items) > 0 {
-		series.CoverURI = items[0].CoverURI
-		series.FileMtime = items[0].FileMtime
+func (bs *BooksScanner) UpdateSeries(r *repository, series *models.Content, ordered []Child) {
+	inheritChildMetadata(r, series, ordered)
+
+	if len(ordered) > 0 {
+		series.CoverURI, series.FileMtime = bs.SeriesCover(seriesRef(series), ordered)
 	}
 	r.markDirty(series)
 }
