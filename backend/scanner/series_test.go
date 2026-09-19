@@ -14,7 +14,7 @@ import (
 	"voltis/models/metaraw"
 )
 
-func f32(v float32) *float32 { return &v }
+func f32(v float32) *float32 { return new(v) }
 
 func childOf(id string, parts []*float32, m models.Metadata) Child {
 	return Child{
@@ -27,11 +27,28 @@ func childOf(id string, parts []*float32, m models.Metadata) Child {
 	}
 }
 
-func comicChild(id string, part float32, m models.Metadata) (models.Content, *metadataRow) {
-	c := testLeaf(id, "comic", "/lib/s/"+id+".cbz", baseTime, 10, true)
-	c.URI = "comic/s/" + id
+func seriesChild(kind, id string, parts ...*float32) models.Content {
+	ext := ".cbz"
+	if kind == "book" {
+		ext = ".epub"
+	}
+	c := testLeaf(id, kind, "/lib/s/"+id+ext, baseTime, 10, true)
+	c.URI = kind + "/s/" + id
 	c.ParentID = new("p")
-	c.OrderParts = []*float32{f32(part)}
+	c.OrderParts = parts
+	return c
+}
+
+func seriesRepo(kind string, children ...models.Content) *repository {
+	r := newRepository(nil, "library")
+	r.content = append([]models.Content{{
+		ID: "p", LibraryID: "library", Type: kind + "_series", URIPart: "s", URI: kind + "/s", Valid: true,
+	}}, children...)
+	return r
+}
+
+func comicChild(id string, part float32, m models.Metadata) (models.Content, *metadataRow) {
+	c := seriesChild("comic", id, new(part))
 	return c, &metadataRow{URI: c.URI, LibraryID: "library", DataRaw: rawMeta(m)}
 }
 
@@ -108,20 +125,12 @@ func TestOrderSortsByPartsThenID(t *testing.T) {
 
 func TestOrderAcceptedChangeTiedSiblingsRankByIDNotRepositoryOrder(t *testing.T) {
 	tied := func(id string, mtime time.Time) models.Content {
-		c := testLeaf(id, "book", "/lib/s/"+id+".epub", baseTime, 10, true)
-		c.URI = "book/s/" + id
-		c.ParentID = new("p")
-		c.OrderParts = []*float32{f32(0)}
+		c := seriesChild("book", id, f32(0))
 		c.CoverURI = new("/lib/s/" + id + ".epub/cover.jpg")
 		c.FileMtime = &mtime
 		return c
 	}
-	r := newRepository(nil, "library")
-	r.content = []models.Content{
-		{ID: "p", LibraryID: "library", Type: "book_series", URIPart: "s", URI: "book/s", Valid: true},
-		tied("z", baseTime.Add(2*time.Hour)),
-		tied("a", baseTime.Add(time.Hour)),
-	}
+	r := seriesRepo("book", tied("z", baseTime.Add(2*time.Hour)), tied("a", baseTime.Add(time.Hour)))
 	r.metadata = []*metadataRow{
 		{URI: "book/s/z", LibraryID: "library", DataRaw: rawMeta(models.Metadata{Series: "Zed Series", Publisher: "Zed Press"})},
 		{URI: "book/s/a", LibraryID: "library", DataRaw: rawMeta(models.Metadata{Series: "Alpha Series", Publisher: "Alpha Press"})},
@@ -164,19 +173,7 @@ func (cs *capturingScanner) UpdateSeries(r *repository, series *models.Content, 
 }
 
 func TestOrderStampsRanksOntoChildrenPassedToAdapters(t *testing.T) {
-	child := func(id string, part *float32) models.Content {
-		c := testLeaf(id, "book", "/lib/s/"+id+".epub", baseTime, 10, true)
-		c.URI = "book/s/" + id
-		c.ParentID = new("p")
-		c.OrderParts = []*float32{part}
-		return c
-	}
-	r := newRepository(nil, "library")
-	r.content = []models.Content{
-		{ID: "p", LibraryID: "library", Type: "book_series", URIPart: "s", URI: "book/s", Valid: true},
-		child("b", f32(2)),
-		child("a", f32(1)),
-	}
+	r := seriesRepo("book", seriesChild("book", "b", f32(2)), seriesChild("book", "a", f32(1)))
 
 	cs := &capturingScanner{}
 	updateGroupSeries(cs, r, map[string]bool{"p": true})
@@ -279,11 +276,7 @@ func TestInheritTitleFallback(t *testing.T) {
 
 func TestInheritCorrectsAfterEarlierChildArrives(t *testing.T) {
 	late, lateMeta := comicChild("a", 2, models.Metadata{Series: "B Series", Publisher: "B Press", Genre: "Action"})
-	r := newRepository(nil, "library")
-	r.content = []models.Content{
-		{ID: "p", LibraryID: "library", Type: "comic_series", URIPart: "s", URI: "comic/s", Valid: true},
-		late,
-	}
+	r := seriesRepo("comic", late)
 	r.metadata = []*metadataRow{lateMeta}
 
 	inheritChildMetadata(r, &r.content[0], orderedChildren(r))
@@ -307,11 +300,7 @@ func TestInheritCorrectsAfterEarlierChildArrives(t *testing.T) {
 
 func TestInheritReplacesWholeFileLayer(t *testing.T) {
 	child, childMeta := comicChild("a", 1, models.Metadata{Series: "New Series", Genre: "Child Genre", Language: "en"})
-	r := newRepository(nil, "library")
-	r.content = []models.Content{
-		{ID: "p", LibraryID: "library", Type: "comic_series", URIPart: "s", URI: "comic/s", Valid: true},
-		child,
-	}
+	r := seriesRepo("comic", child)
 	r.metadata = []*metadataRow{childMeta, {
 		URI: "comic/s", LibraryID: "library", DataRaw: metaraw.MetadataRaw{
 			File: &metaraw.RawContainer[models.Metadata]{Raw: models.Metadata{
@@ -477,124 +466,117 @@ func stepIDs(steps []step) string {
 	return strings.Join(out, ",")
 }
 
-func TestOrderStepsDependencies(t *testing.T) {
+func TestOrderSteps(t *testing.T) {
 	cases := []struct {
-		name string
-		sets map[string]*SeriesChanges
-		key  map[string]Key
-		want string
+		name    string
+		sets    map[string]*SeriesChanges
+		key     map[string]Key
+		build   func() (map[string]*SeriesChanges, map[string]Key)
+		runs    int
+		want    string
+		wantErr string
 	}{
 		{
-			"cross series leaf chain",
-			map[string]*SeriesChanges{
+			name: "cross series leaf chain",
+			sets: map[string]*SeriesChanges{
 				"S": {Ref: SeriesRef{ID: "S", URIPart: "S"}, Writes: []write{leafWrite("B", "ch1")}},
 				"T": {Ref: SeriesRef{ID: "T", URIPart: "T"}, Writes: []write{leafWrite("A", "ch1")}},
 			},
-			map[string]Key{"A": {"S", "ch1"}},
-			"A,B",
+			key:  map[string]Key{"A": {"S", "ch1"}},
+			want: "A,B",
 		},
 		{
-			"standalone and rename releases precede their claims against enumeration order",
-			map[string]*SeriesChanges{
+			name: "standalone and rename releases precede their claims against enumeration order",
+			sets: map[string]*SeriesChanges{
 				"":  {Ref: SeriesRef{ID: ""}, Writes: []write{leafWrite("L2", "Old")}},
 				"F": {Ref: SeriesRef{ID: "F", URIPart: "Foo"}, New: true},
 				"R": {Ref: SeriesRef{ID: "R", URIPart: "New"}, OldURI: "comic/Old"},
 				"T": {Ref: SeriesRef{ID: "T", URIPart: "T"}, Writes: []write{leafWrite("L1", "ch1")}},
 			},
-			map[string]Key{"L1": {"", "Foo"}, "R": {"", "Old"}},
-			"R,L2,L1,F",
+			key:  map[string]Key{"L1": {"", "Foo"}, "R": {"", "Old"}},
+			want: "R,L2,L1,F",
 		},
 		{
-			"series rename chain with children",
-			map[string]*SeriesChanges{
+			name: "series rename chain with children",
+			sets: map[string]*SeriesChanges{
 				"A": {Ref: SeriesRef{ID: "A", URIPart: "b"}, OldURI: "comic/a", Writes: []write{leafWrite("ca", "ch1")}},
 				"B": {Ref: SeriesRef{ID: "B", URIPart: "c"}, OldURI: "comic/b", Writes: []write{leafWrite("cb", "ch1")}},
 			},
-			map[string]Key{"A": {"", "a"}, "B": {"", "b"}},
-			"B,A,ca,cb",
+			key:  map[string]Key{"A": {"", "a"}, "B": {"", "b"}},
+			want: "B,A,ca,cb",
 		},
 		{
-			"new parent before the child whose key an earlier set claims",
-			map[string]*SeriesChanges{
+			name: "new parent before the child whose key an earlier set claims",
+			sets: map[string]*SeriesChanges{
 				"A": {Ref: SeriesRef{ID: "A", URIPart: "a"}, Writes: []write{leafWrite("x", "ch1")}},
 				"Z": {Ref: SeriesRef{ID: "Z", URIPart: "z"}, New: true, Writes: []write{leafWrite("y", "ch1")}},
 			},
-			map[string]Key{"y": {"A", "ch1"}},
-			"Z,y,x",
+			key:  map[string]Key{"y": {"A", "ch1"}},
+			want: "Z,y,x",
 		},
 		{
-			"absent hydrated key claims no release",
-			map[string]*SeriesChanges{
+			name: "absent hydrated key claims no release",
+			sets: map[string]*SeriesChanges{
 				"S": {Ref: SeriesRef{ID: "S", URIPart: "S"}, Writes: []write{leafWrite("B", "ch1"), leafWrite("A", "ch2")}},
 			},
-			map[string]Key{},
-			"B,A",
+			key:  map[string]Key{},
+			want: "B,A",
 		},
 		{
-			"unchanged key claims no release",
-			map[string]*SeriesChanges{
+			name: "unchanged key claims no release",
+			sets: map[string]*SeriesChanges{
 				"S": {Ref: SeriesRef{ID: "S", URIPart: "S"}, Writes: []write{leafWrite("B", "ch1"), leafWrite("A", "ch2")}},
 			},
-			map[string]Key{"A": {"S", "ch2"}, "B": {"S", "ch1"}},
-			"B,A",
+			key:  map[string]Key{"A": {"S", "ch2"}, "B": {"S", "ch1"}},
+			want: "B,A",
+		},
+		{
+			name: "swap cycle errors",
+			sets: map[string]*SeriesChanges{
+				"S": {Ref: SeriesRef{ID: "S", URIPart: "S"}, Writes: []write{leafWrite("A", "ch2"), leafWrite("B", "ch1")}},
+			},
+			key:     map[string]Key{"A": {"S", "ch1"}, "B": {"S", "ch2"}},
+			wantErr: "key cycle",
+		},
+		{
+			name: "deterministic across rebuilt fixtures",
+			build: func() (map[string]*SeriesChanges, map[string]Key) {
+				return map[string]*SeriesChanges{
+						"A": {Ref: SeriesRef{ID: "A", URIPart: "b"}, OldURI: "comic/a", Writes: []write{leafWrite("a1", "ch1"), leafWrite("a2", "ch2")}},
+						"B": {Ref: SeriesRef{ID: "B", URIPart: "c"}, OldURI: "comic/b", Writes: []write{leafWrite("b1", "ch1")}},
+						"C": {Ref: SeriesRef{ID: "C", URIPart: "d"}, New: true, Writes: []write{leafWrite("c1", "ch1")}},
+						"D": {Ref: SeriesRef{ID: "D", URIPart: "e"}, Writes: []write{leafWrite("d1", "ch3")}},
+					},
+					map[string]Key{"A": {"", "a"}, "B": {"", "b"}, "d1": {"D", "ch9"}}
+			},
+			runs: 20,
+			want: "B,A,a1,a2,b1,C,c1,d1",
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			steps, err := orderSteps(flush{sets: c.sets}, c.key)
-			if err != nil {
-				t.Fatalf("orderSteps: %v", err)
-			}
-			if got := stepIDs(steps); got != c.want {
-				t.Fatalf("steps = %s, want %s", got, c.want)
+			for i := range max(c.runs, 1) {
+				sets, key := c.sets, c.key
+				if c.build != nil {
+					sets, key = c.build()
+				}
+				steps, err := orderSteps(flush{sets: sets}, key)
+				if c.wantErr != "" {
+					if err == nil {
+						t.Fatalf("steps = %s, want a %q error", stepIDs(steps), c.wantErr)
+					}
+					if !strings.Contains(err.Error(), c.wantErr) {
+						t.Fatalf("err = %v, want %q", err, c.wantErr)
+					}
+					continue
+				}
+				if err != nil {
+					t.Fatalf("orderSteps: %v", err)
+				}
+				if got := stepIDs(steps); got != c.want {
+					t.Fatalf("run %d: steps = %s, want %s", i, got, c.want)
+				}
 			}
 		})
-	}
-}
-
-func TestOrderStepsSwapCycleErrors(t *testing.T) {
-	sets := map[string]*SeriesChanges{
-		"S": {Ref: SeriesRef{ID: "S", URIPart: "S"}, Writes: []write{leafWrite("A", "ch2"), leafWrite("B", "ch1")}},
-	}
-	key := map[string]Key{"A": {"S", "ch1"}, "B": {"S", "ch2"}}
-
-	steps, err := orderSteps(flush{sets: sets}, key)
-	if err == nil {
-		t.Fatalf("steps = %s, want a cycle error", stepIDs(steps))
-	}
-	if !strings.Contains(err.Error(), "key cycle") {
-		t.Fatalf("err = %v", err)
-	}
-}
-
-func TestOrderStepsDeterministic(t *testing.T) {
-	build := func() (flush, map[string]Key) {
-		sets := map[string]*SeriesChanges{
-			"A": {Ref: SeriesRef{ID: "A", URIPart: "b"}, OldURI: "comic/a", Writes: []write{leafWrite("a1", "ch1"), leafWrite("a2", "ch2")}},
-			"B": {Ref: SeriesRef{ID: "B", URIPart: "c"}, OldURI: "comic/b", Writes: []write{leafWrite("b1", "ch1")}},
-			"C": {Ref: SeriesRef{ID: "C", URIPart: "d"}, New: true, Writes: []write{leafWrite("c1", "ch1")}},
-			"D": {Ref: SeriesRef{ID: "D", URIPart: "e"}, Writes: []write{leafWrite("d1", "ch3")}},
-		}
-		return flush{sets: sets}, map[string]Key{"A": {"", "a"}, "B": {"", "b"}, "d1": {"D", "ch9"}}
-	}
-
-	var want string
-	for i := range 20 {
-		f, key := build()
-		steps, err := orderSteps(f, key)
-		if err != nil {
-			t.Fatalf("orderSteps: %v", err)
-		}
-		got := stepIDs(steps)
-		if i == 0 {
-			want = got
-			continue
-		}
-		if got != want {
-			t.Fatalf("run %d = %s, want %s", i, got, want)
-		}
-	}
-	if want != "B,A,a1,a2,b1,C,c1,d1" {
-		t.Fatalf("steps = %s", want)
 	}
 }

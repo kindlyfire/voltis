@@ -4,7 +4,10 @@ import { queryClient } from '../misc'
 import { ws } from '../ws'
 import type { UpdateMe, User, UserUpsert } from './types'
 
-ws.on('$open', () => queryClient.invalidateQueries({ queryKey: ['users', 'me'] }))
+const revalidateMe = () => queryClient.invalidateQueries({ queryKey: ['users', 'me'] })
+
+ws.on('$open', revalidateMe)
+ws.on('$close', revalidateMe)
 
 export const usersApi = {
     useList: () =>
@@ -51,14 +54,11 @@ export const usersApi = {
     useUpsert: () => {
         const queryClient = useQueryClient()
         return useMutation({
-            mutationFn: async (user: UserUpsert) => {
-                const url = `/users/${user.id ?? 'new'}`
-                const { id: _, ...body } = user
-                return apiFetch<User>(url, {
+            mutationFn: async ({ id, ...body }: UserUpsert) =>
+                apiFetch<User>(`/users/${id ?? 'new'}`, {
                     method: 'POST',
                     body: JSON.stringify(body),
-                })
-            },
+                }),
             onSuccess: () => {
                 queryClient.invalidateQueries({ queryKey: ['users'] })
             },

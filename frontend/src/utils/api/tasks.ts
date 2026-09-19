@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/vue-query'
 import { computed, toValue, type MaybeRefOrGetter } from 'vue'
 import { apiFetch } from '../fetch'
 import type { QueryOptions } from './_utils'
-import type { Paginated, Task, TaskListParams } from './types'
+import type { Paginated, Task, TaskListParams, TaskLogs, TaskSnapshot } from './types'
 
 export const tasksApi = {
     useList: (
@@ -24,4 +24,12 @@ export const tasksApi = {
             },
             ...options,
         }),
+
+    snapshot: async (ids?: string[]) => {
+        const query = ids?.length ? `?ids=${ids.map(encodeURIComponent).join(',')}` : ''
+        return apiFetch<TaskSnapshot[]>(`/tasks/snapshot${query}`)
+    },
+
+    logs: async (id: string, offset: number) =>
+        apiFetch<TaskLogs>(`/tasks/${encodeURIComponent(id)}/logs?offset=${offset}`),
 }

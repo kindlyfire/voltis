@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"sync"
 	"time"
 
@@ -15,39 +17,77 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+var PublishInterval = 250 * time.Millisecond
+
 type RunningInfo struct {
 	Name  string
 	Input any
 }
 
-type queueEntry struct {
-	def         *TaskDef
-	task        *models.Task
-	input       any
-	runtimeData map[string]any
-	handle      *TaskHandle
-}
-
 type Manager struct {
 	pool    *pgxpool.Pool
+	publish func(Snapshot)
 	mu      sync.Mutex
-	queue   []*queueEntry
-	running []*queueEntry
+	queue   []*entry
+	running []*entry
+	live    map[string]*entry
 	defs    map[string]*TaskDef
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
 }
 
-func NewManager(pool *pgxpool.Pool) *Manager {
-	return &Manager{
-		pool: pool,
-		defs: map[string]*TaskDef{},
+func NewManager(pool *pgxpool.Pool, publish func(Snapshot)) *Manager {
+	ctx, cancel := context.WithCancel(context.Background())
+	m := &Manager{
+		pool:    pool,
+		publish: publish,
+		live:    map[string]*entry{},
+		defs:    map[string]*TaskDef{},
+		cancel:  cancel,
 	}
+	m.wg.Go(func() { m.publishLoop(ctx) })
+	return m
+}
+
+func (m *Manager) Close() {
+	m.cancel()
+	m.wg.Wait()
 }
 
 func (m *Manager) Register(def *TaskDef) {
 	m.defs[def.Name] = def
 }
 
-func (m *Manager) Push(def *TaskDef, input any, runtimeData map[string]any) (*TaskHandle, error) {
+func newEntry(def *TaskDef, input any, task *models.Task) *entry {
+	ctx, cancel := context.WithCancel(context.Background())
+	e := &entry{
+		def:    def,
+		input:  input,
+		ctx:    ctx,
+		cancel: cancel,
+		done:   make(chan struct{}),
+		dirty:  true,
+		snap: Snapshot{
+			ID:        task.ID,
+			Name:      task.Name,
+			Status:    task.Status,
+			Input:     task.Input,
+			Output:    task.Output,
+			CreatedAt: task.CreatedAt,
+			UpdatedAt: task.UpdatedAt,
+		},
+	}
+	if e.snap.Output == nil {
+		e.snap.Output = json.RawMessage("{}")
+	}
+	if task.Logs != nil {
+		e.logs.WriteString(*task.Logs)
+		e.snap.LogLen = e.logs.Len()
+	}
+	return e
+}
+
+func (m *Manager) Push(def *TaskDef, input any) (*TaskHandle, error) {
 	inputJSON, err := json.Marshal(input)
 	if err != nil {
 		return nil, fmt.Errorf("marshal task input: %w", err)
@@ -67,22 +107,14 @@ func (m *Manager) Push(def *TaskDef, input any, runtimeData map[string]any) (*Ta
 		return nil, fmt.Errorf("create task: %w", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	handle := &TaskHandle{task: task, done: make(chan struct{}), ctx: ctx, cancelFn: cancel}
-	entry := &queueEntry{
-		def:         def,
-		task:        task,
-		input:       input,
-		runtimeData: runtimeData,
-		handle:      handle,
-	}
+	e := newEntry(def, input, task)
+	m.mu.Lock()
+	m.live[e.snap.ID] = e
+	m.queue = append(m.queue, e)
+	m.scheduleUnlocked()
+	m.mu.Unlock()
 
-	fp.WithMutex(&m.mu, func() {
-		m.queue = append(m.queue, entry)
-		m.scheduleUnlocked()
-	})
-
-	return handle, nil
+	return &TaskHandle{e: e}, nil
 }
 
 func (m *Manager) Load(ctx context.Context) error {
@@ -98,102 +130,96 @@ func (m *Manager) Load(ctx context.Context) error {
 		return fmt.Errorf("load pending tasks: %w", err)
 	}
 
-	fp.WithMutex(&m.mu, func() {
-		for i := range pending {
-			task := &pending[i]
-			def, ok := m.defs[task.Name]
-			if !ok {
-				slog.Warn("[tasks] no registered def for pending task", "name", task.Name, "id", task.ID)
-				continue
-			}
-			if def.UnmarshalInput == nil {
-				slog.Warn("[tasks] no UnmarshalInput for pending task", "name", task.Name, "id", task.ID)
-				continue
-			}
-			input, unmarshalErr := def.UnmarshalInput(task.Input)
-			if unmarshalErr != nil {
-				slog.Error("[tasks] failed to unmarshal pending task input", "name", task.Name, "id", task.ID, "err", unmarshalErr)
-				continue
-			}
-			if input == nil {
-				continue
-			}
-			entryCtx, entryCancel := context.WithCancel(context.Background())
-			m.queue = append(m.queue, &queueEntry{
-				def:    def,
-				task:   task,
-				input:  input,
-				handle: &TaskHandle{task: task, done: make(chan struct{}), ctx: entryCtx, cancelFn: entryCancel},
-			})
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range pending {
+		task := &pending[i]
+		def, ok := m.defs[task.Name]
+		if !ok {
+			slog.Warn("[tasks] no registered def for pending task", "name", task.Name, "id", task.ID)
+			continue
 		}
-		m.scheduleUnlocked()
-	})
+		if def.UnmarshalInput == nil {
+			slog.Warn("[tasks] no UnmarshalInput for pending task", "name", task.Name, "id", task.ID)
+			continue
+		}
+		input, unmarshalErr := def.UnmarshalInput(task.Input)
+		if unmarshalErr != nil {
+			slog.Error("[tasks] failed to unmarshal pending task input", "name", task.Name, "id", task.ID, "err", unmarshalErr)
+			continue
+		}
+		if input == nil {
+			continue
+		}
+		e := newEntry(def, input, task)
+		m.live[e.snap.ID] = e
+		m.queue = append(m.queue, e)
+	}
+	m.scheduleUnlocked()
 
 	return nil
 }
 
-// Pending returns the inputs of all queued and running tasks with the given name.
-func (m *Manager) Pending(name string) []any {
+func (m *Manager) Pending(name string) []Pending {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	all := append(m.queue, m.running...)
-	return fp.Map(
-		fp.Filter(all, func(e *queueEntry) bool { return e.def.Name == name }),
-		func(e *queueEntry) any { return e.input },
-	)
+	out := []Pending{}
+	for _, e := range slices.Concat(m.queue, m.running) {
+		if e.def.Name == name {
+			out = append(out, Pending{ID: e.snap.ID, Input: e.input})
+		}
+	}
+	return out
+}
+
+func (m *Manager) Live() []Snapshot {
+	m.mu.Lock()
+	entries := slices.Collect(maps.Values(m.live))
+	m.mu.Unlock()
+	return fp.Map(entries, func(e *entry) Snapshot { return e.snapshot() })
+}
+
+func (m *Manager) Logs(id string) (string, bool) {
+	m.mu.Lock()
+	e := m.live[id]
+	m.mu.Unlock()
+	if e == nil {
+		return "", false
+	}
+	return e.readLogs(), true
 }
 
 func (m *Manager) Cancel(id string) error {
-	var entry *queueEntry
-	var queued bool
+	var e *entry
+	queued := false
 
-	fp.WithMutex(&m.mu, func() {
-		for _, e := range m.queue {
-			if e.task.ID == id {
-				entry = e
-				queued = true
-				m.queue = fp.Remove(m.queue, e)
-				return
-			}
-		}
-		for _, e := range m.running {
-			if e.task.ID == id {
-				entry = e
-				return
-			}
-		}
-	})
+	byID := func(x *entry) bool { return x.snap.ID == id }
+	m.mu.Lock()
+	if i := slices.IndexFunc(m.queue, byID); i >= 0 {
+		e, queued = m.queue[i], true
+		m.queue = slices.Delete(m.queue, i, i+1)
+	} else if i := slices.IndexFunc(m.running, byID); i >= 0 {
+		e = m.running[i]
+	}
+	m.mu.Unlock()
 
-	if entry == nil {
+	if e == nil {
 		return fmt.Errorf("task not found: %s", id)
 	}
 
-	entry.handle.cancelFn()
-
+	e.cancel()
 	if queued {
-		entry.task.Status = models.TaskStatusCancelled
-		entry.task.UpdatedAt = time.Now().UTC()
-		_, _ = m.pool.Exec(context.Background(),
-			"UPDATE tasks SET status = $1, updated_at = $2 WHERE id = $3",
-			entry.task.Status, entry.task.UpdatedAt, entry.task.ID)
-
-		fp.WithMutex(&entry.handle.mu, func() {
-			entry.handle.err = context.Canceled
-		})
-		close(entry.handle.done)
+		m.finish(e, models.TaskStatusCancelled, nil, nil, context.Canceled)
 	}
-
 	return nil
 }
 
 func (m *Manager) scheduleUnlocked() {
-	var remaining []*queueEntry
+	var remaining []*entry
 	for _, e := range m.queue {
 		if m.canRunUnlocked(e) {
 			m.running = append(m.running, e)
-			go e.def.execute(m.pool, e.input, e.task, e.handle, e.runtimeData, func() {
-				m.taskDone(e)
-			})
+			go m.run(e)
 		} else {
 			remaining = append(remaining, e)
 		}
@@ -201,14 +227,7 @@ func (m *Manager) scheduleUnlocked() {
 	m.queue = remaining
 }
 
-func (m *Manager) taskDone(e *queueEntry) {
-	fp.WithMutex(&m.mu, func() {
-		m.running = fp.Remove(m.running, e)
-		m.scheduleUnlocked()
-	})
-}
-
-func (m *Manager) canRunUnlocked(e *queueEntry) bool {
+func (m *Manager) canRunUnlocked(e *entry) bool {
 	if len(m.running) == 0 {
 		return true
 	}
@@ -221,4 +240,124 @@ func (m *Manager) canRunUnlocked(e *queueEntry) bool {
 		}
 	}
 	return true
+}
+
+func (m *Manager) run(e *entry) {
+	m.setStatus(e, models.TaskStatusInProgress)
+
+	result, err := e.def.Process(e.input, &TaskContext{ctx: e.ctx, pool: m.pool, e: e})
+
+	status := models.TaskStatusCompleted
+	var output any
+	switch {
+	case e.ctx.Err() != nil:
+		status = models.TaskStatusCancelled
+	case err != nil:
+		status = models.TaskStatusFailed
+		e.appendLog(err.Error())
+	default:
+		output = result
+	}
+	m.finish(e, status, output, result, err)
+}
+
+func (m *Manager) setStatus(e *entry, status int) {
+	e.mu.Lock()
+	e.snap.Status = status
+	e.snap.UpdatedAt = time.Now().UTC()
+	e.dirty = true
+	e.mu.Unlock()
+	_ = m.persist(context.Background(), e)
+}
+
+func (m *Manager) finish(e *entry, status int, output, result any, err error) {
+	var data json.RawMessage
+	if output != nil {
+		encoded, marshalErr := json.Marshal(output)
+		if marshalErr != nil {
+			slog.Error("[tasks] failed to marshal task output", "id", e.snap.ID, "err", marshalErr)
+		} else {
+			data = encoded
+		}
+	}
+
+	e.mu.Lock()
+	e.snap.Status = status
+	if data != nil {
+		e.snap.Output = data
+	}
+	e.snap.UpdatedAt = time.Now().UTC()
+	e.dirty = false
+	snap := e.snapshotLocked()
+	e.mu.Unlock()
+
+	_ = m.persist(context.Background(), e)
+	if m.publish != nil {
+		m.publish(snap)
+	}
+
+	m.mu.Lock()
+	delete(m.live, snap.ID)
+	m.running = fp.Remove(m.running, e)
+	m.scheduleUnlocked()
+	m.mu.Unlock()
+
+	e.result, e.err = result, err
+	close(e.done)
+}
+
+func (m *Manager) publishLoop(ctx context.Context) {
+	ticker := time.NewTicker(PublishInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		m.mu.Lock()
+		entries := slices.Collect(maps.Values(m.live))
+		m.mu.Unlock()
+
+		var dirty []Snapshot
+		for _, e := range entries {
+			e.mu.Lock()
+			if e.dirty {
+				e.dirty = false
+				dirty = append(dirty, e.snapshotLocked())
+			}
+			e.mu.Unlock()
+		}
+
+		if m.publish == nil {
+			continue
+		}
+		for _, s := range dirty {
+			m.publish(s)
+		}
+	}
+}
+
+func (m *Manager) persist(ctx context.Context, e *entry) error {
+	e.mu.Lock()
+	id, status, output, updated := e.snap.ID, e.snap.Status, e.snap.Output, e.snap.UpdatedAt
+	logs := e.logs.String()
+	e.mu.Unlock()
+
+	var logsPtr *string
+	if logs != "" {
+		logsPtr = &logs
+	}
+
+	writeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	_, err := m.pool.Exec(writeCtx, `
+		UPDATE tasks SET status = $1, output = $2, logs = $3, updated_at = $4
+		WHERE id = $5
+	`, status, output, logsPtr, updated, id)
+	if err != nil {
+		slog.Error("[tasks] failed to persist task", "id", id, "err", err)
+	}
+	return err
 }

@@ -1,5 +1,8 @@
 <template>
-    <div v-if="qMe.isLoading.value || qInfo.isLoading.value" class="loading-container">
+    <div
+        v-if="qMe.isLoading.value || qInfo.isLoading.value"
+        class="flex h-screen w-screen items-center justify-center"
+    >
         <VProgressCircular indeterminate size="64" />
     </div>
     <RouterView v-else />
@@ -9,12 +12,15 @@
 import { useHead } from '@unhead/vue'
 import { watch } from 'vue'
 import { RouterView, useRouter } from 'vue-router'
+import { useScanSync } from './stores/scans'
 import { miscApi } from './utils/api/misc'
 import { usersApi } from './utils/api/users'
 
 const router = useRouter()
 const qMe = usersApi.useMe()
 const qInfo = miscApi.useInfo()
+
+useScanSync()
 
 watch(
     () =>
@@ -44,14 +50,6 @@ useHead({
 .v-btn {
     text-transform: none;
     letter-spacing: normal;
-}
-
-.loading-container {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 100vh;
-    width: 100vw;
 }
 
 .v-overlay__content > .v-card > .v-card-title {

@@ -8,7 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"voltis/models"
+	"voltis/lib/tasks"
+	"voltis/scanner"
 
 	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -168,6 +169,8 @@ func (h *WebSocketHub) broadcast(to func(*userConn) bool, event any) {
 
 func toAdmins(c *userConn) bool { return c.admin }
 
+func toEveryone(*userConn) bool { return true }
+
 func (h *WebSocketHub) Drop(user string) {
 	var drop []*userConn
 	h.mu.Lock()
@@ -185,17 +188,20 @@ func (h *WebSocketHub) Drop(user string) {
 	}
 }
 
-func (h *WebSocketHub) BroadcastTaskEvent(task *models.Task, progress json.RawMessage, logDelta *string) {
+func (h *WebSocketHub) TaskUpdate(s tasks.Snapshot) {
 	h.broadcast(toAdmins, map[string]any{
-		"type": "task_update",
-		"task": map[string]any{
-			"id":     task.ID,
-			"status": task.Status,
-			"input":  task.Input,
-			"output": task.Output,
-			"logs":   logDelta,
-		},
-		"progress": progress,
+		"type":     "task_update",
+		"task":     s,
+		"progress": s.Progress,
+	})
+}
+
+func (h *WebSocketHub) CatalogChanged(ev scanner.CatalogChanged) {
+	h.broadcast(toEveryone, map[string]any{
+		"type":       "catalog_changed",
+		"library_id": ev.LibraryID,
+		"task_id":    ev.TaskID,
+		"commit_seq": ev.CommitSeq,
 	})
 }
 

@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
 	"slices"
@@ -78,37 +79,17 @@ func inherit(uriPart string, ordered []Child) models.Metadata {
 		if inherited.Staff == nil && len(m.Staff) > 0 {
 			inherited.Staff = slices.Clone(m.Staff)
 		}
-		if inherited.Publisher == "" {
-			inherited.Publisher = m.Publisher
-		}
-		if inherited.Language == "" {
-			inherited.Language = m.Language
-		}
-		if inherited.Genre == "" {
-			inherited.Genre = m.Genre
-		}
-		if inherited.AgeRating == "" {
-			inherited.AgeRating = m.AgeRating
-		}
-		if inherited.Manga == "" {
-			inherited.Manga = m.Manga
-		}
-		if inherited.Imprint == "" {
-			inherited.Imprint = m.Imprint
-		}
-		if inherited.Description == "" {
-			inherited.Description = m.Description
-		}
-		if inherited.PublicationDate == "" {
-			inherited.PublicationDate = m.PublicationDate
-		}
-		if inherited.Title == "" {
-			inherited.Title = m.Series
-		}
+		inherited.Publisher = cmp.Or(inherited.Publisher, m.Publisher)
+		inherited.Language = cmp.Or(inherited.Language, m.Language)
+		inherited.Genre = cmp.Or(inherited.Genre, m.Genre)
+		inherited.AgeRating = cmp.Or(inherited.AgeRating, m.AgeRating)
+		inherited.Manga = cmp.Or(inherited.Manga, m.Manga)
+		inherited.Imprint = cmp.Or(inherited.Imprint, m.Imprint)
+		inherited.Description = cmp.Or(inherited.Description, m.Description)
+		inherited.PublicationDate = cmp.Or(inherited.PublicationDate, m.PublicationDate)
+		inherited.Title = cmp.Or(inherited.Title, m.Series)
 	}
-	if inherited.Title == "" {
-		inherited.Title = uriPart
-	}
+	inherited.Title = cmp.Or(inherited.Title, uriPart)
 	return inherited
 }
 
@@ -207,7 +188,7 @@ func orderSteps(f flush, key map[string]Key) ([]step, error) {
 }
 
 func compareOrderParts(a, b []*float32) int {
-	for i := 0; i < len(a) && i < len(b); i++ {
+	for i := range min(len(a), len(b)) {
 		ai, bi := a[i], b[i]
 		if ai == nil && bi == nil {
 			continue

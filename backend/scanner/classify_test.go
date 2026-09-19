@@ -23,17 +23,6 @@ func TestClassifyComicTuples(t *testing.T) {
 		want string
 	}{
 		{
-			"filename volume and chapter",
-			"/lib/Series Name (2019)/Series Name v01 ch003.cbz", models.Metadata{}, 0,
-			"prefix=comic type=comic part=v1_ch3 order=[1,3] cover=001.jpg title=Vol. 1 Ch. 3 series=comic|comic_series|Series Name_2019|Series Name index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
-		},
-		{
-			"metadata wins over filename",
-			"/lib/Series Name (2019)/Series Name v01 ch003.cbz",
-			models.Metadata{Series: "Meta Series", Number: "4.5", Volume: 2, Title: "Meta Title"}, 2001,
-			"prefix=comic type=comic part=v2_ch4.5 order=[2,4.5] cover=001.jpg title=Meta Title series=comic|comic_series|Meta Series_2001|Meta Series index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
-		},
-		{
 			"chapter only",
 			"/lib/Other Series/Other Series ch7.cbz", models.Metadata{}, 0,
 			"prefix=comic type=comic part=ch7 order=[nil,7] cover=001.jpg title=Ch. 7 series=comic|comic_series|Other Series|Other Series index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
@@ -44,18 +33,9 @@ func TestClassifyComicTuples(t *testing.T) {
 			"prefix=comic type=comic part=ch2 order=[nil,2] cover=001.jpg title=Ch. 2 series=comic|comic_series|Series 1000|Series 1000 index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
 		},
 		{
-			"year only title uses series name",
-			"/lib/Yearly/Yearly (1995).cbz", models.Metadata{}, 0,
-			"prefix=comic type=comic part=y1995 order=[nil,nil] cover=001.jpg title=Yearly (1995) series=comic|comic_series|Yearly|Yearly index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
-		},
-		{
 			"metadata year without comicinfo year",
 			"/lib/Plain/Plain ch1.cbz", models.Metadata{Series: "Plain Series"}, 0,
 			"prefix=comic type=comic part=ch1 order=[nil,1] cover=001.jpg title=Ch. 1 series=comic|comic_series|Plain Series|Plain Series index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
-		},
-		{
-			"unidentifiable",
-			"/lib/Plain/Plain.cbz", models.Metadata{}, 0, "nil",
 		},
 	}
 	for _, c := range cases {
@@ -69,17 +49,6 @@ func TestClassifyComicTuples(t *testing.T) {
 	}
 }
 
-func TestClassifyComicSeriesDirectory(t *testing.T) {
-	file := FSFile{Path: "/lib/Series/ch1.cbz", Mtime: baseTime, Size: 10}
-	item := classifyComic(file, models.Metadata{}, 0, testPages)
-	if item.Series.FileURI == nil || *item.Series.FileURI != "/lib/Series" {
-		t.Fatalf("series file uri = %v", item.Series.FileURI)
-	}
-	if item.File != file {
-		t.Fatalf("file = %+v, want %+v", item.File, file)
-	}
-}
-
 func TestClassifyBookTuples(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -88,19 +57,6 @@ func TestClassifyBookTuples(t *testing.T) {
 		coverValid bool
 		want       string
 	}{
-		{
-			"series member",
-			"/lib/Books/story-one.epub",
-			epub.Metadata{Title: "Story One", Series: "Book Series", SeriesIndex: 2, HasSeriesIndex: true, CoverPath: "cover.jpg"},
-			true,
-			"prefix=book type=book part=story-one order=[2] cover=cover.jpg title=Story One series=book|book_series|Book Series|Book Series index=2 data=",
-		},
-		{
-			"standalone",
-			"/lib/Books/lonely-book.epub",
-			epub.Metadata{Title: "Lonely Book", CoverPath: "cover.jpg"}, true,
-			"prefix=book type=book part=lonely-book order=[0] cover=cover.jpg title=Lonely Book series=nil index=0 data=",
-		},
 		{
 			"title falls back to stem",
 			"/lib/Books/untitled-file.epub", epub.Metadata{}, false,

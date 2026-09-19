@@ -4,55 +4,36 @@
             <VBtn v-bind="props" icon="mdi-sync" variant="text" :class="active && 'scan-spin'" />
         </template>
         <VCard>
-            <VCardText class="space-y-3!">
-                <div
-                    v-for="item in scans"
-                    :key="item.libraryId"
-                    class="pa-3 min-w-[300px] rounded border"
-                >
+            <VCardText class="flex flex-col gap-3">
+                <div v-for="row in rows" :key="row.id" class="min-w-[300px] rounded border p-3">
                     <div class="flex items-center gap-2 font-medium">
-                        {{ getLibraryName(item.libraryId) }}
+                        {{ getLibraryName(row.libraryId) }}
                         <VIcon
-                            v-if="item.status === 'completed'"
-                            icon="mdi-check"
+                            v-if="row.status >= TaskStatus.COMPLETED"
+                            :icon="
+                                row.status === TaskStatus.COMPLETED
+                                    ? 'mdi-check'
+                                    : 'mdi-alert-circle'
+                            "
+                            :color="row.color"
                             size="small"
-                            color="success"
-                        />
-                        <VIcon
-                            v-else-if="item.status === 'failed'"
-                            icon="mdi-alert-circle"
-                            size="small"
-                            color="error"
                         />
                     </div>
-                    <template v-if="item.status === 'running'">
-                        <VProgressLinear
-                            :model-value="
-                                !item.progress
-                                    ? 0
-                                    : item.progress.total === 0
-                                      ? 100
-                                      : (item.progress.processed / item.progress.total) * 100
-                            "
-                            class="mt-2"
-                            rounded
-                            height="6"
-                        />
-                        <div class="text-medium-emphasis mt-1 text-xs">
-                            {{ item.progress?.processed ?? 0 }} /
-                            {{ item.progress?.total ?? '?' }}
-                        </div>
-                    </template>
-                    <template v-else-if="item.status === 'completed' || item.status === 'failed'">
-                        <VProgressLinear
-                            :model-value="100"
-                            :color="item.status === 'completed' ? 'success' : 'error'"
-                            class="mt-2"
-                            rounded
-                            height="6"
-                        />
-                    </template>
-                    <div v-else class="text-medium-emphasis mt-1 text-sm">Queued</div>
+                    <VProgressLinear
+                        v-if="row.status !== TaskStatus.PENDING"
+                        :model-value="row.value"
+                        :indeterminate="row.indeterminate"
+                        :color="row.color"
+                        class="mt-2"
+                        rounded
+                        height="6"
+                    />
+                    <div
+                        class="mt-1 opacity-60"
+                        :class="row.status === TaskStatus.PENDING ? 'text-sm' : 'text-xs'"
+                    >
+                        {{ row.detail }}
+                    </div>
                 </div>
             </VCardText>
         </VCard>
@@ -60,60 +41,77 @@
 </template>
 
 <script setup lang="ts">
-import { computed, watch, onUnmounted } from 'vue'
-import { ref } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
+import { isTerminal, scanRow, useScanStore } from '@/stores/scans'
 import { librariesApi } from '@/utils/api/libraries'
+import { TaskStatus } from '@/utils/api/types'
 import { usersApi } from '@/utils/api/users'
-import { useScanTracker } from '@/utils/ws'
 
+const store = useScanStore()
 const qMe = usersApi.useMe()
 const isAdmin = computed(() => !!qMe.data.value?.permissions.includes('ADMIN'))
-const { scans, clear } = useScanTracker(isAdmin)
 const libraries = librariesApi.useList()
 const menuOpen = ref(false)
-const pendingClear = ref(false)
+const pendingDismiss = new Set<string>()
 
-const active = computed(() =>
-    scans.value.some(i => i.status === 'running' || i.status === 'queued')
+const shown = computed(() =>
+    Object.values(store.tasks).filter(task => !store.dismissed.has(task.id))
 )
-const visible = computed(() => isAdmin.value && scans.value.length > 0)
-const allDone = computed(
-    () =>
-        scans.value.length > 0 &&
-        scans.value.every(i => i.status === 'completed' || i.status === 'failed')
-)
+const rows = computed(() => shown.value.map(scanRow))
+const active = computed(() => shown.value.some(task => !isTerminal(task)))
+const visible = computed(() => isAdmin.value && rows.value.length > 0)
 
 function getLibraryName(id: string): string {
     return libraries.data?.value?.find(l => l.id === id)?.name ?? id
 }
 
-let clearTimer: ReturnType<typeof setTimeout> | null = null
+const DISMISS_DELAY = 10000
+const dueAt = new Map<string, number>()
+let timer: ReturnType<typeof setTimeout> | null = null
 
-function scheduleClear() {
-    if (clearTimer) clearTimeout(clearTimer)
-    clearTimer = setTimeout(() => {
-        clearTimer = null
-        if (menuOpen.value) {
-            pendingClear.value = true
-        } else {
-            clear()
-        }
-    }, 10000)
+function schedule() {
+    if (timer) clearTimeout(timer)
+    timer = null
+    const next = Math.min(...dueAt.values())
+    if (!Number.isFinite(next)) return
+    timer = setTimeout(sweep, Math.max(0, next - Date.now()))
 }
 
-watch(allDone, done => {
-    if (done) scheduleClear()
-})
+function sweep() {
+    timer = null
+    const ready = [...dueAt].filter(([, at]) => at - Date.now() <= 1).map(([id]) => id)
+    for (const id of ready) dueAt.delete(id)
+    if (menuOpen.value) {
+        for (const id of ready) pendingDismiss.add(id)
+    } else {
+        store.dismiss(ready)
+    }
+    schedule()
+}
+
+watch(
+    shown,
+    tasks => {
+        const ids = new Set(tasks.map(task => task.id))
+        const terminal = new Set(tasks.filter(isTerminal).map(task => task.id))
+        for (const id of terminal) {
+            if (!dueAt.has(id) && !pendingDismiss.has(id)) dueAt.set(id, Date.now() + DISMISS_DELAY)
+        }
+        for (const id of [...dueAt.keys()]) if (!terminal.has(id)) dueAt.delete(id)
+        for (const id of [...pendingDismiss]) if (!ids.has(id)) pendingDismiss.delete(id)
+        schedule()
+    },
+    { immediate: true }
+)
 
 watch(menuOpen, open => {
-    if (!open && pendingClear.value) {
-        pendingClear.value = false
-        clear()
-    }
+    if (open || pendingDismiss.size === 0) return
+    store.dismiss([...pendingDismiss])
+    pendingDismiss.clear()
 })
 
 onUnmounted(() => {
-    if (clearTimer) clearTimeout(clearTimer)
+    if (timer) clearTimeout(timer)
 })
 </script>
 

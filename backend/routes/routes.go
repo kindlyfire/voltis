@@ -14,10 +14,19 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 )
 
-func Register(e *echo.Echo, pool *pgxpool.Pool) *WebSocketHub {
+func adminOnly(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		if _, err := requireAdmin(c); err != nil {
+			return err
+		}
+		return next(c)
+	}
+}
+
+func Register(e *echo.Echo, pool *pgxpool.Pool) (*WebSocketHub, *tasks.Manager) {
 	hub := NewHub()
 
-	manager := tasks.NewManager(pool)
+	manager := tasks.NewManager(pool, hub.TaskUpdate)
 	manager.Register(scanner.ScanTask)
 	if err := manager.Load(context.Background()); err != nil {
 		slog.Error("failed to load pending tasks", "err", err)
@@ -53,11 +62,11 @@ func Register(e *echo.Echo, pool *pgxpool.Pool) *WebSocketHub {
 	(&FileRoutes{pool: pool}).Register(api.Group("/files"))
 	(&ContentRefRoutes{pool: pool}).Register(api.Group("/content"))
 	(&CustomListRoutes{pool: pool}).Register(api.Group("/custom-lists"))
-	(&TaskRoutes{pool: pool}).Register(api.Group("/tasks"))
+	(&TaskRoutes{pool: pool, manager: manager}).Register(api.Group("/tasks"))
 	(&MetadataSourceRoutes{pool: pool, mangabaka: sources.NewMangaBaka()}).Register(api.Group("/metadata-sources"))
 
 	e.GET("/api/ws", wsHandler(pool, hub))
 
 	registerStaticRoutes(e)
-	return hub
+	return hub, manager
 }

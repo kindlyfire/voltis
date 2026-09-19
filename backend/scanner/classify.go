@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -16,45 +17,31 @@ import (
 
 func classifyBook(file FSFile, meta epub.Metadata, coverValid bool) ParsedItem {
 	path := file.Path
-
-	// Title from metadata, falling back to filename stem
 	stem := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-	title := meta.Title
-	if title == "" {
-		title = stem
-	}
 
-	// Order parts
-	var orderParts []*float32
+	index := 0.0
 	if meta.HasSeriesIndex {
-		f := float32(meta.SeriesIndex)
-		orderParts = append(orderParts, &f)
-	} else {
-		f := float32(0)
-		orderParts = append(orderParts, &f)
+		index = meta.SeriesIndex
 	}
 
-	// Cover suffix
 	var coverSuffix *string
 	if coverValid {
 		coverSuffix = new(meta.CoverPath)
 	}
 
-	// Metadata
-	fileMeta := models.Metadata{Title: title}
+	fileMeta := models.Metadata{
+		Title:           cmp.Or(meta.Title, stem),
+		Description:     meta.Description,
+		Publisher:       meta.Publisher,
+		Language:        meta.Language,
+		PublicationDate: meta.PublicationDate,
+		Series:          meta.Series,
+		SeriesIndex:     index,
+	}
 	for _, a := range meta.Authors {
 		fileMeta.Staff = append(fileMeta.Staff, models.StaffEntry{Name: a, Role: "author"})
 	}
-	fileMeta.Description = meta.Description
-	fileMeta.Publisher = meta.Publisher
-	fileMeta.Language = meta.Language
-	fileMeta.PublicationDate = meta.PublicationDate
-	fileMeta.Series = meta.Series
-	if meta.HasSeriesIndex {
-		fileMeta.SeriesIndex = meta.SeriesIndex
-	}
 
-	// Series
 	var series *ParsedSeries
 	if meta.Series != "" {
 		series = &ParsedSeries{
@@ -71,7 +58,7 @@ func classifyBook(file FSFile, meta epub.Metadata, coverValid bool) ParsedItem {
 		URIPrefix:   "book",
 		ContentType: "book",
 		URIPart:     stem,
-		OrderParts:  orderParts,
+		OrderParts:  []*float32{new(float32(index))},
 		CoverSuffix: coverSuffix,
 		MetaRaw:     fileMeta,
 	}
@@ -80,20 +67,14 @@ func classifyBook(file FSFile, meta epub.Metadata, coverValid bool) ParsedItem {
 func classifyComic(file FSFile, meta models.Metadata, year int, pages []comic.PageInfo) *ParsedItem {
 	path := file.Path
 
-	// Determine series
 	dir := filepath.Dir(path)
 	dirName := filepath.Base(dir)
 	fallbackName, fallbackYear := keys.ParseSeriesName(dirName)
 
-	seriesName := fallbackName
-	if meta.Series != "" {
-		seriesName = meta.Series
-	}
-	var seriesYear *int
+	seriesName := cmp.Or(meta.Series, fallbackName)
+	seriesYear := fallbackYear
 	if year != 0 {
 		seriesYear = &year
-	} else {
-		seriesYear = fallbackYear
 	}
 
 	seriesURIPart := seriesName
@@ -101,23 +82,18 @@ func classifyComic(file FSFile, meta models.Metadata, year int, pages []comic.Pa
 		seriesURIPart = fmt.Sprintf("%s_%d", seriesName, *seriesYear)
 	}
 
-	// Parse volume/chapter from filename
 	stem := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	filename := keys.CleanSeriesName(stem)
 
-	var volNum *float64
-	var chNum *float64
-
+	var volNum, chNum *float64
 	if meta.Volume != 0 {
-		f := float64(meta.Volume)
-		volNum = &f
+		volNum = new(float64(meta.Volume))
 	} else {
 		volNum = keys.ParseVolume(filename)
 	}
 
 	if meta.Number != "" {
-		f, err := keys.ParseFloatStr(meta.Number)
-		if err == nil {
+		if f, err := keys.ParseFloatStr(meta.Number); err == nil {
 			chNum = &f
 		} else {
 			chNum = keys.ParseChapter(meta.Number)
@@ -132,57 +108,29 @@ func classifyComic(file FSFile, meta models.Metadata, year int, pages []comic.Pa
 		chNum = keys.ParseFallbackChapter(stripped)
 	}
 
-	// Build URI parts
-	var uriParts []string
+	var uriParts, titleParts []string
+	orderParts := make([]*float32, 2)
 	if volNum != nil {
-		uriParts = append(uriParts, fmt.Sprintf("v%s", keys.FormatNum(*volNum)))
+		n := keys.FormatNum(*volNum)
+		uriParts = append(uriParts, "v"+n)
+		titleParts = append(titleParts, "Vol. "+n)
+		orderParts[0] = new(float32(*volNum))
 	}
 	if chNum != nil {
-		uriParts = append(uriParts, fmt.Sprintf("ch%s", keys.FormatNum(*chNum)))
-	}
-	if volNum == nil && chNum == nil && yearNum != nil {
-		uriParts = append(uriParts, fmt.Sprintf("y%d", *yearNum))
+		n := keys.FormatNum(*chNum)
+		uriParts = append(uriParts, "ch"+n)
+		titleParts = append(titleParts, "Ch. "+n)
+		orderParts[1] = new(float32(*chNum))
 	}
 	if len(uriParts) == 0 {
-		return nil
-	}
-	uriPart := strings.Join(uriParts, "_")
-
-	// Build title
-	var titleParts []string
-	if volNum != nil {
-		titleParts = append(titleParts, fmt.Sprintf("Vol. %s", keys.FormatNum(*volNum)))
-	}
-	if chNum != nil {
-		titleParts = append(titleParts, fmt.Sprintf("Ch. %s", keys.FormatNum(*chNum)))
-	}
-	if volNum == nil && chNum == nil && yearNum != nil {
+		if yearNum == nil {
+			return nil
+		}
+		uriParts = append(uriParts, fmt.Sprintf("y%d", *yearNum))
 		titleParts = append(titleParts, fmt.Sprintf("%s (%d)", seriesName, *yearNum))
 	}
-	title := strings.Join(titleParts, " ")
-	if title == "" {
-		title = filename
-	}
-	if meta.Title == "" {
-		meta.Title = title
-	}
+	meta.Title = cmp.Or(meta.Title, strings.Join(titleParts, " "))
 
-	// Build order parts
-	var orderParts []*float32
-	if volNum != nil {
-		f := float32(*volNum)
-		orderParts = append(orderParts, &f)
-	} else {
-		orderParts = append(orderParts, nil)
-	}
-	if chNum != nil {
-		f := float32(*chNum)
-		orderParts = append(orderParts, &f)
-	} else {
-		orderParts = append(orderParts, nil)
-	}
-
-	// Build file data (pages)
 	pageTuples := fp.Map(pages, func(p comic.PageInfo) any {
 		return []any{p.Name, p.Width, p.Height}
 	})
@@ -192,7 +140,7 @@ func classifyComic(file FSFile, meta models.Metadata, year int, pages []comic.Pa
 		File:        file,
 		URIPrefix:   "comic",
 		ContentType: "comic",
-		URIPart:     uriPart,
+		URIPart:     strings.Join(uriParts, "_"),
 		OrderParts:  orderParts,
 		CoverSuffix: new(pages[0].Name),
 		FileData:    fd,

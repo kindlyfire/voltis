@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"voltis/db"
@@ -26,12 +27,12 @@ type repository struct {
 	pool      *pgxpool.Pool
 	libraryID string
 
-	content    []models.Content
-	contentD   []models.Content // deleted
-	metadata   []*metadataRow
-	dirtyIDs   map[string]bool // content IDs that were modified
-	uriRenames map[string]string
-	parents    map[string]*models.Content // resolved series by URI
+	content        []models.Content
+	deletedContent []models.Content
+	metadata       []*metadataRow
+	dirtyIDs       map[string]bool
+	uriRenames     map[string]string
+	parents        map[string]*models.Content
 }
 
 func newRepository(pool *pgxpool.Pool, libraryID string) *repository {
@@ -82,10 +83,8 @@ func (r *repository) markDirty(c *models.Content) {
 }
 
 func (r *repository) getMetadata(uri string) *metadataRow {
-	for _, m := range r.metadata {
-		if m.URI == uri {
-			return m
-		}
+	if i := slices.IndexFunc(r.metadata, func(m *metadataRow) bool { return m.URI == uri }); i >= 0 {
+		return r.metadata[i]
 	}
 	m := &metadataRow{
 		URI:       uri,
@@ -97,9 +96,9 @@ func (r *repository) getMetadata(uri string) *metadataRow {
 }
 
 func (r *repository) matchDeletedItem(uriPart string, parentID *string) *models.Content {
-	for i, c := range r.contentD {
+	for i, c := range r.deletedContent {
 		if c.URIPart == uriPart && ptrEq(c.ParentID, parentID) {
-			r.contentD = append(r.contentD[:i], r.contentD[i+1:]...)
+			r.deletedContent = slices.Delete(r.deletedContent, i, i+1)
 			r.content = append(r.content, c)
 			return &r.content[len(r.content)-1]
 		}
@@ -108,23 +107,16 @@ func (r *repository) matchDeletedItem(uriPart string, parentID *string) *models.
 }
 
 func (r *repository) checkURIAvailable(parsed *ParsedItem, parentID *string) bool {
-	count := 0
-	for i := range r.content {
-		other := &r.content[i]
-		if other.URIPart == parsed.URIPart && ptrEq(other.ParentID, parentID) && (other.FileURI == nil || *other.FileURI != parsed.File.Path) {
-			count++
-		}
-	}
-	return count == 0
+	return !slices.ContainsFunc(r.content, func(other models.Content) bool {
+		return other.URIPart == parsed.URIPart && ptrEq(other.ParentID, parentID) &&
+			(other.FileURI == nil || *other.FileURI != parsed.File.Path)
+	})
 }
 
 func (r *repository) removeContent(c *models.Content) {
-	for i := range r.content {
-		if r.content[i].ID == c.ID {
-			r.contentD = append(r.contentD, r.content[i])
-			r.content = append(r.content[:i], r.content[i+1:]...)
-			return
-		}
+	if i := slices.IndexFunc(r.content, func(x models.Content) bool { return x.ID == c.ID }); i >= 0 {
+		r.deletedContent = append(r.deletedContent, r.content[i])
+		r.content = slices.Delete(r.content, i, i+1)
 	}
 }
 
@@ -153,7 +145,6 @@ func (r *repository) getSeries(uri, uriPart string, fileURI *string, contentType
 		return c
 	}
 
-	// Find existing by URI or file_uri
 	for i := range r.content {
 		c := &r.content[i]
 		if c.URI == uri || (fileURI != nil && c.FileURI != nil && *c.FileURI == *fileURI) {
@@ -168,7 +159,6 @@ func (r *repository) getSeries(uri, uriPart string, fileURI *string, contentType
 		}
 	}
 
-	// Create new
 	now := time.Now().UTC()
 	newContent := models.Content{
 		ID:         models.MakeContentID(),
@@ -255,7 +245,6 @@ func (r *repository) commitGroup(ctx context.Context) error {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// Upsert modified content
 	for i := range r.content {
 		c := &r.content[i]
 		if !r.dirtyIDs[c.ID] {
@@ -284,7 +273,6 @@ func (r *repository) commitGroup(ctx context.Context) error {
 		}
 	}
 
-	// Handle URI renames
 	for oldURI, newURI := range r.uriRenames {
 		_, _ = tx.Exec(ctx, `
 			DELETE FROM content_metadata WHERE uri = $1 AND library_id = $2
@@ -297,7 +285,6 @@ func (r *repository) commitGroup(ctx context.Context) error {
 		`, newURI, oldURI, r.libraryID)
 	}
 
-	// Upsert metadata
 	for _, m := range r.metadata {
 		if !m.dirty {
 			continue
@@ -321,9 +308,8 @@ func (r *repository) commitGroup(ctx context.Context) error {
 		return err
 	}
 
-	// Clear dirty state after successful commit
-	r.dirtyIDs = map[string]bool{}
-	r.uriRenames = map[string]string{}
+	clear(r.dirtyIDs)
+	clear(r.uriRenames)
 	for _, m := range r.metadata {
 		m.dirty = false
 	}
@@ -337,19 +323,14 @@ func (r *repository) commitFinal(ctx context.Context) error {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// Delete removed content
-	if len(r.contentD) > 0 {
-		ids := make([]string, len(r.contentD))
-		for i, c := range r.contentD {
-			ids[i] = c.ID
-		}
+	if len(r.deletedContent) > 0 {
+		ids := fp.Map(r.deletedContent, func(c models.Content) string { return c.ID })
 		_, err := tx.Exec(ctx, "DELETE FROM content WHERE id = ANY($1)", ids)
 		if err != nil {
 			return fmt.Errorf("delete content: %w", err)
 		}
 	}
 
-	// Delete orphaned series
 	parentIDs := map[string]bool{}
 	for i := range r.content {
 		if r.content[i].ParentID != nil {
@@ -370,14 +351,11 @@ func (r *repository) commitFinal(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("delete orphans: %w", err)
 		}
-		// Remove from content slice (reverse order to preserve indices)
-		for i := len(orphanIdxs) - 1; i >= 0; i-- {
-			idx := orphanIdxs[i]
-			r.content = append(r.content[:idx], r.content[idx+1:]...)
+		for _, idx := range slices.Backward(orphanIdxs) {
+			r.content = slices.Delete(r.content, idx, idx+1)
 		}
 	}
 
-	// Update library scanned_at
 	_, err = tx.Exec(ctx, "UPDATE libraries SET scanned_at = $1 WHERE id = $2",
 		time.Now().UTC(), r.libraryID)
 	if err != nil {

@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 
 	"voltis/db"
@@ -13,10 +14,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// QueueBroadcaster is implemented by the WebSocket hub.
 type QueueBroadcaster interface {
-	BroadcastTaskEvent(task *models.Task, progress json.RawMessage, logs *string)
 	BroadcastScanQueue(libraryIDs []string)
+	CatalogChanged(ev CatalogChanged)
 }
 
 type Queue struct {
@@ -26,23 +26,17 @@ type Queue struct {
 }
 
 func NewQueue(manager *tasks.Manager, pool *pgxpool.Pool, hub QueueBroadcaster) *Queue {
-	q := &Queue{manager: manager, pool: pool, hub: hub}
-	ScanTask.OnUpdate = func(task *models.Task, progress json.RawMessage, logs *string) {
-		hub.BroadcastTaskEvent(task, progress, logs)
-		if task.Status != models.TaskStatusInProgress && task.Status != models.TaskStatusPending {
-			q.broadcastQueue()
-		}
-	}
-	return q
+	SetNotifier(hub)
+	return &Queue{manager: manager, pool: pool, hub: hub}
 }
 
-func (q *Queue) Enqueue(libraryID string, force bool, filterPaths []string) {
+func (q *Queue) Enqueue(libraryID string, force bool, filterPaths []string) (string, error) {
 	if len(filterPaths) == 0 {
-		for _, input := range q.manager.Pending("scan_library") {
-			si := input.(ScanInput)
-			if si.LibraryID == libraryID && len(si.FilterPaths) == 0 {
+		for _, p := range q.manager.Pending("scan_library") {
+			si, ok := p.Input.(ScanInput)
+			if ok && si.LibraryID == libraryID && len(si.FilterPaths) == 0 {
 				slog.Info("[scanner] scan already queued", "library", libraryID)
-				return
+				return p.ID, nil
 			}
 		}
 	}
@@ -51,8 +45,7 @@ func (q *Queue) Enqueue(libraryID string, force bool, filterPaths []string) {
 	lib, err := db.SelectOne[models.Library](ctx, q.pool,
 		"SELECT * FROM libraries WHERE id = $1", libraryID)
 	if err != nil {
-		slog.Error("[scanner] library not found", "library", libraryID, "err", err)
-		return
+		return "", fmt.Errorf("library not found: %s: %w", libraryID, err)
 	}
 
 	type source struct {
@@ -69,21 +62,24 @@ func (q *Queue) Enqueue(libraryID string, force bool, filterPaths []string) {
 		Sources:     paths,
 		Force:       force,
 		FilterPaths: filterPaths,
-	}, nil)
+	})
 	if err != nil {
-		slog.Error("[scanner] failed to push scan task", "library", lib.ID, "err", err)
-		return
+		return "", fmt.Errorf("push scan task: %w", err)
 	}
 
 	q.broadcastQueue()
 
 	go func() {
+		defer q.broadcastQueue()
 		resultAny, err := handle.Wait()
 		if err != nil {
 			slog.Error("[scanner] scan failed", "library", lib.ID, "err", err)
 			return
 		}
-		result := resultAny.(ScanResult)
+		result, ok := resultAny.(ScanResult)
+		if !ok {
+			return
+		}
 		slog.Info("[scanner] scan complete",
 			"library", lib.ID,
 			"added", result.Added,
@@ -94,12 +90,15 @@ func (q *Queue) Enqueue(libraryID string, force bool, filterPaths []string) {
 			"duration", result.Duration,
 		)
 	}()
+
+	return handle.ID(), nil
 }
 
 func (q *Queue) broadcastQueue() {
 	pending := q.manager.Pending("scan_library")
-	ids := fp.Dedup(fp.Map(pending, func(input any) string {
-		return input.(ScanInput).LibraryID
+	ids := fp.Dedup(fp.Map(pending, func(p tasks.Pending) string {
+		si, _ := p.Input.(ScanInput)
+		return si.LibraryID
 	}))
 	q.hub.BroadcastScanQueue(ids)
 }

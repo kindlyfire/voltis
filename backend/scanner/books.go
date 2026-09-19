@@ -9,7 +9,6 @@ import (
 	"voltis/models"
 )
 
-// BooksScanner implements FileScanner for EPUB books.
 type BooksScanner struct{}
 
 func (bs *BooksScanner) FileEligible(path string) bool {

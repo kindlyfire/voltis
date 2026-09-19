@@ -208,8 +208,7 @@ func QueryToStruct[T any](c echo.Context) (T, error) {
 // messages are resolved from `query` or `json` tags when available.
 func ValidateStruct[T any](s T) error {
 	if err := validate.Struct(s); err != nil {
-		var ve validator.ValidationErrors
-		if errors.As(err, &ve) {
+		if ve, ok := errors.AsType[validator.ValidationErrors](err); ok {
 			t := reflect.TypeOf(s)
 			fields := make([]string, len(ve))
 			for i, fe := range ve {

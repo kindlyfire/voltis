@@ -226,7 +226,7 @@ func scanPDFPages(path string) []PageInfo {
 	var pageCount int
 	var pageWidth, pageHeight int
 
-	for _, line := range strings.Split(string(result), "\n") {
+	for line := range strings.SplitSeq(string(result), "\n") {
 		if m := pdfPagesRe.FindStringSubmatch(line); m != nil {
 			pageCount, _ = strconv.Atoi(m[1])
 		} else if strings.HasPrefix(line, "Page size:") {

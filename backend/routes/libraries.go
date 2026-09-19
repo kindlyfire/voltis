@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"slices"
 	"time"
 
 	"voltis/db"
@@ -24,9 +25,9 @@ type LibraryRoutes struct {
 
 func (lr *LibraryRoutes) Register(g *echo.Group) {
 	g.GET("", lr.list)
-	g.POST("/scan", lr.scan)
-	g.POST("/:id_or_new", lr.upsert)
-	g.DELETE("/:id", lr.delete)
+	g.POST("/scan", adminOnly(lr.scan))
+	g.POST("/:id_or_new", adminOnly(lr.upsert))
+	g.DELETE("/:id", adminOnly(lr.delete))
 }
 
 type LibrarySourceDTO struct {
@@ -99,6 +100,10 @@ func (lr *LibraryRoutes) list(c echo.Context) error {
 	return c.JSON(http.StatusOK, result)
 }
 
+type scanResponse struct {
+	TaskIDs []string `json:"task_ids"`
+}
+
 type scanRequest struct {
 	IDs        []string `json:"ids"`
 	ContentIDs []string `json:"content_ids"`
@@ -106,10 +111,6 @@ type scanRequest struct {
 }
 
 func (lr *LibraryRoutes) scan(c echo.Context) error {
-	if _, err := requireAdmin(c); err != nil {
-		return err
-	}
-
 	ctx := reqCtx(c)
 
 	var req scanRequest
@@ -122,10 +123,11 @@ func (lr *LibraryRoutes) scan(c echo.Context) error {
 	}
 
 	if len(req.ContentIDs) > 0 {
-		if err := lr.scanContentIDs(ctx, req.ContentIDs); err != nil {
+		ids, err := lr.scanContentIDs(ctx, req.ContentIDs)
+		if err != nil {
 			return err
 		}
-		return okResponse(c)
+		return c.JSON(http.StatusOK, scanResponse{TaskIDs: ids})
 	}
 
 	var (
@@ -141,27 +143,30 @@ func (lr *LibraryRoutes) scan(c echo.Context) error {
 		return err
 	}
 
+	taskIDs := []string{}
 	for _, lib := range libraries {
-		lr.scanQueue.Enqueue(lib.ID, req.Force, nil)
+		id, err := lr.scanQueue.Enqueue(lib.ID, req.Force, nil)
+		if err != nil {
+			return err
+		}
+		taskIDs = append(taskIDs, id)
 	}
 
-	return okResponse(c)
+	return c.JSON(http.StatusOK, scanResponse{TaskIDs: taskIDs})
 }
 
-func (lr *LibraryRoutes) scanContentIDs(ctx context.Context, contentIDs []string) error {
+func (lr *LibraryRoutes) scanContentIDs(ctx context.Context, contentIDs []string) ([]string, error) {
 	rows, err := db.Select[models.Content](ctx, lr.pool, "SELECT * FROM content WHERE id = ANY($1)", contentIDs)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(rows) != len(contentIDs) {
-		return echo.NewHTTPError(http.StatusNotFound, "One or more content IDs not found")
+		return nil, echo.NewHTTPError(http.StatusNotFound, "One or more content IDs not found")
 	}
 
 	libraryID := rows[0].LibraryID
-	for _, r := range rows[1:] {
-		if r.LibraryID != libraryID {
-			return echo.NewHTTPError(http.StatusBadRequest, "All content IDs must belong to the same library")
-		}
+	if slices.ContainsFunc(rows[1:], func(r models.Content) bool { return r.LibraryID != libraryID }) {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "All content IDs must belong to the same library")
 	}
 
 	var fileURIs []string
@@ -174,23 +179,22 @@ func (lr *LibraryRoutes) scanContentIDs(ctx context.Context, contentIDs []string
 	childURIs, err := db.SelectScalars[string](ctx, lr.pool,
 		"SELECT file_uri FROM content WHERE parent_id = ANY($1) AND file_uri IS NOT NULL", contentIDs)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	fileURIs = append(fileURIs, childURIs...)
 
 	if len(fileURIs) == 0 {
-		return echo.NewHTTPError(http.StatusBadRequest, "No files to scan")
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "No files to scan")
 	}
 
-	lr.scanQueue.Enqueue(libraryID, true, fileURIs)
-	return nil
+	taskID, err := lr.scanQueue.Enqueue(libraryID, true, fileURIs)
+	if err != nil {
+		return nil, err
+	}
+	return []string{taskID}, nil
 }
 
 func (lr *LibraryRoutes) upsert(c echo.Context) error {
-	if _, err := requireAdmin(c); err != nil {
-		return err
-	}
-
 	ctx := reqCtx(c)
 	idOrNew := c.Param("id_or_new")
 
@@ -214,36 +218,26 @@ func (lr *LibraryRoutes) upsert(c echo.Context) error {
 
 	now := time.Now().UTC()
 
+	id := idOrNew
 	if idOrNew == "new" {
-		id := models.MakeLibraryID()
+		id = models.MakeLibraryID()
 		_, err = lr.pool.Exec(ctx, `
 			INSERT INTO libraries (id, created_at, updated_at, name, type, sources)
 			VALUES ($1, $2, $3, $4, $5, $6)
 		`, id, now, now, req.Name, req.Type, sourcesJSON)
-		if err != nil {
-			return err
+	} else {
+		if _, err := getLibrary(ctx, lr.pool, idOrNew); err != nil {
+			return echo.NewHTTPError(http.StatusNotFound, "Library not found")
 		}
-
-		lib, err := getLibrary(ctx, lr.pool, id)
-		if err != nil {
-			return err
-		}
-		return c.JSON(http.StatusOK, libraryToDTO(lib, nil, nil))
+		_, err = lr.pool.Exec(ctx, `
+			UPDATE libraries SET name = $1, sources = $2, updated_at = $3 WHERE id = $4
+		`, req.Name, sourcesJSON, now, idOrNew)
 	}
-
-	_, err = getLibrary(ctx, lr.pool, idOrNew)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "Library not found")
-	}
-
-	_, err = lr.pool.Exec(ctx, `
-		UPDATE libraries SET name = $1, sources = $2, updated_at = $3 WHERE id = $4
-	`, req.Name, sourcesJSON, now, idOrNew)
 	if err != nil {
 		return err
 	}
 
-	lib, err := getLibrary(ctx, lr.pool, idOrNew)
+	lib, err := getLibrary(ctx, lr.pool, id)
 	if err != nil {
 		return err
 	}
@@ -251,10 +245,6 @@ func (lr *LibraryRoutes) upsert(c echo.Context) error {
 }
 
 func (lr *LibraryRoutes) delete(c echo.Context) error {
-	if _, err := requireAdmin(c); err != nil {
-		return err
-	}
-
 	ctx := reqCtx(c)
 	id := c.Param("id")
 	result, err := lr.pool.Exec(ctx, "DELETE FROM libraries WHERE id = $1", id)

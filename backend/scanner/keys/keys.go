@@ -3,6 +3,7 @@ package keys
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -15,8 +16,8 @@ var (
 	trailingTags   = regexp.MustCompile(`\s*[\[\(][^\[\]\(\)]*[\]\)]\s*$`)
 )
 
-func ParseVolume(name string) *float64 {
-	m := volumePattern.FindStringSubmatch(name)
+func parseNumber(pattern *regexp.Regexp, name string) *float64 {
+	m := pattern.FindStringSubmatch(name)
 	if m == nil {
 		return nil
 	}
@@ -27,17 +28,9 @@ func ParseVolume(name string) *float64 {
 	return &v
 }
 
-func ParseChapter(name string) *float64 {
-	m := chapterPattern.FindStringSubmatch(name)
-	if m == nil {
-		return nil
-	}
-	v, err := strconv.ParseFloat(m[1], 64)
-	if err != nil {
-		return nil
-	}
-	return &v
-}
+func ParseVolume(name string) *float64 { return parseNumber(volumePattern, name) }
+
+func ParseChapter(name string) *float64 { return parseNumber(chapterPattern, name) }
 
 func ParseFallbackChapter(name string) *float64 {
 	name = CleanSeriesName(name)
@@ -46,7 +39,6 @@ func ParseFallbackChapter(name string) *float64 {
 		return nil
 	}
 
-	// Find the match with the most digits
 	best := matches[0][1]
 	for _, m := range matches[1:] {
 		if digitCount(m[1]) > digitCount(best) {
@@ -79,13 +71,9 @@ func ParseSeriesName(name string) (string, *int) {
 
 func ParseSeriesYear(name string) *int {
 	matches := yearPattern.FindAllStringSubmatch(name, -1)
-	// Search from right to left for a 4-digit year
-	for i := len(matches) - 1; i >= 0; i-- {
-		v, err := strconv.Atoi(matches[i][1])
-		if err != nil {
-			continue
-		}
-		if v >= 1000 && v <= 9999 {
+	for _, m := range slices.Backward(matches) {
+		v, err := strconv.Atoi(m[1])
+		if err == nil && v >= 1000 && v <= 9999 {
 			return &v
 		}
 	}
@@ -114,7 +102,7 @@ func RemoveCommonPrefix(a, b string) (string, string) {
 
 func FormatNum(f float64) string {
 	if f == float64(int(f)) {
-		return fmt.Sprintf("%d", int(f))
+		return strconv.Itoa(int(f))
 	}
 	return fmt.Sprintf("%g", f)
 }

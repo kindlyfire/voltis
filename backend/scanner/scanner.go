@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"path/filepath"
-	"sort"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,38 +17,33 @@ import (
 	"voltis/models/metaraw"
 )
 
-// FileScanner is the interface each scanner type must implement.
 type FileScanner interface {
-	// FileEligible returns whether a file should be scanned.
 	FileEligible(path string) bool
 
-	// ParseFile parses a file and returns the extracted data, or nil if the
-	// file could not be parsed. Should be safe to call concurrently.
+	// ParseFile must be safe to call concurrently. It returns nil when the
+	// file could not be parsed.
 	ParseFile(libraryID string, file FSFile) *ParsedItem
 
 	SeriesCover(series SeriesRef, ordered []Child) (*string, *time.Time)
-
-	// UpdateSeries is called for each series that had at least one child
-	// added, updated, or removed.
 	UpdateSeries(r *repository, series *models.Content, ordered []Child)
 }
 
 type ParsedSeries struct {
-	URIPrefix   string // "comic" or "book"
+	URIPrefix   string
 	URIPart     string
-	ContentType string // "comic_series" or "book_series"
+	ContentType string
 	Title       string
-	FileURI     *string // directory path for comics, nil for books
+	FileURI     *string
 }
 
 type ParsedItem struct {
 	File        FSFile
-	Series      *ParsedSeries // nil if standalone (book without series)
-	URIPrefix   string        // "comic" or "book"
-	ContentType string        // "comic" or "book"
+	Series      *ParsedSeries
+	URIPrefix   string
+	ContentType string
 	URIPart     string
 	OrderParts  []*float32
-	CoverSuffix *string // appended to file path for cover URI
+	CoverSuffix *string
 	FileData    json.RawMessage
 	MetaRaw     models.Metadata
 }
@@ -70,10 +66,54 @@ type ScanResult struct {
 	Duration  time.Duration `json:"duration"`
 }
 
-// ScanTask is the task definition for library scans.
+type Counts struct {
+	Added   int `json:"added"`
+	Updated int `json:"updated"`
+	Removed int `json:"removed"`
+}
+
+type Progress struct {
+	Phase     string `json:"phase"`
+	Found     int    `json:"found"`
+	Total     int    `json:"total"`
+	Processed int    `json:"processed"`
+	Unchanged int    `json:"unchanged"`
+	Failed    int    `json:"failed"`
+	Saved     Counts `json:"saved"`
+	CommitSeq int    `json:"commit_seq"`
+}
+
+type CatalogChanged struct {
+	LibraryID string `json:"library_id"`
+	TaskID    string `json:"task_id"`
+	CommitSeq int    `json:"commit_seq"`
+}
+
+type Notifier interface{ CatalogChanged(CatalogChanged) }
+
+var (
+	notifierMu sync.RWMutex
+	notifier   Notifier
+)
+
+func SetNotifier(n Notifier) {
+	notifierMu.Lock()
+	notifier = n
+	notifierMu.Unlock()
+}
+
+func notifyCatalog(libraryID, taskID string, seq int) {
+	notifierMu.RLock()
+	n := notifier
+	notifierMu.RUnlock()
+	if n != nil {
+		n.CatalogChanged(CatalogChanged{LibraryID: libraryID, TaskID: taskID, CommitSeq: seq})
+	}
+}
+
 var ScanTask = &tasks.TaskDef{
 	Name: "scan_library",
-	Process: func(input any, tc *tasks.TaskContext) error {
+	Process: func(input any, tc *tasks.TaskContext) (any, error) {
 		return runScan(input.(ScanInput), tc)
 	},
 	UnmarshalInput: func(data json.RawMessage) (any, error) {
@@ -104,7 +144,7 @@ func newFileScanner(libraryType string) FileScanner {
 	}
 }
 
-func runScan(input ScanInput, tc *tasks.TaskContext) error {
+func runScan(input ScanInput, tc *tasks.TaskContext) (ScanResult, error) {
 	ctx := tc.Context()
 	pool := tc.Pool()
 
@@ -115,26 +155,35 @@ func runScan(input ScanInput, tc *tasks.TaskContext) error {
 
 	scanStart := time.Now()
 
+	var progMu sync.Mutex
+	prog := Progress{Phase: "walking"}
+	emit := func(fn func(p *Progress)) {
+		progMu.Lock()
+		defer progMu.Unlock()
+		fn(&prog)
+		tc.Progress(prog)
+	}
+	emit(func(p *Progress) {})
+
 	s := newFileScanner(input.LibraryType)
 	if s == nil {
-		return fmt.Errorf("unsupported library type: %s", input.LibraryType)
+		return ScanResult{}, fmt.Errorf("unsupported library type: %s", input.LibraryType)
 	}
 
 	slog_scan("starting scan", "library", input.LibraryID, "type", input.LibraryType, "force", input.Force, "filter_paths", input.FilterPaths, "concurrency", concurrency)
 
-	// Determine sources
 	scanSources := input.Sources
 	if len(input.FilterPaths) > 0 {
 		scanSources = input.FilterPaths
 	}
 
-	// Walk filesystem
 	walked, err := walkSources(scanSources, s.FileEligible)
 	if err != nil {
-		return err
+		return ScanResult{}, err
 	}
 	files := walked.Files
 	slog.Info("[scanner] found files", "count", len(files), "library", input.LibraryID)
+	emit(func(p *Progress) { p.Found = len(files) })
 
 	var failedPaths []string
 	for _, f := range walked.Failures {
@@ -148,13 +197,11 @@ func runScan(input ScanInput, tc *tasks.TaskContext) error {
 		tc.Log("Inventory incomplete at %d paths; deletion was suppressed within those scopes.\n", len(failedPaths))
 	}
 
-	// Load existing content
 	r := newRepository(pool, input.LibraryID)
 	if err := r.load(ctx); err != nil {
-		return err
+		return ScanResult{}, err
 	}
 
-	// Diff
 	toAdd, toUpdate, unchanged, toRemove := matchFiles(r, files, input.FilterPaths, failedPaths, input.Force)
 
 	slog.Info("[scanner] diff",
@@ -162,31 +209,17 @@ func runScan(input ScanInput, tc *tasks.TaskContext) error {
 		"unchanged", len(unchanged), "remove", len(toRemove),
 	)
 
-	// Emit summary
-	tc.Progress(map[string]int{
-		"to_add":    len(toAdd),
-		"to_update": len(toUpdate),
-		"to_remove": len(toRemove),
-		"unchanged": len(unchanged),
-	})
-
-	// Move removed items to deleted list (in-memory; DB delete in commitFinal)
 	for _, file := range toRemove {
-		for i := range r.content {
-			if r.content[i].FileURI != nil && *r.content[i].FileURI == file.Path {
-				r.removeContent(&r.content[i])
-				break
-			}
+		if c := r.findContentByFileURI(file.Path); c != nil {
+			r.removeContent(c)
 		}
 	}
 
-	// Snapshot contentD IDs to compute accurate Removed count later
 	removedIDs := map[string]bool{}
-	for _, c := range r.contentD {
+	for _, c := range r.deletedContent {
 		removedIDs[c.ID] = true
 	}
 
-	// Group toProcess files by folder and build sorted work list
 	toProcess := append(toAdd, toUpdate...)
 	addSet := map[string]bool{}
 	for _, f := range toAdd {
@@ -205,7 +238,6 @@ func runScan(input ScanInput, tc *tasks.TaskContext) error {
 		}
 	}
 
-	// Per-group completion tracking
 	type groupState struct {
 		mu      sync.Mutex
 		done    int
@@ -216,12 +248,16 @@ func runScan(input ScanInput, tc *tasks.TaskContext) error {
 		return groupState{size: len(g), parents: map[string]bool{}}
 	})
 
-	// Process files concurrently, commit per group
-	progressTotal := len(toProcess)
-	var progressProcessed atomic.Int64
 	var commitMu sync.Mutex
 	var commitErr error
 	var counts scanCounts
+	var batch Counts
+
+	emit(func(p *Progress) {
+		p.Phase = "parsing"
+		p.Total = len(toProcess)
+		p.Unchanged = len(unchanged)
+	})
 
 	fp.MapConcurrently(workList, concurrency, func(gf groupedFile) {
 		parsed := s.ParseFile(input.LibraryID, gf.file)
@@ -231,7 +267,7 @@ func runScan(input ScanInput, tc *tasks.TaskContext) error {
 			if commitErr != nil {
 				return
 			}
-			parentID = applyParseResult(r, input.LibraryID, gf.file, parsed, addSet[gf.file.Path], tc.Log, &counts)
+			parentID = applyParseResult(r, input.LibraryID, gf.file, parsed, addSet[gf.file.Path], tc.Log, &counts, &batch)
 		})
 
 		state := &states[gf.groupIdx]
@@ -244,50 +280,72 @@ func runScan(input ScanInput, tc *tasks.TaskContext) error {
 			complete = state.done == state.size
 		})
 
+		committedSeq := 0
 		if complete {
 			fp.WithMutex(&commitMu, func() {
 				if commitErr != nil {
 					return
 				}
 				updateGroupSeries(s, r, state.parents)
-				commitErr = r.commitGroup(ctx)
+				if commitErr = r.commitGroup(ctx); commitErr != nil {
+					return
+				}
+				saved := batch
+				batch = Counts{}
+				emit(func(p *Progress) {
+					p.Saved.Added += saved.Added
+					p.Saved.Updated += saved.Updated
+					p.CommitSeq++
+					committedSeq = p.CommitSeq
+				})
 			})
 		}
 
-		processed := int(progressProcessed.Add(1))
-		tc.Progress(map[string]int{
-			"total":     progressTotal,
-			"processed": processed,
+		emit(func(p *Progress) {
+			p.Processed++
+			p.Failed = int(counts.failed.Load())
 		})
+
+		if committedSeq > 0 {
+			notifyCatalog(input.LibraryID, tc.ID(), committedSeq)
+		}
 	})
 
 	if commitErr != nil {
-		return commitErr
+		return ScanResult{}, commitErr
 	}
+
+	emit(func(p *Progress) { p.Phase = "saving" })
 
 	if err := r.commitFinal(ctx); err != nil {
-		return err
+		return ScanResult{}, err
 	}
 
-	// Compute accurate Removed count: initial toRemove items still in contentD
 	resultRemoved := 0
-	for _, c := range r.contentD {
+	for _, c := range r.deletedContent {
 		if removedIDs[c.ID] {
 			resultRemoved++
 		}
 	}
 
-	result := ScanResult{
+	finalSeq := 0
+	emit(func(p *Progress) {
+		p.Saved.Removed += resultRemoved
+		p.CommitSeq++
+		p.Failed = int(counts.failed.Load())
+		p.Phase = "done"
+		finalSeq = p.CommitSeq
+	})
+	notifyCatalog(input.LibraryID, tc.ID(), finalSeq)
+
+	return ScanResult{
 		Added:     int(counts.added.Load()),
 		Updated:   int(counts.updated.Load()),
 		Removed:   resultRemoved,
 		Failed:    int(counts.failed.Load()),
 		Unchanged: len(unchanged),
 		Duration:  time.Since(scanStart),
-	}
-
-	tc.Result(result)
-	return nil
+	}, nil
 }
 
 type scanCounts struct {
@@ -296,7 +354,7 @@ type scanCounts struct {
 	failed  atomic.Int64
 }
 
-func applyParseResult(r *repository, libraryID string, file FSFile, parsed *ParsedItem, isAdd bool, logf func(string, ...any), counts *scanCounts) *string {
+func applyParseResult(r *repository, libraryID string, file FSFile, parsed *ParsedItem, isAdd bool, logf func(string, ...any), counts *scanCounts, batch *Counts) *string {
 	if parsed == nil {
 		parentID := r.invalidateFile(file.Path)
 		slog.Warn("[scanner] failed to parse file", "path", file.Path)
@@ -321,8 +379,10 @@ func applyParseResult(r *repository, libraryID string, file FSFile, parsed *Pars
 	content := applyParsedItem(r, libraryID, parsed)
 	if isAdd {
 		counts.added.Add(1)
+		batch.Added++
 	} else {
 		counts.updated.Add(1)
+		batch.Updated++
 	}
 	return content.ParentID
 }
@@ -392,28 +452,18 @@ func groupByFolder(files []FSFile) [][]FSFile {
 		folder := filepath.Dir(f.Path)
 		byFolder[folder] = append(byFolder[folder], f)
 	}
-	folders := make([]string, 0, len(byFolder))
-	for folder := range byFolder {
-		folders = append(folders, folder)
-	}
-	sort.Strings(folders)
-	return fp.Map(folders, func(folder string) []FSFile {
+	return fp.Map(slices.Sorted(maps.Keys(byFolder)), func(folder string) []FSFile {
 		return byFolder[folder]
 	})
 }
 
 func updateGroupSeries(s FileScanner, r *repository, parents map[string]bool) {
 	for parentID := range parents {
-		var parent *models.Content
-		for i := range r.content {
-			if r.content[i].ID == parentID {
-				parent = &r.content[i]
-				break
-			}
-		}
-		if parent == nil {
+		i := slices.IndexFunc(r.content, func(c models.Content) bool { return c.ID == parentID })
+		if i < 0 {
 			continue
 		}
+		parent := &r.content[i]
 
 		children := r.childrenOf(parentID)
 		byID := map[string]*models.Content{}

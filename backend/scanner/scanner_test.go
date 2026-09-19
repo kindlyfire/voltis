@@ -60,65 +60,36 @@ func assertUntouched(t *testing.T, r *repository, before []models.Content) {
 	if !reflect.DeepEqual(r.content, before) {
 		t.Fatalf("content = %+v, want %+v", r.content, before)
 	}
-	if len(r.contentD) != 0 {
-		t.Fatalf("contentD = %d rows, want 0", len(r.contentD))
+	if len(r.deletedContent) != 0 {
+		t.Fatalf("deletedContent = %d rows, want 0", len(r.deletedContent))
 	}
 	if len(r.dirtyIDs) != 0 {
 		t.Fatalf("dirtyIDs = %v, want empty", r.dirtyIDs)
 	}
 }
 
-func TestMatchFilesFilterBoundaries(t *testing.T) {
-	newRepo := func() *repository {
+type diffPaths struct{ added, updated, unchanged, removed []string }
+
+func repoOf(build func() []models.Content) func() *repository {
+	return func() *repository {
 		r := newRepository(nil, "library")
-		r.content = []models.Content{
+		r.content = build()
+		return r
+	}
+}
+
+func TestMatchFiles(t *testing.T) {
+	paths := func(p ...string) []string { return p }
+	boundary := repoOf(func() []models.Content {
+		return []models.Content{
 			testLeaf("a", "comic", "/lib/Foo/ch1.cbz", baseTime, 10, true),
 			testLeaf("b", "comic", "/lib/Foo/ch2.cbz", baseTime, 10, true),
 			testLeaf("c", "comic", "/lib/Foo Extra/ch3.cbz", baseTime, 10, true),
 			testLeaf("d", "comic", "/lib/Foo/Sub/ch4.cbz", baseTime, 10, true),
 		}
-		return r
-	}
-	files := []FSFile{
-		fsFile("/lib/Foo/ch1.cbz", baseTime, 10),
-		fsFile("/lib/Foo/new.cbz", baseTime, 10),
-		fsFile("/lib/Foo Extra/ch5.cbz", baseTime, 10),
-	}
-	r := newRepo()
-
-	for _, filters := range [][]string{{"/lib/Foo"}, {"/lib/Foo", "/lib/Foo/Sub"}} {
-		label := fmt.Sprint(filters)
-		toAdd, toUpdate, unchanged, toRemove := matchFiles(r, files, filters, nil, false)
-		assertPaths(t, label+" toAdd", toAdd, "/lib/Foo/new.cbz")
-		assertPaths(t, label+" toUpdate", toUpdate)
-		assertPaths(t, label+" unchanged", unchanged, "/lib/Foo/ch1.cbz")
-		assertPaths(t, label+" toRemove", toRemove, "/lib/Foo/ch2.cbz", "/lib/Foo/Sub/ch4.cbz")
-		assertUntouched(t, r, newRepo().content)
-	}
-
-	toAdd, toUpdate, unchanged, toRemove := matchFiles(r, files, []string{"/lib/Foo Extra"}, nil, false)
-	assertPaths(t, "sibling toAdd", toAdd, "/lib/Foo Extra/ch5.cbz")
-	assertPaths(t, "sibling toUpdate", toUpdate)
-	assertPaths(t, "sibling unchanged", unchanged)
-	assertPaths(t, "sibling toRemove", toRemove, "/lib/Foo Extra/ch3.cbz")
-	assertUntouched(t, r, newRepo().content)
-
-	exact := newRepository(nil, "library")
-	exact.content = []models.Content{
-		testLeaf("a", "comic", "/lib/Foo/ch1.cbz", baseTime, 10, true),
-		testLeaf("b", "comic", "/lib/Foo/ch1.cbz.bak", baseTime, 10, true),
-	}
-	toAdd, toUpdate, unchanged, toRemove = matchFiles(exact, nil, []string{"/lib/Foo/ch1.cbz"}, nil, false)
-	assertPaths(t, "exact toAdd", toAdd)
-	assertPaths(t, "exact toUpdate", toUpdate)
-	assertPaths(t, "exact unchanged", unchanged)
-	assertPaths(t, "exact toRemove", toRemove, "/lib/Foo/ch1.cbz")
-}
-
-func TestMatchFilesFailedScopes(t *testing.T) {
-	newRepo := func() *repository {
-		r := newRepository(nil, "library")
-		r.content = []models.Content{
+	})
+	failed := repoOf(func() []models.Content {
+		return []models.Content{
 			testLeaf("a", "comic", "/lib/Broken/ch1.cbz", baseTime, 10, true),
 			testLeaf("b", "comic", "/lib/Broken/Sub/ch2.cbz", baseTime, 10, true),
 			testLeaf("c", "comic", "/lib/Odd/ch9.cbz", baseTime, 10, true),
@@ -126,65 +97,77 @@ func TestMatchFilesFailedScopes(t *testing.T) {
 			testLeaf("e", "comic", "/lib/Ok/ch4.cbz", baseTime, 10, true),
 			testLeaf("f", "comic", "/lib/Broken/ch5.cbz", baseTime, 10, true),
 		}
-		return r
-	}
-	r := newRepo()
-
-	changed := []FSFile{fsFile("/lib/Broken/ch5.cbz", baseTime.Add(time.Hour), 20)}
-	toAdd, toUpdate, unchanged, toRemove := matchFiles(r, changed, nil, []string{"/lib/Broken", "/lib/Odd/ch9.cbz"}, false)
-	assertPaths(t, "toAdd", toAdd)
-	assertPaths(t, "toUpdate", toUpdate, "/lib/Broken/ch5.cbz")
-	assertPaths(t, "unchanged", unchanged)
-	assertPaths(t, "toRemove", toRemove, "/lib/Broken Extra/ch3.cbz", "/lib/Ok/ch4.cbz")
-	assertUntouched(t, r, newRepo().content)
-
-	same := []FSFile{fsFile("/lib/Broken/ch5.cbz", baseTime, 10)}
-	toAdd, toUpdate, unchanged, toRemove = matchFiles(r, same, []string{"/lib/Broken", "/lib/Broken Extra"}, []string{"/lib/Broken"}, false)
-	assertPaths(t, "filtered toAdd", toAdd)
-	assertPaths(t, "filtered toUpdate", toUpdate)
-	assertPaths(t, "filtered unchanged", unchanged, "/lib/Broken/ch5.cbz")
-	assertPaths(t, "filtered toRemove", toRemove, "/lib/Broken Extra/ch3.cbz")
-	assertUntouched(t, r, newRepo().content)
-}
-
-func TestMatchFilesInvalidRetries(t *testing.T) {
-	newRepo := func() *repository {
-		r := newRepository(nil, "library")
-		r.content = []models.Content{
+	})
+	invalid := repoOf(func() []models.Content {
+		return []models.Content{
 			testLeaf("valid", "comic", "/lib/s/a.cbz", baseTime, 10, true),
 			testLeaf("invalid", "comic", "/lib/s/b.cbz", baseTime, 10, false),
 			testLeaf("changed", "comic", "/lib/s/c.cbz", baseTime, 10, true),
 			testLeaf("gone", "comic", "/lib/s/d.cbz", baseTime, 10, false),
 		}
-		return r
+	})
+	exact := repoOf(func() []models.Content {
+		return []models.Content{
+			testLeaf("a", "comic", "/lib/Foo/ch1.cbz", baseTime, 10, true),
+			testLeaf("b", "comic", "/lib/Foo/ch1.cbz.bak", baseTime, 10, true),
+		}
+	})
+	boundaryFiles := []FSFile{
+		fsFile("/lib/Foo/ch1.cbz", baseTime, 10),
+		fsFile("/lib/Foo/new.cbz", baseTime, 10),
+		fsFile("/lib/Foo Extra/ch5.cbz", baseTime, 10),
 	}
-	files := []FSFile{
+	invalidFiles := []FSFile{
 		fsFile("/lib/s/a.cbz", baseTime, 10),
 		fsFile("/lib/s/b.cbz", baseTime, 10),
 		fsFile("/lib/s/c.cbz", baseTime, 20),
 	}
-	r := newRepo()
+	brokenChanged := []FSFile{fsFile("/lib/Broken/ch5.cbz", baseTime.Add(time.Hour), 20)}
+	brokenSame := []FSFile{fsFile("/lib/Broken/ch5.cbz", baseTime, 10)}
 
-	toAdd, toUpdate, unchanged, toRemove := matchFiles(r, files, nil, nil, false)
-	assertPaths(t, "toAdd", toAdd)
-	assertPaths(t, "toUpdate", toUpdate, "/lib/s/b.cbz", "/lib/s/c.cbz")
-	assertPaths(t, "unchanged", unchanged, "/lib/s/a.cbz")
-	assertPaths(t, "toRemove", toRemove, "/lib/s/d.cbz")
-	assertUntouched(t, r, newRepo().content)
-
-	toAdd, toUpdate, unchanged, toRemove = matchFiles(r, files, nil, nil, true)
-	assertPaths(t, "forced toAdd", toAdd)
-	assertPaths(t, "forced toUpdate", toUpdate, "/lib/s/a.cbz", "/lib/s/b.cbz", "/lib/s/c.cbz")
-	assertPaths(t, "forced unchanged", unchanged)
-	assertPaths(t, "forced toRemove", toRemove, "/lib/s/d.cbz")
-	assertUntouched(t, r, newRepo().content)
-
-	toAdd, toUpdate, unchanged, toRemove = matchFiles(r, files, nil, []string{"/lib/s/d.cbz"}, false)
-	assertPaths(t, "protected toAdd", toAdd)
-	assertPaths(t, "protected toUpdate", toUpdate, "/lib/s/b.cbz", "/lib/s/c.cbz")
-	assertPaths(t, "protected unchanged", unchanged, "/lib/s/a.cbz")
-	assertPaths(t, "protected toRemove", toRemove)
-	assertUntouched(t, r, newRepo().content)
+	cases := []struct {
+		name            string
+		build           func() *repository
+		files           []FSFile
+		filters, failed []string
+		force           bool
+		want            diffPaths
+	}{
+		{"directory filter", boundary, boundaryFiles, paths("/lib/Foo"), nil, false, diffPaths{
+			added: paths("/lib/Foo/new.cbz"), unchanged: paths("/lib/Foo/ch1.cbz"),
+			removed: paths("/lib/Foo/ch2.cbz", "/lib/Foo/Sub/ch4.cbz")}},
+		{"overlapping filters", boundary, boundaryFiles, paths("/lib/Foo", "/lib/Foo/Sub"), nil, false, diffPaths{
+			added: paths("/lib/Foo/new.cbz"), unchanged: paths("/lib/Foo/ch1.cbz"),
+			removed: paths("/lib/Foo/ch2.cbz", "/lib/Foo/Sub/ch4.cbz")}},
+		{"sibling boundary", boundary, boundaryFiles, paths("/lib/Foo Extra"), nil, false, diffPaths{
+			added: paths("/lib/Foo Extra/ch5.cbz"), removed: paths("/lib/Foo Extra/ch3.cbz")}},
+		{"exact file boundary", exact, nil, paths("/lib/Foo/ch1.cbz"), nil, false, diffPaths{
+			removed: paths("/lib/Foo/ch1.cbz")}},
+		{"failed directory and failed file", failed, brokenChanged, nil, paths("/lib/Broken", "/lib/Odd/ch9.cbz"), false, diffPaths{
+			updated: paths("/lib/Broken/ch5.cbz"),
+			removed: paths("/lib/Broken Extra/ch3.cbz", "/lib/Ok/ch4.cbz")}},
+		{"filtered failure", failed, brokenSame, paths("/lib/Broken", "/lib/Broken Extra"), paths("/lib/Broken"), false, diffPaths{
+			unchanged: paths("/lib/Broken/ch5.cbz"), removed: paths("/lib/Broken Extra/ch3.cbz")}},
+		{"invalid retry", invalid, invalidFiles, nil, nil, false, diffPaths{
+			updated: paths("/lib/s/b.cbz", "/lib/s/c.cbz"), unchanged: paths("/lib/s/a.cbz"),
+			removed: paths("/lib/s/d.cbz")}},
+		{"forced retry", invalid, invalidFiles, nil, nil, true, diffPaths{
+			updated: paths("/lib/s/a.cbz", "/lib/s/b.cbz", "/lib/s/c.cbz"),
+			removed: paths("/lib/s/d.cbz")}},
+		{"protected missing invalid file", invalid, invalidFiles, nil, paths("/lib/s/d.cbz"), false, diffPaths{
+			updated: paths("/lib/s/b.cbz", "/lib/s/c.cbz"), unchanged: paths("/lib/s/a.cbz")}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := c.build()
+			toAdd, toUpdate, unchanged, toRemove := matchFiles(r, c.files, c.filters, c.failed, c.force)
+			assertPaths(t, "toAdd", toAdd, c.want.added...)
+			assertPaths(t, "toUpdate", toUpdate, c.want.updated...)
+			assertPaths(t, "unchanged", unchanged, c.want.unchanged...)
+			assertPaths(t, "toRemove", toRemove, c.want.removed...)
+			assertUntouched(t, r, c.build().content)
+		})
+	}
 }
 
 func TestApplyParseResult(t *testing.T) {
@@ -200,16 +183,16 @@ func TestApplyParseResult(t *testing.T) {
 		}
 	}
 
-	if parentID := applyParseResult(r, "library", fsFile("/lib/s/new.cbz", baseTime, 5), nil, true, logf, &counts); parentID != nil {
+	if parentID := applyParseResult(r, "library", fsFile("/lib/s/new.cbz", baseTime, 5), nil, true, logf, &counts, &Counts{}); parentID != nil {
 		t.Fatalf("parentID = %v, want nil", *parentID)
 	}
-	if len(r.content) != 0 || len(r.contentD) != 0 || len(r.dirtyIDs) != 0 {
-		t.Fatalf("content = %d, contentD = %d, dirtyIDs = %v", len(r.content), len(r.contentD), r.dirtyIDs)
+	if len(r.content) != 0 || len(r.deletedContent) != 0 || len(r.dirtyIDs) != 0 {
+		t.Fatalf("content = %d, deletedContent = %d, dirtyIDs = %v", len(r.content), len(r.deletedContent), r.dirtyIDs)
 	}
 	assertCounts(0, 0, 1)
 
 	file := fsFile("/lib/s/ch1.cbz", baseTime, 10)
-	parentID := applyParseResult(r, "library", file, parsedComic(file, "ch1"), true, logf, &counts)
+	parentID := applyParseResult(r, "library", file, parsedComic(file, "ch1"), true, logf, &counts, &Counts{})
 	if len(r.content) != 2 || r.content[0].Type != "comic_series" {
 		t.Fatalf("content = %+v", r.content)
 	}
@@ -225,12 +208,12 @@ func TestApplyParseResult(t *testing.T) {
 	}
 
 	dupe := fsFile("/lib/s/ch1 (v2).cbz", baseTime, 10)
-	parentID = applyParseResult(r, "library", dupe, parsedComic(dupe, "ch1"), true, logf, &counts)
+	parentID = applyParseResult(r, "library", dupe, parsedComic(dupe, "ch1"), true, logf, &counts, &Counts{})
 	if parentID == nil || *parentID != r.content[0].ID {
 		t.Fatalf("parentID = %v, want %s", parentID, r.content[0].ID)
 	}
-	if len(r.content) != 2 || len(r.contentD) != 0 || *r.content[1].FileURI != file.Path {
-		t.Fatalf("content = %+v, contentD = %d", r.content, len(r.contentD))
+	if len(r.content) != 2 || len(r.deletedContent) != 0 || *r.content[1].FileURI != file.Path {
+		t.Fatalf("content = %+v, deletedContent = %d", r.content, len(r.deletedContent))
 	}
 	assertCounts(1, 0, 2)
 	if len(logs) != 1 || !strings.Contains(logs[0], dupe.Path) || !strings.Contains(logs[0], "comic/Series/ch1") {
@@ -267,14 +250,14 @@ func TestInvalidFileRecovers(t *testing.T) {
 		MetaRaw:     models.Metadata{Title: "Story"},
 	}
 	var counts scanCounts
-	if parentID := applyParseResult(r, "library", files[0], parsed, false, func(string, ...any) {}, &counts); parentID != nil {
+	if parentID := applyParseResult(r, "library", files[0], parsed, false, func(string, ...any) {}, &counts, &Counts{}); parentID != nil {
 		t.Fatalf("parentID = %v, want nil", *parentID)
 	}
 	if counts.updated.Load() != 1 || counts.added.Load() != 0 || counts.failed.Load() != 0 {
 		t.Fatalf("counts = %d/%d/%d, want 0/1/0", counts.added.Load(), counts.updated.Load(), counts.failed.Load())
 	}
-	if len(r.content) != 1 || len(r.contentD) != 0 {
-		t.Fatalf("content = %d, contentD = %d", len(r.content), len(r.contentD))
+	if len(r.content) != 1 || len(r.deletedContent) != 0 {
+		t.Fatalf("content = %d, deletedContent = %d", len(r.content), len(r.deletedContent))
 	}
 	if c := r.content[0]; c.ID != "book1" || !c.Valid || string(c.FileData) != `{"ok":true}` {
 		t.Fatalf("row = %+v", c)
@@ -328,8 +311,8 @@ func TestUpdateGroupSeriesRetainsInvalidChildren(t *testing.T) {
 
 			updateGroupSeries(c.scanner, r, map[string]bool{"p": true})
 
-			if len(r.content) != 3 || len(r.contentD) != 0 {
-				t.Fatalf("content = %d, contentD = %d", len(r.content), len(r.contentD))
+			if len(r.content) != 3 || len(r.deletedContent) != 0 {
+				t.Fatalf("content = %d, deletedContent = %d", len(r.content), len(r.deletedContent))
 			}
 			items := r.childrenOf("p")
 			byID := map[string]*models.Content{}

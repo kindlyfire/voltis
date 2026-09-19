@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -23,11 +24,11 @@ type UserRoutes struct {
 }
 
 func (ur *UserRoutes) Register(g *echo.Group) {
-	g.GET("", ur.list)
+	g.GET("", adminOnly(ur.list))
 	g.GET("/me", ur.me)
 	g.POST("/me", ur.updateMe)
 	g.POST("/:id_or_new", ur.upsert)
-	g.DELETE("/:user_id", ur.delete)
+	g.DELETE("/:user_id", adminOnly(ur.delete))
 }
 
 type UserDTO struct {
@@ -59,10 +60,6 @@ func userToDTO(u models.User) UserDTO {
 }
 
 func (ur *UserRoutes) list(c echo.Context) error {
-	if _, err := requireAdmin(c); err != nil {
-		return err
-	}
-
 	users, err := db.Select[models.User](reqCtx(c), ur.pool, "SELECT * FROM users")
 	if err != nil {
 		return err
@@ -213,15 +210,10 @@ func (ur *UserRoutes) upsert(c echo.Context) error {
 			}
 		}
 
-		passwordHash := existing.PasswordHash
-		if newHash != "" {
-			passwordHash = newHash
-		}
-
 		if _, err := tx.Exec(ctx, `
 			UPDATE users SET username = $1, password_hash = $2, permissions = $3, updated_at = $4
 			WHERE id = $5
-		`, req.Username, passwordHash, req.Permissions, now, idOrNew); err != nil {
+		`, req.Username, cmp.Or(newHash, existing.PasswordHash), req.Permissions, now, idOrNew); err != nil {
 			return err
 		}
 
@@ -238,10 +230,6 @@ func (ur *UserRoutes) upsert(c echo.Context) error {
 const adminMutationLockKey int64 = 7263845190
 
 func (ur *UserRoutes) delete(c echo.Context) error {
-	if _, err := requireAdmin(c); err != nil {
-		return err
-	}
-
 	ctx := reqCtx(c)
 	userID := c.Param("user_id")
 

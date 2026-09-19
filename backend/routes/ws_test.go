@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -10,7 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"voltis/models"
+	"voltis/lib/tasks"
+	"voltis/scanner"
 
 	"github.com/gorilla/websocket"
 )
@@ -170,8 +172,8 @@ func TestHubStalledClientDoesNotBlockOthers(t *testing.T) {
 	waitFor(t, stalled.entered, "the stalled client to block mid-write")
 	expectMessage(t, healthy, `"m0"`)
 
-	for i := 1; i <= queueDepth; i++ {
-		id := fmt.Sprintf("m%d", i)
+	for i := range queueDepth {
+		id := fmt.Sprintf("m%d", i+1)
 		mustBroadcast(t, h, id)
 		expectMessage(t, healthy, fmt.Sprintf(`"%s"`, id))
 	}
@@ -206,44 +208,57 @@ func expectNoMessage(t *testing.T, f *fakeSocket) {
 	}
 }
 
-func TestTaskAudienceIsAdminOnly(t *testing.T) {
+func adminAndPlainSockets(t *testing.T) (*WebSocketHub, *fakeSocket, *fakeSocket) {
+	t.Helper()
 	noPings(t)
-
 	h := NewHub()
-	admin := newFakeSocket(false)
-	plain := newFakeSocket(false)
+	admin, plain := newFakeSocket(false), newFakeSocket(false)
 	serveFake(t, h, admin, "u1", true)
 	serveFake(t, h, plain, "u2", false)
+	return h, admin, plain
+}
 
-	owner := "u2"
-	logs := "chunk\n"
-	h.BroadcastTaskEvent(&models.Task{ID: "task_1", UserID: &owner}, nil, &logs)
-	h.BroadcastTaskEvent(&models.Task{ID: "task_2", UserID: nil}, nil, &logs)
+func TestTaskAudienceIsAdminOnly(t *testing.T) {
+	h, admin, plain := adminAndPlainSockets(t)
+
+	h.TaskUpdate(tasks.Snapshot{ID: "task_1", Name: "scan_library", Status: 1,
+		Input:    json.RawMessage(`{"library_id":"l_1","sources":["/comics"]}`),
+		Output:   json.RawMessage("{}"),
+		Progress: json.RawMessage(`{"phase":"parsing","total":20,"processed":7}`),
+		LogLen:   143})
+	h.TaskUpdate(tasks.Snapshot{ID: "task_2", Name: "scan_library", Status: 2,
+		Output: json.RawMessage(`{"added":1}`)})
 	mustBroadcast(t, h, "queue")
 
-	expectMessage(t, admin, `"task_update"`, `"task_1"`, `"chunk\n"`)
-	expectMessage(t, admin, `"task_update"`, `"task_2"`)
+	msg := nextMessage(t, admin)
+	assertEq(t, s(msg["type"]), "task_update")
+	task, _ := msg["task"].(map[string]any)
+	if task == nil {
+		t.Fatalf("task payload = %v, want the nested snapshot", msg["task"])
+	}
+	assertEq(t, s(task["id"]), "task_1")
+	assertEq(t, s(task["name"]), "scan_library")
+	assertEq(t, task["status"].(float64), float64(1))
+	assertEq(t, task["log_len"].(float64), float64(143))
+	if !strings.Contains(s(task["input"]), "/comics") {
+		t.Fatalf("input = %v, want the pushed sources", task["input"])
+	}
+	progress, _ := task["progress"].(map[string]any)
+	if progress == nil || s(progress["phase"]) != "parsing" {
+		t.Fatalf("progress = %v, want the nested scan progress", task["progress"])
+	}
+	if msg["progress"] == nil {
+		t.Fatal("legacy top-level progress field is missing")
+	}
+
+	expectMessage(t, admin, `"task_update"`, `"task_2"`, `"added":1`)
 	expectMessage(t, admin, `"scan_queue_update"`, `"queue"`)
 	expectNoMessage(t, plain)
 
 	h.broadcast(func(c *userConn) bool { return c.user == "u2" },
 		map[string]any{"type": "ping", "id": "still-live"})
 	expectMessage(t, plain, `"still-live"`)
-}
-
-func TestHubUserFilter(t *testing.T) {
-	noPings(t)
-
-	h := NewHub()
-	a := newFakeSocket(false)
-	b := newFakeSocket(false)
-	serveFake(t, h, a, "u1", true)
-	serveFake(t, h, b, "u2", false)
-
-	h.broadcast(func(c *userConn) bool { return c.user == "u2" }, map[string]any{"type": "ping", "id": "only-b"})
-
-	expectMessage(t, b, `"only-b"`)
-	expectNoMessage(t, a)
+	expectNoMessage(t, admin)
 }
 
 func TestDropClosesOnlyTheNamedUser(t *testing.T) {
@@ -459,7 +474,7 @@ func TestWSPingPongKeepalive(t *testing.T) {
 		})
 		errCh := readErrors(c)
 
-		for i := 0; i < int(pongWait/pingPeriod)+10; i++ {
+		for range int(pongWait/pingPeriod) + 10 {
 			waitFor(t, pings, "a ping from the server")
 		}
 		select {
@@ -468,4 +483,34 @@ func TestWSPingPongKeepalive(t *testing.T) {
 		default:
 		}
 	})
+}
+
+func nextMessage(t *testing.T, f *fakeSocket) map[string]any {
+	t.Helper()
+	select {
+	case got := <-f.writes:
+		var v map[string]any
+		if err := json.Unmarshal(got.data, &v); err != nil {
+			t.Fatalf("invalid JSON message %q: %v", got.data, err)
+		}
+		return v
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for a message")
+		return nil
+	}
+}
+
+func TestCatalogChangedGoesToEveryone(t *testing.T) {
+	h, admin, plain := adminAndPlainSockets(t)
+
+	h.CatalogChanged(scanner.CatalogChanged{LibraryID: "l_1", TaskID: "t_1", CommitSeq: 2})
+
+	for _, f := range []*fakeSocket{admin, plain} {
+		msg := nextMessage(t, f)
+		assertEq(t, s(msg["type"]), "catalog_changed")
+		assertEq(t, s(msg["library_id"]), "l_1")
+		assertEq(t, s(msg["task_id"]), "t_1")
+		assertEq(t, msg["commit_seq"].(float64), float64(2))
+		assertEq(t, len(msg), 4)
+	}
 }

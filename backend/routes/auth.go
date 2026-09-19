@@ -53,21 +53,7 @@ func (a *AuthRoutes) login(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "invalid credentials")
 	}
 
-	token, err := generateToken()
-	if err != nil {
-		return err
-	}
-	expiresAt := time.Now().Add(sessionDurationDays * 24 * time.Hour)
-	_, err = a.pool.Exec(ctx,
-		"INSERT INTO sessions (token, user_id, expires_at) VALUES ($1, $2, $3)",
-		token, user.ID, expiresAt,
-	)
-	if err != nil {
-		return err
-	}
-
-	setSessionCookie(c, token)
-	return okResponse(c)
+	return a.startSession(c, user.ID)
 }
 
 func (a *AuthRoutes) register(c echo.Context) error {
@@ -136,21 +122,20 @@ func (a *AuthRoutes) register(c echo.Context) error {
 		err = insertUser(a.pool, []string{})
 	}
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == "23505" {
 			return echo.NewHTTPError(http.StatusBadRequest, "username already exists")
 		}
 		return err
 	}
 
-	token, err := generateToken()
-	if err != nil {
-		return err
-	}
-	expiresAt := time.Now().Add(sessionDurationDays * 24 * time.Hour)
-	_, err = a.pool.Exec(ctx,
+	return a.startSession(c, userID)
+}
+
+func (a *AuthRoutes) startSession(c echo.Context, userID string) error {
+	token := generateToken()
+	_, err := a.pool.Exec(reqCtx(c),
 		"INSERT INTO sessions (token, user_id, expires_at) VALUES ($1, $2, $3)",
-		token, userID, expiresAt,
+		token, userID, time.Now().Add(sessionDurationDays*24*time.Hour),
 	)
 	if err != nil {
 		return err
@@ -210,10 +195,8 @@ func isFirstUserFlow(ctx context.Context, q db.Querier) (bool, error) {
 	return !adminExists, nil
 }
 
-func generateToken() (string, error) {
+func generateToken() string {
 	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(b), nil
+	rand.Read(b)
+	return hex.EncodeToString(b)
 }

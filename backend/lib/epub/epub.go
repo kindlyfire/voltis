@@ -422,7 +422,7 @@ func parseEPUB3Nav(data []byte, opfDir string) map[string]string {
 		text = strings.TrimSpace(text)
 
 		if href != "" && text != "" {
-			baseHref := strings.SplitN(href, "#", 2)[0]
+			baseHref, _, _ := strings.Cut(href, "#")
 			if baseHref != "" {
 				fullHref := resolvePath(opfDir, baseHref)
 				titles[baseHref] = text
@@ -475,7 +475,7 @@ func parseNCXTitles(data []byte, opfDir string) map[string]string {
 		text := strings.TrimSpace(p.Label.Text.Text)
 		src := p.Content.Src
 		if text != "" && src != "" {
-			baseSrc := strings.SplitN(src, "#", 2)[0]
+			baseSrc, _, _ := strings.Cut(src, "#")
 			if baseSrc != "" {
 				fullHref := resolvePath(opfDir, baseSrc)
 				titles[baseSrc] = text

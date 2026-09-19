@@ -3,10 +3,9 @@
         <VCard>
             <VCardTitle>{{ title }}</VCardTitle>
             <VCardText>
-                <!-- Form -->
                 <template v-if="!scanning">
                     <VCheckbox
-                        class="force-scan-checkbox"
+                        class="[&_.v-input__details]:-mt-[15px] [&_.v-input__details]:ml-10 [&_.v-messages__message]:leading-[15px]"
                         v-model="forceScan"
                         :disabled="isContentScan"
                         label="Force scan"
@@ -20,70 +19,41 @@
                     </div>
                 </template>
 
-                <!-- Scanning -->
                 <template v-else>
                     <div v-if="!isAdmin" class="py-4 text-center">
                         Scan progress is no longer available.
                     </div>
 
-                    <div v-else-if="scans.length === 0 && !scanComplete" class="py-4 text-center">
+                    <div v-else-if="rows.length === 0" class="py-4 text-center">
                         <VProgressCircular indeterminate class="mb-4" />
                         <div>Starting scan...</div>
                     </div>
 
-                    <template v-else>
-                        <div class="space-y-3!">
+                    <div v-else class="flex flex-col gap-3">
+                        <div v-for="row in rows" :key="row.id" class="rounded border p-3">
+                            <div class="font-medium">{{ getLibraryName(row.libraryId) }}</div>
+                            <VProgressLinear
+                                v-if="row.status !== TaskStatus.PENDING"
+                                :model-value="row.value"
+                                :indeterminate="row.indeterminate"
+                                :color="row.color"
+                                class="mt-2"
+                                rounded
+                                height="6"
+                            />
                             <div
-                                v-for="item in scans"
-                                :key="item.libraryId"
-                                class="pa-3 rounded border"
+                                class="mt-1 opacity-60"
+                                :class="row.status === TaskStatus.PENDING ? 'text-sm' : 'text-xs'"
                             >
-                                <div class="font-medium">{{ getLibraryName(item.libraryId) }}</div>
-                                <template
-                                    v-if="
-                                        item.status === 'running' ||
-                                        item.status === 'completed' ||
-                                        item.status === 'failed'
-                                    "
-                                >
-                                    <VProgressLinear
-                                        :model-value="
-                                            !item.progress
-                                                ? 0
-                                                : item.progress.total === 0
-                                                  ? 100
-                                                  : (item.progress.processed /
-                                                        item.progress.total) *
-                                                    100
-                                        "
-                                        :color="
-                                            item.status === 'completed'
-                                                ? 'success'
-                                                : item.status === 'failed'
-                                                  ? 'error'
-                                                  : undefined
-                                        "
-                                        class="mt-2"
-                                        rounded
-                                        height="6"
-                                    />
-                                    <div class="text-medium-emphasis mt-1 text-xs">
-                                        {{ item.progress?.processed ?? 0 }} /
-                                        {{ item.progress?.total ?? '?' }}
-                                    </div>
-                                    <div
-                                        v-if="item.output"
-                                        class="text-medium-emphasis mt-1 text-sm"
-                                    >
-                                        {{ item.output.to_add }} to add,
-                                        {{ item.output.to_update }} to update,
-                                        {{ item.output.to_remove }} to remove
-                                    </div>
-                                </template>
-                                <div v-else class="text-medium-emphasis mt-1 text-sm">Queued</div>
+                                {{ row.detail }}
                             </div>
                         </div>
-                    </template>
+
+                        <pre
+                            v-if="logText"
+                            class="max-h-40 overflow-auto rounded border p-2 text-xs whitespace-pre-wrap"
+                            >{{ logText }}</pre>
+                    </div>
 
                     <div class="mt-4 flex justify-end">
                         <VBtn variant="text" @click="close()">Close</VBtn>
@@ -95,10 +65,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { scanRow, useScanStore } from '@/stores/scans'
 import { librariesApi } from '@/utils/api/libraries'
+import { TaskStatus } from '@/utils/api/types'
 import { usersApi } from '@/utils/api/users'
-import { useScanTracker } from '@/utils/ws'
 
 const props = defineProps<{
     open: boolean
@@ -107,29 +78,60 @@ const props = defineProps<{
     contentIds?: string[]
 }>()
 
+const store = useScanStore()
 const qLibraries = librariesApi.useList()
 const mScan = librariesApi.useScan()
-const forceScan = ref(!!props.contentIds?.length)
-const scanning = ref(false)
 const qMe = usersApi.useMe()
 const isAdmin = computed(() => !!qMe.data.value?.permissions.includes('ADMIN'))
-const { scans } = useScanTracker(isAdmin)
+
+const forceScan = ref(!!props.contentIds?.length)
+const scanning = ref(false)
+const taskIds = ref<string[]>([])
 
 const isContentScan = computed(() => !!props.contentIds?.length)
-const scanComplete = computed(
-    () =>
-        scans.value.length > 0 &&
-        scans.value.every(i => i.status === 'completed' || i.status === 'failed')
+
+const rows = computed(() =>
+    taskIds.value.flatMap(id => {
+        const task = store.tasks[id]
+        return task ? [scanRow(task)] : []
+    })
 )
 
-const queryClient = useQueryClient()
-watch(
-    () => scanComplete.value,
-    complete => {
-        if (complete) {
-            queryClient.invalidateQueries()
+const logText = computed(() =>
+    taskIds.value
+        .map(id => store.logs[id]?.text ?? '')
+        .filter(Boolean)
+        .join('\n')
+        .trimEnd()
+)
+
+function pumpLogs(): void {
+    if (!props.open) return
+    for (const id of taskIds.value) {
+        const task = store.tasks[id]
+        if (task && task.log_len > (store.logs[id]?.len ?? 0)) {
+            void store.fetchLogs(id).catch(() => {})
         }
     }
+}
+
+watch(
+    () =>
+        taskIds.value
+            .map(id => `${store.tasks[id]?.log_len ?? 0}:${store.logs[id]?.len ?? 0}`)
+            .join('|'),
+    pumpLogs,
+    { immediate: true }
+)
+
+watch(
+    () => props.open,
+    (open, _, onCleanup) => {
+        if (!open) return
+        const poll = setInterval(pumpLogs, 1000)
+        onCleanup(() => clearInterval(poll))
+    },
+    { immediate: true }
 )
 
 const title = computed(() => {
@@ -145,14 +147,16 @@ function getLibraryName(id: string): string {
 
 async function startScan() {
     try {
-        if (isContentScan.value) {
-            await mScan.mutateAsync({ contentIds: props.contentIds })
-        } else {
-            await mScan.mutateAsync({
-                ids: props.libraryIds.length > 0 ? props.libraryIds : undefined,
-                force: forceScan.value,
-            })
-        }
+        const res = await mScan.mutateAsync(
+            isContentScan.value
+                ? { contentIds: props.contentIds }
+                : {
+                      ids: props.libraryIds.length > 0 ? props.libraryIds : undefined,
+                      force: forceScan.value,
+                  }
+        )
+        taskIds.value = res.task_ids
+        void store.reconcile(res.task_ids).catch(() => {})
     } finally {
         scanning.value = true
     }
@@ -160,7 +164,6 @@ async function startScan() {
 </script>
 
 <script lang="ts">
-import { useQueryClient } from '@tanstack/vue-query'
 import { Modals } from '@/utils/modals'
 import Self from './ScanModal.vue'
 
@@ -173,14 +176,3 @@ export function showScanModal(arg: string[] | { contentIds: string[] }): Promise
     return Modals.show(Self, { libraryIds: [], contentIds: arg.contentIds })
 }
 </script>
-
-<style lang="css" scoped>
-:deep(.force-scan-checkbox .v-input__details) {
-    margin-left: 40px;
-    margin-top: -15px;
-}
-
-:deep(.force-scan-checkbox .v-messages__message) {
-    line-height: 15px;
-}
-</style>

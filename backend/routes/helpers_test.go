@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -12,6 +13,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -23,17 +25,13 @@ import (
 
 func newTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	adminURL := os.Getenv("APP_TESTS_DATABASE_URL")
-	if adminURL == "" {
-		adminURL = "postgresql://postgres:postgres@localhost:5432/postgres?sslmode=disable"
-	}
+	adminURL := cmp.Or(os.Getenv("APP_TESTS_DATABASE_URL"),
+		"postgresql://postgres:postgres@localhost:5432/postgres?sslmode=disable")
 
 	ctx := context.Background()
 
 	buf := make([]byte, 8)
-	if _, err := rand.Read(buf); err != nil {
-		t.Fatalf("rand: %v", err)
-	}
+	rand.Read(buf)
 	dbName := "voltis_tests_" + hex.EncodeToString(buf)
 
 	admin, err := db.Connect(ctx, adminURL)
@@ -51,9 +49,8 @@ func newTestPool(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("parse admin url: %v", err)
 	}
 	parsed.Path = "/" + dbName
-	testURL := parsed.String()
 
-	pool, err := db.Connect(ctx, testURL)
+	pool, err := db.Connect(ctx, parsed.String())
 	if err != nil {
 		t.Fatalf("connect test db: %v", err)
 	}
@@ -90,10 +87,11 @@ func newClient(t *testing.T, pool *pgxpool.Pool) *testClient {
 	firstUserFlow.Store(true)
 
 	e := echo.New()
-	hub := Register(e, pool)
+	hub, manager := Register(e, pool)
+	t.Cleanup(manager.Close)
 
-	server := httptest.NewServer(e)
-	t.Cleanup(server.Close)
+	server := httptest.NewTestServer(t, e)
+	server.Start()
 
 	jar, _ := cookiejar.New(nil)
 	return &testClient{
@@ -126,12 +124,7 @@ func newAdminClient(t *testing.T, pool *pgxpool.Pool) *testClient {
 
 func (c *testClient) HasCookie(name string) bool {
 	u, _ := url.Parse(c.server.URL)
-	for _, cookie := range c.http.Jar.Cookies(u) {
-		if cookie.Name == name {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(c.http.Jar.Cookies(u), func(ck *http.Cookie) bool { return ck.Name == name })
 }
 
 func (c *testClient) Get(path string) *response {

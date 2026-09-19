@@ -46,15 +46,15 @@ func TestInvalidatedRowLifecycle(t *testing.T) {
 	assertUntouched(t, r, newRepo().content)
 
 	before := populatedLeaf()
-	parentID := applyParseResult(r, "library", fsFile("/lib/s/ch1.cbz", baseTime, 42), nil, false, func(string, ...any) {}, &counts)
+	parentID := applyParseResult(r, "library", fsFile("/lib/s/ch1.cbz", baseTime, 42), nil, false, func(string, ...any) {}, &counts, &Counts{})
 	if parentID == nil || *parentID != "parent" {
 		t.Fatalf("parentID = %v, want parent", parentID)
 	}
 	if counts.failed.Load() != 1 || counts.added.Load() != 0 || counts.updated.Load() != 0 {
 		t.Fatalf("counts = %d/%d/%d, want 0/0/1", counts.added.Load(), counts.updated.Load(), counts.failed.Load())
 	}
-	if len(r.content) != 3 || len(r.contentD) != 0 {
-		t.Fatalf("content = %d, contentD = %d", len(r.content), len(r.contentD))
+	if len(r.content) != 3 || len(r.deletedContent) != 0 {
+		t.Fatalf("content = %d, deletedContent = %d", len(r.content), len(r.deletedContent))
 	}
 
 	got := r.content[1]
@@ -88,7 +88,7 @@ func TestInvalidatedRowLifecycle(t *testing.T) {
 	if parentID == nil || *parentID != "parent" {
 		t.Fatalf("parentID = %v, want parent", parentID)
 	}
-	if len(r.content) != 3 || len(r.contentD) != 0 || r.content[1].Valid || !r.content[1].UpdatedAt.After(got.UpdatedAt) {
+	if len(r.content) != 3 || len(r.deletedContent) != 0 || r.content[1].Valid || !r.content[1].UpdatedAt.After(got.UpdatedAt) {
 		t.Fatalf("content = %+v", r.content)
 	}
 }

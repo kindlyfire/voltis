@@ -53,14 +53,6 @@ export interface LibraryUpsert {
     sources: LibrarySource[]
 }
 
-export interface ScanResult {
-    library_id: string
-    added: number
-    updated: number
-    removed: number
-    unchanged: number
-}
-
 export type ContentType = 'comic' | 'comic_series' | 'book' | 'book_series'
 
 export type ReadingStatus = 'reading' | 'completed' | 'on_hold' | 'dropped' | 'plan_to_read'
@@ -116,8 +108,7 @@ export interface UserToContentUpdate {
 }
 
 export interface ContentFileData {
-    /** [filename, width, height] */
-    pages?: Array<[string, number, number]>
+    pages?: Array<[filename: string, width: number, height: number]>
 }
 
 export interface StaffEntry {
@@ -132,7 +123,6 @@ export interface ContentMetadata {
     publisher?: string
     language?: string
     publication_date?: string
-    // Comic-specific fields
     series?: string
     number?: string
     volume?: number
@@ -150,9 +140,7 @@ export interface ContentMetadata {
     alternate_series?: string
     alternate_number?: string
     alternate_count?: number
-    // Book-specific fields
     series_index?: number
-    // Source links
     mangabaka_id?: number
 }
 
@@ -291,10 +279,62 @@ export interface OkResponse {
 }
 
 export const TaskStatus = {
+    PENDING: 0,
     IN_PROGRESS: 1,
     COMPLETED: 2,
     FAILED: 3,
+    CANCELLED: 4,
 } as const
+
+export type TaskStatusValue = (typeof TaskStatus)[keyof typeof TaskStatus]
+
+export interface ScanProgress {
+    phase: 'walking' | 'parsing' | 'saving' | 'done'
+    found: number
+    total: number
+    processed: number
+    unchanged: number
+    failed: number
+    saved: { added: number; updated: number; removed: number }
+    commit_seq: number
+}
+
+export interface ScanResult {
+    added: number
+    updated: number
+    removed: number
+    failed: number
+    unchanged: number
+    duration: number
+}
+
+export interface TaskSnapshot {
+    id: string
+    name: 'scan_library'
+    status: TaskStatusValue
+    input: {
+        library_id: string
+        library_type: string
+        sources: string[]
+        force: boolean
+        filter_paths?: string[]
+    }
+    output: ScanResult | Record<string, never>
+    progress: ScanProgress | null
+    log_len: number
+    created_at: string
+    updated_at: string
+}
+
+export interface TaskLogs {
+    offset: number
+    text: string
+    len: number
+}
+
+export interface ScanTaskIds {
+    task_ids: string[]
+}
 
 export interface Task {
     id: string

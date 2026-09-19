@@ -232,10 +232,7 @@ func (m *MangaBaka) doWithRetry(ctx context.Context, req *http.Request) (*http.R
 	var lastErr error
 	for attempt := range maxRetries {
 		if attempt > 0 {
-			delay := time.Duration(math.Pow(2, float64(attempt-1))) * retryMinDelay
-			if delay > retryMaxDelay {
-				delay = retryMaxDelay
-			}
+			delay := min(time.Duration(math.Pow(2, float64(attempt-1)))*retryMinDelay, retryMaxDelay)
 			slog.Warn("mangabaka: retrying request", "attempt", attempt+1, "delay", delay, "err", lastErr)
 			t := time.NewTimer(delay)
 			select {

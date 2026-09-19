@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"voltis/models"
+	"voltis/lib/tasks"
 
 	"github.com/gorilla/websocket"
 )
@@ -49,8 +49,7 @@ func (c *testClient) toUser(user, id string) {
 }
 
 func (c *testClient) broadcastTaskAndQueue() {
-	logs := "chunk\n"
-	c.hub.BroadcastTaskEvent(&models.Task{ID: "task_1"}, nil, &logs)
+	c.hub.TaskUpdate(tasks.Snapshot{ID: "task_1", Name: "scan_library", Status: 1})
 	c.hub.BroadcastScanQueue([]string{"lib_1"})
 }
 
@@ -131,26 +130,36 @@ func TestSocketRevocationOnDemotion(t *testing.T) {
 	expectWSMessage(t, reconnected, `"still-live"`)
 }
 
-func TestSocketRevocationOnDelete(t *testing.T) {
-	admin, member, memberID := adminAndMember(t, []string{})
+func TestSocketRevocationClosesTheSocket(t *testing.T) {
+	cases := []struct {
+		name  string
+		perms []string
+		act   func(t *testing.T, admin, member *testClient, memberID string)
+	}{
+		{"delete", []string{}, func(t *testing.T, admin, _ *testClient, memberID string) {
+			admin.Delete("/api/users/"+memberID).Assert(t, 200)
+		}},
+		{"logout", []string{}, func(t *testing.T, _, member *testClient, _ string) {
+			member.Post("/api/auth/logout", nil).Assert(t, 200)
+		}},
+		{"unchanged upsert", []string{"ADMIN"}, func(t *testing.T, admin, _ *testClient, memberID string) {
+			admin.Post("/api/users/"+memberID, map[string]any{
+				"username": "member", "permissions": []string{"ADMIN"},
+			}).Assert(t, 200)
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			admin, member, memberID := adminAndMember(t, c.perms)
 
-	conn := member.dialWS(t)
-	waitConns(t, admin.hub, 1)
+			conn := member.dialWS(t)
+			waitConns(t, admin.hub, 1)
 
-	admin.Delete("/api/users/"+memberID).Assert(t, 200)
-	expectWSClosed(t, conn)
-	waitConns(t, admin.hub, 0)
-}
-
-func TestSocketRevocationOnLogout(t *testing.T) {
-	admin, member, _ := adminAndMember(t, []string{})
-
-	conn := member.dialWS(t)
-	waitConns(t, admin.hub, 1)
-
-	member.Post("/api/auth/logout", nil).Assert(t, 200)
-	expectWSClosed(t, conn)
-	waitConns(t, admin.hub, 0)
+			c.act(t, admin, member, memberID)
+			expectWSClosed(t, conn)
+			waitConns(t, admin.hub, 0)
+		})
+	}
 }
 
 func TestSocketSurvivesRolledBackUpsert(t *testing.T) {
@@ -174,17 +183,4 @@ func TestSocketSurvivesRolledBackUpsert(t *testing.T) {
 	admin.broadcastTaskAndQueue()
 	expectWSMessage(t, conn, `"task_update"`)
 	waitConns(t, admin.hub, 1)
-}
-
-func TestSocketRevocationOnUnchangedUpsert(t *testing.T) {
-	admin, member, memberID := adminAndMember(t, []string{"ADMIN"})
-
-	conn := member.dialWS(t)
-	waitConns(t, admin.hub, 1)
-
-	admin.Post("/api/users/"+memberID, map[string]any{
-		"username": "member", "permissions": []string{"ADMIN"},
-	}).Assert(t, 200)
-	expectWSClosed(t, conn)
-	waitConns(t, admin.hub, 0)
 }

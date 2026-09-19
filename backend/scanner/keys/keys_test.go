@@ -3,6 +3,7 @@ package keys
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"testing"
 )
 
@@ -17,7 +18,7 @@ func fmtIntPtr(v *int) string {
 	if v == nil {
 		return "nil"
 	}
-	return fmt.Sprintf("%d", *v)
+	return strconv.Itoa(*v)
 }
 
 func TestKeysParseVolume(t *testing.T) {

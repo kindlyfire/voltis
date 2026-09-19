@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { apiFetch } from '../fetch'
-import type { Library, LibraryUpsert, OkResponse } from './types'
+import type { Library, LibraryUpsert, ScanTaskIds } from './types'
 
 export const librariesApi = {
     useList: () =>
@@ -12,14 +12,11 @@ export const librariesApi = {
     useUpsert: () => {
         const queryClient = useQueryClient()
         return useMutation({
-            mutationFn: async (library: LibraryUpsert) => {
-                const url = `/libraries/${library.id ?? 'new'}`
-                const { id: _, ...body } = library
-                return apiFetch<Library>(url, {
+            mutationFn: async ({ id, ...body }: LibraryUpsert) =>
+                apiFetch<Library>(`/libraries/${id ?? 'new'}`, {
                     method: 'POST',
                     body: JSON.stringify(body),
-                })
-            },
+                }),
             onSuccess: () => {
                 queryClient.invalidateQueries({ queryKey: ['libraries'] })
             },
@@ -40,7 +37,7 @@ export const librariesApi = {
         const queryClient = useQueryClient()
         return useMutation({
             mutationFn: async (opts?: { ids?: string[]; force?: boolean; contentIds?: string[] }) =>
-                apiFetch<OkResponse>('/libraries/scan', {
+                apiFetch<ScanTaskIds>('/libraries/scan', {
                     method: 'POST',
                     body: JSON.stringify({
                         ids: opts?.ids,

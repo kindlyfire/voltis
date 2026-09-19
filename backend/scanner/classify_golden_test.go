@@ -153,14 +153,19 @@ func TestClassifyComicGoldens(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			path := writeCBZ(t, filepath.Join(root, c.name, c.rel), c.comicInfo)
-			got := summarize(cs.ParseFile("library", statFile(t, path)))
-			if got != c.want {
+			file := statFile(t, path)
+			item := cs.ParseFile("library", file)
+			if got := summarize(item); got != c.want {
 				t.Errorf("got  %s\nwant %s", got, c.want)
 			}
-			if p := cs.ParseFile("library", statFile(t, path)); p != nil {
-				if p.Series.FileURI == nil || *p.Series.FileURI != filepath.Dir(path) {
-					t.Errorf("series file uri = %v, want %s", p.Series.FileURI, filepath.Dir(path))
-				}
+			if item == nil {
+				return
+			}
+			if item.File != file {
+				t.Errorf("file = %+v, want %+v", item.File, file)
+			}
+			if item.Series.FileURI == nil || *item.Series.FileURI != filepath.Dir(path) {
+				t.Errorf("series file uri = %v, want %s", item.Series.FileURI, filepath.Dir(path))
 			}
 		})
 	}

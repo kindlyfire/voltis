@@ -9,7 +9,6 @@ import (
 	"voltis/models"
 )
 
-// ComicsScanner implements FileScanner for comic archives.
 type ComicsScanner struct{}
 
 var coverNames = []string{"cover.jpg", "cover.jpeg", "cover.png", "cover.webp"}
