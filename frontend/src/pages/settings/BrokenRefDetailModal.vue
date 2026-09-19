@@ -4,7 +4,7 @@
             <VCardTitle>Reference Detail</VCardTitle>
             <VCardText>
                 <code>
-                    <pre class="bg-surface-variant pa-2 overflow-auto rounded font-mono!">{{
+                    <pre class="bg-surface-variant overflow-auto rounded p-2 font-mono!">{{
                         formatted
                     }}</pre>
                 </code>

@@ -3,7 +3,7 @@
         <VCard>
             <VCardTitle>Set reading status</VCardTitle>
             <VCardText class="space-y-4!">
-                <div class="text-medium-emphasis">
+                <div class="opacity-60">
                     {{ contentIds.length }} item{{ contentIds.length === 1 ? '' : 's' }} selected
                 </div>
 

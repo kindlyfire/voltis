@@ -1,5 +1,5 @@
 <template>
-    <div class="d-flex align-center" @mouseleave="hoverRating = null">
+    <div class="flex items-center" @mouseleave="hoverRating = null">
         <VBtn
             v-for="star in 5"
             :key="star"

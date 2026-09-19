@@ -1,20 +1,20 @@
 <template>
     <VContainer>
-        <h1 class="text-h4 mb-6">Interface</h1>
+        <h1 class="mb-6 text-4xl">Interface</h1>
 
         <VCard>
             <VCardTitle>Library Visibility</VCardTitle>
             <VCardText>
-                <div v-if="!qLibraries.data?.value?.length" class="text-medium-emphasis">
+                <div v-if="!qLibraries.data?.value?.length" class="opacity-60">
                     No libraries found.
                 </div>
-                <div v-else class="d-flex flex-column gap-4">
+                <div v-else class="flex flex-col gap-4">
                     <div
                         v-for="library in qLibraries.data.value"
                         :key="library.id"
-                        class="d-flex align-center gap-4"
+                        class="flex flex-wrap items-center gap-4"
                     >
-                        <span class="text-body-1" style="min-width: 120px">
+                        <span class="text-base" style="min-width: 120px">
                             {{ library.name }}
                         </span>
                         <VBtnToggle

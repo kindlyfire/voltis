@@ -4,7 +4,7 @@
             <VCardTitle>Edit Notes</VCardTitle>
             <VCardText>
                 <VForm @submit="form.onSubmit" class="space-y-4!">
-                    <div v-if="title" class="text-body-2 text-medium-emphasis">
+                    <div v-if="title" class="text-sm opacity-60">
                         {{ title }}
                     </div>
 

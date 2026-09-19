@@ -2,7 +2,7 @@
     <div
         ref="containerRef"
         id="longstrip-container"
-        class="reader-longstrip d-flex flex-column align-center"
+        class="reader-longstrip flex flex-col items-center"
     >
         <template v-for="(loader, index) in reader.state?.loaders ?? []" :key="index">
             <div
@@ -12,14 +12,14 @@
             >
                 <div
                     v-if="loader.error"
-                    class="reader-longstrip__placeholder d-flex flex-column align-center justify-center gap-2"
+                    class="reader-longstrip__placeholder flex flex-col items-center justify-center gap-2"
                 >
                     <div class="text-error">{{ loader.error }}</div>
                     <VBtn size="small" @click.stop="loader.load()">Retry</VBtn>
                 </div>
                 <div
                     v-else-if="loader.loading || !loader.blobUrl"
-                    class="reader-longstrip__placeholder d-flex align-center justify-center"
+                    class="reader-longstrip__placeholder flex items-center justify-center"
                 >
                     <VProgressCircular indeterminate size="32" />
                 </div>

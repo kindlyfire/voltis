@@ -49,7 +49,7 @@
                 </div>
 
                 <div class="w-full xl:w-2/3">
-                    <h2 class="text-1xl">Entries</h2>
+                    <h2 class="text-xl">Entries</h2>
 
                     <div v-if="entries.length" class="space-y-4!">
                         <template v-for="(entry, idx) in entries" :key="entry.id">
@@ -57,7 +57,7 @@
                                 <div class="flex flex-col sm:flex-row">
                                     <div>
                                         <div
-                                            class="bg-surface-variant/40 relative aspect-[2.1/3] w-full sm:w-[100px]"
+                                            class="bg-surface-variant relative aspect-[2.1/3] w-full sm:w-[100px]"
                                         >
                                             <img
                                                 v-if="entryCoverUri(entry)"

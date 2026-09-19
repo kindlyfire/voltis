@@ -43,14 +43,10 @@
                     </VListItem>
                 </template>
                 <VListItem v-else-if="query.isFetching?.value">
-                    <VListItemTitle class="text-medium-emphasis text-center">
-                        Searching...
-                    </VListItemTitle>
+                    <VListItemTitle class="text-center opacity-60"> Searching... </VListItemTitle>
                 </VListItem>
                 <VListItem v-else>
-                    <VListItemTitle class="text-medium-emphasis text-center">
-                        No results
-                    </VListItemTitle>
+                    <VListItemTitle class="text-center opacity-60"> No results </VListItemTitle>
                 </VListItem>
             </VList>
         </VMenu>

@@ -3,7 +3,7 @@
         <VCard>
             <VCardTitle>Reset reading progress</VCardTitle>
             <VCardText class="space-y-4!">
-                <div class="text-medium-emphasis">
+                <div class="opacity-60">
                     This will clear the reading status and progress for the following
                     {{ contentIds.length }} item{{ contentIds.length === 1 ? '' : 's' }}:
                 </div>

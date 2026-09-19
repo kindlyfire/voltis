@@ -27,7 +27,7 @@
                         v-for="item in searchResults"
                         :key="item.id"
                         variant="outlined"
-                        class="d-flex ga-3 pa-3"
+                        class="flex gap-3 p-3"
                     >
                         <img
                             v-if="item.cover_url"
@@ -36,10 +36,10 @@
                         />
                         <div v-else class="bg-surface-variant h-24 w-16 shrink-0 rounded" />
                         <div class="min-w-0 grow">
-                            <div class="text-body-1 font-weight-medium">
+                            <div class="text-base font-medium">
                                 {{ item.title }}
                             </div>
-                            <div class="d-flex ga-2 mt-1 flex-wrap">
+                            <div class="mt-1 flex flex-wrap gap-2">
                                 <VChip size="x-small" variant="tonal">
                                     {{ item.type }}
                                 </VChip>
@@ -50,20 +50,14 @@
                                     {{ item.year }}
                                 </VChip>
                             </div>
-                            <div
-                                v-if="item.authors.length"
-                                class="text-caption text-medium-emphasis mt-1"
-                            >
+                            <div v-if="item.authors.length" class="mt-1 text-xs opacity-60">
                                 {{ item.authors.join(', ') }}
                             </div>
-                            <div
-                                v-if="item.genres.length"
-                                class="text-caption text-medium-emphasis mt-1"
-                            >
+                            <div v-if="item.genres.length" class="mt-1 text-xs opacity-60">
                                 {{ item.genres.join(', ') }}
                             </div>
                         </div>
-                        <div class="d-flex flex-column ga-1 shrink-0">
+                        <div class="flex shrink-0 flex-col gap-1">
                             <VBtn
                                 size="small"
                                 color="primary"
@@ -89,7 +83,7 @@
 
                 <div
                     v-else-if="qSearch.isSuccess.value"
-                    class="text-medium-emphasis text-body-2 py-4 text-center"
+                    class="py-4 text-center text-sm opacity-60"
                 >
                     No results found.
                 </div>

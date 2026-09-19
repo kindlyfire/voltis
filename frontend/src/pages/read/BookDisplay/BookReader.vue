@@ -4,7 +4,7 @@
             <VBtn icon :to="`/${props.contentId}`" variant="text" exact>
                 <VIcon>mdi-arrow-left</VIcon>
             </VBtn>
-            <VAppBarTitle class="text-body-1">
+            <VAppBarTitle class="text-base">
                 {{ chapters.current?.title || 'Chapter' }}
             </VAppBarTitle>
             <VSpacer />
@@ -16,7 +16,7 @@
             >
                 <VIcon>mdi-chevron-left</VIcon>
             </VBtn>
-            <span class="text-body-2 mx-2">
+            <span class="mx-2 text-sm">
                 {{ currentChapterIndex + 1 }} / {{ visibleChapters.items.length || 0 }}
             </span>
             <VBtn
@@ -30,19 +30,19 @@
         </VAppBar>
 
         <div class="book-reader-content">
-            <div v-if="qChapterContent.isLoading.value" class="d-flex justify-center py-8">
+            <div v-if="qChapterContent.isLoading.value" class="flex justify-center py-8">
                 <VProgressCircular indeterminate />
             </div>
             <AQueryError
                 v-else-if="qChapterContent.error.value"
                 :query="qChapterContent"
-                class="ma-4"
+                class="m-4"
             />
             <div v-else ref="chapterContainer" class="book-chapter-container" />
 
             <div v-if="chapters.next">
                 <VDivider />
-                <div class="d-flex pa-4 justify-center">
+                <div class="flex justify-center p-4">
                     <VBtn color="primary" :to="`?ch=${encodeURIComponent(chapters.next.href)}`">
                         Next Chapter: {{ chapters.next.title || chapters.next.id }}
                     </VBtn>

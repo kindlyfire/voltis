@@ -207,7 +207,7 @@
 
     <VOverlay
         v-model="showCoverOverlay"
-        class="align-center justify-center"
+        class="items-center justify-center"
         scrim
         @click="showCoverOverlay = false"
     >

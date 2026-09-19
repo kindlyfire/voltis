@@ -2,17 +2,15 @@
     <VContainer>
         <div
             v-if="!qLibraries.isLoading.value && libraries?.length === 0 && user"
-            class="d-flex flex-column align-center justify-center"
+            class="flex flex-col items-center justify-center"
             style="min-height: 75vh"
         >
             <template v-if="user.permissions.includes('ADMIN')">
-                <div class="text-h6 text-medium-emphasis mb-4">
-                    No libraries. Add one in settings!
-                </div>
+                <div class="text-h6 mb-4 opacity-60">No libraries. Add one in settings!</div>
                 <VBtn color="primary" to="/settings/libraries">Libraries</VBtn>
             </template>
             <template v-else>
-                <div class="text-h6 text-medium-emphasis mb-4">
+                <div class="text-h6 mb-4 opacity-60">
                     No libraries. Ask your server admin to import something!
                 </div>
             </template>

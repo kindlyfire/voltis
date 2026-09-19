@@ -5,13 +5,11 @@
         </template>
         <VCard min-width="200">
             <VCardText>
-                <div class="d-flex align-center justify-space-between mb-1">
-                    <span class="text-caption text-medium-emphasis">Columns</span>
-                    <a class="text-caption cursor-pointer" @click="store.resetKey(storeKey)"
-                        >Reset</a
-                    >
+                <div class="mb-1 flex items-center justify-between">
+                    <span class="text-xs opacity-60">Columns</span>
+                    <a class="cursor-pointer text-xs" @click="store.resetKey(storeKey)">Reset</a>
                 </div>
-                <div class="d-flex align-center ga-2">
+                <div class="flex items-center gap-2">
                     <VBtn
                         icon="mdi-minus"
                         size="x-small"
@@ -40,9 +38,9 @@
 
                 <VDivider class="my-3" />
 
-                <div class="d-flex align-center justify-space-between mb-1">
-                    <span class="text-caption text-medium-emphasis">Visibility</span>
-                    <a class="text-caption cursor-pointer" @click="showAll">Show all</a>
+                <div class="mb-1 flex items-center justify-between">
+                    <span class="text-xs opacity-60">Visibility</span>
+                    <a class="cursor-pointer text-xs" @click="showAll">Show all</a>
                 </div>
                 <VCheckbox
                     v-model="hideItemCount"
@@ -60,9 +58,7 @@
 
                 <VDivider class="my-3" />
 
-                <div class="d-flex align-center justify-space-between mb-1">
-                    <span class="text-caption text-medium-emphasis">Item count</span>
-                </div>
+                <div class="mb-1 text-xs opacity-60">Item count</div>
                 <VBtnToggle v-model="itemCountMode" mandatory density="compact" variant="outlined">
                     <VBtn value="unread" size="small">Unread</VBtn>
                     <VBtn value="total" size="small">Total</VBtn>

@@ -48,7 +48,7 @@
                                 </VBtn>
                             </VForm>
                         </div>
-                        <div v-else class="text-body-2">
+                        <div v-else class="text-sm">
                             Registrations are currently disabled. Please contact an administrator
                             for access.
                         </div>

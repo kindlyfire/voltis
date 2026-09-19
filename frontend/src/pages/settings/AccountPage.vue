@@ -1,6 +1,6 @@
 <template>
     <VContainer>
-        <h1 class="text-h4 mb-6">Account</h1>
+        <h1 class="mb-6 text-4xl">Account</h1>
 
         <VCard class="mb-6">
             <VCardTitle>User Details</VCardTitle>

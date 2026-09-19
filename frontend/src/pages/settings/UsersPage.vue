@@ -1,7 +1,7 @@
 <template>
     <VContainer>
-        <div class="d-flex align-center mb-6">
-            <h1 class="text-h4">Users</h1>
+        <div class="mb-6 flex items-center">
+            <h1 class="text-4xl">Users</h1>
             <VSpacer />
             <VBtn color="primary" @click="showUserModal('new')">Create User</VBtn>
         </div>

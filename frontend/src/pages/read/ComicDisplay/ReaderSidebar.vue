@@ -10,10 +10,10 @@
             height: '100vh',
         }"
     >
-        <div class="pa-4 mt-16 space-y-4! pt-0" v-if="reader.state">
+        <div class="mt-16 space-y-4! p-4 pt-0" v-if="reader.state">
             <!-- mb-2!: The spacing of 4 with the element below feels kinda wrong,
             because of how much empty space there is in this element. -->
-            <div class="d-flex align-center mb-2! h-16">
+            <div class="mb-2! flex h-16 items-center">
                 <span class="text-h6">Reader</span>
                 <VSpacer />
                 <VBtn icon variant="text" @click="reader.sidebarOpen = false">
@@ -26,7 +26,7 @@
                 <template v-else>
                     <RouterLink
                         :to="`/${parent.id}`"
-                        class="font-weight-medium text-blue-400 hover:underline"
+                        class="font-medium text-blue-400 hover:underline"
                     >
                         {{ parent.title }}
                     </RouterLink>
@@ -34,7 +34,7 @@
             </div>
 
             <div v-if="reader.siblings">
-                <div class="d-flex align-center mb-2 gap-2">
+                <div class="mb-2 flex items-center gap-2">
                     <VBtn
                         icon
                         size="small"
@@ -65,14 +65,14 @@
                         <VIcon>mdi-chevron-right</VIcon>
                     </VBtn>
                 </div>
-                <div class="text-body-2 text-medium-emphasis text-center">
+                <div class="text-center text-sm opacity-60">
                     {{ reader.siblings.currentIndex + 1 }} of
                     {{ reader.siblings.items.length }}
                 </div>
             </div>
 
             <div>
-                <div class="text-body-2 text-medium-emphasis mb-1">
+                <div class="mb-1 text-sm opacity-60">
                     Page {{ sliderPage + 1 }} of
                     {{ reader.state.pageDimensions.length }}
                 </div>
@@ -87,7 +87,7 @@
             </div>
 
             <div>
-                <div class="text-body-2 text-medium-emphasis mb-2">Mode</div>
+                <div class="mb-2 text-sm opacity-60">Mode</div>
                 <VBtnToggle
                     :model-value="(reader.seriesSettings.mode ?? 'null') as ReaderMode | 'null'"
                     @update:model-value="reader.setMode($event == 'null' ? null : $event)"
@@ -101,14 +101,14 @@
                     <VBtn value="null" class="flex-1">Auto</VBtn>
                 </VBtnToggle>
                 <template v-if="reader.seriesSettings.mode == null">
-                    <div class="text-medium-emphasis mt-1 text-xs">
+                    <div class="mt-1 text-xs opacity-60">
                         Auto: {{ reader.mode === 'longstrip' ? 'Longstrip' : 'Paged' }}
                     </div>
                 </template>
             </div>
 
             <div v-if="reader.mode === 'longstrip'">
-                <div class="text-body-2 text-medium-emphasis mb-1">
+                <div class="mb-1 text-sm opacity-60">
                     Width: {{ reader.settings.longstripWidth }}%
                 </div>
                 <VSlider
@@ -121,9 +121,9 @@
                 />
             </div>
 
-            <div class="text-body-2 text-medium-emphasis">
+            <div class="text-sm opacity-60">
                 <div class="mb-1">Keyboard shortcuts</div>
-                <div v-for="s in kbShortcuts" class="d-flex justify-space-between text-xs!">
+                <div v-for="s in kbShortcuts" class="flex justify-between text-xs!">
                     <span>{{ s[1] }}</span>
                     <span class="font-mono">
                         {{ s[0] }}

@@ -1,13 +1,13 @@
 <template>
-    <div class="reader-paged d-flex align-center justify-center">
+    <div class="reader-paged flex items-center justify-center">
         <template v-if="loader">
-            <div v-if="loader.error" class="d-flex flex-column align-center gap-2">
+            <div v-if="loader.error" class="flex flex-col items-center gap-2">
                 <div class="text-error">{{ loader.error }}</div>
                 <VBtn @click.stop="loader.load()">Retry</VBtn>
             </div>
             <div
                 v-else-if="loader.loading || !loader.blobUrl"
-                class="d-flex align-center justify-center"
+                class="flex items-center justify-center"
             >
                 <VProgressCircular indeterminate size="64" />
             </div>

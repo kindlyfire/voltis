@@ -1,13 +1,13 @@
 <template>
     <VContainer>
-        <h1 class="text-h4 mb-2">Broken References</h1>
-        <p class="text-medium-emphasis mb-6 max-w-[700px]">
+        <h1 class="mb-2 text-4xl">Broken References</h1>
+        <p class="mb-6 max-w-[700px] opacity-60">
             Reading status, ratings, and other user data is linked to content by a URI. If content
             is deleted from the server, or the URI otherwise changes in a way we don't handle
             automatically, your data will show up here so that it can be reassigned or deleted.
         </p>
 
-        <div class="d-flex align-center mb-6 gap-2">
+        <div class="mb-6 flex flex-wrap items-center gap-2">
             <VSelect
                 v-model="selectedLibraryId"
                 :items="libraryItems"
@@ -70,8 +70,8 @@
                         <code>{{ item.uri }}</code>
                     </td>
                     <td class="py-2" style="vertical-align: middle">
-                        <div class="d-flex align-center gap-2">
-                            <span class="text-medium-emphasis">{{ summarize(item) }}</span>
+                        <div class="flex items-center gap-2">
+                            <span class="opacity-60">{{ summarize(item) }}</span>
                             <VBtn
                                 icon
                                 size="x-small"
@@ -84,7 +84,7 @@
                         </div>
                     </td>
                     <td class="py-2" style="vertical-align: middle">
-                        <div class="d-flex align-center gap-2">
+                        <div class="flex items-center gap-2">
                             <VTooltip v-if="shouldShowUriWarning(item.id)" location="top">
                                 <template #activator="{ props: tp }">
                                     <VIcon v-bind="tp" color="warning" size="small">
@@ -124,7 +124,7 @@
                     </td>
                 </tr>
                 <tr v-if="qBrokenRefs.data.value?.data.length === 0">
-                    <td colspan="3" class="text-medium-emphasis pa-4 text-center">
+                    <td colspan="3" class="p-4 text-center opacity-60">
                         No broken references found.
                     </td>
                 </tr>
@@ -133,7 +133,7 @@
 
         <div
             v-if="selectedLibraryId && (qBrokenRefs.data.value?.total ?? 0) > PAGE_SIZE"
-            class="d-flex mt-4 justify-center"
+            class="mt-4 flex justify-center"
         >
             <VPagination
                 :model-value="page"

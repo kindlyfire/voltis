@@ -25,7 +25,7 @@
                             />
                         </template>
                     </VListItem>
-                    <div v-if="!qLists.data?.value?.length" class="text-medium-emphasis">
+                    <div v-if="!qLists.data?.value?.length" class="opacity-60">
                         No lists yet. Create one from the Lists page.
                     </div>
                 </VList>

@@ -9,12 +9,12 @@
                 class="border-b"
             >
                 <template #prepend>
-                    <span class="text-medium-emphasis mr-4">{{ index + 1 }}</span>
+                    <span class="mr-4 opacity-60">{{ index + 1 }}</span>
                 </template>
                 <VListItemTitle>{{ chapter.title || chapter.id }}</VListItemTitle>
             </VListItem>
         </VList>
-        <div v-else-if="qChapters.isLoading.value" class="d-flex justify-center py-8">
+        <div v-else-if="qChapters.isLoading.value" class="flex justify-center py-8">
             <VProgressCircular indeterminate />
         </div>
         <AQueryError v-else-if="qChapters.error.value" :query="qChapters" />

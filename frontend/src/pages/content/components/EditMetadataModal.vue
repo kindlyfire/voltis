@@ -10,7 +10,7 @@
                 </div>
 
                 <template v-else-if="qLayers.isSuccess.value && localLayers">
-                    <div class="d-flex align-center ga-2">
+                    <div class="flex items-center gap-2">
                         <VSelect
                             v-model="selectedView"
                             :items="viewOptions"
@@ -42,9 +42,9 @@
 
                     <div class="metadata-fields">
                         <template v-for="field in fieldsWithValues" :key="field.key">
-                            <div class="metadata-field d-flex align-center ga-2 py-1">
+                            <div class="metadata-field flex items-center gap-2 py-1">
                                 <div
-                                    class="text-caption text-medium-emphasis field-label d-flex align-center"
+                                    class="field-label flex items-center text-xs text-current/60"
                                     :class="{ 'field-label--editable': isEditable }"
                                     @click="isEditable && openFieldEditor(field.key)"
                                 >
@@ -66,8 +66,8 @@
                                         {{ sourceLabel(currentView.sources[field.key]!) }}
                                     </VChip>
                                 </div>
-                                <div class="field-value grow">
-                                    <span class="text-body-2">
+                                <div class="field-value min-w-0 grow break-words">
+                                    <span class="text-sm">
                                         {{ formatValue(currentView.values[field.key]) }}
                                     </span>
                                 </div>
@@ -76,8 +76,8 @@
                     </div>
 
                     <div v-if="isEditable && fieldsWithoutValues.length" class="mt-2">
-                        <span class="text-caption text-medium-emphasis">Add:</span>
-                        <div class="d-flex ga-1 mt-1 flex-wrap">
+                        <span class="text-xs opacity-60">Add:</span>
+                        <div class="mt-1 flex flex-wrap gap-1">
                             <VChip
                                 v-for="field in fieldsWithoutValues"
                                 :key="field.key"
@@ -91,8 +91,8 @@
                     </div>
 
                     <div v-if="isEditable && isSeriesType" class="mt-2">
-                        <span class="text-caption text-medium-emphasis">Link Source:</span>
-                        <div class="d-flex ga-1 mt-1 flex-wrap">
+                        <span class="text-xs opacity-60">Link Source:</span>
+                        <div class="mt-1 flex flex-wrap gap-1">
                             <VChip
                                 size="small"
                                 class="cursor-pointer"
@@ -173,13 +173,13 @@
             <VCardText>
                 <div class="flex flex-col gap-4 lg:flex-row">
                     <div class="flex-1">
-                        <div class="text-caption text-medium-emphasis mb-1">Normalized Data</div>
+                        <div class="mb-1 text-xs opacity-60">Normalized Data</div>
                         <pre class="raw-json">{{
                             JSON.stringify(selectedViewLayer.data, null, 2)
                         }}</pre>
                     </div>
                     <div v-if="Object.keys(selectedViewLayer.raw).length" class="flex-1">
-                        <div class="text-caption text-medium-emphasis mb-1">Raw Response</div>
+                        <div class="mb-1 text-xs opacity-60">Raw Response</div>
                         <pre class="raw-json">{{
                             JSON.stringify(selectedViewLayer.raw, null, 2)
                         }}</pre>
