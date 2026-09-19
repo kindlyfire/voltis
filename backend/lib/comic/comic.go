@@ -9,6 +9,7 @@ import (
 	_ "image/png"
 	"math"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -154,6 +155,13 @@ func Scan(path string) ([]PageInfo, *ComicInfo) {
 	return scanArchivePages(path)
 }
 
+func isArchiveLocal(name string) bool {
+	if name == "" || strings.Contains(name, `\`) {
+		return false
+	}
+	return path.Clean("/"+name) == "/"+name
+}
+
 func scanArchivePages(path string) ([]PageInfo, *ComicInfo) {
 	a, err := archive.Open(path)
 	if err != nil {
@@ -170,6 +178,10 @@ func scanArchivePages(path string) ([]PageInfo, *ComicInfo) {
 	var comicInfo *ComicInfo
 
 	for _, entry := range entries {
+		if !isArchiveLocal(entry.Name) {
+			continue
+		}
+
 		if entry.Name == "ComicInfo.xml" {
 			data, err := a.ReadFile(entry.Name)
 			if err == nil {

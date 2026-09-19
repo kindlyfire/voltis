@@ -117,8 +117,7 @@ func (fr *FileRoutes) getComicPage(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "Invalid page data")
 	}
 
-	pageURI := filepath.Join(*content.FileURI, pageName)
-	data, mediaType, err := readContentFile(pageURI)
+	data, mediaType, err := readArchiveEntry(*content.FileURI, pageName)
 	if err != nil {
 		return err
 	}
@@ -395,6 +394,10 @@ func readContentFile(uri string) ([]byte, string, error) {
 		return nil, "", echo.NewHTTPError(http.StatusNotFound, "File not found")
 	}
 
+	return readArchiveEntry(archivePath, innerPath)
+}
+
+func readArchiveEntry(archivePath, innerPath string) ([]byte, string, error) {
 	// PDF page rendering via pdftoppm
 	if strings.ToLower(filepath.Ext(archivePath)) == ".pdf" {
 		return readPDFPage(archivePath, innerPath)
