@@ -86,8 +86,7 @@ type testClient struct {
 func newClient(t *testing.T, pool *pgxpool.Pool) *testClient {
 	t.Helper()
 
-	// Reset first-user flag so registration creates an admin
-	firstUserFlow = true
+	firstUserFlow.Store(true)
 
 	e := echo.New()
 	Register(e, pool)

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"voltis/config"
@@ -101,16 +102,38 @@ func (a *AuthRoutes) register(c echo.Context) error {
 		return err
 	}
 
-	permissions := []string{}
-	if firstUser {
-		permissions = []string{"ADMIN"}
+	userID := models.MakeUserID()
+	insertUser := func(q db.Querier, permissions []string) error {
+		_, err := q.Exec(ctx,
+			`INSERT INTO users (id, username, password_hash, permissions) VALUES ($1, $2, $3, $4)`,
+			userID, req.Username, string(hash), permissions,
+		)
+		return err
 	}
 
-	userID := models.MakeUserID()
-	_, err = a.pool.Exec(ctx,
-		`INSERT INTO users (id, username, password_hash, permissions) VALUES ($1, $2, $3, $4)`,
-		userID, req.Username, string(hash), permissions,
-	)
+	if firstUser {
+		err = db.WithTx(ctx, a.pool, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", adminMutationLockKey); err != nil {
+				return err
+			}
+
+			firstUser, err := isFirstUserFlow(ctx, tx)
+			if err != nil {
+				return err
+			}
+			if !cfg.RegistrationEnabled && !firstUser {
+				return echo.NewHTTPError(http.StatusForbidden, "registration is disabled")
+			}
+
+			permissions := []string{}
+			if firstUser {
+				permissions = []string{"ADMIN"}
+			}
+			return insertUser(tx, permissions)
+		})
+	} else {
+		err = insertUser(a.pool, []string{})
+	}
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -159,20 +182,25 @@ func (a *AuthRoutes) logout(c echo.Context) error {
 	return okResponse(c)
 }
 
-var firstUserFlow = true
+var firstUserFlow atomic.Bool
 
-func isFirstUserFlow(ctx context.Context, pool *pgxpool.Pool) (bool, error) {
-	if firstUserFlow {
-		var count int
-		err := pool.QueryRow(ctx, "SELECT COUNT(*) FROM users WHERE 'ADMIN' = ANY(permissions)").Scan(&count)
-		if err != nil {
-			return false, err
-		}
-		if count > 0 {
-			firstUserFlow = false
-		}
+func init() {
+	firstUserFlow.Store(true)
+}
+
+func isFirstUserFlow(ctx context.Context, q db.Querier) (bool, error) {
+	if !firstUserFlow.Load() {
+		return false, nil
 	}
-	return firstUserFlow, nil
+	adminExists, err := db.SelectScalar[bool](ctx, q,
+		"SELECT EXISTS (SELECT 1 FROM users WHERE permissions @> ARRAY['ADMIN'])")
+	if err != nil {
+		return false, err
+	}
+	if adminExists {
+		firstUserFlow.Store(false)
+	}
+	return !adminExists, nil
 }
 
 func generateToken() (string, error) {
