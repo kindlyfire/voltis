@@ -9,10 +9,11 @@ export interface PageLoaderState {
     dispose(): void
 }
 
-export function createPageLoader(index: number, url: string, signal: AbortSignal): PageLoaderState {
+export function createPageLoader(index: number, url: string): PageLoaderState {
     const blobUrl = ref<string | null>(null)
     const loading = ref(false)
     const error = ref<string | null>(null)
+    let active: AbortController | null = null
 
     async function load() {
         if (blobUrl.value || loading.value) return
@@ -20,27 +21,37 @@ export function createPageLoader(index: number, url: string, signal: AbortSignal
         loading.value = true
         error.value = null
 
+        const controller = new AbortController()
+        active = controller
+
         try {
-            const res = await fetch(url, { signal, credentials: 'include' })
+            const res = await fetch(url, { signal: controller.signal, credentials: 'include' })
             if (!res.ok) throw new Error(`HTTP ${res.status}`)
 
             const blob = await res.blob()
 
             // Check if aborted during blob read
-            if (signal.aborted) return
+            if (controller.signal.aborted) return
 
             blobUrl.value = URL.createObjectURL(blob)
         } catch (e) {
+            if (active !== controller) return
             if (e instanceof DOMException && e.name === 'AbortError') {
                 return // Silently ignore abort
             }
             error.value = e instanceof Error ? e.message : String(e)
         } finally {
-            loading.value = false
+            if (active === controller) {
+                active = null
+                loading.value = false
+            }
         }
     }
 
     function dispose() {
+        active?.abort()
+        active = null
+        loading.value = false
         if (blobUrl.value) {
             URL.revokeObjectURL(blobUrl.value)
             blobUrl.value = null

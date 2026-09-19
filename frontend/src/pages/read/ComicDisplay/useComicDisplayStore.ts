@@ -98,10 +98,8 @@ export const useReaderStore = defineStore('reader', () => {
     function dispose() {
         sidebarOpen.value = false
         const s = state.value
-        if (s) {
-            s.dispose()
-            state.value = null
-        }
+        state.value = null
+        return s?.dispose()
     }
 
     function setMode(mode: ReaderMode | null) {
@@ -126,28 +124,31 @@ export const useReaderStore = defineStore('reader', () => {
         if (options.contentId === state.value?.contentId) {
             return
         }
-        if (state.value) {
-            state.value.dispose()
-        }
-        state.value = createComicState(options.contentId, options.initialPage)
-        state.value.setHandlers({
+        state.value?.dispose()
+        const s = createComicState(options.contentId, options.initialPage)
+        state.value = s
+        s.setHandlers({
             onReady: () => {
+                if (state.value !== s) return
+
                 if (mode.value === 'longstrip') {
                     requestAnimationFrame(() => {
-                        if (state.value!.initialPage === 'last') {
+                        if (state.value !== s) return
+
+                        if (s.initialPage === 'last') {
                             window.scrollTo({
                                 top: document.body.scrollHeight,
                                 behavior: 'instant',
                             })
                             return
                         }
-                        goToPage(state.value!.page, 'instant')
+                        goToPage(s.page, 'instant')
                     })
                 }
 
                 // This is to replace "last" or "resume" in the URL with the
                 // actual page number
-                const page = state.value!.page
+                const page = s.page
                 router.replace({ query: page === 0 ? {} : { page: page + 1 } })
             },
         })

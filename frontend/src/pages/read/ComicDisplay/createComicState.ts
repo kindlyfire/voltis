@@ -39,6 +39,8 @@ export function createComicState(contentId: string, initialPage: number | 'last'
 
     let userData: UserToContent | null = null
     let updateProgressPromise = Promise.resolve()
+    let disposed = false
+    const contentController = new AbortController()
 
     const updateProgress = useDebounceFn(() => {
         if (!state.content) return
@@ -70,8 +72,9 @@ export function createComicState(contentId: string, initialPage: number | 'last'
     }, 1000)
 
     contentApi
-        .get(contentId)
+        .get(contentId, { signal: contentController.signal })
         .then(content => {
+            if (disposed) return
             if (!state.handlers) {
                 throw new Error('Comic handlers not set')
             }
@@ -84,9 +87,7 @@ export function createComicState(contentId: string, initialPage: number | 'last'
             }))
             // We just use `reactive` to turn it into UnwrapNestedRefs<_>
             state.loaders = reactive(
-                state.pageDimensions.map((_, index) =>
-                    createPageLoader(index, getPageUrl(index), new AbortController().signal)
-                )
+                state.pageDimensions.map((_, index) => createPageLoader(index, getPageUrl(index)))
             )
             state.error = null
             state.loading = false
@@ -105,6 +106,7 @@ export function createComicState(contentId: string, initialPage: number | 'last'
             state.handlers.onReady()
         })
         .catch(e => {
+            if (disposed) return
             console.error(e)
             state.error = e instanceof Error ? e.message : String(e)
             state.loading = false
@@ -149,9 +151,13 @@ export function createComicState(contentId: string, initialPage: number | 'last'
             state.handlers = handlers
         },
         dispose() {
+            disposed = true
+            contentController.abort()
+            updateProgress.flush()
             for (const loader of state.loaders) {
                 loader.dispose()
             }
+            return updateProgressPromise
         },
     })
 }

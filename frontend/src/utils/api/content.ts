@@ -32,8 +32,8 @@ export const contentApi = {
             ...options,
         }),
 
-    get: async (id: string) => {
-        return apiFetch<Content>(`/content/${id}`)
+    get: async (id: string, init?: RequestInit) => {
+        return apiFetch<Content>(`/content/${id}`, init)
     },
 
     useList: (
