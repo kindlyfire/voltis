@@ -15,7 +15,7 @@ import (
 
 // QueueBroadcaster is implemented by the WebSocket hub.
 type QueueBroadcaster interface {
-	BroadcastTaskEvent(task *models.Task, progress json.RawMessage)
+	BroadcastTaskEvent(task *models.Task, progress json.RawMessage, logs *string)
 	BroadcastScanQueue(libraryIDs []string)
 }
 
@@ -27,8 +27,8 @@ type Queue struct {
 
 func NewQueue(manager *tasks.Manager, pool *pgxpool.Pool, hub QueueBroadcaster) *Queue {
 	q := &Queue{manager: manager, pool: pool, hub: hub}
-	ScanTask.OnUpdate = func(task *models.Task, progress json.RawMessage) {
-		hub.BroadcastTaskEvent(task, progress)
+	ScanTask.OnUpdate = func(task *models.Task, progress json.RawMessage, logs *string) {
+		hub.BroadcastTaskEvent(task, progress, logs)
 		if task.Status != models.TaskStatusInProgress && task.Status != models.TaskStatusPending {
 			q.broadcastQueue()
 		}

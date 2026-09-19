@@ -21,7 +21,7 @@ type TaskDef struct {
 	Process          func(any, *TaskContext) error
 	UnmarshalInput   func(json.RawMessage) (any, error)
 	IsCompatibleWith func(self any, other RunningInfo) bool
-	OnUpdate         func(task *models.Task, progress json.RawMessage)
+	OnUpdate         func(task *models.Task, progress json.RawMessage, logs *string)
 }
 
 type TaskHandle struct {
@@ -50,9 +50,9 @@ func (d *TaskDef) execute(pool *pgxpool.Pool, input any, task *models.Task, hand
 		pool:        pool,
 		task:        task,
 		runtimeData: runtimeData,
-		bc: bufchan.New(mergeUpdateOpts, 200*time.Millisecond, func(opts updateOpts) error {
+		bc: bufchan.New(mergeUpdateOpts, 200*time.Millisecond, d.updater(task, func(opts updateOpts) (string, error) {
 			return d.flushUpdate(context.Background(), pool, task, opts)
-		}),
+		})),
 	}
 
 	go func() {
@@ -97,28 +97,54 @@ func (d *TaskDef) execute(pool *pgxpool.Pool, input any, task *models.Task, hand
 	}()
 }
 
-func (d *TaskDef) flushUpdate(ctx context.Context, pool *pgxpool.Pool, task *models.Task, opts updateOpts) error {
+func (d *TaskDef) updater(task *models.Task, flush func(updateOpts) (string, error)) func(updateOpts) error {
+	var pending string
+	return func(opts updateOpts) error {
+		delta, err := flush(opts)
+		pending += delta
+		if err != nil {
+			return err
+		}
+		if d.OnUpdate != nil {
+			var progress json.RawMessage
+			if opts.progress != nil {
+				progress, _ = json.Marshal(opts.progress)
+			}
+			var logDelta *string
+			if pending != "" {
+				s := pending
+				logDelta = &s
+			}
+			d.OnUpdate(task, progress, logDelta)
+		}
+		pending = ""
+		return nil
+	}
+}
+
+func (d *TaskDef) flushUpdate(ctx context.Context, pool *pgxpool.Pool, task *models.Task, opts updateOpts) (string, error) {
 	if opts.status != nil {
 		task.Status = *opts.status
+	}
+	var delta string
+	if opts.logs != nil {
+		prev := ""
+		if task.Logs != nil {
+			prev = *task.Logs
+		}
+		delta = *opts.logs
+		if len(prev) > 0 && prev[len(prev)-1] != '\n' {
+			delta = "\n" + delta
+		}
+		joined := prev + delta
+		task.Logs = &joined
 	}
 	if opts.output != nil {
 		data, err := json.Marshal(opts.output)
 		if err != nil {
-			return err
+			return delta, err
 		}
 		task.Output = data
-	}
-	if opts.logs != nil {
-		if task.Logs == nil {
-			task.Logs = opts.logs
-		} else {
-			s := *task.Logs
-			if len(s) > 0 && s[len(s)-1] != '\n' {
-				s += "\n"
-			}
-			s += *opts.logs
-			task.Logs = &s
-		}
 	}
 
 	task.UpdatedAt = time.Now().UTC()
@@ -127,19 +153,7 @@ func (d *TaskDef) flushUpdate(ctx context.Context, pool *pgxpool.Pool, task *mod
 		UPDATE tasks SET status = $1, output = $2, logs = $3, updated_at = $4
 		WHERE id = $5
 	`, task.Status, task.Output, task.Logs, task.UpdatedAt, task.ID)
-	if err != nil {
-		return err
-	}
-
-	if d.OnUpdate != nil {
-		var progress json.RawMessage
-		if opts.progress != nil {
-			progress, _ = json.Marshal(opts.progress)
-		}
-		d.OnUpdate(task, progress)
-	}
-
-	return nil
+	return delta, err
 }
 
 // TaskHandle

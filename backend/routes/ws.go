@@ -2,8 +2,10 @@ package routes
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"voltis/models"
 
@@ -16,125 +18,158 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
-// WebSocketHub manages WebSocket connections and broadcasts events.
+var (
+	queueDepth       = 32
+	writeWait        = 5 * time.Second
+	pingPeriod       = 20 * time.Second
+	pongWait         = 60 * time.Second
+	readLimit  int64 = 1024
+)
+
+type socket interface {
+	ReadMessage() (int, []byte, error)
+	WriteMessage(int, []byte) error
+	SetReadLimit(int64)
+	SetReadDeadline(time.Time) error
+	SetWriteDeadline(time.Time) error
+	SetPongHandler(func(string) error)
+	Close() error
+}
+
 type WebSocketHub struct {
-	mu    sync.RWMutex
+	mu    sync.Mutex
 	conns map[*userConn]struct{}
 }
 
 type userConn struct {
-	user  *models.User
-	conn  *websocket.Conn
-	mu    sync.Mutex
-	tasks map[string]*models.Task // tracked tasks for diffing
+	conn socket
+	user string
+	out  chan []byte
+	done chan struct{}
+	once sync.Once
 }
 
 func NewHub() *WebSocketHub {
 	return &WebSocketHub{conns: make(map[*userConn]struct{})}
 }
 
-func (h *WebSocketHub) register(uc *userConn) {
-	h.mu.Lock()
-	h.conns[uc] = struct{}{}
-	h.mu.Unlock()
+func (c *userConn) close() {
+	c.once.Do(func() {
+		close(c.done)
+		_ = c.conn.Close()
+	})
 }
 
-func (h *WebSocketHub) unregister(uc *userConn) {
+func (h *WebSocketHub) serve(conn socket, user string) {
+	c := &userConn{conn: conn, user: user, out: make(chan []byte, queueDepth), done: make(chan struct{})}
+
 	h.mu.Lock()
-	delete(h.conns, uc)
+	h.conns[c] = struct{}{}
 	h.mu.Unlock()
+	defer func() {
+		h.mu.Lock()
+		delete(h.conns, c)
+		h.mu.Unlock()
+	}()
+
+	written := make(chan struct{})
+	go func() {
+		defer close(written)
+		defer c.close()
+		c.writeLoop()
+	}()
+	defer func() {
+		c.close()
+		<-written
+	}()
+
+	c.readLoop()
 }
 
-func (h *WebSocketHub) broadcast(msg []byte) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	for uc := range h.conns {
-		uc.mu.Lock()
-		err := uc.conn.WriteMessage(websocket.TextMessage, msg)
-		uc.mu.Unlock()
-		if err != nil {
-			_ = uc.conn.Close()
+func (c *userConn) writeLoop() {
+	ticker := time.NewTicker(pingPeriod)
+	defer ticker.Stop()
+	for {
+		var kind int
+		var data []byte
+		select {
+		case <-c.done:
+			return
+		case data = <-c.out:
+			kind = websocket.TextMessage
+		case <-ticker.C:
+			kind = websocket.PingMessage
+		}
+		if c.conn.SetWriteDeadline(time.Now().Add(writeWait)) != nil {
+			return
+		}
+		if c.conn.WriteMessage(kind, data) != nil {
+			return
 		}
 	}
 }
 
-// BroadcastTaskEvent sends a task_update to all connected users.
-// Per-user filtering: skips users that don't own the task when user_id is set.
-func (h *WebSocketHub) BroadcastTaskEvent(task *models.Task, progress json.RawMessage) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	for uc := range h.conns {
-		if task.UserID != nil && *task.UserID != uc.user.ID {
+func (c *userConn) readLoop() {
+	c.conn.SetReadLimit(readLimit)
+	if c.conn.SetReadDeadline(time.Now().Add(pongWait)) != nil {
+		return
+	}
+	c.conn.SetPongHandler(func(string) error {
+		return c.conn.SetReadDeadline(time.Now().Add(pongWait))
+	})
+	for {
+		if _, _, err := c.conn.ReadMessage(); err != nil {
+			return
+		}
+	}
+}
+
+func (h *WebSocketHub) broadcast(user *string, event any) {
+	data, err := json.Marshal(event)
+	if err != nil {
+		slog.Error("[ws] failed to marshal event", "err", err)
+		return
+	}
+
+	var slow []*userConn
+	h.mu.Lock()
+	for c := range h.conns {
+		if user != nil && *user != c.user {
 			continue
 		}
-
-		uc.mu.Lock()
-		old := uc.tasks[task.ID]
-		copied := *task
-		uc.tasks[task.ID] = &copied
-
-		diff := taskDiff(old, task)
-		msg, _ := json.Marshal(map[string]any{
-			"type":     "task_update",
-			"task":     diff,
-			"progress": progress,
-		})
-		err := uc.conn.WriteMessage(websocket.TextMessage, msg)
-		uc.mu.Unlock()
-
-		if err != nil {
-			_ = uc.conn.Close()
+		select {
+		case c.out <- data:
+		default:
+			slow = append(slow, c)
 		}
+	}
+	h.mu.Unlock()
 
-		// Clean up completed/failed tasks
-		if task.Status != models.TaskStatusInProgress {
-			uc.mu.Lock()
-			delete(uc.tasks, task.ID)
-			uc.mu.Unlock()
-		}
+	for _, c := range slow {
+		slog.Warn("[ws] disconnecting slow client", "user", c.user)
+		c.close()
 	}
 }
 
-// BroadcastScanQueue sends a scan_queue_update with queued library IDs.
+func (h *WebSocketHub) BroadcastTaskEvent(task *models.Task, progress json.RawMessage, logDelta *string) {
+	h.broadcast(task.UserID, map[string]any{
+		"type": "task_update",
+		"task": map[string]any{
+			"id":     task.ID,
+			"status": task.Status,
+			"input":  task.Input,
+			"output": task.Output,
+			"logs":   logDelta,
+		},
+		"progress": progress,
+	})
+}
+
 func (h *WebSocketHub) BroadcastScanQueue(libraryIDs []string) {
-	msg, _ := json.Marshal(map[string]any{
+	h.broadcast(nil, map[string]any{
 		"type":        "scan_queue_update",
 		"library_ids": libraryIDs,
 	})
-	h.broadcast(msg)
-}
-
-func taskDiff(old, new *models.Task) map[string]any {
-	diff := map[string]any{"id": new.ID}
-
-	if old == nil || old.Status != new.Status {
-		diff["status"] = new.Status
-	}
-	if old == nil || string(old.Output) != string(new.Output) {
-		diff["output"] = json.RawMessage(new.Output)
-	}
-	if old == nil || string(old.Input) != string(new.Input) {
-		diff["input"] = json.RawMessage(new.Input)
-	}
-	if old == nil || ptrStr(old.Logs) != ptrStr(new.Logs) {
-		if old == nil || old.Logs == nil {
-			diff["logs"] = new.Logs
-		} else if new.Logs != nil && len(*new.Logs) >= len(*old.Logs) && (*new.Logs)[:len(*old.Logs)] == *old.Logs {
-			appended := (*new.Logs)[len(*old.Logs):]
-			diff["logs"] = &appended
-		} else {
-			diff["logs"] = new.Logs
-		}
-	}
-
-	return diff
-}
-
-func ptrStr(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }
 
 func wsHandler(pool *pgxpool.Pool, hub *WebSocketHub) echo.HandlerFunc {
@@ -149,23 +184,7 @@ func wsHandler(pool *pgxpool.Pool, hub *WebSocketHub) echo.HandlerFunc {
 			return err
 		}
 
-		uc := &userConn{
-			user:  user,
-			conn:  ws,
-			tasks: make(map[string]*models.Task),
-		}
-		hub.register(uc)
-		defer func() {
-			hub.unregister(uc)
-			_ = ws.Close()
-		}()
-
-		// Read loop — just keep connection alive and detect disconnect
-		for {
-			if _, _, err := ws.ReadMessage(); err != nil {
-				break
-			}
-		}
+		hub.serve(ws, user.ID)
 		return nil
 	}
 }
