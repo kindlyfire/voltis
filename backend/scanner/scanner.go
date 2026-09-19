@@ -167,6 +167,7 @@ func parseWorker(ctx context.Context, s FileScanner, jobs <-chan FSFile, results
 
 func runScan(ctx context.Context, in ScanInput, tc *tasks.TaskContext, notify Notifier) (ScanResult, error) {
 	start := time.Now()
+	tc.Progress(Progress{Phase: "walking"})
 
 	s := newFileScanner(in.LibraryType)
 	if s == nil {
@@ -319,6 +320,7 @@ func runLegacyScan(input ScanInput, tc *tasks.TaskContext) (ScanResult, error) {
 	for _, c := range r.deletedContent {
 		removedIDs[c.ID] = true
 	}
+	r.retarget()
 
 	toProcess := append(toAdd, toUpdate...)
 	addSet := map[string]bool{}
@@ -413,6 +415,13 @@ func runLegacyScan(input ScanInput, tc *tasks.TaskContext) (ScanResult, error) {
 
 	if commitErr != nil {
 		return ScanResult{}, commitErr
+	}
+
+	if len(r.moved) > 0 {
+		updateGroupSeries(s, r, r.moved)
+		if err := r.commitGroup(ctx); err != nil {
+			return ScanResult{}, err
+		}
 	}
 
 	emit(func(p *Progress) { p.Phase = "saving" })
@@ -516,6 +525,7 @@ func applyParsedItem(r *repository, libraryID string, p *ParsedItem) *models.Con
 	series, _ := findParent(r, p)
 	if series != nil {
 		parentID = &series.ID
+		r.placeSeries(series, p.Series.FileURI)
 	}
 
 	content := r.findContentByFileURI(p.File.Path)
@@ -528,6 +538,7 @@ func applyParsedItem(r *repository, libraryID string, p *ParsedItem) *models.Con
 		r.content = append(r.content, models.Content{ID: models.MakeContentID()})
 		content = &r.content[len(r.content)-1]
 	} else {
+		r.reparent(content, parentID)
 		previous := *content
 		old = &previous
 	}
@@ -568,11 +579,10 @@ func groupByFolder(files []FSFile) [][]FSFile {
 
 func updateGroupSeries(s FileScanner, r *repository, parents map[string]bool) {
 	for parentID := range parents {
-		i := slices.IndexFunc(r.content, func(c models.Content) bool { return c.ID == parentID })
-		if i < 0 {
+		parent := r.byID(parentID)
+		if parent == nil {
 			continue
 		}
-		parent := &r.content[i]
 
 		children := r.childrenOf(parentID)
 		byID := map[string]*models.Content{}

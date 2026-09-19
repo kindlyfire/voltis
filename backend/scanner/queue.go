@@ -23,11 +23,13 @@ type Queue struct {
 	manager *tasks.Manager
 	pool    *pgxpool.Pool
 	hub     QueueBroadcaster
+	def     *tasks.TaskDef
 }
 
 func NewQueue(manager *tasks.Manager, pool *pgxpool.Pool, hub QueueBroadcaster) *Queue {
-	SetNotifier(hub)
-	return &Queue{manager: manager, pool: pool, hub: hub}
+	def := NewScanTask(hub)
+	manager.Register(def)
+	return &Queue{manager: manager, pool: pool, hub: hub, def: def}
 }
 
 func (q *Queue) Enqueue(libraryID string, force bool, filterPaths []string) (string, error) {
@@ -56,7 +58,7 @@ func (q *Queue) Enqueue(libraryID string, force bool, filterPaths []string) (str
 
 	paths := fp.Map(sources, func(s source) string { return s.PathURI })
 
-	handle, err := q.manager.Push(ScanTask, ScanInput{
+	handle, err := q.manager.Push(q.def, ScanInput{
 		LibraryID:   lib.ID,
 		LibraryType: lib.Type,
 		Sources:     paths,

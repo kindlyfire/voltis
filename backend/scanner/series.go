@@ -35,6 +35,33 @@ type Child struct {
 	Meta       metaraw.MetadataRaw
 }
 
+type dirPick struct {
+	stored *string
+	dirs   map[string]int
+}
+
+func (d *dirPick) add(dir string) {
+	if d.dirs == nil {
+		d.dirs = map[string]int{}
+	}
+	d.dirs[dir]++
+}
+
+func (d *dirPick) drop(dir string) {
+	if n := d.dirs[dir]; n > 1 {
+		d.dirs[dir] = n - 1
+	} else {
+		delete(d.dirs, dir)
+	}
+}
+
+func (d *dirPick) pick() *string {
+	if len(d.dirs) == 0 || (d.stored != nil && d.dirs[*d.stored] > 0) {
+		return d.stored
+	}
+	return new(slices.Min(slices.Collect(maps.Keys(d.dirs))))
+}
+
 type write struct {
 	id    string
 	item  *ParsedItem

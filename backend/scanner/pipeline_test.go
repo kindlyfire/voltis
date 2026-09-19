@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -13,6 +14,7 @@ import (
 	"voltis/db"
 	"voltis/lib/tasks"
 	"voltis/models"
+	"voltis/models/metaraw"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -281,15 +283,25 @@ func TestScanPipelineFailedParsesInvalidateAndRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	manifest := string(readContent(t, p.pool, id).FileData)
+	exec(t, p.pool, "INSERT INTO users (id, username, password_hash) VALUES ('u1', 'u', 'x')")
+	exec(t, p.pool, "INSERT INTO user_to_content (id, user_id, library_id, uri, starred) VALUES ('a1', 'u1', $1, $2, true)",
+		p.lib, "comic/Foo_2019/ch1")
 
 	writeFile(t, path, "corrupt")
 	result := p.mustScan(ScanInput{})
-	if result.Failed != 1 || result.Added != 0 || result.Updated != 0 {
+	if result.Failed != 1 || result.Added != 0 || result.Updated != 0 || result.Removed != 0 {
 		t.Fatalf("corrupt scan = %+v", result)
 	}
-	if row := readContent(t, p.pool, id); row.Valid {
+	row := readContent(t, p.pool, id)
+	if row.Valid {
 		t.Fatal("row must be invalidated")
 	}
+	if string(row.FileData) != manifest {
+		t.Fatalf("file_data = %s, want the manifest kept through invalidation", row.FileData)
+	}
+	assertCatalog(t, p.pool, p.lib, []string{"comic/Foo_2019", "comic/Foo_2019/ch1"})
+	assertAnnotations(t, p.pool, p.lib, []string{"comic/Foo_2019/ch1"})
 
 	writeCBZFixture(t, path, "Foo", "1")
 	if result := p.mustScan(ScanInput{}); result.Updated != 1 || result.Failed != 0 {
@@ -298,6 +310,105 @@ func TestScanPipelineFailedParsesInvalidateAndRetry(t *testing.T) {
 	if row := readContent(t, p.pool, id); !row.Valid {
 		t.Fatal("repaired row must be valid again")
 	}
+	assertAnnotations(t, p.pool, p.lib, []string{"comic/Foo_2019/ch1"})
+}
+
+func comicInfoXML(series, number, publisher, language string) string {
+	return `<?xml version="1.0"?><ComicInfo><Series>` + series + `</Series><Number>` + number +
+		`</Number><Publisher>` + publisher + `</Publisher><LanguageISO>` + language + `</LanguageISO></ComicInfo>`
+}
+
+func TestScanPipelineEarlierMemberCorrectsSeriesWithoutLosingOverrides(t *testing.T) {
+	p := newPipeline(t, "comics")
+	series := filepath.Join(p.root, "Foo (2019)")
+	writeCBZ(t, filepath.Join(series, "Foo ch2.cbz"), comicInfoXML("Foo", "2", "Beta", "fr"))
+
+	p.mustScan(ScanInput{})
+	if got := readMeta(t, p.pool, p.lib, "comic/Foo_2019").File.Raw; got.Publisher != "Beta" {
+		t.Fatalf("series metadata = %+v, want the only member", got)
+	}
+
+	mr := readMeta(t, p.pool, p.lib, "comic/Foo_2019")
+	mr.Overrides = &metaraw.RawContainer[models.Metadata]{Raw: models.Metadata{Publisher: "Override Press"}}
+	seedMetadata(t, p.pool, p.lib, "comic/Foo_2019", mr)
+
+	writeCBZ(t, filepath.Join(series, "Foo ch1.cbz"), comicInfoXML("Foo", "1", "Alpha", ""))
+	if result := p.mustScan(ScanInput{}); result.Added != 1 || result.Unchanged != 1 {
+		t.Fatalf("second scan = %+v", result)
+	}
+
+	got := readMeta(t, p.pool, p.lib, "comic/Foo_2019")
+	if got.File.Raw.Publisher != "Alpha" {
+		t.Fatalf("file layer publisher = %q, want the earlier member to win", got.File.Raw.Publisher)
+	}
+	if got.File.Raw.Language != "fr" {
+		t.Fatalf("file layer language = %q, want the later member to still contribute", got.File.Raw.Language)
+	}
+	if got.Overrides == nil || got.Overrides.Raw.Publisher != "Override Press" {
+		t.Fatalf("overrides = %+v, want them untouched", got.Overrides)
+	}
+	if merged := got.Merge(); merged.Publisher != "Override Press" {
+		t.Fatalf("merged publisher = %q, want the override to win", merged.Publisher)
+	}
+}
+
+func TestScanPipelineStampsScannedAtOnlyOnASuccessfulFinalFlush(t *testing.T) {
+	p := newPipeline(t, "comics")
+	series := filepath.Join(p.root, "Foo (2019)")
+	writeCBZFixture(t, filepath.Join(series, "Foo ch1.cbz"), "Foo", "1")
+
+	p.mustScan(ScanInput{})
+	first := libraryScannedAt(t, p.pool, p.lib)
+	if first == nil {
+		t.Fatal("scanned_at = nil, want the successful scan stamped")
+	}
+
+	exec(t, p.pool, `
+		CREATE FUNCTION fail_stamp() RETURNS trigger AS $fn$
+		BEGIN
+			RAISE EXCEPTION 'no stamp' USING ERRCODE = '22000';
+		END $fn$ LANGUAGE plpgsql`)
+	exec(t, p.pool, "CREATE TRIGGER fail_stamp AFTER UPDATE ON libraries FOR EACH ROW EXECUTE FUNCTION fail_stamp()")
+
+	writeCBZFixture(t, filepath.Join(series, "Foo ch2.cbz"), "Foo", "2")
+	if _, err := p.scan(ScanInput{}); err == nil {
+		t.Fatal("the final flush must fail while the stamp is rejected")
+	}
+
+	at := libraryScannedAt(t, p.pool, p.lib)
+	if at == nil || !at.Equal(*first) {
+		t.Fatalf("scanned_at = %v, want it left at %v by the failed final flush", at, first)
+	}
+	assertCatalog(t, p.pool, p.lib, []string{"comic/Foo_2019", "comic/Foo_2019/ch1", "comic/Foo_2019/ch2"})
+}
+
+func TestScanPipelineRerunAfterAnInterruptedScanConverges(t *testing.T) {
+	p := newPipeline(t, "comics")
+	series := filepath.Join(p.root, "Foo (2019)")
+	for _, n := range []string{"1", "2", "3"} {
+		writeCBZFixture(t, filepath.Join(series, "Foo ch"+n+".cbz"), "Foo", n)
+	}
+
+	saved := statFile(t, filepath.Join(series, "Foo ch1.cbz"))
+	run := newScanRun(t, p.pool, p.lib, &ComicsScanner{})
+	run.place(Result{File: saved, Item: (&ComicsScanner{}).ParseFile(saved)})
+	run.commit(false)
+	batch := contentIDByURI(t, p.pool, p.lib, "comic/Foo_2019/ch1")
+
+	result := p.mustScan(ScanInput{})
+	if result.Added != 2 || result.Unchanged != 1 || result.Removed != 0 || result.Failed != 0 {
+		t.Fatalf("rerun = %+v, want the saved batch reused and the rest added", result)
+	}
+	want := []string{"comic/Foo_2019", "comic/Foo_2019/ch1", "comic/Foo_2019/ch2", "comic/Foo_2019/ch3"}
+	assertCatalog(t, p.pool, p.lib, want)
+	if got := contentIDByURI(t, p.pool, p.lib, "comic/Foo_2019/ch1"); got != batch {
+		t.Fatalf("ch1 id = %s, want the row the interrupted scan saved (%s)", got, batch)
+	}
+
+	if again := p.mustScan(ScanInput{}); again.Unchanged != 3 || again.Added != 0 || again.Removed != 0 {
+		t.Fatalf("settled scan = %+v", again)
+	}
+	assertCatalog(t, p.pool, p.lib, want)
 }
 
 func TestScanConcurrencyProducesStableCatalog(t *testing.T) {
@@ -509,5 +620,331 @@ func TestScanPipelineRetainsRowsWhoseAncestryCannotBeResolved(t *testing.T) {
 	assertCatalog(t, p.pool, p.lib, []string{"comic/Book", "comic/Book/ch1"})
 	if _, err := os.Stat(book); err != nil {
 		t.Fatalf("archive missing from disk: %v", err)
+	}
+}
+
+func (p *pipeline) runner(name string) func(ScanInput) ScanResult {
+	if name == "legacy" {
+		return p.mustLegacyScan
+	}
+	return p.mustScan
+}
+
+func TestScanKeepsASeriesInItsStoredDirectory(t *testing.T) {
+	for _, runner := range []string{"writer", "legacy"} {
+		t.Run(runner, func(t *testing.T) {
+			p := newPipeline(t, "comics")
+			scan := p.runner(runner)
+			a, z := filepath.Join(p.root, "A"), filepath.Join(p.root, "Z")
+			writeCBZFixture(t, filepath.Join(a, "ch1.cbz"), "Foo", "1")
+			writeCBZFixture(t, filepath.Join(z, "ch2.cbz"), "Foo", "2")
+			writeFile(t, filepath.Join(a, "cover.jpg"), "a")
+			writeFile(t, filepath.Join(z, "cover.jpg"), "z")
+
+			if got := scan(ScanInput{}); got.Added != 2 {
+				t.Fatalf("first scan = %+v", got)
+			}
+			series := contentIDByURI(t, p.pool, p.lib, "comic/Foo")
+			if got := readContent(t, p.pool, series); deref(got.FileURI) != a {
+				t.Fatalf("series file_uri = %v, want the smallest member directory %s", deref(got.FileURI), a)
+			}
+
+			writeCBZFixture(t, filepath.Join(z, "ch3.cbz"), "Foo", "3")
+			if got := scan(ScanInput{}); got.Added != 1 || got.Unchanged != 2 {
+				t.Fatalf("second scan = %+v", got)
+			}
+			got := readContent(t, p.pool, series)
+			if deref(got.FileURI) != a {
+				t.Fatalf("series file_uri = %v, want %s kept while it still has members", deref(got.FileURI), a)
+			}
+			if deref(got.CoverURI) != filepath.Join(a, "cover.jpg") {
+				t.Fatalf("series cover_uri = %v, want the cover of %s", deref(got.CoverURI), a)
+			}
+
+			first := filepath.Join(p.root, "0")
+			writeCBZFixture(t, filepath.Join(first, "ch0.cbz"), "Foo", "0")
+			writeFile(t, filepath.Join(first, "cover.jpg"), "0")
+			if got := scan(ScanInput{}); got.Added != 1 || got.Unchanged != 3 {
+				t.Fatalf("third scan = %+v", got)
+			}
+			got = readContent(t, p.pool, series)
+			if deref(got.FileURI) != a {
+				t.Fatalf("series file_uri = %v, want %s kept even though %s now sorts first", deref(got.FileURI), a, first)
+			}
+			if deref(got.CoverURI) != filepath.Join(a, "cover.jpg") {
+				t.Fatalf("series cover_uri = %v, want the cover of %s", deref(got.CoverURI), a)
+			}
+		})
+	}
+}
+
+func TestScanMovesASeriesOffADeletedDirectory(t *testing.T) {
+	for _, runner := range []string{"writer", "legacy"} {
+		t.Run(runner, func(t *testing.T) {
+			p := newPipeline(t, "comics")
+			scan := p.runner(runner)
+			a, z := filepath.Join(p.root, "A"), filepath.Join(p.root, "Z")
+			writeCBZFixture(t, filepath.Join(a, "ch1.cbz"), "Foo", "1")
+			writeCBZFixture(t, filepath.Join(z, "ch2.cbz"), "Foo", "2")
+			writeFile(t, filepath.Join(z, "cover.jpg"), "z")
+
+			if got := scan(ScanInput{}); got.Added != 2 {
+				t.Fatalf("first scan = %+v", got)
+			}
+			series := contentIDByURI(t, p.pool, p.lib, "comic/Foo")
+
+			if err := os.RemoveAll(a); err != nil {
+				t.Fatal(err)
+			}
+			if got := scan(ScanInput{}); got.Removed != 1 || got.Unchanged != 1 {
+				t.Fatalf("second scan = %+v", got)
+			}
+			got := readContent(t, p.pool, series)
+			if deref(got.FileURI) != z {
+				t.Fatalf("series file_uri = %v, want the surviving member directory %s", deref(got.FileURI), z)
+			}
+			if deref(got.CoverURI) != filepath.Join(z, "cover.jpg") {
+				t.Fatalf("series cover_uri = %v, want the cover of %s", deref(got.CoverURI), z)
+			}
+			assertCatalog(t, p.pool, p.lib, []string{"comic/Foo", "comic/Foo/ch2"})
+		})
+	}
+}
+
+func TestScanNeverMovesASettledSeries(t *testing.T) {
+	for _, runner := range []string{"writer", "legacy"} {
+		t.Run(runner, func(t *testing.T) {
+			p := newPipeline(t, "comics")
+			scan := p.runner(runner)
+			a, z := filepath.Join(p.root, "A"), filepath.Join(p.root, "Z")
+			writeCBZFixture(t, filepath.Join(a, "ch1.cbz"), "Foo", "1")
+			writeCBZFixture(t, filepath.Join(z, "ch2.cbz"), "Foo", "2")
+			scan(ScanInput{})
+
+			series := contentIDByURI(t, p.pool, p.lib, "comic/Foo")
+			if got := deref(readContent(t, p.pool, series).FileURI); got != a {
+				t.Fatalf("series file_uri = %v, want the smallest member directory %s", got, a)
+			}
+
+			for _, in := range []ScanInput{{}, {Force: true}, {FilterPaths: []string{z}}, {}} {
+				scan(in)
+				if got := deref(readContent(t, p.pool, series).FileURI); got != a {
+					t.Fatalf("series file_uri = %v after %+v, want %s left untouched", got, in, a)
+				}
+			}
+		})
+	}
+}
+
+func TestScanFollowsASeriesWhoseMemberJoinedAnother(t *testing.T) {
+	for _, runner := range []string{"writer", "legacy"} {
+		t.Run(runner, func(t *testing.T) {
+			p := newPipeline(t, "comics")
+			scan := p.runner(runner)
+			zero, a, z := filepath.Join(p.root, "0"), filepath.Join(p.root, "A"), filepath.Join(p.root, "Z")
+			writeCBZFixture(t, filepath.Join(a, "ch1.cbz"), "Foo", "1")
+			writeCBZFixture(t, filepath.Join(z, "ch2.cbz"), "Foo", "2")
+			writeCBZFixture(t, filepath.Join(zero, "ch3.cbz"), "Bar", "3")
+			for _, dir := range []string{zero, a, z} {
+				writeFile(t, filepath.Join(dir, "cover.jpg"), filepath.Base(dir))
+			}
+
+			if got := scan(ScanInput{}); got.Added != 3 {
+				t.Fatalf("first scan = %+v", got)
+			}
+			foo := contentIDByURI(t, p.pool, p.lib, "comic/Foo")
+			bar := contentIDByURI(t, p.pool, p.lib, "comic/Bar")
+			if got := deref(readContent(t, p.pool, foo).FileURI); got != a {
+				t.Fatalf("series file_uri = %v, want the smallest member directory %s", got, a)
+			}
+
+			writeCBZFixture(t, filepath.Join(a, "ch1.cbz"), "Bar", "1")
+			if got := scan(ScanInput{Force: true}); got.Updated != 3 {
+				t.Fatalf("reparenting scan = %+v", got)
+			}
+			assertCatalog(t, p.pool, p.lib, []string{"comic/Bar", "comic/Bar/ch1", "comic/Bar/ch3", "comic/Foo", "comic/Foo/ch2"})
+
+			got := readContent(t, p.pool, foo)
+			if deref(got.FileURI) != z {
+				t.Fatalf("former series file_uri = %v, want its only surviving member directory %s", deref(got.FileURI), z)
+			}
+			if deref(got.CoverURI) != filepath.Join(z, "cover.jpg") {
+				t.Fatalf("former series cover_uri = %v, want the cover of %s", deref(got.CoverURI), z)
+			}
+			if got := deref(readContent(t, p.pool, bar).FileURI); got != zero {
+				t.Fatalf("joined series file_uri = %v, want %s kept while it still has members", got, zero)
+			}
+
+			if again := scan(ScanInput{}); again.Unchanged != 3 || again.Updated != 0 {
+				t.Fatalf("settled scan = %+v", again)
+			}
+			if got := deref(readContent(t, p.pool, foo).FileURI); got != z {
+				t.Fatalf("former series file_uri = %v on reload, want %s persisted by the reparenting scan", got, z)
+			}
+		})
+	}
+}
+
+func TestScanPersistsADirectoryCorrectionWithNothingElseToCommit(t *testing.T) {
+	for _, runner := range []string{"writer", "legacy"} {
+		t.Run(runner, func(t *testing.T) {
+			p := newPipeline(t, "comics")
+			scan := p.runner(runner)
+			a := filepath.Join(p.root, "A")
+			writeCBZFixture(t, filepath.Join(a, "ch1.cbz"), "Foo", "1")
+			writeFile(t, filepath.Join(a, "cover.jpg"), "a")
+
+			if got := scan(ScanInput{}); got.Added != 1 {
+				t.Fatalf("first scan = %+v", got)
+			}
+			series := contentIDByURI(t, p.pool, p.lib, "comic/Foo")
+			exec(t, p.pool, "UPDATE content SET file_uri = $2, cover_uri = NULL WHERE id = $1",
+				series, filepath.Join(p.root, "Gone"))
+
+			if got := scan(ScanInput{}); got.Unchanged != 1 || got.Added != 0 || got.Updated != 0 {
+				t.Fatalf("settled rescan = %+v, want nothing to parse", got)
+			}
+			got := readContent(t, p.pool, series)
+			if deref(got.FileURI) != a {
+				t.Fatalf("series file_uri = %v, want the correction to %s committed", deref(got.FileURI), a)
+			}
+			if deref(got.CoverURI) != filepath.Join(a, "cover.jpg") {
+				t.Fatalf("series cover_uri = %v, want the corrected directory re-probed", deref(got.CoverURI))
+			}
+		})
+	}
+}
+
+func TestScanLeavesBookSeriesDirectoryless(t *testing.T) {
+	for _, runner := range []string{"writer", "legacy"} {
+		t.Run(runner, func(t *testing.T) {
+			p := newPipeline(t, "books")
+			scan := p.runner(runner)
+			volume := filepath.Join(p.root, "Bar v1.epub")
+			writeEPUBFixture(t, volume, "Bar Volume 1", "Bar", "1")
+			writeEPUBFixture(t, filepath.Join(p.root, "Solo.epub"), "Solo", "", "")
+
+			if got := scan(ScanInput{LibraryType: "books"}); got.Added != 2 {
+				t.Fatalf("first scan = %+v", got)
+			}
+			series := contentIDByURI(t, p.pool, p.lib, "book/Bar")
+			check := func(what string) {
+				t.Helper()
+				if got := readContent(t, p.pool, series); got.FileURI != nil {
+					t.Fatalf("book series file_uri = %q after %s, want books to stay directoryless", *got.FileURI, what)
+				}
+			}
+			check("the first scan")
+
+			for _, in := range []ScanInput{
+				{LibraryType: "books"},
+				{LibraryType: "books", Force: true},
+				{LibraryType: "books", FilterPaths: []string{volume}},
+			} {
+				scan(in)
+				check(fmt.Sprintf("%+v", in))
+			}
+			assertCatalog(t, p.pool, p.lib, []string{"book/Bar", "book/Bar/Bar v1", "book/Solo"})
+		})
+	}
+}
+
+func TestScanRejectedPlacementContributesNoDirectory(t *testing.T) {
+	for _, runner := range []string{"writer", "legacy"} {
+		t.Run(runner, func(t *testing.T) {
+			p := newPipeline(t, "comics")
+			scan := p.runner(runner)
+			a, m, z := filepath.Join(p.root, "A"), filepath.Join(p.root, "M"), filepath.Join(p.root, "Z")
+			writeCBZFixture(t, filepath.Join(a, "b1.cbz"), "Bar", "1")
+			writeCBZFixture(t, filepath.Join(z, "b2.cbz"), "Bar", "2")
+			writeCBZFixture(t, filepath.Join(m, "f1.cbz"), "Foo", "9")
+			for _, dir := range []string{a, m, z} {
+				writeFile(t, filepath.Join(dir, "cover.jpg"), filepath.Base(dir))
+			}
+
+			if got := scan(ScanInput{}); got.Added != 3 {
+				t.Fatalf("first scan = %+v", got)
+			}
+			bar := contentIDByURI(t, p.pool, p.lib, "comic/Bar")
+			foo := contentIDByURI(t, p.pool, p.lib, "comic/Foo")
+			if got := deref(readContent(t, p.pool, bar).FileURI); got != a {
+				t.Fatalf("Bar file_uri = %v, want the smallest member directory %s", got, a)
+			}
+
+			if err := os.Remove(filepath.Join(a, "b1.cbz")); err != nil {
+				t.Fatal(err)
+			}
+			writeCBZFixture(t, filepath.Join(m, "f1.cbz"), "Bar", "2")
+
+			for i := range 3 {
+				if got := scan(ScanInput{}); got.Failed != 1 {
+					t.Fatalf("rescan %d = %+v, want the colliding member rejected", i, got)
+				}
+				got := readContent(t, p.pool, bar)
+				if deref(got.FileURI) != z {
+					t.Fatalf("rescan %d: Bar file_uri = %v, want its surviving member directory %s", i, deref(got.FileURI), z)
+				}
+				if deref(got.CoverURI) != filepath.Join(z, "cover.jpg") {
+					t.Fatalf("rescan %d: Bar cover_uri = %v, want the cover of %s", i, deref(got.CoverURI), z)
+				}
+				if got := deref(readContent(t, p.pool, foo).FileURI); got != m {
+					t.Fatalf("rescan %d: Foo file_uri = %v, want %s left untouched", i, got, m)
+				}
+				assertCatalog(t, p.pool, p.lib, []string{"comic/Bar", "comic/Bar/ch2", "comic/Foo", "comic/Foo/ch9"})
+			}
+
+			writeCBZFixture(t, filepath.Join(m, "f1.cbz"), "Bar", "9")
+			if got := scan(ScanInput{}); got.Failed != 0 || got.Updated != 1 {
+				t.Fatalf("resolving scan = %+v", got)
+			}
+			assertCatalog(t, p.pool, p.lib, []string{"comic/Bar", "comic/Bar/ch2", "comic/Bar/ch9"})
+			got := readContent(t, p.pool, bar)
+			if deref(got.FileURI) != z {
+				t.Fatalf("Bar file_uri = %v, want %s kept once the member there is accepted too", deref(got.FileURI), z)
+			}
+			if deref(got.CoverURI) != filepath.Join(z, "cover.jpg") {
+				t.Fatalf("Bar cover_uri = %v, want the cover of %s", deref(got.CoverURI), z)
+			}
+		})
+	}
+}
+
+func TestScanKeepsADirectoryPinnedByAnotherMember(t *testing.T) {
+	for _, runner := range []string{"writer", "legacy"} {
+		t.Run(runner, func(t *testing.T) {
+			p := newPipeline(t, "comics")
+			scan := p.runner(runner)
+			zero, a, z := filepath.Join(p.root, "0"), filepath.Join(p.root, "A"), filepath.Join(p.root, "Z")
+			writeCBZFixture(t, filepath.Join(a, "ch1.cbz"), "Foo", "1")
+			writeCBZFixture(t, filepath.Join(a, "ch2.cbz"), "Foo", "2")
+			writeCBZFixture(t, filepath.Join(z, "ch3.cbz"), "Foo", "3")
+			writeCBZFixture(t, filepath.Join(zero, "ch9.cbz"), "Bar", "9")
+			for _, dir := range []string{zero, a, z} {
+				writeFile(t, filepath.Join(dir, "cover.jpg"), filepath.Base(dir))
+			}
+
+			if got := scan(ScanInput{}); got.Added != 4 {
+				t.Fatalf("first scan = %+v", got)
+			}
+			foo := contentIDByURI(t, p.pool, p.lib, "comic/Foo")
+			if got := deref(readContent(t, p.pool, foo).FileURI); got != a {
+				t.Fatalf("series file_uri = %v, want the smallest member directory %s", got, a)
+			}
+
+			writeCBZFixture(t, filepath.Join(a, "ch1.cbz"), "Bar", "1")
+			if got := scan(ScanInput{}); got.Updated != 1 || got.Unchanged != 3 {
+				t.Fatalf("reparenting scan = %+v", got)
+			}
+			assertCatalog(t, p.pool, p.lib,
+				[]string{"comic/Bar", "comic/Bar/ch1", "comic/Bar/ch9", "comic/Foo", "comic/Foo/ch2", "comic/Foo/ch3"})
+
+			got := readContent(t, p.pool, foo)
+			if deref(got.FileURI) != a {
+				t.Fatalf("series file_uri = %v, want %s still pinned by its remaining member there", deref(got.FileURI), a)
+			}
+			if deref(got.CoverURI) != filepath.Join(a, "cover.jpg") {
+				t.Fatalf("series cover_uri = %v, want the cover of %s", deref(got.CoverURI), a)
+			}
+		})
 	}
 }

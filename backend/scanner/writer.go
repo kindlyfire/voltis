@@ -19,7 +19,7 @@ type committed struct {
 	err    error
 }
 
-var flushSpacing = 5 * time.Second
+var FlushSpacing = 5 * time.Second
 
 type writer struct {
 	in       ScanInput
@@ -33,6 +33,8 @@ type writer struct {
 	byURI    map[string]string
 	byDir    map[string][]string
 	cov      *coverage
+	dirs     map[string]*dirPick
+	seeded   map[string]string
 	indexed  map[string]string
 	behind   map[string][]string
 	gone     map[string]bool
@@ -58,6 +60,8 @@ func newWriter(in ScanInput, tc *tasks.TaskContext, notify Notifier, res *resolv
 		series:  make(map[string]SeriesRef, len(refs)),
 		byURI:   make(map[string]string, len(refs)),
 		byDir:   map[string][]string{},
+		dirs:    map[string]*dirPick{},
+		seeded:  map[string]string{},
 		indexed: map[string]string{},
 		behind:  map[string][]string{},
 		gone:    map[string]bool{},
@@ -80,6 +84,7 @@ func newWriter(in ScanInput, tc *tasks.TaskContext, notify Notifier, res *resolv
 		w.series[ref.ID] = ref
 		w.byURI[ref.URI] = ref.ID
 		w.keys[Key{"", ref.URIPart}] = ref.ID
+		w.dirs[ref.ID] = &dirPick{stored: ref.FileURI}
 		if ref.FileURI != nil {
 			w.addDir(*ref.FileURI, ref.ID)
 		}
@@ -112,13 +117,14 @@ func (w *writer) run(ctx context.Context, events <-chan Event, walkDone <-chan e
 	if err := <-walkDone; err != nil {
 		return err
 	}
+	w.seed()
 
 	w.prog.Phase = "parsing"
 	if len(w.queue) == 0 {
 		closeJobs()
 	}
 
-	tick := time.NewTicker(flushSpacing)
+	tick := time.NewTicker(FlushSpacing)
 	defer tick.Stop()
 	busy := false
 	for w.inflight > 0 || len(w.queue) > 0 || busy {
@@ -148,7 +154,7 @@ func (w *writer) run(ctx context.Context, events <-chan Event, walkDone <-chan e
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-		if !busy && len(w.sets) > 0 && time.Since(w.last) >= flushSpacing {
+		if !busy && len(w.sets) > 0 && time.Since(w.last) >= FlushSpacing {
 			flushes <- w.take(false)
 			busy = true
 		}
@@ -157,15 +163,6 @@ func (w *writer) run(ctx context.Context, events <-chan Event, walkDone <-chan e
 
 	w.prog.Phase = "saving"
 	w.publish()
-	if delay := flushSpacing - time.Since(w.last); delay > 0 {
-		timer := time.NewTimer(delay)
-		defer timer.Stop()
-		select {
-		case <-timer.C:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
 	select {
 	case flushes <- w.take(true):
 	case <-ctx.Done():
@@ -334,12 +331,16 @@ func (w *writer) place(r Result) {
 		return
 	}
 
+	if ref != nil {
+		w.aim(parent, r.Item.Series.FileURI)
+	}
 	if prev, ok := w.byID[id]; ok {
 		if pk := (Key{deref(prev.ParentID), prev.URIPart}); pk != k && w.keys[pk] == id {
 			delete(w.keys, pk)
 		}
 		if oldParent := deref(prev.ParentID); oldParent != parent {
 			w.set(oldParent)
+			w.unseed(id)
 		}
 	}
 	w.keys[k] = id
@@ -363,12 +364,9 @@ func (w *writer) resolveSeries(p *ParsedSeries) (*SeriesRef, bool) {
 		if _, taken := w.keys[key]; taken {
 			return nil, false
 		}
-		ref := SeriesRef{ID: models.MakeContentID(), URI: uri, URIPart: p.URIPart, Type: p.ContentType, FileURI: p.FileURI}
+		ref := SeriesRef{ID: models.MakeContentID(), URI: uri, URIPart: p.URIPart, Type: p.ContentType}
 		w.series[ref.ID] = ref
 		w.byURI[uri] = ref.ID
-		if p.FileURI != nil {
-			w.addDir(*p.FileURI, ref.ID)
-		}
 		w.keys[key] = ref.ID
 		s := w.set(ref.ID)
 		s.New = true
@@ -392,18 +390,68 @@ func (w *writer) resolveSeries(p *ParsedSeries) (*SeriesRef, bool) {
 		ref.URI = uri
 		w.byURI[uri] = id
 	}
-	if ref.FileURI != nil && (p.FileURI == nil || *p.FileURI != *ref.FileURI) {
-		w.dropDir(*ref.FileURI, id)
-	}
-	if p.FileURI != nil {
-		w.addDir(*p.FileURI, id)
-	}
 	ref.URIPart = p.URIPart
-	ref.FileURI = p.FileURI
 	w.keys[key] = id
 	w.series[id] = ref
 	s.Ref = ref
 	return &ref, true
+}
+
+func (w *writer) seed() {
+	for id, f := range w.byID {
+		if f.ParentID == nil || w.gone[id] {
+			continue
+		}
+		d, ok := w.dirs[*f.ParentID]
+		if !ok || d.stored == nil {
+			continue
+		}
+		dir := filepath.Dir(f.Path)
+		d.add(dir)
+		w.seeded[id] = dir
+	}
+	for id := range w.series {
+		w.aim(id, nil)
+	}
+}
+
+func (w *writer) unseed(id string) {
+	dir, ok := w.seeded[id]
+	if !ok {
+		return
+	}
+	delete(w.seeded, id)
+	parent := deref(w.byID[id].ParentID)
+	if d, ok := w.dirs[parent]; ok {
+		d.drop(dir)
+		w.aim(parent, nil)
+	}
+}
+
+func (w *writer) aim(id string, dir *string) *string {
+	d, ok := w.dirs[id]
+	if !ok {
+		d = &dirPick{}
+		w.dirs[id] = d
+	}
+	if dir != nil {
+		d.add(*dir)
+	}
+	ref := w.series[id]
+	picked := d.pick()
+	if ptrEq(ref.FileURI, picked) {
+		return picked
+	}
+	if ref.FileURI != nil {
+		w.dropDir(*ref.FileURI, id)
+	}
+	if picked != nil {
+		w.addDir(*picked, id)
+	}
+	ref.FileURI = picked
+	w.series[id] = ref
+	w.set(id).Ref = ref
+	return picked
 }
 
 func (w *writer) at(path string) (Fingerprint, bool) {

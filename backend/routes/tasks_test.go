@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,9 +13,18 @@ import (
 	"time"
 
 	"voltis/lib/tasks"
+	"voltis/models"
+	"voltis/scanner"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+func fastFlushes(t *testing.T) {
+	t.Helper()
+	old := scanner.FlushSpacing
+	scanner.FlushSpacing = 50 * time.Millisecond
+	t.Cleanup(func() { scanner.FlushSpacing = old })
+}
 
 func publishEveryTick(t *testing.T) {
 	t.Helper()
@@ -66,7 +76,7 @@ func awaitRetired(t *testing.T, c *testClient) {
 	})
 }
 
-func blockedScanLibrary(t *testing.T, pool *pgxpool.Pool, c *testClient) (string, func()) {
+func blockedScanLibrary(t *testing.T, pool *pgxpool.Pool, c *testClient, mode string) (string, func()) {
 	t.Helper()
 
 	dir := t.TempDir()
@@ -91,7 +101,7 @@ func blockedScanLibrary(t *testing.T, pool *pgxpool.Pool, c *testClient) (string
 		conn.Release()
 		t.Fatalf("begin: %v", err)
 	}
-	if _, err := tx.Exec(ctx, "LOCK TABLE content IN ACCESS EXCLUSIVE MODE"); err != nil {
+	if _, err := tx.Exec(ctx, "LOCK TABLE content IN "+mode+" MODE"); err != nil {
 		conn.Release()
 		t.Fatalf("lock content: %v", err)
 	}
@@ -105,7 +115,7 @@ func blockedScanLibrary(t *testing.T, pool *pgxpool.Pool, c *testClient) (string
 func TestTaskSnapshotRoute(t *testing.T) {
 	pool := newTestPool(t)
 	c := newAdminClient(t, pool)
-	libID, release := blockedScanLibrary(t, pool, c)
+	libID, release := blockedScanLibrary(t, pool, c, "ACCESS EXCLUSIVE")
 	defer release()
 
 	scan := c.Post("/api/libraries/scan", map[string]any{"ids": []string{libID}}).Assert(t, 200).JSON()
@@ -168,7 +178,7 @@ func TestTaskSnapshotRoute(t *testing.T) {
 func TestTaskLogRoute(t *testing.T) {
 	pool := newTestPool(t)
 	c := newAdminClient(t, pool)
-	libID, release := blockedScanLibrary(t, pool, c)
+	libID, release := blockedScanLibrary(t, pool, c, "EXCLUSIVE")
 	defer release()
 
 	scan := c.Post("/api/libraries/scan", map[string]any{"ids": []string{libID}}).Assert(t, 200).JSON()
@@ -279,6 +289,7 @@ func progressOf(msg map[string]any) map[string]any {
 func TestScanProgressAdvancesAndCommitsNotify(t *testing.T) {
 	noPings(t)
 	publishEveryTick(t)
+	fastFlushes(t)
 	pool := newTestPool(t)
 	c := newAdminClient(t, pool)
 	sock := newFakeSocket(false)
@@ -322,11 +333,15 @@ func TestScanProgressAdvancesAndCommitsNotify(t *testing.T) {
 	assertEq(t, s(final["phase"]), "done")
 	assertEq(t, final["total"].(float64), float64(2))
 	assertEq(t, final["processed"].(float64), float64(2))
-	assertEq(t, final["commit_seq"].(float64), float64(2))
 	assertEq(t, final["saved"].(map[string]any)["added"].(float64), float64(2))
 
-	if len(seqs) != 2 || seqs[0] != 1 || seqs[1] != 2 {
-		t.Fatalf("catalog_changed commit_seqs = %v, want the group commit then the no-op final", seqs)
+	if len(seqs) < 2 || final["commit_seq"].(float64) != float64(len(seqs)) {
+		t.Fatalf("catalog_changed commit_seqs = %v, want one per commit up to the final %v", seqs, final["commit_seq"])
+	}
+	for i, got := range seqs {
+		if got != float64(i+1) {
+			t.Fatalf("catalog_changed commit_seqs = %v, want them contiguous from 1", seqs)
+		}
 	}
 
 	done := snapshotOf(t, c, id)
@@ -336,6 +351,7 @@ func TestScanProgressAdvancesAndCommitsNotify(t *testing.T) {
 
 func TestScanCommitFailureSavesNothingAndNotifiesNobody(t *testing.T) {
 	noPings(t)
+	fastFlushes(t)
 	pool := newTestPool(t)
 	c := newAdminClient(t, pool)
 	sock := newFakeSocket(false)
@@ -387,4 +403,82 @@ func TestScanCommitFailureSavesNothingAndNotifiesNobody(t *testing.T) {
 		t.Fatalf("count content: %v", err)
 	}
 	assertEq(t, rows, 0)
+}
+
+func unparsableComicLibrary(t *testing.T, c *testClient) (string, string) {
+	t.Helper()
+
+	dir := t.TempDir()
+	bad := filepath.Join(dir, "broken.cbz")
+	if err := os.WriteFile(bad, []byte("not an archive"), 0o644); err != nil {
+		t.Fatalf("write archive: %v", err)
+	}
+
+	lib := c.Post("/api/libraries/new", map[string]any{
+		"name": "broken", "type": "comics",
+		"sources": []map[string]any{{"path_uri": dir}},
+	}).Assert(t, 200).JSON()
+	return s(lib["id"]), bad
+}
+
+func TestScanRouteRunsTheWriterPipeline(t *testing.T) {
+	fastFlushes(t)
+	pool := newTestPool(t)
+	c := newAdminClient(t, pool)
+	libID, bad := unparsableComicLibrary(t, c)
+
+	scan := c.Post("/api/libraries/scan", map[string]any{"ids": []string{libID}}).Assert(t, 200).JSON()
+	id := s(scan["task_ids"].([]any)[0])
+	awaitTask(t, c, id, "the scan to finish", func(snap map[string]any) bool {
+		return snap["status"].(float64) >= 2
+	})
+
+	logs := s(c.Get("/api/tasks/"+id+"/logs?offset=0").Assert(t, 200).JSON()["text"])
+	if !strings.Contains(logs, "Failed to parse "+bad+"\n") {
+		t.Fatalf("logs = %q, want the writer's parse failure for %s; only the legacy runner stays silent here", logs, bad)
+	}
+}
+
+func TestPendingScanLibraryIsRequeuedIntoTheWriterPipeline(t *testing.T) {
+	fastFlushes(t)
+	pool := newTestPool(t)
+	c := newAdminClient(t, pool)
+	libID, bad := unparsableComicLibrary(t, c)
+
+	ctx := context.Background()
+	id := models.MakeTaskID()
+	input, err := json.Marshal(scanner.ScanInput{
+		LibraryID:   libID,
+		LibraryType: "comics",
+		Sources:     []string{filepath.Dir(bad)},
+	})
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		"INSERT INTO tasks (id, name, status, input) VALUES ($1, 'scan_library', $2, $3)",
+		id, models.TaskStatusPending, input); err != nil {
+		t.Fatalf("insert pending task: %v", err)
+	}
+
+	newClient(t, pool)
+
+	var status int
+	var logs string
+	read := func() {
+		t.Helper()
+		if err := pool.QueryRow(ctx,
+			"SELECT status, COALESCE(logs, '') FROM tasks WHERE id = $1", id).Scan(&status, &logs); err != nil {
+			t.Fatalf("read task: %v", err)
+		}
+	}
+	waitUntil(t, "the pending scan to be requeued and run at startup", func() bool {
+		read()
+		return status >= models.TaskStatusCompleted
+	})
+
+	assertEq(t, status, models.TaskStatusCompleted)
+	if !strings.Contains(logs, "Failed to parse "+bad+"\n") {
+		t.Fatalf("logs = %q, want the writer's parse failure for %s; only the legacy runner stays silent here", logs, bad)
+	}
 }

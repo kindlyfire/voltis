@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"slices"
 	"time"
 
@@ -32,7 +33,10 @@ type repository struct {
 	metadata       []*metadataRow
 	dirtyIDs       map[string]bool
 	uriRenames     map[string]string
-	parents        map[string]*models.Content
+	parents        map[string]string
+	dirs           map[string]*dirPick
+	seeded         map[string]string
+	moved          map[string]bool
 }
 
 func newRepository(pool *pgxpool.Pool, libraryID string) *repository {
@@ -41,7 +45,10 @@ func newRepository(pool *pgxpool.Pool, libraryID string) *repository {
 		libraryID:  libraryID,
 		dirtyIDs:   map[string]bool{},
 		uriRenames: map[string]string{},
-		parents:    map[string]*models.Content{},
+		parents:    map[string]string{},
+		dirs:       map[string]*dirPick{},
+		seeded:     map[string]string{},
+		moved:      map[string]bool{},
 	}
 }
 
@@ -131,6 +138,13 @@ func (r *repository) invalidateFile(path string) *string {
 	return c.ParentID
 }
 
+func (r *repository) byID(id string) *models.Content {
+	if i := slices.IndexFunc(r.content, func(c models.Content) bool { return c.ID == id }); i >= 0 {
+		return &r.content[i]
+	}
+	return nil
+}
+
 func (r *repository) findContentByFileURI(fileURI string) *models.Content {
 	for i := range r.content {
 		if r.content[i].FileURI != nil && *r.content[i].FileURI == fileURI {
@@ -140,26 +154,100 @@ func (r *repository) findContentByFileURI(fileURI string) *models.Content {
 	return nil
 }
 
+func (r *repository) seriesDirs(c *models.Content) *dirPick {
+	if d, ok := r.dirs[c.ID]; ok {
+		return d
+	}
+	d := &dirPick{stored: c.FileURI}
+	r.dirs[c.ID] = d
+	if c.FileURI == nil {
+		return d
+	}
+	for i := range r.content {
+		m := &r.content[i]
+		if m.FileURI != nil && m.ParentID != nil && *m.ParentID == c.ID {
+			dir := filepath.Dir(*m.FileURI)
+			d.add(dir)
+			r.seeded[m.ID] = dir
+		}
+	}
+	return d
+}
+
+func (r *repository) placeSeries(c *models.Content, dir *string) bool {
+	d := r.seriesDirs(c)
+	if dir != nil {
+		d.add(*dir)
+	}
+	picked := d.pick()
+	if ptrEq(c.FileURI, picked) {
+		return false
+	}
+	c.FileURI = picked
+	r.markDirty(c)
+	return true
+}
+
+func (r *repository) retarget() {
+	for i := range r.content {
+		c := &r.content[i]
+		if isGroupingType(c.Type) && r.placeSeries(c, nil) {
+			r.moved[c.ID] = true
+		}
+	}
+}
+
+func (r *repository) reparent(c *models.Content, parentID *string) {
+	if c.ParentID == nil || ptrEq(c.ParentID, parentID) {
+		return
+	}
+	old := r.byID(*c.ParentID)
+	if old == nil {
+		return
+	}
+	d := r.seriesDirs(old)
+	dir, ok := r.seeded[c.ID]
+	if !ok {
+		return
+	}
+	delete(r.seeded, c.ID)
+	d.drop(dir)
+	if r.placeSeries(old, nil) {
+		r.moved[old.ID] = true
+	}
+}
+
+func (r *repository) findSeries(uri string, fileURI *string) *models.Content {
+	var byDir *models.Content
+	for i := range r.content {
+		c := &r.content[i]
+		if c.URI == uri {
+			return c
+		}
+		if fileURI != nil && c.FileURI != nil && *c.FileURI == *fileURI &&
+			(byDir == nil || c.ID < byDir.ID) {
+			byDir = c
+		}
+	}
+	return byDir
+}
+
 func (r *repository) getSeries(uri, uriPart string, fileURI *string, contentType, title string) *models.Content {
-	if c, ok := r.parents[uri]; ok {
+	if c := r.byID(r.parents[uri]); c != nil {
 		return c
 	}
 
-	for i := range r.content {
-		c := &r.content[i]
-		if c.URI == uri || (fileURI != nil && c.FileURI != nil && *c.FileURI == *fileURI) {
-			if !isGroupingType(c.Type) {
-				return nil
-			}
-			if c.URI != uri {
-				r.updateURIs(c, uri)
-			}
-			c.URIPart = uriPart
-			c.FileURI = fileURI
-			r.markDirty(c)
-			r.parents[uri] = c
-			return c
+	if c := r.findSeries(uri, fileURI); c != nil {
+		if !isGroupingType(c.Type) {
+			return nil
 		}
+		if c.URI != uri {
+			r.updateURIs(c, uri)
+		}
+		c.URIPart = uriPart
+		r.markDirty(c)
+		r.parents[uri] = c.ID
+		return c
 	}
 
 	now := time.Now().UTC()
@@ -169,7 +257,6 @@ func (r *repository) getSeries(uri, uriPart string, fileURI *string, contentType
 		URIPart:    uriPart,
 		URI:        uri,
 		Type:       contentType,
-		FileURI:    fileURI,
 		OrderParts: []*float32{},
 		Valid:      true,
 		CreatedAt:  now,
@@ -177,13 +264,14 @@ func (r *repository) getSeries(uri, uriPart string, fileURI *string, contentType
 	}
 	r.content = append(r.content, newContent)
 	c := &r.content[len(r.content)-1]
+	r.dirs[c.ID] = &dirPick{}
 	r.markDirty(c)
 
 	meta := r.getMetadata(uri)
 	meta.DataRaw.File = &metaraw.RawContainer[models.Metadata]{Raw: models.Metadata{Title: title}}
 	meta.dirty = true
 
-	r.parents[uri] = c
+	r.parents[uri] = c.ID
 	return c
 }
 

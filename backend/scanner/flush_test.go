@@ -210,7 +210,7 @@ func TestFlushKeepsManifestThroughInvalidationAndSeriesPatch(t *testing.T) {
 	seriesID := r.w.byURI["comic/S"]
 	leafID := r.w.keys[Key{seriesID, "ch1"}]
 	seriesManifest := `{"pages": [["cover.jpg", 2, 3]]}`
-	exec(t, r.pool, "UPDATE content SET file_data = $2 WHERE id = $1", seriesID, seriesManifest)
+	exec(t, r.pool, "UPDATE content SET file_data = $2, file_uri = $3 WHERE id = $1", seriesID, seriesManifest, "/lib/Old")
 
 	leafBefore, seriesBefore := readContent(t, r.pool, leafID), readContent(t, r.pool, seriesID)
 	var stored map[string]any
@@ -236,8 +236,8 @@ func TestFlushKeepsManifestThroughInvalidationAndSeriesPatch(t *testing.T) {
 	if !leafAfter.UpdatedAt.After(leafBefore.UpdatedAt) {
 		t.Fatalf("updated_at = %v, want later than %v", leafAfter.UpdatedAt, leafBefore.UpdatedAt)
 	}
-	if deref(seriesAfter.FileURI) != "/lib/S2" {
-		t.Fatalf("series file_uri = %v, want the patch to land", seriesAfter.FileURI)
+	if deref(seriesAfter.FileURI) != "/lib/S" {
+		t.Fatalf("series file_uri = %v, want the patch to land", deref(seriesAfter.FileURI))
 	}
 	if string(seriesAfter.FileData) != string(seriesBefore.FileData) {
 		t.Fatalf("series file_data = %s, want %s", seriesAfter.FileData, seriesBefore.FileData)
@@ -603,19 +603,23 @@ func TestFlushFailedFinalRollsBackScannedAt(t *testing.T) {
 func TestFlushSharedSeriesAcrossDirectories(t *testing.T) {
 	r := newTestScan(t, "comics")
 
-	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
 	r.place(comicResult("/lib/S2/ch2.cbz", "ch2", "S", "/lib/S2"))
+	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
 	r.commit(false)
 
 	want := []string{"comic/S", "comic/S/ch1", "comic/S/ch2"}
 	assertCatalog(t, r.pool, r.lib, want)
 	seriesID := r.w.byURI["comic/S"]
+	if got := readContent(t, r.pool, seriesID); deref(got.FileURI) != "/lib/S" {
+		t.Fatalf("series file_uri = %v, want the smallest member directory", deref(got.FileURI))
+	}
 	for _, part := range []string{"ch1", "ch2"} {
 		if row := readContent(t, r.pool, r.w.keys[Key{seriesID, part}]); deref(row.ParentID) != seriesID {
 			t.Fatalf("%s parent = %v, want the shared series", part, row.ParentID)
 		}
 	}
 
+	exec(t, r.pool, "UPDATE content SET file_uri = $2 WHERE id = $1", seriesID, "/lib/Gone")
 	r.reload()
 	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
 	counts := r.commit(false)
@@ -623,8 +627,8 @@ func TestFlushSharedSeriesAcrossDirectories(t *testing.T) {
 		t.Fatalf("counts = %+v, want the shared series reused", counts)
 	}
 	assertCatalog(t, r.pool, r.lib, want)
-	if deref(readContent(t, r.pool, seriesID).FileURI) != "/lib/S" {
-		t.Fatalf("series file_uri = %v, want the latest directory", readContent(t, r.pool, seriesID).FileURI)
+	if got := readContent(t, r.pool, seriesID); deref(got.FileURI) != "/lib/S" {
+		t.Fatalf("series file_uri = %v, want a directory with no members patched to the smallest one", deref(got.FileURI))
 	}
 }
 
@@ -765,6 +769,112 @@ func TestFallbackTitleAgreesAcrossRunnersWhenFoldersShareASeries(t *testing.T) {
 		updateGroupSeries(&ComicsScanner{}, r, map[string]bool{*parentID: true})
 		if got := r.getMetadata("comic/Foo_2019").DataRaw.File.Raw.Title; got != "Foo_2019" {
 			t.Errorf("legacy runner title = %q with %s first, want %q", got, dirs[first], "Foo_2019")
+		}
+	}
+}
+
+func TestSharedSeriesFileURIAgreesAcrossRunners(t *testing.T) {
+	pool := newTestPool(t)
+	root := t.TempDir()
+	dirs := []string{filepath.Join(root, "Foo\\bar"), filepath.Join(root, "Foo_bar")}
+	for _, dir := range dirs {
+		writeFile(t, filepath.Join(dir, "cover.jpg"), filepath.Base(dir))
+	}
+
+	for _, first := range []int{0, 1} {
+		seen := []int{first, 1 - first}
+
+		lib := newTestLibrary(t, pool, "comics")
+		run := newScanRun(t, pool, lib, &ComicsScanner{})
+		for n, i := range seen {
+			file, item := comicItem(dirs[i], fmt.Sprint(n+1), models.Metadata{})
+			run.place(Result{File: file, Item: item})
+		}
+		run.commit(true)
+		series := readContent(t, pool, contentIDByURI(t, pool, lib, "comic/Foo_bar"))
+		if deref(series.FileURI) != dirs[0] {
+			t.Errorf("new runner file_uri = %v with %s first, want %s", deref(series.FileURI), dirs[first], dirs[0])
+		}
+		if deref(series.CoverURI) != filepath.Join(dirs[0], "cover.jpg") {
+			t.Errorf("new runner cover_uri = %v with %s first, want the cover of %s", deref(series.CoverURI), dirs[first], dirs[0])
+		}
+
+		r := newRepository(nil, "library")
+		var counts scanCounts
+		var parentID *string
+		for n, i := range seen {
+			file, item := comicItem(dirs[i], fmt.Sprint(n+1), models.Metadata{})
+			parentID = applyParseResult(r, "library", file, item, true, func(string, ...any) {}, &counts, &Counts{})
+		}
+		if parentID == nil {
+			t.Fatalf("no series, failed = %d", counts.failed.Load())
+		}
+		updateGroupSeries(&ComicsScanner{}, r, map[string]bool{*parentID: true})
+		legacy := *r.byID(*parentID)
+		if deref(legacy.FileURI) != dirs[0] {
+			t.Errorf("legacy runner file_uri = %v with %s first, want %s", deref(legacy.FileURI), dirs[first], dirs[0])
+		}
+		if deref(legacy.CoverURI) != filepath.Join(dirs[0], "cover.jpg") {
+			t.Errorf("legacy runner cover_uri = %v with %s first, want the cover of %s", deref(legacy.CoverURI), dirs[first], dirs[0])
+		}
+	}
+}
+
+func seedSharedSeries(t *testing.T, pool *pgxpool.Pool, dir string) (string, string) {
+	t.Helper()
+	lib := newTestLibrary(t, pool, "comics")
+	series, leaf := models.MakeContentID(), models.MakeContentID()
+	mtime := baseTime
+	seedContent(t, pool,
+		models.Content{ID: series, LibraryID: lib, Type: "comic_series", URI: "comic/S", URIPart: "S",
+			Valid: true, FileURI: new(dir)},
+		models.Content{ID: leaf, LibraryID: lib, Type: "comic", URI: "comic/S/ch1", URIPart: "ch1",
+			Valid: true, FileURI: new(dir + "/ch1.cbz"), FileMtime: &mtime, FileSize: new(10),
+			ParentID: new(series), OrderParts: []*float32{new(float32(1))}},
+	)
+	exec(t, pool, "INSERT INTO user_to_content (id, user_id, library_id, uri, starred) VALUES ($1, 'u1', $2, $3, true)",
+		models.MakeContentID(), lib, "comic/S/ch1")
+	return lib, series
+}
+
+func TestSeriesKeepsItsDirectoryWhileANeighbourClaimsTheOther(t *testing.T) {
+	pool := newTestPool(t)
+	exec(t, pool, "INSERT INTO users (id, username, password_hash) VALUES ('u1', 'u', 'x')")
+
+	results := []Result{
+		comicResult("/lib/A/ch1.cbz", "ch1", "S", "/lib/A"),
+		comicResult("/lib/Z/ch2.cbz", "ch2", "S", "/lib/Z"),
+		comicResult("/lib/Z/ch3.cbz", "ch3", "T", "/lib/Z"),
+	}
+	want := []string{"comic/S", "comic/S/ch1", "comic/S/ch2", "comic/T", "comic/T/ch3"}
+
+	for _, order := range [][]int{{0, 1, 2}, {1, 0, 2}} {
+		for _, runner := range []string{"writer", "legacy"} {
+			t.Run(fmt.Sprint(runner, order), func(t *testing.T) {
+				lib, series := seedSharedSeries(t, pool, "/lib/A")
+				if runner == "writer" {
+					run := newScanRun(t, pool, lib, &ComicsScanner{})
+					for _, i := range order {
+						run.place(results[i])
+					}
+					run.commit(true)
+				} else {
+					run := newLegacyRun(t, pool, lib, &ComicsScanner{})
+					for _, i := range order {
+						run.place(results[i])
+					}
+					run.commit()
+				}
+				if got := contentURIs(t, pool, lib); !slices.Equal(got, want) {
+					t.Errorf("uris = %v, want %v", got, want)
+				}
+				if got := annotationURIs(t, pool, lib); !slices.Equal(got, []string{"comic/S/ch1"}) {
+					t.Errorf("annotations = %v, want the annotation left where it was", got)
+				}
+				if got := deref(readContent(t, pool, series).FileURI); got != "/lib/A" {
+					t.Errorf("series file_uri = %v, want the stored directory kept", got)
+				}
+			})
 		}
 	}
 }

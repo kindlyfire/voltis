@@ -166,9 +166,9 @@ func TestWriterStandaloneMembership(t *testing.T) {
 func TestWriterSeriesMatchesURIAndFileURI(t *testing.T) {
 	w := testWriter(nil, []SeriesRef{seriesRefOf("p1", "S", "/lib/S")})
 
-	ref, ok := w.resolveSeries(&ParsedSeries{URIPrefix: "comic", URIPart: "S", ContentType: "comic_series", FileURI: new("/lib/Moved")})
-	if !ok || ref.ID != "p1" {
-		t.Fatalf("uri match = %+v, %v, want p1 found by uri alone", ref, ok)
+	w.place(comicResult("/lib/Moved/ch1.cbz", "ch1", "S", "/lib/Moved"))
+	if got := w.series["p1"]; got.URI != "comic/S" || deref(got.FileURI) != "/lib/Moved" {
+		t.Fatalf("uri match = %+v, want p1 found by uri alone and moved by its member", got)
 	}
 	if w.sets["p1"].OldURI != "" || w.sets["p1"].New {
 		t.Fatalf("unchanged series recorded a rename: %+v", w.sets["p1"])
@@ -177,9 +177,9 @@ func TestWriterSeriesMatchesURIAndFileURI(t *testing.T) {
 		t.Fatal("the previous directory must leave the index")
 	}
 
-	ref, ok = w.resolveSeries(&ParsedSeries{URIPrefix: "comic", URIPart: "S_2019", ContentType: "comic_series", FileURI: new("/lib/Moved")})
-	if !ok || ref.ID != "p1" || ref.URI != "comic/S_2019" {
-		t.Fatalf("file uri match = %+v, %v", ref, ok)
+	w.place(comicResult("/lib/Moved/ch2.cbz", "ch2", "S_2019", "/lib/Moved"))
+	if got := w.series["p1"]; got.URI != "comic/S_2019" {
+		t.Fatalf("file uri match = %+v", got)
 	}
 	if w.sets["p1"].OldURI != "comic/S" {
 		t.Fatalf("old uri = %q", w.sets["p1"].OldURI)
@@ -188,12 +188,15 @@ func TestWriterSeriesMatchesURIAndFileURI(t *testing.T) {
 		t.Fatalf("series keys = %v", w.keys)
 	}
 
-	ref, ok = w.resolveSeries(&ParsedSeries{URIPrefix: "comic", URIPart: "S_2020", ContentType: "comic_series", FileURI: new("/lib/Moved")})
-	if !ok || ref.URI != "comic/S_2020" {
-		t.Fatalf("second rename = %+v, %v", ref, ok)
+	w.place(comicResult("/lib/Moved/ch3.cbz", "ch3", "S_2020", "/lib/Moved"))
+	if got := w.series["p1"]; got.URI != "comic/S_2020" {
+		t.Fatalf("second rename = %+v", got)
 	}
 	if w.sets["p1"].OldURI != "comic/S" {
 		t.Fatalf("old uri recorded twice: %q", w.sets["p1"].OldURI)
+	}
+	if w.prog.Failed != 0 || len(w.sets) != 1 {
+		t.Fatalf("progress = %+v, sets = %v", w.prog, slices.Sorted(maps.Keys(w.sets)))
 	}
 }
 
@@ -432,10 +435,10 @@ func (r *writerRig) stop() {
 }
 
 func fastFlushes(t *testing.T) time.Duration {
-	prev := flushSpacing
-	flushSpacing = 150 * time.Millisecond
-	t.Cleanup(func() { flushSpacing = prev })
-	return flushSpacing
+	prev := FlushSpacing
+	FlushSpacing = 150 * time.Millisecond
+	t.Cleanup(func() { FlushSpacing = prev })
+	return FlushSpacing
 }
 
 func (r *writerRig) start() {
@@ -589,9 +592,9 @@ func TestWriterRunCancellationDuringFinalCommit(t *testing.T) {
 	}
 }
 
-func TestWriterRunSpacesFlushesIncludingTheFinalOne(t *testing.T) {
-	if flushSpacing != 5*time.Second {
-		t.Fatalf("flushSpacing = %v, want 5s by default", flushSpacing)
+func TestWriterRunSpacesIntermediateFlushesOnly(t *testing.T) {
+	if FlushSpacing != 5*time.Second {
+		t.Fatalf("FlushSpacing = %v, want 5s by default", FlushSpacing)
 	}
 	spacing := fastFlushes(t)
 
@@ -614,10 +617,8 @@ func TestWriterRunSpacesFlushesIncludingTheFinalOne(t *testing.T) {
 			rig.result(comicResult(jobs[i].Path, names[i], "S", "/lib/S"))
 		}
 		f := rig.takeFlush(t)
-		if prev.seq != 0 {
-			if gap := f.at.Sub(prev.at); gap < spacing {
-				t.Fatalf("flush %d taken %v after flush %d, want at least %v", f.seq, gap, prev.seq, spacing)
-			}
+		if gap := f.at.Sub(prev.at); prev.seq != 0 && !f.final && gap < spacing {
+			t.Fatalf("flush %d taken %v after flush %d, want at least %v", f.seq, gap, prev.seq, spacing)
 		}
 		for _, s := range f.sets {
 			for _, wr := range s.Writes {
@@ -640,37 +641,103 @@ func TestWriterRunSpacesFlushesIncludingTheFinalOne(t *testing.T) {
 	}
 }
 
+func TestWriterRunDoesNotSpaceTheFinalFlush(t *testing.T) {
+	prev := FlushSpacing
+	FlushSpacing = 3 * time.Second
+	t.Cleanup(func() { FlushSpacing = prev })
+
+	w := testWriter(nil, nil)
+	rig := newRig(t, w)
+	rig.start()
+	rig.seen(fsFile("/lib/S/ch1.cbz", baseTime, 10))
+	rig.walkOver()
+
+	job := rig.job()
+	rig.result(comicResult(job.Path, "ch1", "S", "/lib/S"))
+
+	first := rig.takeFlush(t)
+	if first.final || len(first.sets) != 1 {
+		t.Fatalf("first flush = %+v", first)
+	}
+	rig.commit(committed{seq: first.seq, counts: Counts{Added: 1}})
+
+	start := time.Now()
+	final := rig.takeFlush(t)
+	waited := time.Since(start)
+	if !final.final || len(final.sets) != 0 || final.seq != first.seq+1 {
+		t.Fatalf("final flush = %+v", final)
+	}
+	if waited >= FlushSpacing {
+		t.Fatalf("final flush waited %v after the last commit, want parsing to end the scan", waited)
+	}
+	rig.commit(committed{seq: final.seq})
+
+	if err := rig.finish(t); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if _, open := rigRecv(t, rig.flushes, "the flushes channel to close"); open {
+		t.Fatal("flushes must be closed after the final one")
+	}
+	if w.prog.Phase != "done" || w.prog.CommitSeq != final.seq || w.prog.Saved.Added != 1 {
+		t.Fatalf("progress = %+v", w.prog)
+	}
+}
+
 func TestWriterDirectoryKeepsSmallestSeriesID(t *testing.T) {
-	shared := &ParsedSeries{URIPrefix: "comic", URIPart: "C", ContentType: "comic_series", FileURI: new("/lib/D")}
+	sharedDir := func(t *testing.T, w *writer, want string) {
+		t.Helper()
+		w.place(comicResult("/lib/D/ch2.cbz", "ch2", "C", "/lib/D"))
+		got := w.sets[want]
+		if got == nil || len(got.Writes) != 1 || got.Ref.URI != "comic/C" {
+			t.Fatalf("directory match = %v, want it under %s", slices.Sorted(maps.Keys(w.sets)), want)
+		}
+		if got.New || w.prog.Failed != 0 {
+			t.Fatalf("set = %+v, progress = %+v, want an existing series reused", got, w.prog)
+		}
+	}
 
 	t.Run("uri match does not steal the directory", func(t *testing.T) {
 		w := testWriter(nil, []SeriesRef{seriesRefOf("s1", "A", "/lib/D"), seriesRefOf("s2", "B", "/lib/D")})
 
-		if ref, ok := w.resolveSeries(&ParsedSeries{URIPrefix: "comic", URIPart: "B",
-			ContentType: "comic_series", FileURI: new("/lib/D")}); !ok || ref.ID != "s2" {
-			t.Fatalf("uri match = %+v, %v", ref, ok)
+		w.place(comicResult("/lib/D/ch1.cbz", "ch1", "B", "/lib/D"))
+		if len(w.sets["s2"].Writes) != 1 || deref(w.series["s2"].FileURI) != "/lib/D" {
+			t.Fatalf("uri match = %+v", w.sets["s2"])
 		}
-		ref, ok := w.resolveSeries(shared)
-		if !ok || ref.ID != "s1" {
-			t.Fatalf("directory match = %+v, %v, want the smallest id", ref, ok)
-		}
+		sharedDir(t, w, "s1")
 	})
 
 	t.Run("departure restores the next smallest", func(t *testing.T) {
 		w := testWriter(nil, []SeriesRef{seriesRefOf("s1", "A", "/lib/D"), seriesRefOf("s2", "B", "/lib/D")})
 
-		if ref, ok := w.resolveSeries(&ParsedSeries{URIPrefix: "comic", URIPart: "A",
-			ContentType: "comic_series", FileURI: new("/lib/E")}); !ok || ref.ID != "s1" {
-			t.Fatalf("moved series = %+v, %v", ref, ok)
+		w.place(comicResult("/lib/E/ch1.cbz", "ch1", "A", "/lib/E"))
+		if deref(w.series["s1"].FileURI) != "/lib/E" {
+			t.Fatalf("moved series = %+v", w.series["s1"])
 		}
-		ref, ok := w.resolveSeries(shared)
-		if !ok || ref.ID != "s2" {
-			t.Fatalf("directory match = %+v, %v, want the series still in the directory", ref, ok)
-		}
-		if w.sets[ref.ID].New {
-			t.Fatal("a series still in the directory must not be reallocated")
-		}
+		sharedDir(t, w, "s2")
 	})
+}
+
+func TestWriterRejectedPlacementContributesNoDirectory(t *testing.T) {
+	w := testWriter(
+		[]Fingerprint{leafFP("l1", "/lib/Z/ch1.cbz", "ch1", "p1"), leafFP("l2", "/lib/M/other.cbz", "other", "p2")},
+		[]SeriesRef{seriesRefOf("p1", "S", "/lib/A"), seriesRefOf("p2", "T", "/lib/M")},
+	)
+	w.seed()
+	if deref(w.series["p1"].FileURI) != "/lib/Z" {
+		t.Fatalf("seeded series = %+v, want its only member directory", w.series["p1"])
+	}
+
+	w.place(comicResult("/lib/M/other.cbz", "ch1", "S", "/lib/M"))
+
+	if w.prog.Failed != 1 {
+		t.Fatalf("progress = %+v, want the uri conflict rejected", w.prog)
+	}
+	if got := deref(w.series["p1"].FileURI); got != "/lib/Z" {
+		t.Fatalf("series file_uri = %v, want the rejected placement to contribute nothing", got)
+	}
+	if id, ok := w.dirSeries("/lib/M"); !ok || id != "p2" {
+		t.Fatalf("directory index for /lib/M = %q, %v, want only its own series", id, ok)
+	}
 }
 
 func TestWriterRunFailsWithWorkStillOutstanding(t *testing.T) {

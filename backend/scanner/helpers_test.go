@@ -172,14 +172,19 @@ func assertCatalog(t *testing.T, pool *pgxpool.Pool, libraryID string, want []st
 	}
 }
 
-func assertAnnotations(t *testing.T, pool *pgxpool.Pool, libraryID string, want []string) {
+func annotationURIs(t *testing.T, pool *pgxpool.Pool, libraryID string) []string {
 	t.Helper()
 	got, err := db.SelectScalars[string](context.Background(), pool,
 		"SELECT uri FROM user_to_content WHERE library_id = $1 ORDER BY uri", libraryID)
 	if err != nil {
 		t.Fatalf("read annotations: %v", err)
 	}
-	if !slices.Equal(got, want) {
+	return got
+}
+
+func assertAnnotations(t *testing.T, pool *pgxpool.Pool, libraryID string, want []string) {
+	t.Helper()
+	if got := annotationURIs(t, pool, libraryID); !slices.Equal(got, want) {
 		t.Fatalf("annotations = %v, want %v", got, want)
 	}
 }
@@ -217,6 +222,7 @@ func (r *scanRun) reload() {
 		r.t.Fatalf("load series: %v", err)
 	}
 	r.w = newWriter(ScanInput{LibraryID: r.lib}, nil, nil, res, fps, refs)
+	r.w.seed()
 }
 
 func (r *scanRun) place(results ...Result) {
@@ -252,4 +258,45 @@ func (r *scanRun) recordCommit(final bool) (*recordingTx, Counts, error) {
 		return txErr
 	})
 	return rec, counts, err
+}
+
+type legacyRun struct {
+	t    *testing.T
+	pool *pgxpool.Pool
+	lib  string
+	fs   FileScanner
+	r    *repository
+}
+
+func newLegacyRun(t *testing.T, pool *pgxpool.Pool, libraryID string, s FileScanner) *legacyRun {
+	t.Helper()
+	r := newRepository(pool, libraryID)
+	if err := r.load(context.Background()); err != nil {
+		t.Fatalf("load repository: %v", err)
+	}
+	r.retarget()
+	return &legacyRun{t: t, pool: pool, lib: libraryID, fs: s, r: r}
+}
+
+func (l *legacyRun) place(results ...Result) {
+	l.t.Helper()
+	var counts scanCounts
+	parents := map[string]bool{}
+	for _, res := range results {
+		if id := applyParseResult(l.r, l.lib, res.File, res.Item, true, func(string, ...any) {}, &counts, &Counts{}); id != nil {
+			parents[*id] = true
+		}
+	}
+	updateGroupSeries(l.fs, l.r, parents)
+}
+
+func (l *legacyRun) commit() {
+	l.t.Helper()
+	ctx := context.Background()
+	if err := l.r.commitGroup(ctx); err != nil {
+		l.t.Fatalf("commit group: %v", err)
+	}
+	if err := l.r.commitFinal(ctx); err != nil {
+		l.t.Fatalf("commit final: %v", err)
+	}
 }

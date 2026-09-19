@@ -3,6 +3,7 @@ package scanner
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -90,5 +91,27 @@ func TestInvalidatedRowLifecycle(t *testing.T) {
 	}
 	if len(r.content) != 3 || len(r.deletedContent) != 0 || r.content[1].Valid || !r.content[1].UpdatedAt.After(got.UpdatedAt) {
 		t.Fatalf("content = %+v", r.content)
+	}
+}
+
+func TestGetSeriesPrefersTheURIMatchOverTheDirectory(t *testing.T) {
+	series := func(id, uri, part, dir string) models.Content {
+		return models.Content{ID: id, LibraryID: "library", URI: uri, URIPart: part,
+			Type: "comic_series", FileURI: new(dir), Valid: true}
+	}
+	foo := series("foo", "comic/Foo", "Foo", "/lib/A")
+	bar := series("bar", "comic/Bar", "Bar", "/lib/0")
+
+	for _, order := range [][]models.Content{{foo, bar}, {bar, foo}} {
+		r := newRepository(nil, "library")
+		r.content = append(r.content, order...)
+
+		got := r.getSeries("comic/Bar", "Bar", new("/lib/A"), "comic_series", "Bar")
+		if got == nil || got.ID != "bar" {
+			t.Fatalf("row order %s: matched %+v, want the series already holding comic/Bar", order[0].ID, got)
+		}
+		if r.content[slices.IndexFunc(r.content, func(c models.Content) bool { return c.ID == "foo" })].URI != "comic/Foo" {
+			t.Fatalf("row order %s: the directory match renamed comic/Foo", order[0].ID)
+		}
 	}
 }

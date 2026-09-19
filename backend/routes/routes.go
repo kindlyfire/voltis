@@ -27,12 +27,10 @@ func Register(e *echo.Echo, pool *pgxpool.Pool) (*WebSocketHub, *tasks.Manager) 
 	hub := NewHub()
 
 	manager := tasks.NewManager(pool, hub.TaskUpdate)
-	manager.Register(scanner.ScanTask)
+	scanQueue := scanner.NewQueue(manager, pool, hub)
 	if err := manager.Load(context.Background()); err != nil {
 		slog.Error("failed to load pending tasks", "err", err)
 	}
-
-	scanQueue := scanner.NewQueue(manager, pool, hub)
 
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOriginFunc: func(origin string) (bool, error) {
