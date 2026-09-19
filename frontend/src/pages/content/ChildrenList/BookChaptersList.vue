@@ -20,8 +20,7 @@
         <AQueryError v-else-if="qChapters.error.value" :query="qChapters" />
         <VCheckbox
             v-if="visibleChapters.hasHidden"
-            :model-value="settings.showHidden"
-            @update:model-value="settings.setShowHidden(toValue($event) ?? false)"
+            v-model="showHidden"
             label="Show hidden chapters"
             density="compact"
             hide-details
@@ -31,47 +30,20 @@
 </template>
 
 <script setup lang="ts">
-import { computed, toValue } from 'vue'
 import AQueryError from '@/components/AQueryError.vue'
 import { contentApi } from '@/utils/api/content'
 import type { Content } from '@/utils/api/types'
 import {
-    useBookDisplaySettings,
-    useVisibleBookChapters as useVisibleBookChapters,
+    useBookShowHidden,
+    useVisibleBookChapters,
 } from '../../read/BookDisplay/useBookDisplayStore'
 
 const props = defineProps<{
     content: Content
 }>()
 
-const settings = useBookDisplaySettings(() => props.content.id)
+const showHidden = useBookShowHidden(() => props.content.id)
 
 const qChapters = contentApi.useBookChapters(() => props.content.id)
-const visibleChapters = useVisibleBookChapters(
-    computed(() => props.content.id),
-    qChapters.data
-)
+const visibleChapters = useVisibleBookChapters(() => props.content.id, qChapters.data)
 </script>
-
-<style scoped>
-.metadata-list {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 0.25rem 1rem;
-}
-
-.metadata-list dt {
-    color: rgba(var(--v-theme-on-surface), 0.6);
-    font-size: 0.875rem;
-}
-
-.metadata-list dd {
-    margin: 0;
-    font-size: 0.875rem;
-}
-
-.description-text {
-    white-space: pre-wrap;
-    margin: 0;
-}
-</style>

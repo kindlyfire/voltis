@@ -41,43 +41,34 @@ function parseBookDisplaySettings(v: any): BookDisplaySettings {
     return final
 }
 
-export function getBookDisplaySettings(contentId: string) {
-    const { value: settings } = useLocalStorage('reader:books', parseBookDisplaySettings)
-    return {
-        showHidden: computed(() => {
-            return settings.value.showHidden.some(v => v.id === contentId)
-        }),
-        setShowHidden(show: boolean) {
-            const index = settings.value.showHidden.findIndex(item => item.id === contentId)
-            if (show && index === -1) {
-                settings.value.showHidden.push({ id: contentId, dt: new Date().toISOString() })
-            } else if (!show && index !== -1) {
-                settings.value.showHidden.splice(index, 1)
+export function useBookShowHidden(contentId: MaybeRefOrGetter<string>) {
+    const store = useBookDisplayStore()
+    return computed({
+        get: () => store.settings.showHidden.some(v => v.id === toValue(contentId)),
+        set(show) {
+            const id = toValue(contentId)
+            const on = !!show
+            const index = store.settings.showHidden.findIndex(item => item.id === id)
+            if (on && index === -1) {
+                store.settings.showHidden.push({ id, dt: new Date().toISOString() })
+            } else if (!on && index !== -1) {
+                store.settings.showHidden.splice(index, 1)
             }
         },
-    }
-}
-
-export function useBookDisplaySettings(contentId: MaybeRefOrGetter<string>) {
-    return computed(() => getBookDisplaySettings(toValue(contentId)))
+    })
 }
 
 export function useVisibleBookChapters(
     contentId: MaybeRefOrGetter<string>,
     chapters: MaybeRefOrGetter<BookChapter[] | undefined>
 ) {
-    const settings = useBookDisplaySettings(contentId)
+    const showHidden = useBookShowHidden(contentId)
     return computed(() => {
-        let items = toValue(chapters) ?? []
-        let len = items.length
-
-        if (!settings.value.showHidden) {
-            items = items.filter(ch => ch.linear)
-        }
-
+        const all = toValue(chapters) ?? []
+        const linear = all.filter(ch => ch.linear)
         return {
-            items,
-            hasHidden: len !== items.length,
+            items: showHidden.value ? all : linear,
+            hasHidden: linear.length !== all.length,
         }
     })
 }

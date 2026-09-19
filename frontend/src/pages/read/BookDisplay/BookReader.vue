@@ -74,10 +74,7 @@ const qChapterContent = contentApi.useBookChapter(
     () => router.currentRoute.value.query.ch as string
 )
 
-const visibleChapters = useVisibleBookChapters(
-    computed(() => props.contentId),
-    qChapters.data
-)
+const visibleChapters = useVisibleBookChapters(() => props.contentId, qChapters.data)
 
 const currentChapterIndex = computed(() => {
     if (!visibleChapters.value) return -1
