@@ -683,7 +683,7 @@ func (cr *ContentRoutes) updateMetadataOverride(c echo.Context) error {
 		return err
 	}
 
-	err = editMetadataRaw(ctx, cr.pool, content.URI, content.LibraryID, func(mr *metaraw.MetadataRaw) bool {
+	err = editMetadataRaw(ctx, cr.pool, content.ID, content.LibraryID, func(mr *metaraw.MetadataRaw) bool {
 		var overrides models.Metadata
 		_ = json.Unmarshal(req.Data, &overrides)
 		mr.Overrides = &metaraw.RawContainer[models.Metadata]{Raw: overrides}
@@ -745,36 +745,49 @@ func getContent(ctx context.Context, pool *pgxpool.Pool, id string) (models.Cont
 	return content, err
 }
 
-// editMetadataRaw loads the data_raw for a content_metadata row, calls fn, and
-// if fn returns true, persists the updated data_raw and recomputed merged data.
 func editMetadataRaw(
 	ctx context.Context, pool *pgxpool.Pool,
-	uri, libraryID string,
+	contentID, libraryID string,
 	fn func(*metaraw.MetadataRaw) bool,
 ) error {
-	var dataRaw json.RawMessage
-	err := pool.QueryRow(ctx,
-		`SELECT data_raw FROM content_metadata WHERE uri = $1 AND library_id = $2`,
-		uri, libraryID).Scan(&dataRaw)
-	if errors.Is(err, pgx.ErrNoRows) {
-		dataRaw = json.RawMessage("{}")
-	} else if err != nil {
-		return err
-	}
+	return db.WithTx(ctx, pool, func(tx pgx.Tx) error {
+		if err := db.LockMetadata(ctx, tx, libraryID); err != nil {
+			return err
+		}
 
-	merged, err := metaraw.EditInPlace(&dataRaw, fn)
-	if err != nil {
-		return err
-	}
-	if merged == nil {
-		return nil
-	}
+		var uri string
+		err := tx.QueryRow(ctx, "SELECT uri FROM content WHERE id = $1 AND library_id = $2",
+			contentID, libraryID).Scan(&uri)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return echo.NewHTTPError(http.StatusNotFound, "Content not found")
+		} else if err != nil {
+			return err
+		}
 
-	_, err = pool.Exec(ctx, `
-		INSERT INTO content_metadata (uri, library_id, data, data_raw, updated_at)
-		VALUES ($1, $2, $3, $4, now())
-		ON CONFLICT (uri, library_id) DO UPDATE
-		SET data = EXCLUDED.data, data_raw = EXCLUDED.data_raw, updated_at = now()
-	`, uri, libraryID, merged, dataRaw)
-	return err
+		var dataRaw json.RawMessage
+		err = tx.QueryRow(ctx,
+			`SELECT data_raw FROM content_metadata WHERE uri = $1 AND library_id = $2`,
+			uri, libraryID).Scan(&dataRaw)
+		if errors.Is(err, pgx.ErrNoRows) {
+			dataRaw = json.RawMessage("{}")
+		} else if err != nil {
+			return err
+		}
+
+		merged, err := metaraw.EditInPlace(&dataRaw, fn)
+		if err != nil {
+			return err
+		}
+		if merged == nil {
+			return nil
+		}
+
+		_, err = tx.Exec(ctx, `
+			INSERT INTO content_metadata (uri, library_id, data, data_raw, updated_at)
+			VALUES ($1, $2, $3, $4, now())
+			ON CONFLICT (uri, library_id) DO UPDATE
+			SET data = EXCLUDED.data, data_raw = EXCLUDED.data_raw, updated_at = now()
+		`, uri, libraryID, merged, dataRaw)
+		return err
+	})
 }

@@ -61,3 +61,8 @@ func WithTx(ctx context.Context, pool *pgxpool.Pool, fn func(pgx.Tx) error) erro
 
 	return tx.Commit(ctx)
 }
+
+func LockMetadata(ctx context.Context, tx pgx.Tx, libraryID string) error {
+	_, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtext('metadata:' || $1))", libraryID)
+	return err
+}

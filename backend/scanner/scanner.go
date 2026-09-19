@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -46,6 +47,11 @@ type ParsedItem struct {
 	CoverSuffix *string
 	FileData    json.RawMessage
 	MetaRaw     models.Metadata
+}
+
+type Result struct {
+	File FSFile
+	Item *ParsedItem
 }
 
 type ScanInput struct {
@@ -111,26 +117,123 @@ func notifyCatalog(libraryID, taskID string, seq int) {
 	}
 }
 
+func unmarshalScanInput(data json.RawMessage) (any, error) {
+	var v ScanInput
+	err := json.Unmarshal(data, &v)
+	return v, err
+}
+
+func scanCompatible(self any, other tasks.RunningInfo) bool {
+	if other.Name != "scan_library" {
+		return true
+	}
+	otherInput, ok := other.Input.(ScanInput)
+	if !ok {
+		return false
+	}
+	return self.(ScanInput).LibraryID != otherInput.LibraryID
+}
+
 var ScanTask = &tasks.TaskDef{
 	Name: "scan_library",
 	Process: func(input any, tc *tasks.TaskContext) (any, error) {
-		return runScan(input.(ScanInput), tc)
+		return runLegacyScan(input.(ScanInput), tc)
 	},
-	UnmarshalInput: func(data json.RawMessage) (any, error) {
-		var v ScanInput
-		err := json.Unmarshal(data, &v)
-		return v, err
-	},
-	IsCompatibleWith: func(self any, other tasks.RunningInfo) bool {
-		if other.Name != "scan_library" {
-			return true
+	UnmarshalInput:   unmarshalScanInput,
+	IsCompatibleWith: scanCompatible,
+}
+
+func NewScanTask(notify Notifier) *tasks.TaskDef {
+	return &tasks.TaskDef{
+		Name: "scan_library",
+		Process: func(input any, tc *tasks.TaskContext) (any, error) {
+			return runScan(tc.Context(), input.(ScanInput), tc, notify)
+		},
+		UnmarshalInput:   unmarshalScanInput,
+		IsCompatibleWith: scanCompatible,
+	}
+}
+
+func parseWorker(ctx context.Context, s FileScanner, libraryID string, jobs <-chan FSFile, results chan<- Result) {
+	for f := range jobs {
+		if ctx.Err() != nil {
+			return
 		}
-		otherInput, ok := other.Input.(ScanInput)
-		if !ok {
-			return false
+		item := s.ParseFile(libraryID, f)
+		select {
+		case results <- Result{File: f, Item: item}:
+		case <-ctx.Done():
+			return
 		}
-		return self.(ScanInput).LibraryID != otherInput.LibraryID
-	},
+	}
+}
+
+func runScan(ctx context.Context, in ScanInput, tc *tasks.TaskContext, notify Notifier) (ScanResult, error) {
+	start := time.Now()
+
+	s := newFileScanner(in.LibraryType)
+	if s == nil {
+		return ScanResult{}, fmt.Errorf("unsupported library type: %s", in.LibraryType)
+	}
+
+	pool := tc.Pool()
+	res := newResolver()
+	fps, err := loadFingerprints(ctx, pool, in.LibraryID)
+	if err != nil {
+		return ScanResult{}, err
+	}
+	refs, err := loadSeries(ctx, pool, in.LibraryID)
+	if err != nil {
+		return ScanResult{}, err
+	}
+
+	roots := in.Sources
+	if len(in.FilterPaths) > 0 {
+		roots = in.FilterPaths
+	}
+	workers := in.Concurrency
+	if workers <= 0 {
+		workers = 10
+	}
+
+	slog_scan("starting scan", "library", in.LibraryID, "type", in.LibraryType, "force", in.Force,
+		"filter_paths", in.FilterPaths, "concurrency", workers)
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	events := make(chan Event, 256)
+	walkDone := make(chan error, 1)
+	jobs := make(chan FSFile, workers)
+	results := make(chan Result, workers)
+	flushes := make(chan flush, 1)
+	done := make(chan committed, 1)
+
+	w := newWriter(in, tc, notify, res, fps, refs)
+
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		err := walk(ctx, roots, s.FileEligible, events)
+		close(events)
+		walkDone <- err
+	})
+	for range workers {
+		wg.Go(func() { parseWorker(ctx, s, in.LibraryID, jobs, results) })
+	}
+	wg.Go(func() { commitLoop(ctx, pool, s, in.LibraryID, flushes, done) })
+
+	err = w.run(ctx, events, walkDone, jobs, results, flushes, done)
+	cancel()
+	wg.Wait()
+
+	return ScanResult{
+		Added:     w.prog.Saved.Added,
+		Updated:   w.prog.Saved.Updated,
+		Removed:   w.prog.Saved.Removed,
+		Failed:    w.prog.Failed,
+		Unchanged: w.prog.Unchanged,
+		Duration:  time.Since(start),
+	}, err
 }
 
 func newFileScanner(libraryType string) FileScanner {
@@ -144,7 +247,7 @@ func newFileScanner(libraryType string) FileScanner {
 	}
 }
 
-func runScan(input ScanInput, tc *tasks.TaskContext) (ScanResult, error) {
+func runLegacyScan(input ScanInput, tc *tasks.TaskContext) (ScanResult, error) {
 	ctx := tc.Context()
 	pool := tc.Pool()
 

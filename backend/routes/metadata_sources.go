@@ -152,7 +152,7 @@ func (r *MetadataSourceRoutes) mangabakaLink(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("MangaBaka error: %v", err))
 	}
 
-	err = editMetadataRaw(ctx, r.pool, content.URI, content.LibraryID, func(mr *metaraw.MetadataRaw) bool {
+	err = editMetadataRaw(ctx, r.pool, content.ID, content.LibraryID, func(mr *metaraw.MetadataRaw) bool {
 		mr.MangaBaka = &metaraw.RawContainer[sources.Series]{Raw: *series}
 		return true
 	})
@@ -191,7 +191,7 @@ func (r *MetadataSourceRoutes) unlink(c echo.Context) error {
 		return err
 	}
 
-	err = editMetadataRaw(ctx, r.pool, content.URI, content.LibraryID, func(mr *metaraw.MetadataRaw) bool {
+	err = editMetadataRaw(ctx, r.pool, content.ID, content.LibraryID, func(mr *metaraw.MetadataRaw) bool {
 		switch req.Source {
 		case "mangabaka":
 			mr.MangaBaka = nil

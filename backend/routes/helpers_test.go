@@ -1,10 +1,6 @@
 package routes
 
 import (
-	"cmp"
-	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,66 +8,18 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"slices"
 	"strings"
 	"testing"
 
-	"voltis/db"
+	"voltis/db/dbtest"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 )
 
 func newTestPool(t *testing.T) *pgxpool.Pool {
-	t.Helper()
-	adminURL := cmp.Or(os.Getenv("APP_TESTS_DATABASE_URL"),
-		"postgresql://postgres:postgres@localhost:5432/postgres?sslmode=disable")
-
-	ctx := context.Background()
-
-	buf := make([]byte, 8)
-	rand.Read(buf)
-	dbName := "voltis_tests_" + hex.EncodeToString(buf)
-
-	admin, err := db.Connect(ctx, adminURL)
-	if err != nil {
-		t.Fatalf("connect admin: %v", err)
-	}
-	if _, err := admin.Exec(ctx, "CREATE DATABASE "+dbName); err != nil {
-		admin.Close()
-		t.Fatalf("create database: %v", err)
-	}
-	admin.Close()
-
-	parsed, err := url.Parse(adminURL)
-	if err != nil {
-		t.Fatalf("parse admin url: %v", err)
-	}
-	parsed.Path = "/" + dbName
-
-	pool, err := db.Connect(ctx, parsed.String())
-	if err != nil {
-		t.Fatalf("connect test db: %v", err)
-	}
-	if err := db.Migrate(ctx, pool); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-
-	t.Cleanup(func() {
-		pool.Close()
-		admin, err := db.Connect(ctx, adminURL)
-		if err != nil {
-			t.Logf("cleanup connect admin: %v", err)
-			return
-		}
-		defer admin.Close()
-		if _, err := admin.Exec(ctx, "DROP DATABASE "+dbName); err != nil {
-			t.Logf("cleanup drop database: %v", err)
-		}
-	})
-
-	return pool
+	return dbtest.Pool(t)
 }
 
 type testClient struct {

@@ -580,3 +580,14 @@ func TestOrderSteps(t *testing.T) {
 		})
 	}
 }
+
+func TestOrderStepsSkipsSelfRename(t *testing.T) {
+	set := &SeriesChanges{Ref: SeriesRef{ID: "p1", URI: "comic/S", URIPart: "S"}, OldURI: "comic/S"}
+	steps, err := orderSteps(flush{sets: map[string]*SeriesChanges{"p1": set}}, map[string]Key{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(steps) != 0 {
+		t.Fatalf("steps = %+v, want no identity step for a self-rename", steps)
+	}
+}

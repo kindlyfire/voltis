@@ -51,15 +51,19 @@ type SeriesChanges struct {
 
 type flush struct {
 	seq   int
+	at    time.Time
 	sets  map[string]*SeriesChanges
 	gone  map[string]bool
 	final bool
+	keep  bool
 }
 
 type step struct {
 	set   *SeriesChanges
 	write *write
 }
+
+func (s *SeriesChanges) renamed() bool { return s.OldURI != "" && s.OldURI != s.Ref.URI }
 
 func order(children []Child) []Child {
 	ordered := slices.Clone(children)
@@ -140,7 +144,7 @@ func orderSteps(f flush, key map[string]Key) ([]step, error) {
 	ident, holder := map[string]int{}, map[Key]int{}
 	for _, id := range slices.Sorted(maps.Keys(f.sets)) {
 		s := f.sets[id]
-		if s.New || s.OldURI != "" {
+		if s.New || s.renamed() {
 			ident[id] = len(all)
 			all = append(all, step{set: s})
 		}
