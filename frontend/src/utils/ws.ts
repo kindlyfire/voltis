@@ -1,4 +1,4 @@
-import { onUnmounted, ref, type Ref } from 'vue'
+import { onUnmounted, ref, watch, type Ref } from 'vue'
 import { API_URL } from './fetch'
 
 type Handler = (message: any) => void
@@ -15,13 +15,17 @@ function getWsUrl() {
     return `${proto}//${location.host}${API_URL}/ws`
 }
 
+function dispatch(type: string, msg: any) {
+    const handlers = listeners.get(type)
+    if (handlers) {
+        for (const h of handlers) h(msg)
+    }
+}
+
 function onMessage(event: MessageEvent) {
     try {
         const msg = JSON.parse(event.data)
-        const handlers = listeners.get(msg.type)
-        if (handlers) {
-            for (const h of handlers) h(msg)
-        }
+        dispatch(msg.type, msg)
     } catch (e) {
         console.error('Failed to parse WebSocket message', e)
     }
@@ -41,9 +45,13 @@ function connect() {
     socket = new WebSocket(getWsUrl())
     socket.onopen = () => {
         reconnectDelay = 1000
+        dispatch('$open', { type: '$open' })
     }
     socket.onmessage = onMessage
-    socket.onclose = scheduleReconnect
+    socket.onclose = () => {
+        dispatch('$close', { type: '$close' })
+        scheduleReconnect()
+    }
     socket.onerror = () => socket?.close()
 }
 
@@ -94,14 +102,17 @@ const STATUS_MAP: Record<number, ScanTask['status']> = {
     3: 'failed',
 }
 
-export function useScanTracker(): { scans: Ref<ScanTask[]>; clear: () => void } {
+export function useScanTracker(isAdmin: Ref<boolean>): {
+    scans: Ref<ScanTask[]>
+    clear: () => void
+} {
     const scans = ref<ScanTask[]>([])
 
     function findByTask(taskId: string): ScanTask | undefined {
         return scans.value.find(s => s.taskId === taskId)
     }
 
-    const unsubTask = ws.on('task_update', (msg: TaskUpdateMsg) => {
+    function onTaskUpdate(msg: TaskUpdateMsg) {
         const libraryId = msg.task.input?.library_id
         let scan = findByTask(msg.task.id)
 
@@ -127,15 +138,33 @@ export function useScanTracker(): { scans: Ref<ScanTask[]>; clear: () => void } 
         if (msg.progress != null) {
             scan.progress = msg.progress
         }
-    })
+    }
 
     function clear() {
         scans.value = []
     }
 
-    onUnmounted(() => {
-        unsubTask()
-    })
+    let unsubs: (() => void)[] = []
+
+    function unsubscribe() {
+        for (const unsub of unsubs) unsub()
+        unsubs = []
+    }
+
+    watch(
+        isAdmin,
+        admin => {
+            if (admin) {
+                unsubs = [ws.on('task_update', onTaskUpdate), ws.on('$close', clear)]
+            } else {
+                unsubscribe()
+                clear()
+            }
+        },
+        { immediate: true }
+    )
+
+    onUnmounted(unsubscribe)
 
     return { scans, clear }
 }

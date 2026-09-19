@@ -63,9 +63,12 @@
 import { computed, watch, onUnmounted } from 'vue'
 import { ref } from 'vue'
 import { librariesApi } from '@/utils/api/libraries'
+import { usersApi } from '@/utils/api/users'
 import { useScanTracker } from '@/utils/ws'
 
-const { scans, clear } = useScanTracker()
+const qMe = usersApi.useMe()
+const isAdmin = computed(() => !!qMe.data.value?.permissions.includes('ADMIN'))
+const { scans, clear } = useScanTracker(isAdmin)
 const libraries = librariesApi.useList()
 const menuOpen = ref(false)
 const pendingClear = ref(false)
@@ -73,7 +76,7 @@ const pendingClear = ref(false)
 const active = computed(() =>
     scans.value.some(i => i.status === 'running' || i.status === 'queued')
 )
-const visible = computed(() => scans.value.length > 0)
+const visible = computed(() => isAdmin.value && scans.value.length > 0)
 const allDone = computed(
     () =>
         scans.value.length > 0 &&

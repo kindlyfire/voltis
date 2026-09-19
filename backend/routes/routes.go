@@ -14,7 +14,7 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 )
 
-func Register(e *echo.Echo, pool *pgxpool.Pool) {
+func Register(e *echo.Echo, pool *pgxpool.Pool) *WebSocketHub {
 	hub := NewHub()
 
 	manager := tasks.NewManager(pool)
@@ -46,9 +46,9 @@ func Register(e *echo.Echo, pool *pgxpool.Pool) {
 
 	api := e.Group("/api", authMiddleware(pool))
 
-	(&AuthRoutes{pool: pool}).Register(api.Group("/auth"))
+	(&AuthRoutes{pool: pool, hub: hub}).Register(api.Group("/auth"))
 	(&LibraryRoutes{pool: pool, scanQueue: scanQueue}).Register(api.Group("/libraries"))
-	(&UserRoutes{pool: pool}).Register(api.Group("/users"))
+	(&UserRoutes{pool: pool, hub: hub}).Register(api.Group("/users"))
 	(&ContentRoutes{pool: pool}).Register(api.Group("/content"))
 	(&FileRoutes{pool: pool}).Register(api.Group("/files"))
 	(&ContentRefRoutes{pool: pool}).Register(api.Group("/content"))
@@ -59,4 +59,5 @@ func Register(e *echo.Echo, pool *pgxpool.Pool) {
 	e.GET("/api/ws", wsHandler(pool, hub))
 
 	registerStaticRoutes(e)
+	return hub
 }

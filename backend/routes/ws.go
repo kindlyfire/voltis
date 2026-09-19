@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -39,18 +40,27 @@ type socket interface {
 type WebSocketHub struct {
 	mu    sync.Mutex
 	conns map[*userConn]struct{}
+	seq   uint64
+	gens  map[string]uint64
 }
 
 type userConn struct {
-	conn socket
-	user string
-	out  chan []byte
-	done chan struct{}
-	once sync.Once
+	conn  socket
+	user  string
+	admin bool
+	out   chan []byte
+	done  chan struct{}
+	once  sync.Once
 }
 
 func NewHub() *WebSocketHub {
-	return &WebSocketHub{conns: make(map[*userConn]struct{})}
+	return &WebSocketHub{conns: make(map[*userConn]struct{}), gens: make(map[string]uint64)}
+}
+
+func (h *WebSocketHub) dropGen() uint64 {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.seq
 }
 
 func (c *userConn) close() {
@@ -60,10 +70,15 @@ func (c *userConn) close() {
 	})
 }
 
-func (h *WebSocketHub) serve(conn socket, user string) {
-	c := &userConn{conn: conn, user: user, out: make(chan []byte, queueDepth), done: make(chan struct{})}
+func (h *WebSocketHub) serve(conn socket, user string, admin bool, gen uint64) {
+	c := &userConn{conn: conn, user: user, admin: admin, out: make(chan []byte, queueDepth), done: make(chan struct{})}
 
 	h.mu.Lock()
+	if h.gens[user] > gen {
+		h.mu.Unlock()
+		_ = conn.Close()
+		return
+	}
 	h.conns[c] = struct{}{}
 	h.mu.Unlock()
 	defer func() {
@@ -124,7 +139,7 @@ func (c *userConn) readLoop() {
 	}
 }
 
-func (h *WebSocketHub) broadcast(user *string, event any) {
+func (h *WebSocketHub) broadcast(to func(*userConn) bool, event any) {
 	data, err := json.Marshal(event)
 	if err != nil {
 		slog.Error("[ws] failed to marshal event", "err", err)
@@ -134,7 +149,7 @@ func (h *WebSocketHub) broadcast(user *string, event any) {
 	var slow []*userConn
 	h.mu.Lock()
 	for c := range h.conns {
-		if user != nil && *user != c.user {
+		if !to(c) {
 			continue
 		}
 		select {
@@ -151,8 +166,27 @@ func (h *WebSocketHub) broadcast(user *string, event any) {
 	}
 }
 
+func toAdmins(c *userConn) bool { return c.admin }
+
+func (h *WebSocketHub) Drop(user string) {
+	var drop []*userConn
+	h.mu.Lock()
+	h.seq++
+	h.gens[user] = h.seq
+	for c := range h.conns {
+		if c.user == user {
+			drop = append(drop, c)
+		}
+	}
+	h.mu.Unlock()
+
+	for _, c := range drop {
+		c.close()
+	}
+}
+
 func (h *WebSocketHub) BroadcastTaskEvent(task *models.Task, progress json.RawMessage, logDelta *string) {
-	h.broadcast(task.UserID, map[string]any{
+	h.broadcast(toAdmins, map[string]any{
 		"type": "task_update",
 		"task": map[string]any{
 			"id":     task.ID,
@@ -166,7 +200,7 @@ func (h *WebSocketHub) BroadcastTaskEvent(task *models.Task, progress json.RawMe
 }
 
 func (h *WebSocketHub) BroadcastScanQueue(libraryIDs []string) {
-	h.broadcast(nil, map[string]any{
+	h.broadcast(toAdmins, map[string]any{
 		"type":        "scan_queue_update",
 		"library_ids": libraryIDs,
 	})
@@ -174,6 +208,7 @@ func (h *WebSocketHub) BroadcastScanQueue(libraryIDs []string) {
 
 func wsHandler(pool *pgxpool.Pool, hub *WebSocketHub) echo.HandlerFunc {
 	return func(c echo.Context) error {
+		gen := hub.dropGen()
 		user, err := resolveUser(c, pool)
 		if err != nil || user == nil {
 			return c.NoContent(http.StatusUnauthorized)
@@ -184,7 +219,7 @@ func wsHandler(pool *pgxpool.Pool, hub *WebSocketHub) echo.HandlerFunc {
 			return err
 		}
 
-		hub.serve(ws, user.ID)
+		hub.serve(ws, user.ID, slices.Contains(user.Permissions, "ADMIN"), gen)
 		return nil
 	}
 }

@@ -19,6 +19,7 @@ import (
 
 type UserRoutes struct {
 	pool *pgxpool.Pool
+	hub  *WebSocketHub
 }
 
 func (ur *UserRoutes) Register(g *echo.Group) {
@@ -230,6 +231,7 @@ func (ur *UserRoutes) upsert(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	ur.hub.Drop(idOrNew)
 	return c.JSON(http.StatusOK, userToDTO(user))
 }
 
@@ -275,6 +277,7 @@ func (ur *UserRoutes) delete(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	ur.hub.Drop(userID)
 	return okResponse(c)
 }
 

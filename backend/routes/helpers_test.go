@@ -81,6 +81,7 @@ type testClient struct {
 	t      *testing.T
 	server *httptest.Server
 	http   *http.Client
+	hub    *WebSocketHub
 }
 
 func newClient(t *testing.T, pool *pgxpool.Pool) *testClient {
@@ -89,7 +90,7 @@ func newClient(t *testing.T, pool *pgxpool.Pool) *testClient {
 	firstUserFlow.Store(true)
 
 	e := echo.New()
-	Register(e, pool)
+	hub := Register(e, pool)
 
 	server := httptest.NewServer(e)
 	t.Cleanup(server.Close)
@@ -99,7 +100,14 @@ func newClient(t *testing.T, pool *pgxpool.Pool) *testClient {
 		t:      t,
 		server: server,
 		http:   &http.Client{Jar: jar},
+		hub:    hub,
 	}
+}
+
+func (c *testClient) newSession(t *testing.T) *testClient {
+	t.Helper()
+	jar, _ := cookiejar.New(nil)
+	return &testClient{t: t, server: c.server, http: &http.Client{Jar: jar}, hub: c.hub}
 }
 
 func newAdminClient(t *testing.T, pool *pgxpool.Pool) *testClient {

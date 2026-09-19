@@ -1,7 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { apiFetch, RequestError } from '../fetch'
+import { queryClient } from '../misc'
 import { ws } from '../ws'
 import type { UpdateMe, User, UserUpsert } from './types'
+
+ws.on('$open', () => queryClient.invalidateQueries({ queryKey: ['users', 'me'] }))
 
 export const usersApi = {
     useList: () =>

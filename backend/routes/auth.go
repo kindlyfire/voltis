@@ -22,6 +22,7 @@ import (
 
 type AuthRoutes struct {
 	pool *pgxpool.Pool
+	hub  *WebSocketHub
 }
 
 func (a *AuthRoutes) Register(g *echo.Group) {
@@ -165,8 +166,14 @@ func (a *AuthRoutes) logout(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
 	}
 
-	if _, err := a.pool.Exec(reqCtx(c), "DELETE FROM sessions WHERE token = $1", cookie.Value); err != nil {
+	userID, err := db.SelectScalar[string](reqCtx(c),
+		a.pool, "DELETE FROM sessions WHERE token = $1 RETURNING user_id", cookie.Value)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+	case err != nil:
 		return err
+	default:
+		a.hub.Drop(userID)
 	}
 
 	c.SetCookie(&http.Cookie{

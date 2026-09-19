@@ -22,7 +22,11 @@
 
                 <!-- Scanning -->
                 <template v-else>
-                    <div v-if="scans.length === 0 && !scanComplete" class="py-4 text-center">
+                    <div v-if="!isAdmin" class="py-4 text-center">
+                        Scan progress is no longer available.
+                    </div>
+
+                    <div v-else-if="scans.length === 0 && !scanComplete" class="py-4 text-center">
                         <VProgressCircular indeterminate class="mb-4" />
                         <div>Starting scan...</div>
                     </div>
@@ -93,6 +97,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { librariesApi } from '@/utils/api/libraries'
+import { usersApi } from '@/utils/api/users'
 import { useScanTracker } from '@/utils/ws'
 
 const props = defineProps<{
@@ -106,7 +111,9 @@ const qLibraries = librariesApi.useList()
 const mScan = librariesApi.useScan()
 const forceScan = ref(!!props.contentIds?.length)
 const scanning = ref(false)
-const { scans } = useScanTracker()
+const qMe = usersApi.useMe()
+const isAdmin = computed(() => !!qMe.data.value?.permissions.includes('ADMIN'))
+const { scans } = useScanTracker(isAdmin)
 
 const isContentScan = computed(() => !!props.contentIds?.length)
 const scanComplete = computed(
