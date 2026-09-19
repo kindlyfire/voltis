@@ -206,7 +206,8 @@ func (fr *FileRoutes) getBookChapter(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "Chapter not found")
 	}
 
-	return c.Blob(http.StatusOK, "application/xhtml+xml", []byte(chapterContent))
+	c.Response().Header().Set("Content-Disposition", "attachment")
+	return blobUntrusted(c, "application/xhtml+xml", []byte(chapterContent))
 }
 
 func (fr *FileRoutes) getBookResource(c echo.Context) error {
@@ -245,6 +246,13 @@ func (fr *FileRoutes) getBookResource(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	return blobUntrusted(c, mediaType, data)
+}
+
+func blobUntrusted(c echo.Context, mediaType string, data []byte) error {
+	h := c.Response().Header()
+	h.Set("Content-Security-Policy", "sandbox; default-src 'none'")
+	h.Set("X-Content-Type-Options", "nosniff")
 	return c.Blob(http.StatusOK, mediaType, data)
 }
 
