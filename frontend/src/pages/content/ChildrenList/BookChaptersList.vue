@@ -1,49 +1,27 @@
 <template>
     <VContainer>
-        <h2 class="text-h5 mb-4">Chapters</h2>
-        <VList v-if="visibleChapters.items.length">
-            <VListItem
-                v-for="(chapter, index) in visibleChapters.items"
-                :key="chapter.id"
-                :to="`/r/${content.id}?ch=${encodeURIComponent(chapter.href)}`"
-                class="border-b"
-            >
-                <template #prepend>
-                    <span class="mr-4 opacity-60">{{ index + 1 }}</span>
-                </template>
-                <VListItemTitle>{{ chapter.title || chapter.id }}</VListItemTitle>
-            </VListItem>
-        </VList>
-        <div v-else-if="qChapters.isLoading.value" class="flex justify-center py-8">
+        <h2 class="text-h5 mb-4">Contents</h2>
+        <BookContents
+            v-if="qStructure.data.value"
+            :content-id="content.id"
+            :structure="qStructure.data.value"
+        />
+        <div v-else-if="qStructure.isLoading.value" class="flex justify-center py-8">
             <VProgressCircular indeterminate />
         </div>
-        <AQueryError v-else-if="qChapters.error.value" :query="qChapters" />
-        <VCheckbox
-            v-if="visibleChapters.hasHidden"
-            v-model="showHidden"
-            label="Show hidden chapters"
-            density="compact"
-            hide-details
-            class="mt-2"
-        />
+        <AQueryError v-else-if="qStructure.error.value" :query="qStructure" />
     </VContainer>
 </template>
 
 <script setup lang="ts">
 import AQueryError from '@/components/AQueryError.vue'
+import BookContents from '@/pages/read/BookDisplay/BookContents.vue'
 import { contentApi } from '@/utils/api/content'
 import type { Content } from '@/utils/api/types'
-import {
-    useBookShowHidden,
-    useVisibleBookChapters,
-} from '../../read/BookDisplay/useBookDisplayStore'
 
 const props = defineProps<{
     content: Content
 }>()
 
-const showHidden = useBookShowHidden(() => props.content.id)
-
-const qChapters = contentApi.useBookChapters(() => props.content.id)
-const visibleChapters = useVisibleBookChapters(() => props.content.id, qChapters.data)
+const qStructure = contentApi.useBookStructure(() => props.content.id)
 </script>

@@ -65,9 +65,19 @@ export const READING_STATUS_LABELS: Record<ReadingStatus, string> = {
     plan_to_read: 'Plan to Read',
 }
 
+/** Absolute normalized-text offset inside one EPUB document. Written and read
+ * only by the client, so it never has to agree with the backend's counting. */
+export interface BookLocator {
+    version: 1
+    href: string
+    textOffset: number
+    anchorId?: string
+}
+
 export interface ReadingProgress {
     current_page?: number
     progress_percent?: number
+    book?: BookLocator
 }
 
 export interface UserToContent {
@@ -207,11 +217,25 @@ export interface ContentListParams {
     sort_order?: 'asc' | 'desc'
 }
 
-export interface BookChapter {
-    id: string
+export interface SpineItem {
     href: string
-    title: string | null
+    title: string
     linear: boolean
+    words: number
+}
+
+export interface TocEntry {
+    id: string
+    title: string
+    depth: number
+    href: string | null
+    fragment: string
+}
+
+export interface BookStructure {
+    spine: SpineItem[]
+    /** Flat preorder; `depth` carries the nesting. */
+    toc: TocEntry[]
 }
 
 export interface DownloadInfo {

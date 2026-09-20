@@ -712,7 +712,7 @@ func TestFlushKeepsSeriesRenameWhenLeafConflicts(t *testing.T) {
 }
 
 func bookResult(path string, meta epub.Metadata) Result {
-	item := classifyBook(fsFile(path, baseTime, 10), meta, false)
+	item := classifyBook(fsFile(path, baseTime, 10), meta, false, nil)
 	return Result{File: item.File, Item: &item}
 }
 

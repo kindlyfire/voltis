@@ -4,6 +4,9 @@
 
 <script setup lang="ts">
 import { useHead } from '@unhead/vue'
+import { onUnmounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import { parseBookEntry } from './bookEntry'
 import BookReader from './BookReader.vue'
 import { useBookDisplayStore } from './useBookDisplayStore'
 
@@ -11,19 +14,26 @@ const props = defineProps<{
     contentId: string
 }>()
 
+const route = useRoute()
 const store = useBookDisplayStore()
+
+watch(
+    () => [props.contentId, route.query.ch, route.query.frag, route.query.page],
+    () => {
+        store.setContent(props.contentId, parseBookEntry(route.query))
+    },
+    { immediate: true }
+)
+
+onUnmounted(() => {
+    store.dispose()
+})
 
 useHead({
     title() {
-        if (!store.content) return 'Loading...'
-        let text = store.content.title
-
-        const currentChapter = store.chapters?.find(ch => ch.href === store.chapterHref)
-        if (currentChapter) {
-            text = `${currentChapter.title || currentChapter.id} • ${text}`
-        }
-
-        return text
+        const session = store.session
+        if (!session?.content) return 'Loading...'
+        return session.title ? `${session.title} • ${session.content.title}` : session.content.title
     },
 })
 </script>

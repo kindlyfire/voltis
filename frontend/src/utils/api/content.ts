@@ -4,7 +4,7 @@ import { API_URL, apiFetch } from '../fetch'
 import { queryClient } from '../misc'
 import { isEnabled, type QueryOptions } from './_utils'
 import type {
-    BookChapter,
+    BookStructure,
     BrokenRefsFixRequest,
     BrokenRefsSummaryItem,
     BrokenUserToContent,
@@ -79,29 +79,25 @@ export const contentApi = {
             enabled: isEnabled(id),
         }),
 
-    useBookChapters: (id: MaybeRefOrGetter<string | undefined | null>) =>
+    useBookStructure: (id: MaybeRefOrGetter<string | undefined | null>) =>
         useQuery({
-            queryKey: ['content', 'book-chapters', id],
-            queryFn: async () => apiFetch<BookChapter[]>(`/files/book-chapters/${toValue(id)}`),
+            queryKey: ['content', 'book-structure', id],
+            queryFn: async () => contentApi.bookStructure(toValue(id)!),
             enabled: isEnabled(id),
         }),
 
-    useBookChapter: (
-        id: MaybeRefOrGetter<string | undefined | null>,
-        href: MaybeRefOrGetter<string | undefined | null>
-    ) =>
-        useQuery({
-            queryKey: ['content', 'book-chapter', id, href],
-            queryFn: async () => {
-                const params = new URLSearchParams({ href: toValue(href)! })
-                const res = await fetch(`${API_URL}/files/book-chapter/${toValue(id)}?${params}`, {
-                    credentials: 'include',
-                })
-                if (!res.ok) throw new Error('Failed to fetch chapter')
-                return res.text()
-            },
-            enabled: isEnabled([id, href]),
-        }),
+    bookStructure: async (id: string, init?: RequestInit) =>
+        apiFetch<BookStructure>(`/files/book-chapters/${id}`, init),
+
+    bookDocument: async (id: string, href: string, init?: RequestInit) => {
+        const params = new URLSearchParams({ href })
+        const res = await fetch(`${API_URL}/files/book-chapter/${id}?${params}`, {
+            credentials: 'include',
+            ...init,
+        })
+        if (!res.ok) throw new Error(`Failed to fetch ${href}`)
+        return res.text()
+    },
 
     useLists: (id: MaybeRefOrGetter<string | undefined | null>) =>
         useQuery({
@@ -128,11 +124,13 @@ export const contentApi = {
 
     updateUserData: async (
         contentId: string,
-        data: UserToContentUpdate
+        data: UserToContentUpdate,
+        init?: RequestInit
     ): Promise<UserToContent> => {
         return apiFetch<UserToContent>(`/content/${contentId}/user-data`, {
             method: 'POST',
             body: JSON.stringify(data),
+            ...init,
         })
     },
 

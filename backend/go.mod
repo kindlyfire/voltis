@@ -11,9 +11,11 @@ require (
 	github.com/labstack/echo/v4 v4.15.4
 	github.com/lmittmann/tint v1.2.0
 	github.com/nwaples/rardecode/v2 v2.4.1
+	github.com/rivo/uniseg v0.4.7
 	github.com/urfave/cli/v3 v3.12.0
 	golang.org/x/crypto v0.57.0
 	golang.org/x/image v0.46.0
+	golang.org/x/net v0.59.0
 )
 
 require (
@@ -29,7 +31,6 @@ require (
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect
-	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect

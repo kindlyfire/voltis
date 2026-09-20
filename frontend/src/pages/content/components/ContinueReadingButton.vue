@@ -24,6 +24,7 @@
 import { useKeyModifier } from '@vueuse/core'
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { isBookLocator } from '@/pages/read/BookDisplay/bookEntry'
 import { contentApi } from '@/utils/api/content'
 import { showResetReadingModal } from './ResetReadingModal.vue'
 
@@ -58,11 +59,10 @@ const readingStatus = computed(() => {
             return 'resume'
         }
     } else {
-        if (content.user_data?.progress?.current_page) {
-            return 'resume'
-        } else {
-            return 'starting'
-        }
+        // `0` is a real position for both a comic page and a book offset.
+        const progress = content.user_data?.progress
+        const started = typeof progress?.current_page === 'number' || isBookLocator(progress?.book)
+        return started ? 'resume' : 'starting'
     }
 })
 

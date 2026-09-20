@@ -1,129 +1,106 @@
 <template>
-    <div class="book-reader">
-        <VAppBar density="compact" class="book-reader-toolbar">
-            <VBtn icon :to="`/${props.contentId}`" variant="text" exact>
+    <div class="book-reader flex flex-col">
+        <VAppBar density="compact" class="shrink-0">
+            <VBtn icon :to="`/${contentId}`" variant="text" exact>
                 <VIcon>mdi-arrow-left</VIcon>
             </VBtn>
-            <VAppBarTitle class="text-base">
-                {{ chapters.current?.title || 'Chapter' }}
-            </VAppBarTitle>
+            <VAppBarTitle class="text-base">{{ session?.title || 'Book' }}</VAppBarTitle>
             <VSpacer />
-            <VBtn
-                icon
-                :disabled="!chapters.prev"
-                exact
-                :to="chapters.prev ? `?ch=${encodeURIComponent(chapters.prev.href)}` : undefined"
-            >
-                <VIcon>mdi-chevron-left</VIcon>
-            </VBtn>
-            <span class="mx-2 text-sm">
-                {{ currentChapterIndex + 1 }} / {{ visibleChapters.items.length || 0 }}
-            </span>
-            <VBtn
-                icon
-                :disabled="!chapters.next"
-                exact
-                :to="chapters.next ? `?ch=${encodeURIComponent(chapters.next.href)}` : undefined"
-            >
-                <VIcon>mdi-chevron-right</VIcon>
+            <span class="mr-2 text-sm opacity-60">{{ Math.round(session?.percent ?? 0) }}%</span>
+            <VBtn icon variant="text" @click="store.sidebarOpen = true">
+                <VIcon>mdi-format-list-bulleted</VIcon>
             </VBtn>
         </VAppBar>
 
-        <div class="book-reader-content">
-            <div v-if="qChapterContent.isLoading.value" class="flex justify-center py-8">
+        <div class="flex flex-1 flex-col">
+            <VAlert
+                v-if="session?.notice"
+                type="info"
+                variant="tonal"
+                density="compact"
+                closable
+                class="m-4"
+                @click:close="session.dismissNotice()"
+            >
+                {{ session.notice }}
+            </VAlert>
+
+            <div v-if="!session || session.loading" class="flex justify-center py-8">
                 <VProgressCircular indeterminate />
             </div>
-            <AQueryError
-                v-else-if="qChapterContent.error.value"
-                :query="qChapterContent"
-                class="m-4"
-            />
-            <div v-else ref="chapterContainer" class="book-chapter-container" />
+            <VAlert v-else-if="session.error" type="error" variant="tonal" class="m-4">
+                {{ session.error }}
+            </VAlert>
 
-            <div v-if="chapters.next">
-                <VDivider />
-                <div class="flex justify-center p-4">
-                    <VBtn color="primary" :to="`?ch=${encodeURIComponent(chapters.next.href)}`">
-                        Next Chapter: {{ chapters.next.title || chapters.next.id }}
+            <template v-if="session">
+                <div v-if="ready && session.standalone" class="flex justify-center p-4">
+                    <VBtn variant="tonal" @click="session.closeStandalone()">
+                        <VIcon start>mdi-arrow-left</VIcon>
+                        Back to reading
                     </VBtn>
                 </div>
-            </div>
+                <div v-else-if="ready && session.prevPage" class="flex justify-center p-4">
+                    <VBtn variant="tonal" @click="session.goToPage(session.pageIndex - 1)">
+                        Previous: {{ session.prevPage.title }}
+                    </VBtn>
+                </div>
+
+                <!-- Keyed: preserved through this book's loading and errors,
+                replaced when the book itself changes. -->
+                <div ref="host" :key="session.contentId" class="flex-1" />
+
+                <template v-if="ready && !session.standalone">
+                    <VDivider />
+                    <div class="flex justify-center p-4">
+                        <VBtn
+                            v-if="session.nextPage"
+                            color="primary"
+                            @click="session.goToPage(session.pageIndex + 1)"
+                        >
+                            Next: {{ session.nextPage.title }}
+                        </VBtn>
+                        <span v-else class="text-sm opacity-60">End of book</span>
+                    </div>
+                    <div ref="sentinel" class="h-px" />
+                </template>
+            </template>
         </div>
+
+        <BookContentsDrawer />
     </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
-import AQueryError from '@/components/AQueryError.vue'
-import { contentApi } from '@/utils/api/content'
-import { arrayAtNowrap } from '@/utils/misc'
-import { renderChapter } from './renderChapterHtml'
-import { useVisibleBookChapters } from './useBookDisplayStore'
+import { computed, onUnmounted, ref, watch } from 'vue'
+import BookContentsDrawer from './BookContentsDrawer.vue'
+import { useBookDisplayStore } from './useBookDisplayStore'
 
-const props = defineProps<{
-    contentId: string
-}>()
+defineProps<{ contentId: string }>()
 
-const router = useRouter()
-const chapterContainer = ref<HTMLDivElement>()
+const store = useBookDisplayStore()
+const session = computed(() => store.session)
+const ready = computed(() => !!session.value && !session.value.loading && !session.value.error)
+const host = ref<HTMLDivElement>()
+const sentinel = ref<HTMLDivElement>()
 
-const qChapters = contentApi.useBookChapters(() => props.contentId)
-const qChapterContent = contentApi.useBookChapter(
-    () => props.contentId,
-    () => router.currentRoute.value.query.ch as string
+watch(
+    [session, host, sentinel],
+    () => {
+        session.value?.setElements({
+            host: host.value ?? null,
+            sentinel: sentinel.value ?? null,
+        })
+    },
+    { immediate: true, flush: 'post' }
 )
 
-const visibleChapters = useVisibleBookChapters(() => props.contentId, qChapters.data)
-
-const currentChapterIndex = computed(() => {
-    if (!visibleChapters.value) return -1
-    return visibleChapters.value.items.findIndex(
-        ch => ch.href === router.currentRoute.value.query.ch
-    )
+onUnmounted(() => {
+    session.value?.setElements({ host: null, sentinel: null })
 })
-
-const chapters = computed(() => {
-    const ch = visibleChapters.value.items
-    return {
-        current: arrayAtNowrap(ch, currentChapterIndex.value),
-        prev: arrayAtNowrap(ch, currentChapterIndex.value - 1),
-        next: arrayAtNowrap(ch, currentChapterIndex.value + 1),
-    }
-})
-
-function _renderChapter() {
-    if (!chapterContainer.value || !qChapterContent.data.value) return
-    renderChapter({
-        chapterContainer: chapterContainer.value,
-        chapterHtml: qChapterContent.data.value,
-        contentId: props.contentId,
-        chapterHref: router.currentRoute.value.query.ch as string,
-    })
-}
-
-watch(() => qChapterContent.data.value, _renderChapter, { immediate: true })
-watch(chapterContainer, _renderChapter)
 </script>
 
 <style scoped>
 .book-reader {
-    display: flex;
-    flex-direction: column;
     min-height: calc(100dvh - var(--v-layout-top, 0px));
-}
-
-.book-reader-toolbar {
-    flex-shrink: 0;
-}
-
-.book-reader-content {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-}
-
-.book-chapter-container {
-    flex: 1;
 }
 </style>

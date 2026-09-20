@@ -5,7 +5,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
-	"path"
+	"slices"
 	"strings"
 )
 
@@ -20,13 +20,6 @@ type Metadata struct {
 	Publisher       string
 	Language        string
 	PublicationDate string
-}
-
-type Chapter struct {
-	ID     string
-	Href   string
-	Title  string
-	Linear bool
 }
 
 // ReadMetadata extracts metadata from an EPUB file.
@@ -48,70 +41,11 @@ func ReadMetadata(filePath string) (*Metadata, error) {
 		return m, nil
 	}
 
-	opfDir := path.Dir(opfPath)
 	parseDCMetadata(&pkg, m)
 	parseCalibreMetadata(&pkg, m)
-	findCover(&pkg, m, opfDir)
+	findCover(&pkg, m, opfPath)
 
 	return m, nil
-}
-
-// ListChapters returns chapters in reading order.
-func ListChapters(filePath string) ([]Chapter, error) {
-	zr, err := zip.OpenReader(filePath)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = zr.Close() }()
-
-	opfPath, opfData, err := readOPF(zr)
-	if err != nil {
-		return nil, fmt.Errorf("no OPF file found")
-	}
-
-	var pkg opfPackage
-	if err := xml.Unmarshal(opfData, &pkg); err != nil {
-		return nil, fmt.Errorf("invalid OPF: %w", err)
-	}
-
-	opfDir := path.Dir(opfPath)
-
-	manifest := map[string]manifestItem{}
-	for _, item := range pkg.Manifest.Items {
-		manifest[item.ID] = item
-	}
-
-	titles := parseNavTitles(zr, manifest, opfDir)
-
-	var chapters []Chapter
-	for _, ref := range pkg.Spine.ItemRefs {
-		item, ok := manifest[ref.IDRef]
-		if !ok {
-			continue
-		}
-		fullHref := resolvePath(opfDir, item.Href)
-		title := titles[item.Href]
-		if title == "" {
-			title = titles[fullHref]
-		}
-		linear := ref.Linear != "no"
-		chapters = append(chapters, Chapter{
-			ID:     ref.IDRef,
-			Href:   fullHref,
-			Title:  title,
-			Linear: linear,
-		})
-	}
-
-	// Skip cover chapter
-	if len(chapters) > 0 {
-		first := strings.ToLower(chapters[0].Title + " " + chapters[0].ID)
-		if strings.Contains(first, "cover") {
-			chapters = chapters[1:]
-		}
-	}
-
-	return chapters, nil
 }
 
 // ReadChapter reads raw XHTML content of a chapter by href.
@@ -177,6 +111,7 @@ type manifestItem struct {
 }
 
 type opfSpine struct {
+	Toc      string         `xml:"toc,attr"`
 	ItemRefs []spineItemRef `xml:"itemref"`
 }
 
@@ -299,7 +234,7 @@ func parseCalibreMetadata(pkg *opfPackage, m *Metadata) {
 	}
 }
 
-func findCover(pkg *opfPackage, m *Metadata, opfDir string) {
+func findCover(pkg *opfPackage, m *Metadata, opfPath string) {
 	items := pkg.Manifest.Items
 
 	// Method 1: meta name="cover" -> manifest item
@@ -312,201 +247,34 @@ func findCover(pkg *opfPackage, m *Metadata, opfDir string) {
 	}
 	if coverID != "" {
 		for _, item := range items {
-			if item.ID == coverID && item.Href != "" {
-				m.CoverPath = resolvePath(opfDir, item.Href)
-				return
+			if item.ID == coverID {
+				if target, err := resolveTarget(opfPath, item.Href); err == nil {
+					m.CoverPath = target.Href
+					return
+				}
 			}
 		}
 	}
 
 	// Method 2: properties="cover-image"
 	for _, item := range items {
-		if strings.Contains(item.Properties, "cover-image") && item.Href != "" {
-			m.CoverPath = resolvePath(opfDir, item.Href)
-			return
+		if slices.Contains(strings.Fields(item.Properties), "cover-image") {
+			if target, err := resolveTarget(opfPath, item.Href); err == nil {
+				m.CoverPath = target.Href
+				return
+			}
 		}
 	}
 
 	// Method 3: id contains "cover" + image media type
 	for _, item := range items {
-		if strings.Contains(strings.ToLower(item.ID), "cover") &&
-			strings.HasPrefix(item.MediaType, "image/") && item.Href != "" {
-			m.CoverPath = resolvePath(opfDir, item.Href)
-			return
-		}
-	}
-}
-
-func parseNavTitles(zr *zip.ReadCloser, manifest map[string]manifestItem, opfDir string) map[string]string {
-	// Try EPUB3 nav
-	for _, item := range manifest {
-		if strings.Contains(item.Properties, "nav") {
-			navPath := resolvePath(opfDir, item.Href)
-			data, err := readZipFile(zr, navPath)
-			if err == nil {
-				titles := parseEPUB3Nav(data, opfDir)
-				if len(titles) > 0 {
-					return titles
-				}
+		if strings.Contains(strings.ToLower(item.ID), "cover") && strings.HasPrefix(item.MediaType, "image/") {
+			if target, err := resolveTarget(opfPath, item.Href); err == nil {
+				m.CoverPath = target.Href
+				return
 			}
 		}
 	}
-
-	// Fallback: toc.ncx
-	for _, item := range manifest {
-		if item.MediaType == "application/x-dtbncx+xml" {
-			ncxPath := resolvePath(opfDir, item.Href)
-			data, err := readZipFile(zr, ncxPath)
-			if err == nil {
-				titles := parseNCXTitles(data, opfDir)
-				if len(titles) > 0 {
-					return titles
-				}
-			}
-		}
-	}
-
-	return map[string]string{}
-}
-
-func parseEPUB3Nav(data []byte, opfDir string) map[string]string {
-	titles := map[string]string{}
-
-	// Simple approach: find all <a> elements in toc nav using string scanning
-	// since namespace-heavy XHTML is tricky with encoding/xml.
-	// We'll use a more manual approach.
-	content := string(data)
-
-	// Find toc nav section
-	tocIdx := strings.Index(content, `epub:type="toc"`)
-	if tocIdx == -1 {
-		tocIdx = strings.Index(content, `type="toc"`)
-	}
-	if tocIdx == -1 {
-		return titles
-	}
-
-	// Extract anchors after the toc marker
-	remaining := content[tocIdx:]
-	for {
-		aStart := strings.Index(remaining, "<a ")
-		if aStart == -1 {
-			break
-		}
-		aEnd := strings.Index(remaining[aStart:], "</a>")
-		if aEnd == -1 {
-			break
-		}
-		aEnd += aStart + 4
-
-		aTag := remaining[aStart:aEnd]
-
-		// Extract href
-		hrefIdx := strings.Index(aTag, `href="`)
-		if hrefIdx == -1 {
-			remaining = remaining[aEnd:]
-			continue
-		}
-		hrefStart := hrefIdx + 6
-		hrefEnd := strings.Index(aTag[hrefStart:], `"`)
-		if hrefEnd == -1 {
-			remaining = remaining[aEnd:]
-			continue
-		}
-		href := aTag[hrefStart : hrefStart+hrefEnd]
-
-		// Extract text (strip tags)
-		textStart := strings.Index(aTag, ">")
-		textContent := aTag[textStart+1 : strings.LastIndex(aTag, "</a>")]
-		text := stripTags(textContent)
-		text = strings.TrimSpace(text)
-
-		if href != "" && text != "" {
-			baseHref, _, _ := strings.Cut(href, "#")
-			if baseHref != "" {
-				fullHref := resolvePath(opfDir, baseHref)
-				titles[baseHref] = text
-				titles[fullHref] = text
-			}
-		}
-
-		// Check if we hit a closing nav tag
-		navEnd := strings.Index(remaining[aStart:], "</nav>")
-		if navEnd != -1 && navEnd+aStart < aEnd {
-			break
-		}
-
-		remaining = remaining[aEnd:]
-	}
-
-	return titles
-}
-
-func parseNCXTitles(data []byte, opfDir string) map[string]string {
-	titles := map[string]string{}
-
-	type ncxContent struct {
-		Src string `xml:"src,attr"`
-	}
-	type ncxText struct {
-		Text string `xml:",chardata"`
-	}
-	type ncxLabel struct {
-		Text ncxText `xml:"text"`
-	}
-	type navPoint struct {
-		Label   ncxLabel   `xml:"navLabel"`
-		Content ncxContent `xml:"content"`
-	}
-	type navMap struct {
-		Points []navPoint `xml:"navPoint"`
-	}
-	type ncx struct {
-		XMLName xml.Name `xml:"ncx"`
-		NavMap  navMap   `xml:"navMap"`
-	}
-
-	var n ncx
-	if err := xml.Unmarshal(data, &n); err != nil {
-		return titles
-	}
-
-	for _, p := range n.NavMap.Points {
-		text := strings.TrimSpace(p.Label.Text.Text)
-		src := p.Content.Src
-		if text != "" && src != "" {
-			baseSrc, _, _ := strings.Cut(src, "#")
-			if baseSrc != "" {
-				fullHref := resolvePath(opfDir, baseSrc)
-				titles[baseSrc] = text
-				titles[fullHref] = text
-			}
-		}
-	}
-
-	return titles
-}
-
-func resolvePath(dir, href string) string {
-	if dir == "." || dir == "" {
-		return href
-	}
-	return dir + "/" + href
-}
-
-func stripTags(s string) string {
-	var result strings.Builder
-	inTag := false
-	for _, r := range s {
-		if r == '<' {
-			inTag = true
-		} else if r == '>' {
-			inTag = false
-		} else if !inTag {
-			result.WriteRune(r)
-		}
-	}
-	return result.String()
 }
 
 func parseFloat(s string) (float64, error) {

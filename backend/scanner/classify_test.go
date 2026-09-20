@@ -1,11 +1,13 @@
 package scanner
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"voltis/lib/comic"
@@ -56,7 +58,7 @@ func TestClassifyComicTuples(t *testing.T) {
 func TestClassifyBookTuples(t *testing.T) {
 	check := func(t *testing.T, path string, meta epub.Metadata, want string) {
 		t.Helper()
-		item := classifyBook(FSFile{Path: path, Mtime: baseTime, Size: 10}, meta, false)
+		item := classifyBook(FSFile{Path: path, Mtime: baseTime, Size: 10}, meta, false, nil)
 		if got := summarize(&item); got != want {
 			t.Errorf("got  %s\nwant %s", got, want)
 		}
@@ -82,7 +84,7 @@ func TestClassifyBookMetadata(t *testing.T) {
 		PublicationDate: "2020-01-02",
 		Series:          "Book Series",
 	}
-	got := classifyBook(file, meta, false).MetaRaw
+	got := classifyBook(file, meta, false, nil).MetaRaw
 	want := models.Metadata{
 		Title:       "Story",
 		Description: "A story",
@@ -129,7 +131,7 @@ func TestSanitizeURIPart(t *testing.T) {
 
 func TestSanitizeURIPartAtBookProducers(t *testing.T) {
 	file := FSFile{Path: "/lib/Books/a\tb\\c.epub", Mtime: baseTime, Size: 10}
-	item := classifyBook(file, epub.Metadata{Series: "Foo/bar\x01"}, false)
+	item := classifyBook(file, epub.Metadata{Series: "Foo/bar\x01"}, false, nil)
 
 	if item.URIPart != "a_b_c" {
 		t.Errorf("item part = %q, want the stem sanitized", item.URIPart)
@@ -144,7 +146,7 @@ func TestSanitizeURIPartAtBookProducers(t *testing.T) {
 		t.Errorf("metadata series = %q, want it kept verbatim", item.MetaRaw.Series)
 	}
 
-	empty := classifyBook(FSFile{Path: "/lib/Books/.epub"}, epub.Metadata{Series: "/"}, false)
+	empty := classifyBook(FSFile{Path: "/lib/Books/.epub"}, epub.Metadata{Series: "/"}, false, nil)
 	if empty.URIPart != "_" || empty.Series.URIPart != "_" {
 		t.Errorf("parts = %q and %q, want the empty fallback", empty.URIPart, empty.Series.URIPart)
 	}
@@ -210,8 +212,8 @@ func TestClassifySanitizesEveryURIPartProducer(t *testing.T) {
 func TestClassifyCollisionFallsThroughToConflictHandling(t *testing.T) {
 	first := FSFile{Path: "/lib/Books/a_b.epub", Mtime: baseTime, Size: 10}
 	second := FSFile{Path: "/lib/Books/a\tb.epub", Mtime: baseTime, Size: 10}
-	one := classifyBook(first, epub.Metadata{}, false)
-	two := classifyBook(second, epub.Metadata{}, false)
+	one := classifyBook(first, epub.Metadata{}, false, nil)
+	two := classifyBook(second, epub.Metadata{}, false, nil)
 	if one.URIPart != two.URIPart {
 		t.Fatalf("parts = %q and %q, want sanitization to collide them", one.URIPart, two.URIPart)
 	}
@@ -259,5 +261,34 @@ func TestComicFallbackSeriesLeavesTheInferredNameOffTheChild(t *testing.T) {
 	}
 	if item.MetaRaw.Series != "" {
 		t.Errorf("child series = %q, want an inferred name left off the child", item.MetaRaw.Series)
+	}
+}
+
+func TestClassifyBookWords(t *testing.T) {
+	item := classifyBook(FSFile{Path: "/lib/Books/x.epub", Mtime: baseTime, Size: 10},
+		epub.Metadata{Title: "X"}, false, map[string]int{"OEBPS/b.xhtml": 7, "OEBPS/a.xhtml": 120})
+
+	if got := string(item.FileData); got != `{"words":{"OEBPS/a.xhtml":120,"OEBPS/b.xhtml":7}}` {
+		t.Errorf("file data = %s", got)
+	}
+	if empty := classifyBook(FSFile{Path: "/lib/Books/x.epub"}, epub.Metadata{}, false, nil); empty.FileData != nil {
+		t.Errorf("file data = %s, want none without counts", empty.FileData)
+	}
+}
+
+func TestParseBookCountsWords(t *testing.T) {
+	text := "This paragraph is comfortably longer than the textless floor."
+	path := writeZip(t, filepath.Join(t.TempDir(), "book.epub"), map[string][]byte{
+		"META-INF/container.xml": []byte(`<?xml version="1.0"?><container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>`),
+		"OEBPS/content.opf": []byte(`<?xml version="1.0"?><package><metadata><dc:title xmlns:dc="http://purl.org/dc/elements/1.1/">B</dc:title></metadata><manifest>
+			<item id="c1" href="text/ch1.xhtml" media-type="application/xhtml+xml"/>
+		</manifest><spine><itemref idref="c1"/></spine></package>`),
+		"OEBPS/text/ch1.xhtml": []byte(`<!DOCTYPE html><html><body><p>` + text + `</p></body></html>`),
+	})
+
+	item := (&BooksScanner{}).ParseFile(statFile(t, path))
+	want := fmt.Sprintf(`{"words":{"OEBPS/text/ch1.xhtml":%d}}`, len(strings.Fields(text)))
+	if got := string(item.FileData); got != want {
+		t.Errorf("file data = %s, want %s", got, want)
 	}
 }

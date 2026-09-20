@@ -20,6 +20,8 @@ export const useLayoutStore = defineStore('layout', () => {
         'comicReaderPaged',
         // Opening the reader sidebar always shows the navbar
         'comicReaderSidebar',
+        // Same for the book reader's contents drawer
+        'bookReaderSidebar',
     ])
     watch(
         () => [navbarScrollHide.enabled.value, navbarScrollHide.hidden.value],

@@ -15,7 +15,7 @@ import (
 	"voltis/scanner/keys"
 )
 
-func classifyBook(file FSFile, meta epub.Metadata, coverValid bool) ParsedItem {
+func classifyBook(file FSFile, meta epub.Metadata, coverValid bool, words map[string]int) ParsedItem {
 	stem := strings.TrimSuffix(filepath.Base(file.Path), filepath.Ext(file.Path))
 
 	index := 0.0
@@ -41,6 +41,9 @@ func classifyBook(file FSFile, meta epub.Metadata, coverValid bool) ParsedItem {
 	}
 	if coverValid {
 		item.CoverSuffix = new(meta.CoverPath)
+	}
+	if len(words) > 0 {
+		item.FileData, _ = json.Marshal(map[string]any{"words": words})
 	}
 	for _, a := range meta.Authors {
 		item.MetaRaw.Staff = append(item.MetaRaw.Staff, models.StaffEntry{Name: a, Role: "author"})

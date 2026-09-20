@@ -128,13 +128,6 @@ func (fr *FileRoutes) getComicPage(c echo.Context) error {
 	return c.Blob(http.StatusOK, mediaType, data)
 }
 
-type chapterResponse struct {
-	ID     string  `json:"id"`
-	Href   string  `json:"href"`
-	Title  *string `json:"title"`
-	Linear bool    `json:"linear"`
-}
-
 func (fr *FileRoutes) getBookChapters(c echo.Context) error {
 	if _, err := requireUser(c); err != nil {
 		return err
@@ -158,23 +151,21 @@ func (fr *FileRoutes) getBookChapters(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Content is not an EPUB")
 	}
 
-	chapters, err := epub.ListChapters(*content.FileURI)
+	structure, err := epub.BuildStructure(*content.FileURI)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	result := make([]chapterResponse, len(chapters))
-	for i, ch := range chapters {
-		result[i] = chapterResponse{
-			ID:     ch.ID,
-			Href:   ch.Href,
-			Linear: ch.Linear,
-		}
-		if ch.Title != "" {
-			result[i].Title = &ch.Title
+	var fileData struct {
+		Words map[string]int `json:"words"`
+	}
+	if json.Unmarshal(content.FileData, &fileData) == nil {
+		for i, item := range structure.Spine {
+			structure.Spine[i].Words = fileData.Words[item.Href]
 		}
 	}
-	return c.JSON(http.StatusOK, result)
+
+	return c.JSON(http.StatusOK, structure)
 }
 
 func (fr *FileRoutes) getBookChapter(c echo.Context) error {
@@ -235,14 +226,12 @@ func (fr *FileRoutes) getBookResource(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Content is not an EPUB")
 	}
 
-	// Path traversal protection
-	fileBase, _ := filepath.Abs(*content.FileURI)
-	resolved, _ := filepath.Abs(filepath.Join(*content.FileURI, resourcePath))
-	if !strings.HasPrefix(resolved, fileBase+string(filepath.Separator)) {
+	entry, err := epub.NormalizeArchivePath(resourcePath)
+	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid resource path")
 	}
 
-	data, mediaType, err := readContentFile(resolved)
+	data, mediaType, err := readArchiveEntry(*content.FileURI, entry)
 	if err != nil {
 		return err
 	}

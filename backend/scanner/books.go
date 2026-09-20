@@ -21,8 +21,13 @@ func (bs *BooksScanner) ParseFile(file FSFile) *ParsedItem {
 		return nil
 	}
 
+	words, err := epub.CountWords(file.Path)
+	if err != nil {
+		slog_scan("failed to count epub text", "path", file.Path, "err", err)
+	}
+
 	coverValid := meta.CoverPath != "" && epub.ValidateCoverPath(file.Path, meta.CoverPath)
-	return new(classifyBook(file, *meta, coverValid))
+	return new(classifyBook(file, *meta, coverValid, words))
 }
 
 func (bs *BooksScanner) SeriesCover(series SeriesRef, ordered []Child) (*string, *time.Time) {

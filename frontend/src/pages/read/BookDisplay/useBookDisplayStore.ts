@@ -1,98 +1,67 @@
 import { acceptHMRUpdate, defineStore } from 'pinia'
-import { computed, markRaw, readonly, ref, toValue, type MaybeRefOrGetter } from 'vue'
-import { contentApi } from '@/utils/api/content'
-import type { BookChapter } from '@/utils/api/types'
-import { useLocalStorage } from '@/utils/localStorage'
+import { ref, type Ref } from 'vue'
+import { useRouter, type Router } from 'vue-router'
+import { isBookLocator, type BookEntry } from './bookEntry'
+import {
+    createBookSession,
+    type BookAnchor,
+    type BookNav,
+    type BookSession,
+} from './createBookSession'
 
-interface BookDisplaySettings {
-    showHidden: Array<{
-        id: string
-        dt: string
-    }>
+function anchorQuery(target: BookAnchor) {
+    return target.fragment ? { ch: target.href, frag: target.fragment } : { ch: target.href }
 }
 
-function parseBookDisplaySettings(v: any): BookDisplaySettings {
-    const defaults: BookDisplaySettings = { showHidden: [] }
-    if (typeof v !== 'object' || v === null) return defaults
-    const final = {
-        showHidden: (Array.isArray(v.showHidden) ? (v.showHidden as any[]) : []).filter(item => {
-            if (
-                !(
-                    typeof item === 'object' &&
-                    item !== null &&
-                    typeof item.id === 'string' &&
-                    typeof item.dt === 'string'
-                )
-            )
-                return false
-
-            // If date is over a month old, remove it. Otherwise update it.
-            const dt = new Date(item.dt)
-            if (isNaN(dt.getTime())) return false
-            const now = new Date()
-            const diff = now.getTime() - dt.getTime()
-            const oneMonth = 30 * 24 * 60 * 60 * 1000
-            if (diff > oneMonth) return false
-
-            item.dt = now.toISOString()
-            return true
-        }),
-    }
-    return final
-}
-
-export function useBookShowHidden(contentId: MaybeRefOrGetter<string>) {
-    const store = useBookDisplayStore()
-    return computed({
-        get: () => store.settings.showHidden.some(v => v.id === toValue(contentId)),
-        set(show) {
-            const id = toValue(contentId)
-            const on = !!show
-            const index = store.settings.showHidden.findIndex(item => item.id === id)
-            if (on && index === -1) {
-                store.settings.showHidden.push({ id, dt: new Date().toISOString() })
-            } else if (!on && index !== -1) {
-                store.settings.showHidden.splice(index, 1)
-            }
+/** History snapshots are scoped to the book, so an entry stamped by the
+ * previous one can never be restored onto this one. */
+export function createBookNav(router: Router, contentId: string): BookNav {
+    return {
+        push(target) {
+            router.push({ query: anchorQuery(target) })
         },
-    })
-}
-
-export function useVisibleBookChapters(
-    contentId: MaybeRefOrGetter<string>,
-    chapters: MaybeRefOrGetter<BookChapter[] | undefined>
-) {
-    const showHidden = useBookShowHidden(contentId)
-    return computed(() => {
-        const all = toValue(chapters) ?? []
-        const linear = all.filter(ch => ch.linear)
-        return {
-            items: showHidden.value ? all : linear,
-            hasHidden: linear.length !== all.length,
-        }
-    })
+        replace(target) {
+            router.replace({ query: anchorQuery(target) })
+        },
+        saveLocator(locator) {
+            history.replaceState(
+                { ...(history.state ?? {}), bookLocator: { contentId, locator } },
+                ''
+            )
+        },
+        historyLocator() {
+            const saved = (history.state as Record<string, any> | null)?.bookLocator
+            if (!saved || saved.contentId !== contentId) return null
+            return isBookLocator(saved.locator) ? saved.locator : null
+        },
+    }
 }
 
 export const useBookDisplayStore = defineStore('book-display', () => {
-    const { value: settings } = useLocalStorage('reader:books', parseBookDisplaySettings)
-    const contentId = ref(null as string | null)
-    const chapterHref = ref(null as string | null)
+    const router = useRouter()
+    const sidebarOpen = ref(false)
+    const session: Ref<BookSession | null> = ref(null)
 
-    const qContent = contentApi.useGet(() => contentId.value)
-    const qChapters = contentApi.useBookChapters(() => contentId.value)
-    const qChapterContent = contentApi.useBookChapter(() => contentId.value, chapterHref)
+    // Left over from the removed book settings.
+    localStorage.removeItem('reader:books')
 
-    return {
-        settings,
-        contentId: readonly(contentId),
-        chapterHref: readonly(chapterHref),
-        qChapters: markRaw(qChapters),
-        chapters: qChapters.data,
-        qContent: markRaw(qContent),
-        content: qContent.data,
-        qChapterContent: markRaw(qChapterContent),
-        chapterContent: qChapterContent.data,
+    function setContent(contentId: string, entry: BookEntry) {
+        if (session.value?.contentId === contentId) {
+            session.value.setEntry(entry)
+            return
+        }
+        session.value?.dispose()
+        session.value = createBookSession(contentId, entry, createBookNav(router, contentId))
     }
+
+    function dispose() {
+        sidebarOpen.value = false
+        const current = session.value
+        session.value = null
+        return current?.dispose()
+    }
+
+    return { session, sidebarOpen, setContent, dispose }
 })
 
 if (import.meta.hot) {
