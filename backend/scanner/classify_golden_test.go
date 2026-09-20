@@ -18,37 +18,25 @@ func testJPEG(t *testing.T) []byte {
 	img := image.NewRGBA(image.Rect(0, 0, 4, 2))
 	img.Set(0, 0, color.White)
 	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, img, nil); err != nil {
-		t.Fatal(err)
-	}
+	must(t, jpeg.Encode(&buf, img, nil))
 	return buf.Bytes()
 }
 
 func writeZip(t *testing.T, path string, entries map[string][]byte) string {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	must(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	f, err := os.Create(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	must(t, err)
 	zw := zip.NewWriter(f)
 	for name, data := range entries {
 		w, err := zw.Create(name)
-		if err != nil {
-			t.Fatal(err)
-		}
+		must(t, err)
 		if _, err := w.Write(data); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := zw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.Close(); err != nil {
-		t.Fatal(err)
-	}
+	must(t, zw.Close())
+	must(t, f.Close())
 	return path
 }
 
@@ -74,9 +62,7 @@ func writeEPUB(t *testing.T, path, opf string) string {
 func statFile(t *testing.T, path string) FSFile {
 	t.Helper()
 	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	must(t, err)
 	return FSFile{Path: path, Mtime: info.ModTime(), Size: info.Size()}
 }
 
@@ -98,7 +84,7 @@ func summarize(p *ParsedItem) string {
 	}
 	series := "nil"
 	if p.Series != nil {
-		series = fmt.Sprintf("%s|%s|%s|%s", p.Series.URIPrefix, p.Series.ContentType, p.Series.URIPart, p.Series.Title)
+		series = fmt.Sprintf("%s|%s|%s", p.Series.URIPrefix, p.Series.ContentType, p.Series.URIPart)
 	}
 	return fmt.Sprintf("prefix=%s type=%s part=%s order=[%s] cover=%s title=%s series=%s index=%g data=%s",
 		p.URIPrefix, p.ContentType, p.URIPart, strings.Join(parts, ","), cover,
@@ -126,22 +112,22 @@ func TestClassifyComicGoldens(t *testing.T) {
 		{
 			"volume and chapter from filename",
 			"Series Name (2019)/Series Name v01 ch003.cbz", "",
-			"prefix=comic type=comic part=v1_ch3 order=[1,3] cover=001.jpg title=Vol. 1 Ch. 3 series=comic|comic_series|Series Name_2019|Series Name index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
+			"prefix=comic type=comic part=v1_ch3 order=[1,3] cover=001.jpg title=Vol. 1 Ch. 3 series=comic|comic_series|Series Name_2019 index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
 		},
 		{
 			"comicinfo overrides filename",
 			"Series Name (2019)/Series Name v01 ch003.cbz", comicInfoFull,
-			"prefix=comic type=comic part=v2_ch4.5 order=[2,4.5] cover=001.jpg title=Meta Title series=comic|comic_series|Meta Series_2001|Meta Series index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
+			"prefix=comic type=comic part=v2_ch4.5 order=[2,4.5] cover=001.jpg title=Meta Title series=comic|comic_series|Meta Series_2001 index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
 		},
 		{
 			"fallback chapter from digits",
 			"Other Series/003 - Something.cbz", "",
-			"prefix=comic type=comic part=ch3 order=[nil,3] cover=001.jpg title=Ch. 3 series=comic|comic_series|Other Series|Other Series index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
+			"prefix=comic type=comic part=ch3 order=[nil,3] cover=001.jpg title=Ch. 3 series=comic|comic_series|Other Series index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
 		},
 		{
 			"year only",
 			"Yearly/Yearly (1995).cbz", "",
-			"prefix=comic type=comic part=y1995 order=[nil,nil] cover=001.jpg title=Yearly (1995) series=comic|comic_series|Yearly|Yearly index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
+			"prefix=comic type=comic part=y1995 order=[nil,nil] cover=001.jpg title=Yearly (1995) series=comic|comic_series|Yearly index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
 		},
 		{
 			"unidentifiable",
@@ -192,7 +178,7 @@ func TestClassifyBookGoldens(t *testing.T) {
 				`<dc:publisher>Pub</dc:publisher><dc:language>en</dc:language><dc:date>2020-01-02</dc:date>`+
 				`<meta name="calibre:series" content="Book Series"/><meta name="calibre:series_index" content="2"/>`+
 				`<meta name="cover" content="cover-img"/>`, coverItem),
-			"prefix=book type=book part=story-one order=[2] cover=cover.jpg title=Story One series=book|book_series|Book Series|Book Series index=2 data=",
+			"prefix=book type=book part=story-one order=[2] cover=cover.jpg title=Story One series=book|book_series|Book Series index=2 data=",
 		},
 		{
 			"standalone without series",

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"voltis/lib/epub"
-	"voltis/models"
 )
 
 type BooksScanner struct{}
@@ -23,8 +22,7 @@ func (bs *BooksScanner) ParseFile(file FSFile) *ParsedItem {
 	}
 
 	coverValid := meta.CoverPath != "" && epub.ValidateCoverPath(file.Path, meta.CoverPath)
-	item := classifyBook(file, *meta, coverValid)
-	return &item
+	return new(classifyBook(file, *meta, coverValid))
 }
 
 func (bs *BooksScanner) SeriesCover(series SeriesRef, ordered []Child) (*string, *time.Time) {
@@ -32,13 +30,4 @@ func (bs *BooksScanner) SeriesCover(series SeriesRef, ordered []Child) (*string,
 		return nil, nil
 	}
 	return ordered[0].CoverURI, ordered[0].FileMtime
-}
-
-func (bs *BooksScanner) UpdateSeries(r *repository, series *models.Content, ordered []Child) {
-	inheritChildMetadata(r, series, ordered)
-
-	if len(ordered) > 0 {
-		series.CoverURI, series.FileMtime = bs.SeriesCover(seriesRef(series), ordered)
-	}
-	r.markDirty(series)
 }

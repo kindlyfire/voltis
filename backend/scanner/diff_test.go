@@ -162,9 +162,7 @@ func TestCoveragePathParts(t *testing.T) {
 	}
 
 	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
+	must(t, err)
 	for _, rel := range []string{"lib/Foo", ".", "./lib/Foo/", "..", "../Other/book.cbz"} {
 		want := pathParts(mustResolveFile(t, res, filepath.Join(cwd, rel)))
 		got := pathParts(mustResolveFile(t, res, rel))

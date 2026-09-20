@@ -13,7 +13,7 @@ RUN pnpm build
 #
 # Go build
 #
-FROM golang:1.26-alpine AS backend
+FROM golang:1.27-alpine AS backend
 
 RUN apk add --no-cache gcc musl-dev \
     && apk add --no-cache \

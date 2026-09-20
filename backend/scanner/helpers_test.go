@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -17,8 +18,24 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+var baseTime = time.Unix(1700000000, 0).UTC()
+
 func newTestPool(t *testing.T) *pgxpool.Pool {
 	return dbtest.Pool(t)
+}
+
+func fsFile(path string, mtime time.Time, size int64) FSFile {
+	return FSFile{Path: path, Mtime: mtime, Size: size}
+}
+
+func rawMeta(m models.Metadata) metaraw.MetadataRaw {
+	return metaraw.MetadataRaw{File: &metaraw.RawContainer[models.Metadata]{Raw: m}}
+}
+
+func comicItem(dir, number string, meta models.Metadata) Result {
+	meta.Number = number
+	file := fsFile(dir+"/ch"+number+".cbz", baseTime, 10)
+	return Result{File: file, Item: classifyComic(file, meta, 0, testPages)}
 }
 
 type recordingQuerier struct {
@@ -81,17 +98,20 @@ func selectedColumns(t *testing.T, sql string) []string {
 func newTestLibrary(t *testing.T, pool *pgxpool.Pool, libType string) string {
 	t.Helper()
 	id := models.MakeLibraryID()
-	_, err := pool.Exec(context.Background(),
-		"INSERT INTO libraries (id, name, type, sources) VALUES ($1, $2, $3, '[]')", id, "test", libType)
-	if err != nil {
-		t.Fatalf("create library: %v", err)
-	}
+	exec(t, pool, "INSERT INTO libraries (id, name, type, sources) VALUES ($1, $2, $3, '[]')", id, "test", libType)
 	return id
 }
 
-func exec(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) {
+func must(t *testing.T, err error) {
 	t.Helper()
-	if _, err := pool.Exec(context.Background(), sql, args...); err != nil {
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func exec(t *testing.T, q db.Querier, sql string, args ...any) {
+	t.Helper()
+	if _, err := q.Exec(context.Background(), sql, args...); err != nil {
 		t.Fatalf("exec %s: %v", sql, err)
 	}
 }
@@ -115,10 +135,10 @@ func seedContent(t *testing.T, pool *pgxpool.Pool, rows ...models.Content) {
 	}
 }
 
-func seedMetadata(t *testing.T, pool *pgxpool.Pool, libraryID, uri string, mr metaraw.MetadataRaw) {
+func seedMetadata(t *testing.T, q db.Querier, libraryID, uri string, mr metaraw.MetadataRaw) {
 	t.Helper()
 	merged, _ := json.Marshal(mr.Merge())
-	exec(t, pool, `
+	exec(t, q, `
 		INSERT INTO content_metadata (uri, library_id, data, data_raw, updated_at)
 		VALUES ($1, $2, $3, $4, now())
 		ON CONFLICT (uri, library_id) DO UPDATE SET data = EXCLUDED.data, data_raw = EXCLUDED.data_raw
@@ -169,6 +189,17 @@ func assertCatalog(t *testing.T, pool *pgxpool.Pool, libraryID string, want []st
 	t.Helper()
 	if got := contentURIs(t, pool, libraryID); !slices.Equal(got, want) {
 		t.Fatalf("uris = %v, want %v", got, want)
+	}
+}
+
+func assertSeriesLocation(t *testing.T, pool *pgxpool.Pool, id, dir string) {
+	t.Helper()
+	got := readContent(t, pool, id)
+	if deref(got.FileURI) != dir {
+		t.Fatalf("series file_uri = %v, want %s", deref(got.FileURI), dir)
+	}
+	if cover := filepath.Join(dir, "cover.jpg"); deref(got.CoverURI) != cover {
+		t.Fatalf("series cover_uri = %v, want %s", deref(got.CoverURI), cover)
 	}
 }
 
@@ -233,17 +264,11 @@ func (r *scanRun) place(results ...Result) {
 
 func (r *scanRun) commit(final bool) Counts {
 	r.t.Helper()
-	counts, err := r.tryCommit(final)
+	_, counts, err := r.recordCommit(final)
 	if err != nil {
 		r.t.Fatalf("commit: %v", err)
 	}
 	return counts
-}
-
-func (r *scanRun) tryCommit(final bool) (Counts, error) {
-	r.t.Helper()
-	_, counts, err := r.recordCommit(final)
-	return counts, err
 }
 
 func (r *scanRun) recordCommit(final bool) (*recordingTx, Counts, error) {
@@ -258,45 +283,4 @@ func (r *scanRun) recordCommit(final bool) (*recordingTx, Counts, error) {
 		return txErr
 	})
 	return rec, counts, err
-}
-
-type legacyRun struct {
-	t    *testing.T
-	pool *pgxpool.Pool
-	lib  string
-	fs   FileScanner
-	r    *repository
-}
-
-func newLegacyRun(t *testing.T, pool *pgxpool.Pool, libraryID string, s FileScanner) *legacyRun {
-	t.Helper()
-	r := newRepository(pool, libraryID)
-	if err := r.load(context.Background()); err != nil {
-		t.Fatalf("load repository: %v", err)
-	}
-	r.retarget()
-	return &legacyRun{t: t, pool: pool, lib: libraryID, fs: s, r: r}
-}
-
-func (l *legacyRun) place(results ...Result) {
-	l.t.Helper()
-	var counts scanCounts
-	parents := map[string]bool{}
-	for _, res := range results {
-		if id := applyParseResult(l.r, l.lib, res.File, res.Item, true, func(string, ...any) {}, &counts, &Counts{}); id != nil {
-			parents[*id] = true
-		}
-	}
-	updateGroupSeries(l.fs, l.r, parents)
-}
-
-func (l *legacyRun) commit() {
-	l.t.Helper()
-	ctx := context.Background()
-	if err := l.r.commitGroup(ctx); err != nil {
-		l.t.Fatalf("commit group: %v", err)
-	}
-	if err := l.r.commitFinal(ctx); err != nil {
-		l.t.Fatalf("commit final: %v", err)
-	}
 }

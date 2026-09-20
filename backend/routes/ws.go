@@ -190,9 +190,8 @@ func (h *WebSocketHub) Drop(user string) {
 
 func (h *WebSocketHub) TaskUpdate(s tasks.Snapshot) {
 	h.broadcast(toAdmins, map[string]any{
-		"type":     "task_update",
-		"task":     s,
-		"progress": s.Progress,
+		"type": "task_update",
+		"task": s,
 	})
 }
 
@@ -202,13 +201,6 @@ func (h *WebSocketHub) CatalogChanged(ev scanner.CatalogChanged) {
 		"library_id": ev.LibraryID,
 		"task_id":    ev.TaskID,
 		"commit_seq": ev.CommitSeq,
-	})
-}
-
-func (h *WebSocketHub) BroadcastScanQueue(libraryIDs []string) {
-	h.broadcast(toAdmins, map[string]any{
-		"type":        "scan_queue_update",
-		"library_ids": libraryIDs,
 	})
 }
 

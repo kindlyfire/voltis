@@ -12,66 +12,34 @@ import (
 
 type Fingerprint struct {
 	ID       string
-	Path     string
-	Mtime    *time.Time
-	Size     *int
+	Path     string     `db:"file_uri"`
+	Mtime    *time.Time `db:"file_mtime"`
+	Size     *int       `db:"file_size"`
 	Valid    bool
 	URIPart  string
 	ParentID *string
 }
 
 func loadFingerprints(ctx context.Context, q db.Querier, libraryID string) ([]Fingerprint, error) {
-	rows, err := q.Query(ctx, `
+	return db.Select[Fingerprint](ctx, q, `
 		SELECT id, file_uri, file_mtime, file_size, valid, uri_part, parent_id
 		FROM content
 		WHERE library_id = $1 AND type IN ('comic', 'book') AND file_uri IS NOT NULL
 	`, libraryID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var out []Fingerprint
-	for rows.Next() {
-		var f Fingerprint
-		if err := rows.Scan(&f.ID, &f.Path, &f.Mtime, &f.Size, &f.Valid, &f.URIPart, &f.ParentID); err != nil {
-			return nil, err
-		}
-		out = append(out, f)
-	}
-	return out, rows.Err()
 }
 
 func loadSeries(ctx context.Context, q db.Querier, libraryID string) ([]SeriesRef, error) {
-	rows, err := q.Query(ctx, `
+	return db.Select[SeriesRef](ctx, q, `
 		SELECT id, uri, uri_part, type, file_uri
 		FROM content
 		WHERE library_id = $1 AND type IN ('comic_series', 'book_series')
 	`, libraryID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var out []SeriesRef
-	for rows.Next() {
-		var s SeriesRef
-		if err := rows.Scan(&s.ID, &s.URI, &s.URIPart, &s.Type, &s.FileURI); err != nil {
-			return nil, err
-		}
-		out = append(out, s)
-	}
-	return out, rows.Err()
 }
 
 func changed(f FSFile, fp Fingerprint, exists, force bool) bool {
-	if !exists || force || !fp.Valid {
-		return true
-	}
-	return f.HasChanged(FSFile{
-		Mtime: deref(fp.Mtime),
-		Size:  int64(deref(fp.Size)),
-	})
+	return !exists || force || !fp.Valid ||
+		f.Size != int64(deref(fp.Size)) ||
+		!f.Mtime.Truncate(time.Millisecond).Equal(deref(fp.Mtime).Truncate(time.Millisecond))
 }
 
 type node struct {
@@ -150,4 +118,8 @@ func deref[T any](p *T) (v T) {
 		v = *p
 	}
 	return v
+}
+
+func ptrEq(a, b *string) bool {
+	return a == b || (a != nil && b != nil && *a == *b)
 }

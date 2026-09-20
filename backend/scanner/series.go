@@ -25,13 +25,9 @@ type SeriesRef struct {
 
 type Child struct {
 	ID         string
-	URI        string
-	URIPart    string
-	Order      *int
 	OrderParts []*float32
 	CoverURI   *string
 	FileMtime  *time.Time
-	Valid      bool
 	Meta       metaraw.MetadataRaw
 }
 
@@ -229,19 +225,16 @@ func orderSteps(f flush, key map[string]Key) ([]step, error) {
 func compareOrderParts(a, b []*float32) int {
 	for i := range min(len(a), len(b)) {
 		ai, bi := a[i], b[i]
-		if ai == nil && bi == nil {
+		switch {
+		case ai == nil && bi == nil:
 			continue
-		}
-		if ai == nil {
+		case ai == nil:
 			return 1
-		}
-		if bi == nil {
+		case bi == nil:
 			return -1
-		}
-		if *ai < *bi {
+		case *ai < *bi:
 			return -1
-		}
-		if *ai > *bi {
+		case *ai > *bi:
 			return 1
 		}
 	}

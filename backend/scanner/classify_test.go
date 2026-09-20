@@ -1,7 +1,6 @@
 package scanner
 
 import (
-	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -30,17 +29,17 @@ func TestClassifyComicTuples(t *testing.T) {
 		{
 			"chapter only",
 			"/lib/Other Series/Other Series ch7.cbz", models.Metadata{}, 0,
-			"prefix=comic type=comic part=ch7 order=[nil,7] cover=001.jpg title=Ch. 7 series=comic|comic_series|Other Series|Other Series index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
+			"prefix=comic type=comic part=ch7 order=[nil,7] cover=001.jpg title=Ch. 7 series=comic|comic_series|Other Series index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
 		},
 		{
 			"fallback chapter strips directory prefix",
 			"/lib/Series 1000/Series 1000 002.cbz", models.Metadata{}, 0,
-			"prefix=comic type=comic part=ch2 order=[nil,2] cover=001.jpg title=Ch. 2 series=comic|comic_series|Series 1000|Series 1000 index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
+			"prefix=comic type=comic part=ch2 order=[nil,2] cover=001.jpg title=Ch. 2 series=comic|comic_series|Series 1000 index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
 		},
 		{
 			"metadata year without comicinfo year",
 			"/lib/Plain/Plain ch1.cbz", models.Metadata{Series: "Plain Series"}, 0,
-			"prefix=comic type=comic part=ch1 order=[nil,1] cover=001.jpg title=Ch. 1 series=comic|comic_series|Plain Series|Plain Series index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
+			"prefix=comic type=comic part=ch1 order=[nil,1] cover=001.jpg title=Ch. 1 series=comic|comic_series|Plain Series index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
 		},
 	}
 	for _, c := range cases {
@@ -55,33 +54,21 @@ func TestClassifyComicTuples(t *testing.T) {
 }
 
 func TestClassifyBookTuples(t *testing.T) {
-	cases := []struct {
-		name       string
-		path       string
-		meta       epub.Metadata
-		coverValid bool
-		want       string
-	}{
-		{
-			"invalid cover is dropped",
-			"/lib/Books/broken.epub", epub.Metadata{Title: "Broken", CoverPath: "missing.jpg"}, false,
-			"prefix=book type=book part=broken order=[0] cover=nil title=Broken series=nil index=0 data=",
-		},
-		{
-			"series without index",
-			"/lib/Books/no-index.epub", epub.Metadata{Title: "No Index", Series: "Book Series"}, false,
-			"prefix=book type=book part=no-index order=[0] cover=nil title=No Index series=book|book_series|Book Series|Book Series index=0 data=",
-		},
+	check := func(t *testing.T, path string, meta epub.Metadata, want string) {
+		t.Helper()
+		item := classifyBook(FSFile{Path: path, Mtime: baseTime, Size: 10}, meta, false)
+		if got := summarize(&item); got != want {
+			t.Errorf("got  %s\nwant %s", got, want)
+		}
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			file := FSFile{Path: c.path, Mtime: baseTime, Size: 10}
-			item := classifyBook(file, c.meta, c.coverValid)
-			if got := summarize(&item); got != c.want {
-				t.Errorf("got  %s\nwant %s", got, c.want)
-			}
-		})
-	}
+	t.Run("invalid cover is dropped", func(t *testing.T) {
+		check(t, "/lib/Books/broken.epub", epub.Metadata{Title: "Broken", CoverPath: "missing.jpg"},
+			"prefix=book type=book part=broken order=[0] cover=nil title=Broken series=nil index=0 data=")
+	})
+	t.Run("series without index", func(t *testing.T) {
+		check(t, "/lib/Books/no-index.epub", epub.Metadata{Title: "No Index", Series: "Book Series"},
+			"prefix=book type=book part=no-index order=[0] cover=nil title=No Index series=book|book_series|Book Series index=0 data=")
+	})
 }
 
 func TestClassifyBookMetadata(t *testing.T) {
@@ -153,9 +140,8 @@ func TestSanitizeURIPartAtBookProducers(t *testing.T) {
 	if item.Series.URIPart != "Foo_bar_" {
 		t.Errorf("series part = %q, want the series name sanitized", item.Series.URIPart)
 	}
-	if item.Series.Title != "Foo/bar\x01" || item.MetaRaw.Series != "Foo/bar\x01" {
-		t.Errorf("series title = %q and metadata series = %q, want both kept verbatim",
-			item.Series.Title, item.MetaRaw.Series)
+	if item.MetaRaw.Series != "Foo/bar\x01" {
+		t.Errorf("metadata series = %q, want it kept verbatim", item.MetaRaw.Series)
 	}
 
 	empty := classifyBook(FSFile{Path: "/lib/Books/.epub"}, epub.Metadata{Series: "/"}, false)
@@ -171,8 +157,11 @@ func TestSanitizeURIPartAtComicProducers(t *testing.T) {
 	if item.Series.URIPart != "Foo_bar_2019" {
 		t.Errorf("series part = %q, want the separator replaced and the year suffix kept", item.Series.URIPart)
 	}
-	if item.Series.Title != "Foo/bar" || item.MetaRaw.Title != "Ch. 1 / Special" {
-		t.Errorf("titles = %q and %q, want both kept verbatim", item.Series.Title, item.MetaRaw.Title)
+	if item.MetaRaw.Title != "Ch. 1 / Special" {
+		t.Errorf("title = %q, want it kept verbatim", item.MetaRaw.Title)
+	}
+	if item.MetaRaw.Series != "Foo/bar" {
+		t.Errorf("metadata series = %q, want it kept verbatim", item.MetaRaw.Series)
 	}
 	if item.URIPart != "ch1" {
 		t.Errorf("item part = %q, want an ordinary part unchanged", item.URIPart)
@@ -187,9 +176,7 @@ func TestSanitizeURIPartAtComicProducers(t *testing.T) {
 func TestClassifySanitizesEveryURIPartProducer(t *testing.T) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "classify.go", nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	must(t, err)
 
 	sites, wrapped := 0, 0
 	ast.Inspect(file, func(n ast.Node) bool {
@@ -229,20 +216,6 @@ func TestClassifyCollisionFallsThroughToConflictHandling(t *testing.T) {
 		t.Fatalf("parts = %q and %q, want sanitization to collide them", one.URIPart, two.URIPart)
 	}
 
-	r := newRepository(nil, "library")
-	var counts scanCounts
-	var logs []string
-	logf := func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }
-	applyParseResult(r, "library", first, &one, true, logf, &counts, &Counts{})
-	applyParseResult(r, "library", second, &two, true, logf, &counts, &Counts{})
-
-	if len(r.content) != 1 || deref(r.content[0].FileURI) != first.Path {
-		t.Fatalf("content = %+v, want only the first file", r.content)
-	}
-	if counts.added.Load() != 1 || counts.failed.Load() != 1 || len(logs) != 1 {
-		t.Fatalf("counts = %d added / %d failed, logs = %v", counts.added.Load(), counts.failed.Load(), logs)
-	}
-
 	w := testWriter(nil, nil)
 	w.place(Result{File: first, Item: &one})
 	w.place(Result{File: second, Item: &two})
@@ -254,19 +227,12 @@ func TestClassifyCollisionFallsThroughToConflictHandling(t *testing.T) {
 	}
 }
 
-func TestClassifySanitizedPartReachesBothScannerPaths(t *testing.T) {
+func TestClassifySanitizedPartReachesTheWriter(t *testing.T) {
 	path := writeCBZ(t, filepath.Join(t.TempDir(), "Series", "Series ch1.cbz"),
 		`<?xml version="1.0"?><ComicInfo><Series>Foo/bar</Series><Number>1</Number></ComicInfo>`)
 	item := (&ComicsScanner{}).ParseFile(statFile(t, path))
-	if item.Series.URIPart != "Foo_bar" || item.Series.Title != "Foo/bar" {
+	if item.Series.URIPart != "Foo_bar" {
 		t.Fatalf("parsed series = %+v", item.Series)
-	}
-
-	r := newRepository(nil, "library")
-	var counts scanCounts
-	applyParseResult(r, "library", item.File, item, true, func(string, ...any) {}, &counts, &Counts{})
-	if len(r.content) != 2 || r.content[0].URI != "comic/Foo_bar" || r.content[1].URI != "comic/Foo_bar/ch1" {
-		t.Fatalf("legacy content = %+v", r.content)
 	}
 
 	w := testWriter(nil, nil)
@@ -285,26 +251,13 @@ func TestClassifySanitizedPartReachesBothScannerPaths(t *testing.T) {
 	}
 }
 
-func TestComicFallbackSeriesTitleKeepsTheRawName(t *testing.T) {
+func TestComicFallbackSeriesLeavesTheInferredNameOffTheChild(t *testing.T) {
 	file := fsFile("/lib/Foo\\bar/ch1.cbz", baseTime, 10)
 	item := classifyComic(file, models.Metadata{}, 0, testPages)
-	if item.Series.URIPart != "Foo_bar" || item.Series.Title != "Foo\\bar" {
-		t.Fatalf("series = %+v, want a sanitized part and a verbatim title", item.Series)
+	if item.Series.URIPart != "Foo_bar" {
+		t.Fatalf("series = %+v, want the folder name sanitized into the part", item.Series)
 	}
 	if item.MetaRaw.Series != "" {
 		t.Errorf("child series = %q, want an inferred name left off the child", item.MetaRaw.Series)
-	}
-
-	r := newRepository(nil, "library")
-	var counts scanCounts
-	parentID := applyParseResult(r, "library", file, item, true, func(string, ...any) {}, &counts, &Counts{})
-	if parentID == nil {
-		t.Fatalf("parentID = nil, counts failed = %d", counts.failed.Load())
-	}
-	seedSeriesTitle(r, "comic/Foo_bar", "Stale")
-	updateGroupSeries(&ComicsScanner{}, r, map[string]bool{*parentID: true})
-
-	if got := r.getMetadata("comic/Foo_bar").DataRaw.File.Raw.Title; got != "Foo\\bar" {
-		t.Errorf("legacy series title = %q, want the raw directory name", got)
 	}
 }

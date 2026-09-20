@@ -35,7 +35,6 @@ func commitLoop(ctx context.Context, pool *pgxpool.Pool, s FileScanner, libraryI
 		var counts Counts
 		var err error
 		for range 3 {
-			counts = Counts{}
 			err = db.WithTx(ctx, pool, func(tx pgx.Tx) error {
 				var txErr error
 				counts, txErr = commit(ctx, tx, s, libraryID, f, time.Now().UTC())
@@ -61,14 +60,7 @@ func commitLoop(ctx context.Context, pool *pgxpool.Pool, s FileScanner, libraryI
 
 func retryable(err error) bool {
 	pgErr, ok := errors.AsType[*pgconn.PgError](err)
-	if !ok {
-		return false
-	}
-	switch pgErr.Code {
-	case "40001", "40P01", "23505":
-		return true
-	}
-	return false
+	return ok && slices.Contains([]string{"40001", "40P01", "23505"}, pgErr.Code)
 }
 
 func commit(ctx context.Context, tx pgx.Tx, s FileScanner, libraryID string, f flush, now time.Time) (Counts, error) {
@@ -91,8 +83,6 @@ func commit(ctx context.Context, tx pgx.Tx, s FileScanner, libraryID string, f f
 		invalid = append(invalid, set.Invalid...)
 		deletes = append(deletes, set.Deletes...)
 	}
-	ids = append(ids, invalid...)
-	ids = append(ids, deletes...)
 
 	cur := map[string]models.Content{}
 	key := map[string]Key{}
@@ -111,10 +101,8 @@ func commit(ctx context.Context, tx pgx.Tx, s FileScanner, libraryID string, f f
 		return counts, err
 	}
 
-	dropped := maps.Clone(f.gone)
-	if dropped == nil {
-		dropped = map[string]bool{}
-	}
+	dropped := map[string]bool{}
+	maps.Copy(dropped, f.gone)
 	for _, id := range deletes {
 		dropped[id] = true
 	}
@@ -212,67 +200,7 @@ func commit(ctx context.Context, tx pgx.Tx, s FileScanner, libraryID string, f f
 		return counts, err
 	}
 
-	children := map[string][]Child{}
-	if len(seriesIDs) > 0 {
-		var kid Child
-		var parentID string
-		var raw json.RawMessage
-		err := query(ctx, tx, `
-			SELECT c.id, c.uri, c.uri_part, c."order", c.order_parts, c.cover_uri, c.file_mtime, c.valid, c.parent_id,
-			       COALESCE(m.data_raw, '{}') AS data_raw
-			FROM content c LEFT JOIN content_metadata m ON m.library_id = c.library_id AND m.uri = c.uri
-			WHERE c.library_id = $1 AND c.parent_id = ANY($2::text[])
-		`, []any{libraryID, seriesIDs},
-			[]any{&kid.ID, &kid.URI, &kid.URIPart, &kid.Order, &kid.OrderParts,
-				&kid.CoverURI, &kid.FileMtime, &kid.Valid, &parentID, &raw}, func() error {
-				if dropped[kid.ID] {
-					return nil
-				}
-				kid.Meta = metaraw.From(raw)
-				children[parentID] = append(children[parentID], kid)
-				return nil
-			})
-		if err != nil {
-			return counts, err
-		}
-	}
-
-	var seriesMeta []metaWrite
-	for _, id := range seriesIDs {
-		kids := children[id]
-		if len(kids) == 0 {
-			continue
-		}
-		ref := f.sets[id].Ref
-		ordered := order(kids)
-
-		orderIDs := make([]string, len(ordered))
-		orderVals := make([]int, len(ordered))
-		for i := range ordered {
-			orderIDs[i], orderVals[i] = ordered[i].ID, i
-			ordered[i].Order = &orderVals[i]
-		}
-		_, err := tx.Exec(ctx, `
-			UPDATE content c SET "order" = r.o
-			FROM unnest($2::text[], $3::int[]) AS r(id, o)
-			WHERE c.library_id = $1 AND c.id = r.id AND c."order" IS DISTINCT FROM r.o
-		`, libraryID, orderIDs, orderVals)
-		if err != nil {
-			return counts, err
-		}
-
-		cover, mtime := s.SeriesCover(ref, ordered)
-		_, err = tx.Exec(ctx, `
-			UPDATE content SET cover_uri = $2, file_mtime = $3, updated_at = $4
-			WHERE id = $1 AND (cover_uri IS DISTINCT FROM $2 OR file_mtime IS DISTINCT FROM $3)
-		`, id, cover, mtime, now)
-		if err != nil {
-			return counts, err
-		}
-
-		seriesMeta = append(seriesMeta, metaWrite{uri: ref.URI, file: inherit(ref, ordered)})
-	}
-	if err := writeMetadata(ctx, tx, libraryID, now, seriesMeta); err != nil {
+	if err := commitSeries(ctx, tx, s, libraryID, now, f.sets, seriesIDs, dropped); err != nil {
 		return counts, err
 	}
 
@@ -295,20 +223,82 @@ func commit(ctx context.Context, tx pgx.Tx, s FileScanner, libraryID string, f f
 	return counts, nil
 }
 
+func commitSeries(ctx context.Context, tx pgx.Tx, s FileScanner, libraryID string, now time.Time,
+	sets map[string]*SeriesChanges, seriesIDs []string, dropped map[string]bool) error {
+	children := map[string][]Child{}
+	if len(seriesIDs) > 0 {
+		var kid Child
+		var parentID string
+		var raw json.RawMessage
+		err := query(ctx, tx, `
+			SELECT c.id, c.order_parts, c.cover_uri, c.file_mtime, c.parent_id,
+			       COALESCE(m.data_raw, '{}') AS data_raw
+			FROM content c LEFT JOIN content_metadata m ON m.library_id = c.library_id AND m.uri = c.uri
+			WHERE c.library_id = $1 AND c.parent_id = ANY($2::text[])
+		`, []any{libraryID, seriesIDs},
+			[]any{&kid.ID, &kid.OrderParts, &kid.CoverURI, &kid.FileMtime, &parentID, &raw}, func() error {
+				if dropped[kid.ID] {
+					return nil
+				}
+				kid.Meta = metaraw.From(raw)
+				children[parentID] = append(children[parentID], kid)
+				return nil
+			})
+		if err != nil {
+			return err
+		}
+	}
+
+	var seriesMeta []metaWrite
+	for _, id := range seriesIDs {
+		kids := children[id]
+		if len(kids) == 0 {
+			continue
+		}
+		ref := sets[id].Ref
+		ordered := order(kids)
+
+		orderIDs := make([]string, len(ordered))
+		orderVals := make([]int, len(ordered))
+		for i := range ordered {
+			orderIDs[i], orderVals[i] = ordered[i].ID, i
+		}
+		_, err := tx.Exec(ctx, `
+			UPDATE content c SET "order" = r.o
+			FROM unnest($2::text[], $3::int[]) AS r(id, o)
+			WHERE c.library_id = $1 AND c.id = r.id AND c."order" IS DISTINCT FROM r.o
+		`, libraryID, orderIDs, orderVals)
+		if err != nil {
+			return err
+		}
+
+		cover, mtime := s.SeriesCover(ref, ordered)
+		_, err = tx.Exec(ctx, `
+			UPDATE content SET cover_uri = $2, file_mtime = $3, updated_at = $4
+			WHERE id = $1 AND (cover_uri IS DISTINCT FROM $2 OR file_mtime IS DISTINCT FROM $3)
+		`, id, cover, mtime, now)
+		if err != nil {
+			return err
+		}
+
+		seriesMeta = append(seriesMeta, metaWrite{uri: ref.URI, file: inherit(ref, ordered)})
+	}
+	return writeMetadata(ctx, tx, libraryID, now, seriesMeta)
+}
+
 func identityStep(ctx context.Context, tx pgx.Tx, libraryID string, set *SeriesChanges, pairs []rename, now time.Time) error {
 	ref := set.Ref
 	if set.New {
 		return upsertContent(ctx, tx, models.Content{
-			ID:         ref.ID,
-			LibraryID:  libraryID,
-			CreatedAt:  now,
-			UpdatedAt:  now,
-			Type:       ref.Type,
-			URI:        ref.URI,
-			URIPart:    ref.URIPart,
-			Valid:      true,
-			FileURI:    ref.FileURI,
-			OrderParts: []*float32{},
+			ID:        ref.ID,
+			LibraryID: libraryID,
+			CreatedAt: now,
+			UpdatedAt: now,
+			Type:      ref.Type,
+			URI:       ref.URI,
+			URIPart:   ref.URIPart,
+			Valid:     true,
+			FileURI:   ref.FileURI,
 		})
 	}
 

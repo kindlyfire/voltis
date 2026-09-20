@@ -1,17 +1,17 @@
 package routes
 
 import (
-	"archive/zip"
-	"bytes"
 	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"voltis/db"
 	"voltis/lib/tasks"
 	"voltis/models"
 	"voltis/scanner"
@@ -59,12 +59,8 @@ func awaitTask(t *testing.T, c *testClient, id, what string, fn func(map[string]
 	t.Helper()
 	var found map[string]any
 	waitUntil(t, what, func() bool {
-		snap := snapshotOf(t, c, id)
-		if snap == nil || !fn(snap) {
-			return false
-		}
-		found = snap
-		return true
+		found = snapshotOf(t, c, id)
+		return found != nil && fn(found)
 	})
 	return found
 }
@@ -86,10 +82,7 @@ func blockedScanLibrary(t *testing.T, pool *pgxpool.Pool, c *testClient, mode st
 	}
 	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
 
-	lib := c.Post("/api/libraries/new", map[string]any{
-		"name": "blocked", "type": "comics",
-		"sources": []map[string]any{{"path_uri": dir}},
-	}).Assert(t, 200).JSON()
+	libID := libraryAt(t, c, "comics", dir)
 
 	ctx := context.Background()
 	conn, err := pool.Acquire(ctx)
@@ -106,7 +99,7 @@ func blockedScanLibrary(t *testing.T, pool *pgxpool.Pool, c *testClient, mode st
 		t.Fatalf("lock content: %v", err)
 	}
 
-	return s(lib["id"]), sync.OnceFunc(func() {
+	return libID, sync.OnceFunc(func() {
 		_ = tx.Rollback(ctx)
 		conn.Release()
 	})
@@ -234,6 +227,41 @@ func TestTaskRoutesRequireAdmin(t *testing.T) {
 	c.newSession(t).Get("/api/tasks/snapshot").Assert(t, 401)
 }
 
+func writeCBZ(t *testing.T, path, comicInfo string) {
+	t.Helper()
+	entries := map[string]string{"001.jpg": "not really a jpeg"}
+	if comicInfo != "" {
+		entries["ComicInfo.xml"] = comicInfo
+	}
+	writeZip(t, path, entries)
+}
+
+func taskLogs(t *testing.T, c *testClient, id string) string {
+	t.Helper()
+	return s(c.Get("/api/tasks/"+id+"/logs?offset=0").Assert(t, 200).JSON()["text"])
+}
+
+func libraryAt(t *testing.T, c *testClient, kind, dir string) string {
+	t.Helper()
+	lib := c.Post("/api/libraries/new", map[string]any{
+		"name": kind, "type": kind,
+		"sources": []map[string]any{{"path_uri": dir}},
+	}).Assert(t, 200).JSON()
+	return s(lib["id"])
+}
+
+func assertContentURIs(t *testing.T, pool *pgxpool.Pool, libraryID string, want []string) {
+	t.Helper()
+	got, err := db.SelectScalars[string](context.Background(), pool,
+		"SELECT uri FROM content WHERE library_id = $1 ORDER BY uri", libraryID)
+	if err != nil {
+		t.Fatalf("read uris: %v", err)
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("uris = %v, want %v", got, want)
+	}
+}
+
 func comicLibrary(t *testing.T, c *testClient) string {
 	t.Helper()
 
@@ -243,28 +271,9 @@ func comicLibrary(t *testing.T, c *testClient) string {
 		t.Fatalf("mkdir: %v", err)
 	}
 	for _, name := range []string{"ch1.cbz", "ch2.cbz"} {
-		buf := &bytes.Buffer{}
-		zw := zip.NewWriter(buf)
-		w, err := zw.Create("001.jpg")
-		if err != nil {
-			t.Fatalf("zip create: %v", err)
-		}
-		if _, err := w.Write([]byte("not really a jpeg")); err != nil {
-			t.Fatalf("zip write: %v", err)
-		}
-		if err := zw.Close(); err != nil {
-			t.Fatalf("zip close: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(seriesDir, name), buf.Bytes(), 0o644); err != nil {
-			t.Fatalf("write archive: %v", err)
-		}
+		writeCBZ(t, filepath.Join(seriesDir, name), "")
 	}
-
-	lib := c.Post("/api/libraries/new", map[string]any{
-		"name": "comics", "type": "comics",
-		"sources": []map[string]any{{"path_uri": dir}},
-	}).Assert(t, 200).JSON()
-	return s(lib["id"])
+	return libraryAt(t, c, "comics", dir)
 }
 
 func messagesUntilTerminal(t *testing.T, f *fakeSocket, id string) []map[string]any {
@@ -393,7 +402,7 @@ func TestScanCommitFailureSavesNothingAndNotifiesNobody(t *testing.T) {
 	done := snapshotOf(t, c, id)
 	assertEq(t, done["status"].(float64), float64(3))
 
-	logs := s(c.Get("/api/tasks/"+id+"/logs?offset=0").Assert(t, 200).JSON()["text"])
+	logs := taskLogs(t, c, id)
 	if !strings.Contains(logs, "content is read only") {
 		t.Fatalf("logs = %q, want the rejected commit", logs)
 	}
@@ -414,11 +423,7 @@ func unparsableComicLibrary(t *testing.T, c *testClient) (string, string) {
 		t.Fatalf("write archive: %v", err)
 	}
 
-	lib := c.Post("/api/libraries/new", map[string]any{
-		"name": "broken", "type": "comics",
-		"sources": []map[string]any{{"path_uri": dir}},
-	}).Assert(t, 200).JSON()
-	return s(lib["id"]), bad
+	return libraryAt(t, c, "comics", dir), bad
 }
 
 func TestScanRouteRunsTheWriterPipeline(t *testing.T) {
@@ -433,9 +438,9 @@ func TestScanRouteRunsTheWriterPipeline(t *testing.T) {
 		return snap["status"].(float64) >= 2
 	})
 
-	logs := s(c.Get("/api/tasks/"+id+"/logs?offset=0").Assert(t, 200).JSON()["text"])
+	logs := taskLogs(t, c, id)
 	if !strings.Contains(logs, "Failed to parse "+bad+"\n") {
-		t.Fatalf("logs = %q, want the writer's parse failure for %s; only the legacy runner stays silent here", logs, bad)
+		t.Fatalf("logs = %q, want the writer's parse failure for %s", logs, bad)
 	}
 }
 
@@ -465,20 +470,81 @@ func TestPendingScanLibraryIsRequeuedIntoTheWriterPipeline(t *testing.T) {
 
 	var status int
 	var logs string
-	read := func() {
-		t.Helper()
+	waitUntil(t, "the pending scan to be requeued and run at startup", func() bool {
 		if err := pool.QueryRow(ctx,
 			"SELECT status, COALESCE(logs, '') FROM tasks WHERE id = $1", id).Scan(&status, &logs); err != nil {
 			t.Fatalf("read task: %v", err)
 		}
-	}
-	waitUntil(t, "the pending scan to be requeued and run at startup", func() bool {
-		read()
 		return status >= models.TaskStatusCompleted
 	})
 
 	assertEq(t, status, models.TaskStatusCompleted)
 	if !strings.Contains(logs, "Failed to parse "+bad+"\n") {
-		t.Fatalf("logs = %q, want the writer's parse failure for %s; only the legacy runner stays silent here", logs, bad)
+		t.Fatalf("logs = %q, want the writer's parse failure for %s", logs, bad)
 	}
+}
+
+func TestScanLogsTheLeafKeyItRejects(t *testing.T) {
+	fastFlushes(t)
+	pool := newTestPool(t)
+	c := newAdminClient(t, pool)
+
+	dir := t.TempDir()
+	seriesDir := filepath.Join(dir, "Series")
+	if err := os.Mkdir(seriesDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	writeCBZ(t, filepath.Join(seriesDir, "ch1.cbz"), "")
+	libID := libraryAt(t, c, "comics", dir)
+	runScans(t, pool, c, map[string]any{"ids": []string{libID}})
+
+	dupe := filepath.Join(seriesDir, "dupe.cbz")
+	writeCBZ(t, dupe, `<?xml version="1.0"?><ComicInfo><Series>Series</Series><Number>1</Number></ComicInfo>`)
+	ids := runScans(t, pool, c, map[string]any{"ids": []string{libID}})
+
+	var seriesID string
+	err := pool.QueryRow(context.Background(),
+		"SELECT id FROM content WHERE library_id = $1 AND uri = 'comic/Series'", libID).Scan(&seriesID)
+	if err != nil {
+		t.Fatalf("read series: %v", err)
+	}
+
+	logs := taskLogs(t, c, ids[0])
+	want := "URI conflict for file " + dupe + ", skipping (uri_part: ch1, parent_id: " + seriesID + ")\n"
+	if strings.Count(logs, "URI conflict") != 1 || !strings.Contains(logs, want) {
+		t.Fatalf("logs = %q, want one entry naming the rejected file and the key it wanted", logs)
+	}
+
+	status, out := scanOutcome(t, pool, ids[0])
+	if status != models.TaskStatusCompleted || out.Failed != 1 || out.Added != 0 {
+		t.Fatalf("scan = %d, %+v, want the rejected file counted as the only failure", status, out)
+	}
+	assertContentURIs(t, pool, libID, []string{"comic/Series", "comic/Series/ch1"})
+}
+
+func TestScanLogsTheSeriesKeyItRejects(t *testing.T) {
+	fastFlushes(t)
+	pool := newTestPool(t)
+	c := newAdminClient(t, pool)
+
+	dir := t.TempDir()
+	writeEPUB(t, filepath.Join(dir, "Foo_bar.epub"), "Foo_bar", "")
+	libID := libraryAt(t, c, "books", dir)
+	runScans(t, pool, c, map[string]any{"ids": []string{libID}})
+
+	member := filepath.Join(dir, "x.epub")
+	writeEPUB(t, member, "X", "Foo/bar")
+	ids := runScans(t, pool, c, map[string]any{"ids": []string{libID}})
+
+	logs := taskLogs(t, c, ids[0])
+	want := "Series key conflict for file " + member + ", skipping (uri: book/Foo_bar)\n"
+	if strings.Count(logs, "Series key conflict") != 1 || !strings.Contains(logs, want) {
+		t.Fatalf("logs = %q, want one entry naming the rejected file and series key", logs)
+	}
+
+	status, out := scanOutcome(t, pool, ids[0])
+	if status != models.TaskStatusCompleted || out.Failed != 1 || out.Added != 0 {
+		t.Fatalf("scan = %d, %+v, want the rejected file counted as the only failure", status, out)
+	}
+	assertContentURIs(t, pool, libID, []string{"book/Foo_bar"})
 }

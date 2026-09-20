@@ -16,52 +16,43 @@ import (
 )
 
 func classifyBook(file FSFile, meta epub.Metadata, coverValid bool) ParsedItem {
-	path := file.Path
-	stem := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	stem := strings.TrimSuffix(filepath.Base(file.Path), filepath.Ext(file.Path))
 
 	index := 0.0
 	if meta.HasSeriesIndex {
 		index = meta.SeriesIndex
 	}
 
-	var coverSuffix *string
-	if coverValid {
-		coverSuffix = new(meta.CoverPath)
-	}
-
-	fileMeta := models.Metadata{
-		Title:           cmp.Or(meta.Title, stem),
-		Description:     meta.Description,
-		Publisher:       meta.Publisher,
-		Language:        meta.Language,
-		PublicationDate: meta.PublicationDate,
-		Series:          meta.Series,
-		SeriesIndex:     index,
-	}
-	for _, a := range meta.Authors {
-		fileMeta.Staff = append(fileMeta.Staff, models.StaffEntry{Name: a, Role: "author"})
-	}
-
-	var series *ParsedSeries
-	if meta.Series != "" {
-		series = &ParsedSeries{
-			URIPrefix:   "book",
-			URIPart:     sanitizeURIPart(meta.Series),
-			ContentType: "book_series",
-			Title:       meta.Series,
-		}
-	}
-
-	return ParsedItem{
+	item := ParsedItem{
 		File:        file,
-		Series:      series,
 		URIPrefix:   "book",
 		ContentType: "book",
 		URIPart:     sanitizeURIPart(stem),
 		OrderParts:  []*float32{new(float32(index))},
-		CoverSuffix: coverSuffix,
-		MetaRaw:     fileMeta,
+		MetaRaw: models.Metadata{
+			Title:           cmp.Or(meta.Title, stem),
+			Description:     meta.Description,
+			Publisher:       meta.Publisher,
+			Language:        meta.Language,
+			PublicationDate: meta.PublicationDate,
+			Series:          meta.Series,
+			SeriesIndex:     index,
+		},
 	}
+	if coverValid {
+		item.CoverSuffix = new(meta.CoverPath)
+	}
+	for _, a := range meta.Authors {
+		item.MetaRaw.Staff = append(item.MetaRaw.Staff, models.StaffEntry{Name: a, Role: "author"})
+	}
+	if meta.Series != "" {
+		item.Series = &ParsedSeries{
+			URIPrefix:   "book",
+			URIPart:     sanitizeURIPart(meta.Series),
+			ContentType: "book_series",
+		}
+	}
+	return item
 }
 
 func classifyComic(file FSFile, meta models.Metadata, year int, pages []comic.PageInfo) *ParsedItem {
@@ -149,7 +140,6 @@ func classifyComic(file FSFile, meta models.Metadata, year int, pages []comic.Pa
 			URIPrefix:   "comic",
 			URIPart:     sanitizeURIPart(seriesURIPart),
 			ContentType: "comic_series",
-			Title:       seriesName,
 			FileURI:     new(dir),
 		},
 	}
@@ -162,8 +152,5 @@ func sanitizeURIPart(s string) string {
 		}
 		return r
 	}, s)
-	if s == "" {
-		return "_"
-	}
-	return s
+	return cmp.Or(s, "_")
 }

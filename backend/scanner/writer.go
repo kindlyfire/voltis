@@ -7,6 +7,7 @@ import (
 	"maps"
 	"path/filepath"
 	"slices"
+	"sync"
 	"time"
 
 	"voltis/lib/tasks"
@@ -94,19 +95,8 @@ func newWriter(in ScanInput, tc *tasks.TaskContext, notify Notifier, res *resolv
 
 func (w *writer) run(ctx context.Context, events <-chan Event, walkDone <-chan error, jobs chan<- FSFile,
 	results <-chan Result, flushes chan<- flush, done <-chan committed) error {
-	jobsOpen, flushesOpen := true, true
-	closeJobs := func() {
-		if jobsOpen {
-			jobsOpen = false
-			close(jobs)
-		}
-	}
-	closeFlushes := func() {
-		if flushesOpen {
-			flushesOpen = false
-			close(flushes)
-		}
-	}
+	closeJobs := sync.OnceFunc(func() { close(jobs) })
+	closeFlushes := sync.OnceFunc(func() { close(flushes) })
 	defer closeJobs()
 	defer closeFlushes()
 
@@ -292,24 +282,18 @@ func (w *writer) place(r Result) {
 		return
 	}
 
-	ref, ok := w.resolveSeries(r.Item.Series)
+	parent, ok := w.resolveSeries(r.Item.Series)
 	if !ok {
 		w.prog.Failed++
-		slog.Warn("[scanner] series key conflict, skipping", "path", r.File.Path)
-		w.logf("Series key conflict for %s, skipping\n", r.File.Path)
+		slog.Warn("[scanner] series key conflict, skipping", "path", r.File.Path,
+			"uri_prefix", r.Item.Series.URIPrefix, "uri_part", r.Item.Series.URIPart)
+		w.logf("Series key conflict for file %s, skipping (uri: %s/%s)\n", r.File.Path, r.Item.Series.URIPrefix, r.Item.Series.URIPart)
 		return
 	}
 
-	parent := ""
-	if ref != nil {
-		parent = ref.ID
-	}
 	s := w.set(parent)
 
-	own := ""
-	if hadOld {
-		own = old.ID
-	}
+	own := old.ID
 	k := Key{parent, r.Item.URIPart}
 	occ := w.keys[k]
 
@@ -331,7 +315,7 @@ func (w *writer) place(r Result) {
 		return
 	}
 
-	if ref != nil {
+	if parent != "" {
 		w.aim(parent, r.Item.Series.FileURI)
 	}
 	if prev, ok := w.byID[id]; ok {
@@ -347,9 +331,9 @@ func (w *writer) place(r Result) {
 	s.Writes = append(s.Writes, write{id: id, item: r.Item, added: own == ""})
 }
 
-func (w *writer) resolveSeries(p *ParsedSeries) (*SeriesRef, bool) {
+func (w *writer) resolveSeries(p *ParsedSeries) (string, bool) {
 	if p == nil {
-		return nil, true
+		return "", true
 	}
 
 	uri := p.URIPrefix + "/" + p.URIPart
@@ -362,27 +346,23 @@ func (w *writer) resolveSeries(p *ParsedSeries) (*SeriesRef, bool) {
 
 	if !found {
 		if _, taken := w.keys[key]; taken {
-			return nil, false
+			return "", false
 		}
 		ref := SeriesRef{ID: models.MakeContentID(), URI: uri, URIPart: p.URIPart, Type: p.ContentType}
 		w.series[ref.ID] = ref
 		w.byURI[uri] = ref.ID
 		w.keys[key] = ref.ID
-		s := w.set(ref.ID)
-		s.New = true
-		s.Ref = ref
-		return &ref, true
+		w.set(ref.ID).New = true
+		return ref.ID, true
 	}
 
 	ref := w.series[id]
 	s := w.set(id)
 	if ref.URI != uri {
 		if occ, taken := w.keys[key]; taken && occ != id {
-			return nil, false
+			return "", false
 		}
-		if s.OldURI == "" {
-			s.OldURI = ref.URI
-		}
+		s.OldURI = cmp.Or(s.OldURI, ref.URI)
 		delete(w.byURI, ref.URI)
 		if prev := (Key{"", ref.URIPart}); w.keys[prev] == id {
 			delete(w.keys, prev)
@@ -394,7 +374,7 @@ func (w *writer) resolveSeries(p *ParsedSeries) (*SeriesRef, bool) {
 	w.keys[key] = id
 	w.series[id] = ref
 	s.Ref = ref
-	return &ref, true
+	return id, true
 }
 
 func (w *writer) seed() {
@@ -428,7 +408,7 @@ func (w *writer) unseed(id string) {
 	}
 }
 
-func (w *writer) aim(id string, dir *string) *string {
+func (w *writer) aim(id string, dir *string) {
 	d, ok := w.dirs[id]
 	if !ok {
 		d = &dirPick{}
@@ -440,7 +420,7 @@ func (w *writer) aim(id string, dir *string) *string {
 	ref := w.series[id]
 	picked := d.pick()
 	if ptrEq(ref.FileURI, picked) {
-		return picked
+		return
 	}
 	if ref.FileURI != nil {
 		w.dropDir(*ref.FileURI, id)
@@ -451,7 +431,6 @@ func (w *writer) aim(id string, dir *string) *string {
 	ref.FileURI = picked
 	w.series[id] = ref
 	w.set(id).Ref = ref
-	return picked
 }
 
 func (w *writer) at(path string) (Fingerprint, bool) {

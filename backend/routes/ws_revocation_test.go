@@ -48,9 +48,8 @@ func (c *testClient) toUser(user, id string) {
 		map[string]any{"type": "ping", "id": id})
 }
 
-func (c *testClient) broadcastTaskAndQueue() {
+func (c *testClient) broadcastTask() {
 	c.hub.TaskUpdate(tasks.Snapshot{ID: "task_1", Name: "scan_library", Status: 1})
-	c.hub.BroadcastScanQueue([]string{"lib_1"})
 }
 
 func readMessage(t *testing.T, conn *websocket.Conn, within time.Duration) (string, error) {
@@ -113,9 +112,8 @@ func TestSocketRevocationOnDemotion(t *testing.T) {
 
 	conn := member.dialWS(t)
 	waitConns(t, admin.hub, 1)
-	admin.broadcastTaskAndQueue()
+	admin.broadcastTask()
 	expectWSMessage(t, conn, `"task_update"`)
-	expectWSMessage(t, conn, `"scan_queue_update"`)
 
 	admin.Post("/api/users/"+memberID, map[string]any{
 		"username": "member", "permissions": []string{},
@@ -125,7 +123,7 @@ func TestSocketRevocationOnDemotion(t *testing.T) {
 
 	reconnected := member.dialWS(t)
 	waitConns(t, admin.hub, 1)
-	admin.broadcastTaskAndQueue()
+	admin.broadcastTask()
 	admin.toUser(memberID, "still-live")
 	expectWSMessage(t, reconnected, `"still-live"`)
 }
@@ -180,7 +178,7 @@ func TestSocketSurvivesRolledBackUpsert(t *testing.T) {
 		}
 	}
 
-	admin.broadcastTaskAndQueue()
+	admin.broadcastTask()
 	expectWSMessage(t, conn, `"task_update"`)
 	waitConns(t, admin.hub, 1)
 }

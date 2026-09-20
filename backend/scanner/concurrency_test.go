@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -20,12 +19,7 @@ func seedSeriesScan(t *testing.T, pool *pgxpool.Pool, lib string) (*scanRun, str
 	r := newScanRun(t, pool, lib, &ComicsScanner{})
 	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
 	r.commit(false)
-	id, err := db.SelectScalar[string](context.Background(), pool,
-		"SELECT id FROM content WHERE library_id = $1 AND uri = 'comic/S/ch1'", lib)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return r, id
+	return r, contentIDByURI(t, pool, lib, "comic/S/ch1")
 }
 
 func TestMetadataScanRaceEditBeforeRename(t *testing.T) {
@@ -35,35 +29,23 @@ func TestMetadataScanRaceEditBeforeRename(t *testing.T) {
 	ctx := context.Background()
 
 	tx, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	must(t, err)
 	defer tx.Rollback(ctx)
-	if err := db.LockMetadata(ctx, tx, lib); err != nil {
-		t.Fatal(err)
-	}
+	must(t, db.LockMetadata(ctx, tx, lib))
 	var uri string
-	if err := tx.QueryRow(ctx, "SELECT uri FROM content WHERE id = $1", leafID).Scan(&uri); err != nil {
-		t.Fatal(err)
-	}
+	must(t, tx.QueryRow(ctx, "SELECT uri FROM content WHERE id = $1", leafID).Scan(&uri))
 	if uri != "comic/S/ch1" {
 		t.Fatalf("uri = %q", uri)
 	}
-	raw := metaraw.MetadataRaw{Overrides: &metaraw.RawContainer[models.Metadata]{Raw: models.Metadata{Title: "kept"}}}
-	merged, _ := json.Marshal(raw.Merge())
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO content_metadata (uri, library_id, data, data_raw, updated_at)
-		VALUES ($1, $2, $3, $4, now())
-		ON CONFLICT (uri, library_id) DO UPDATE SET data = EXCLUDED.data, data_raw = EXCLUDED.data_raw
-	`, uri, lib, merged, raw.Dump()); err != nil {
-		t.Fatal(err)
-	}
+	seedMetadata(t, tx, lib, uri, metaraw.MetadataRaw{
+		Overrides: &metaraw.RawContainer[models.Metadata]{Raw: models.Metadata{Title: "kept"}},
+	})
 
 	r.reload()
 	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S_2019", "/lib/S"))
 	flushed := make(chan error, 1)
 	go func() {
-		_, err := r.tryCommit(false)
+		_, _, err := r.recordCommit(false)
 		flushed <- err
 	}()
 
@@ -74,9 +56,7 @@ func TestMetadataScanRaceEditBeforeRename(t *testing.T) {
 	default:
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		t.Fatal(err)
-	}
+	must(t, tx.Commit(ctx))
 	if err := <-flushed; err != nil {
 		t.Fatalf("flush: %v", err)
 	}
@@ -112,9 +92,7 @@ func TestScanConcurrencyAnnotationDestinationKept(t *testing.T) {
 
 	rows, err := db.Select[models.UserToContent](context.Background(), pool,
 		"SELECT * FROM user_to_content WHERE library_id = $1 ORDER BY id", lib)
-	if err != nil {
-		t.Fatal(err)
-	}
+	must(t, err)
 	if len(rows) != 2 {
 		t.Fatalf("annotations = %+v", rows)
 	}
@@ -201,9 +179,7 @@ func TestScanConcurrencyRetryPolicy(t *testing.T) {
 			}
 			assertCatalog(t, r.pool, r.lib, c.uris)
 			attempts, err := db.SelectScalar[int64](context.Background(), r.pool, "SELECT last_value FROM attempt_counter")
-			if err != nil {
-				t.Fatal(err)
-			}
+			must(t, err)
 			if attempts != c.attempts {
 				t.Fatalf("trigger fired %d times, want %d", attempts, c.attempts)
 			}
@@ -240,9 +216,7 @@ func TestScanConcurrencyRetriesForcedDeadlock(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	other, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	must(t, err)
 	crossed := make(chan error, 1)
 	crossing := false
 	defer func() {
@@ -257,9 +231,7 @@ func TestScanConcurrencyRetriesForcedDeadlock(t *testing.T) {
 		t.Skipf("deadlock_timeout is not settable by this role: %v", err)
 	}
 	var otherPID int
-	if err := other.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&otherPID); err != nil {
-		t.Fatal(err)
-	}
+	must(t, other.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&otherPID))
 
 	exec(t, pool, "CREATE TABLE lockrows (id int PRIMARY KEY)")
 	exec(t, pool, "INSERT INTO lockrows VALUES (1), (2)")
@@ -318,9 +290,7 @@ func TestScanConcurrencyRetriesForcedDeadlock(t *testing.T) {
 	if err := <-crossed; err != nil {
 		t.Fatalf("other connection: %v", err)
 	}
-	if err := other.Rollback(ctx); err != nil {
-		t.Fatal(err)
-	}
+	must(t, other.Rollback(ctx))
 
 	if c.err != nil {
 		t.Fatalf("commit: %v, want the deadlock victim to retry", c.err)
@@ -331,9 +301,7 @@ func TestScanConcurrencyRetriesForcedDeadlock(t *testing.T) {
 	want := []string{"comic/S", "comic/S/ch1"}
 	assertCatalog(t, pool, lib, want)
 	attempts, err := db.SelectScalar[int64](context.Background(), pool, "SELECT last_value FROM attempt_counter")
-	if err != nil {
-		t.Fatal(err)
-	}
+	must(t, err)
 	if attempts != 3 {
 		t.Fatalf("attempts = %d, want a deadlocked attempt then a clean retry", attempts)
 	}

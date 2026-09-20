@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -45,9 +46,7 @@ func symlink(t *testing.T, target, link string) {
 func crossDeviceDir(t *testing.T, sameAs string) string {
 	t.Helper()
 	here, err := os.Stat(sameAs)
-	if err != nil {
-		t.Fatal(err)
-	}
+	must(t, err)
 	for _, base := range []string{"/dev/shm", os.Getenv("XDG_RUNTIME_DIR")} {
 		if base == "" {
 			continue
@@ -67,24 +66,39 @@ func crossDeviceDir(t *testing.T, sameAs string) string {
 	return ""
 }
 
-func legacyWalk(t *testing.T, sources []string) []string {
+func inventory(t *testing.T, sources []string) []string {
 	t.Helper()
-	result, err := walkSources(sources, isComicFile)
-	if err != nil {
-		t.Fatalf("legacy walk %v: %v", sources, err)
+	var paths []string
+	collect := func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d == nil || d.IsDir() || !isComicFile(path) {
+			return nil
+		}
+		paths = append(paths, path)
+		return nil
 	}
-	paths := make([]string, len(result.Files))
-	for i, f := range result.Files {
-		paths[i] = f.Path
+	for _, source := range sources {
+		info, err := os.Stat(source)
+		if err != nil {
+			t.Fatalf("inventory %v: %v", sources, err)
+		}
+		if !info.IsDir() {
+			if isComicFile(source) {
+				paths = append(paths, source)
+			}
+			continue
+		}
+		if err := filepath.WalkDir(source, collect); err != nil {
+			t.Fatalf("inventory %v: %v", sources, err)
+		}
 	}
 	slices.Sort(paths)
 	return paths
 }
 
-func legacyAbsent(t *testing.T, sources []string, rows map[string]string) []string {
+func inventoryAbsent(t *testing.T, sources []string, rows map[string]string) []string {
 	t.Helper()
 	walked := map[string]bool{}
-	for _, p := range legacyWalk(t, sources) {
+	for _, p := range inventory(t, sources) {
 		walked[p] = true
 	}
 	var out []string
@@ -122,14 +136,8 @@ func indexThenWalk(t *testing.T, sources []string, rows map[string]string, mutat
 		mutate()
 	}
 
-	out := make(chan Event, 8192)
-	if err := walk(context.Background(), sources, isComicFile, out); err != nil {
-		t.Fatalf("walk %v: %v", sources, err)
-	}
-	close(out)
-
 	var o walkOutcome
-	for ev := range out {
+	for _, ev := range mustWalk(t, sources, isComicFile) {
 		w.event(ev)
 		if ev.Kind == Seen {
 			o.seen = append(o.seen, ev.Path)
@@ -152,7 +160,7 @@ type sourceCase struct {
 	extra                []string
 	absent               []string
 	wantErr              bool
-	lexicalLegacyRows    bool
+	lexicalRows          bool
 	want                 []string
 	remove               string
 	removalProvesNothing bool
@@ -231,9 +239,6 @@ func runSourceCase(t *testing.T, c sourceCase) {
 	}
 
 	if c.wantErr {
-		if _, err := walkSources(sources, isComicFile); err == nil {
-			t.Fatalf("legacy walk accepted %v", sources)
-		}
 		out := make(chan Event, 16)
 		if err := walk(context.Background(), sources, isComicFile, out); err == nil {
 			t.Fatalf("walk accepted %v", sources)
@@ -244,9 +249,9 @@ func runSourceCase(t *testing.T, c sourceCase) {
 		return
 	}
 
-	legacy := legacyWalk(t, sources)
+	listing := inventory(t, sources)
 	rows := sourceRows{res: newResolver(), byID: map[string]string{}, byKey: map[string]string{}}
-	for _, p := range legacy {
+	for _, p := range listing {
 		rows.add(p)
 	}
 	for _, p := range c.extra {
@@ -260,9 +265,9 @@ func runSourceCase(t *testing.T, c sourceCase) {
 	run := indexThenWalk(t, sources, rows.byID, mutate)
 
 	if c.mutate == nil {
-		if c.lexicalLegacyRows {
-			if resolvable(legacy) {
-				t.Fatalf("legacy inventory %v resolves; drop lexicalLegacyRows", legacy)
+		if c.lexicalRows {
+			if resolvable(listing) {
+				t.Fatalf("inventory %v resolves; drop lexicalRows", listing)
 			}
 			want := make([]string, len(c.want))
 			for i, p := range c.want {
@@ -274,17 +279,17 @@ func runSourceCase(t *testing.T, c sourceCase) {
 			}
 		} else {
 			for _, p := range run.seen {
-				if !slices.Contains(legacy, p) {
-					t.Fatalf("emitted %q, a spelling legacy never stores; legacy = %v", p, legacy)
+				if !slices.Contains(listing, p) {
+					t.Fatalf("emitted %q, a spelling a plain walk never stores; inventory = %v", p, listing)
 				}
 			}
-			want := make([]string, len(legacy))
-			for i, p := range legacy {
+			want := make([]string, len(listing))
+			for i, p := range listing {
 				want[i] = mustResolveFile(t, rows.res, p)
 			}
 			slices.Sort(want)
 			if !slices.Equal(run.keys, slices.Compact(want)) {
-				t.Fatalf("found = %v, want the legacy inventory %v", run.keys, want)
+				t.Fatalf("found = %v, want the inventory %v", run.keys, want)
 			}
 		}
 		if got, want := run.unchanged, rows.matched(run.keys); got != want {
@@ -296,10 +301,10 @@ func runSourceCase(t *testing.T, c sourceCase) {
 	if !slices.Equal(run.gone, absent) {
 		t.Fatalf("rescan proved %v absent, want %v", run.gone, absent)
 	}
-	legacyParity := !c.lexicalLegacyRows && c.mutate == nil && len(c.extra) == 0
-	if legacyParity {
-		if got := legacyAbsent(t, sources, rows.byID); !slices.Equal(got, absent) {
-			t.Fatalf("legacy rescan proved %v absent, want %v", got, absent)
+	parity := !c.lexicalRows && c.mutate == nil && len(c.extra) == 0
+	if parity {
+		if got := inventoryAbsent(t, sources, rows.byID); !slices.Equal(got, absent) {
+			t.Fatalf("a plain rescan proved %v absent, want %v", got, absent)
 		}
 	}
 
@@ -316,17 +321,15 @@ func runSourceCase(t *testing.T, c sourceCase) {
 	} else if len(rows.under(t, target)) == 0 {
 		t.Fatalf("%s covers no stored row; rows = %v", c.remove, rows.byID)
 	}
-	if err := os.RemoveAll(target); err != nil {
-		t.Fatal(err)
-	}
+	must(t, os.RemoveAll(target))
 
 	run = indexThenWalk(t, sources, rows.byID, nil)
 	if !slices.Equal(run.gone, want) {
 		t.Fatalf("after removing %s gone = %v, want %v", c.remove, run.gone, want)
 	}
-	if legacyParity {
-		if got := legacyAbsent(t, sources, rows.byID); !slices.Equal(got, want) {
-			t.Fatalf("after removing %s legacy proved %v absent, want %v", c.remove, got, want)
+	if parity {
+		if got := inventoryAbsent(t, sources, rows.byID); !slices.Equal(got, want) {
+			t.Fatalf("after removing %s a plain walk proved %v absent, want %v", c.remove, got, want)
 		}
 	}
 }
@@ -363,7 +366,7 @@ func TestWalkSourceMatrix(t *testing.T) {
 		{name: "descendant reachable only through a symlink", sources: []string{"A", "A/link/Sub"},
 			remove: "B/inner/Sub/s1.cbz"},
 		{name: "parent segment crossing a symlink", sources: []string{"A", "A/link/../b1.cbz"}, remove: "A/a1.cbz"},
-		{name: "parent segment crossing a symlink to a directory", lexicalLegacyRows: true,
+		{name: "parent segment crossing a symlink to a directory", lexicalRows: true,
 			sources: []string{"A", "A/link/.."}, extra: []string{"{root}/B/b1.cbz"},
 			absent: []string{spell("A", "b1.cbz")}, remove: "B/b1.cbz",
 			want: []string{"A/a1.cbz", "B/b1.cbz", "B/inner/i1.cbz", "B/inner/Sub/s1.cbz"}},
@@ -374,9 +377,7 @@ func TestWalkSourceMatrix(t *testing.T) {
 			extra: []string{spell("A", "link", "..", "Book ch1.cbz")},
 			setup: func(t *testing.T, root string) {
 				book(t, root)
-				if err := os.RemoveAll(filepath.Join(root, "B", "inner")); err != nil {
-					t.Fatal(err)
-				}
+				must(t, os.RemoveAll(filepath.Join(root, "B", "inner")))
 			}},
 		{name: "looping ancestor", sources: []string{"A"}, remove: "A/a1.cbz",
 			extra: []string{spell("A", "loop", "..", "Book ch1.cbz")},
@@ -391,51 +392,35 @@ func TestWalkSourceMatrix(t *testing.T) {
 		{name: "directory replaced by a symlink between indexing and listing",
 			sources: []string{"Alias/Series"},
 			setup: func(t *testing.T, root string) {
-				if err := os.MkdirAll(filepath.Join(root, "Other", "Series"), 0o755); err != nil {
-					t.Fatal(err)
-				}
+				must(t, os.MkdirAll(filepath.Join(root, "Other", "Series"), 0o755))
 			},
 			mutate: func(t *testing.T, root string) {
-				if err := os.Remove(filepath.Join(root, "Alias")); err != nil {
-					t.Fatal(err)
-				}
+				must(t, os.Remove(filepath.Join(root, "Alias")))
 				symlink(t, filepath.Join(root, "Other"), filepath.Join(root, "Alias"))
 			}},
 		{name: "symlink replaced by a directory between indexing and listing",
 			sources: []string{"Alias/Series"},
 			mutate: func(t *testing.T, root string) {
-				if err := os.Remove(filepath.Join(root, "Alias")); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.MkdirAll(filepath.Join(root, "Alias", "Series"), 0o755); err != nil {
-					t.Fatal(err)
-				}
+				must(t, os.Remove(filepath.Join(root, "Alias")))
+				must(t, os.MkdirAll(filepath.Join(root, "Alias", "Series"), 0o755))
 			}},
 		{name: "mount boundary crossed between indexing and listing",
 			sources: []string{"Alias/Series"},
 			setup: func(t *testing.T, root string) {
 				other := crossDeviceDir(t, root)
-				if err := os.MkdirAll(filepath.Join(other, "Series"), 0o755); err != nil {
-					t.Fatal(err)
-				}
+				must(t, os.MkdirAll(filepath.Join(other, "Series"), 0o755))
 				t.Setenv("VOLTIS_TEST_OTHER", other)
 			},
 			mutate: func(t *testing.T, root string) {
-				if err := os.Remove(filepath.Join(root, "Alias")); err != nil {
-					t.Fatal(err)
-				}
+				must(t, os.Remove(filepath.Join(root, "Alias")))
 				symlink(t, os.Getenv("VOLTIS_TEST_OTHER"), filepath.Join(root, "Alias"))
 			}},
 		{name: "directory replaced between indexing and listing", sources: []string{"Lib"},
 			absent: []string{spell("Lib", "Series", "ch1.cbz")},
 			mutate: func(t *testing.T, root string) {
 				series := filepath.Join(root, "Lib", "Series")
-				if err := os.RemoveAll(series); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.MkdirAll(series, 0o755); err != nil {
-					t.Fatal(err)
-				}
+				must(t, os.RemoveAll(series))
+				must(t, os.MkdirAll(series, 0o755))
 			}},
 	}
 	for _, c := range cases {

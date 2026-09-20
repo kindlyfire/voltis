@@ -12,7 +12,7 @@ import (
 
 func collectWalk(t *testing.T, ctx context.Context, roots []string, eligible func(string) bool) ([]Event, error) {
 	t.Helper()
-	out := make(chan Event, 1024)
+	out := make(chan Event, 8192)
 	err := walk(ctx, roots, eligible, out)
 	close(out)
 	var events []Event
@@ -20,6 +20,13 @@ func collectWalk(t *testing.T, ctx context.Context, roots []string, eligible fun
 		events = append(events, ev)
 	}
 	return events, err
+}
+
+func mustWalk(t *testing.T, roots []string, eligible func(string) bool) []Event {
+	t.Helper()
+	events, err := collectWalk(t, context.Background(), roots, eligible)
+	must(t, err)
+	return events
 }
 
 func eventPaths(events []Event, kind EventKind) []string {
@@ -39,10 +46,7 @@ func TestWalkEmitsListingsBeforeFiles(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "Series", "Sub", "ch2.cbz"), "twotwo")
 	writeFile(t, filepath.Join(dir, "Series", "notes.txt"), "ignored")
 
-	events, err := collectWalk(t, context.Background(), []string{dir}, isComicFile)
-	if err != nil {
-		t.Fatalf("walk: %v", err)
-	}
+	events := mustWalk(t, []string{dir}, isComicFile)
 
 	want := []string{dir, filepath.Join(dir, "Series"), filepath.Join(dir, "Series", "Sub")}
 	if got := eventPaths(events, Listed); !slices.Equal(got, want) {
@@ -70,9 +74,7 @@ func TestWalkEmitsListingsBeforeFiles(t *testing.T) {
 			continue
 		}
 		info, err := os.Stat(ev.Path)
-		if err != nil {
-			t.Fatal(err)
-		}
+		must(t, err)
 		if ev.File.Size != info.Size() || !ev.File.Mtime.Equal(info.ModTime()) || ev.File.Path != ev.Path {
 			t.Fatalf("%s: file = %+v", ev.Path, ev.File)
 		}
@@ -113,10 +115,7 @@ func TestWalkRootFile(t *testing.T) {
 	writeFile(t, comic, "one")
 	writeFile(t, notes, "two")
 
-	events, err := collectWalk(t, context.Background(), []string{comic, notes}, isComicFile)
-	if err != nil {
-		t.Fatalf("walk: %v", err)
-	}
+	events := mustWalk(t, []string{comic, notes}, isComicFile)
 	if len(events) != 1 || events[0].Kind != Seen || events[0].File.Path != comic {
 		t.Fatalf("events = %+v", events)
 	}
@@ -127,10 +126,7 @@ func TestWalkOverlappingRoots(t *testing.T) {
 	sub := filepath.Join(dir, "Series")
 	writeFile(t, filepath.Join(sub, "ch1.cbz"), "one")
 
-	events, err := collectWalk(t, context.Background(), []string{sub, dir, dir + string(filepath.Separator), sub}, isComicFile)
-	if err != nil {
-		t.Fatalf("walk: %v", err)
-	}
+	events := mustWalk(t, []string{sub, dir, dir + string(filepath.Separator), sub}, isComicFile)
 	if got := eventPaths(events, Listed); !slices.Equal(got, []string{dir, sub}) {
 		t.Fatalf("listed = %v, want each directory once", got)
 	}
@@ -147,15 +143,10 @@ func TestWalkListingFailure(t *testing.T) {
 	blocked := filepath.Join(dir, "Blocked")
 	writeFile(t, filepath.Join(blocked, "ch1.cbz"), "one")
 	writeFile(t, filepath.Join(dir, "ch2.cbz"), "two")
-	if err := os.Chmod(blocked, 0); err != nil {
-		t.Fatal(err)
-	}
+	must(t, os.Chmod(blocked, 0))
 	t.Cleanup(func() { _ = os.Chmod(blocked, 0o755) })
 
-	events, err := collectWalk(t, context.Background(), []string{dir}, isComicFile)
-	if err != nil {
-		t.Fatalf("walk: %v", err)
-	}
+	events := mustWalk(t, []string{dir}, isComicFile)
 	if got := eventPaths(events, Failed); !slices.Equal(got, []string{blocked}) {
 		t.Fatalf("failed = %v, want [%s]", got, blocked)
 	}
@@ -175,17 +166,12 @@ func TestWalkStatFailure(t *testing.T) {
 
 	eligible := func(path string) bool {
 		if path == vanishing {
-			if err := os.Remove(path); err != nil {
-				t.Fatal(err)
-			}
+			must(t, os.Remove(path))
 		}
 		return isComicFile(path)
 	}
 
-	events, err := collectWalk(t, context.Background(), []string{dir}, eligible)
-	if err != nil {
-		t.Fatalf("walk: %v", err)
-	}
+	events := mustWalk(t, []string{dir}, eligible)
 	if got := eventPaths(events, Failed); !slices.Equal(got, []string{vanishing}) {
 		t.Fatalf("failed = %v, want [%s]", got, vanishing)
 	}
@@ -204,17 +190,12 @@ func TestWalkSymlinks(t *testing.T) {
 	real := filepath.Join(dir, "Real")
 	writeFile(t, filepath.Join(real, "ch1.cbz"), "one")
 	tree := filepath.Join(dir, "Tree")
-	if err := os.MkdirAll(tree, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	must(t, os.MkdirAll(tree, 0o755))
 	if err := os.Symlink(real, filepath.Join(tree, "Link")); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 
-	events, err := collectWalk(t, context.Background(), []string{tree}, isComicFile)
-	if err != nil {
-		t.Fatalf("walk: %v", err)
-	}
+	events := mustWalk(t, []string{tree}, isComicFile)
 	if got := eventPaths(events, Listed); !slices.Equal(got, []string{tree}) {
 		t.Fatalf("listed = %v, want only %s", got, tree)
 	}
@@ -222,10 +203,7 @@ func TestWalkSymlinks(t *testing.T) {
 		t.Fatalf("seen = %v, want none", got)
 	}
 
-	events, err = collectWalk(t, context.Background(), []string{filepath.Join(tree, "Link")}, isComicFile)
-	if err != nil {
-		t.Fatalf("walk symlinked root: %v", err)
-	}
+	events = mustWalk(t, []string{filepath.Join(tree, "Link")}, isComicFile)
 	if len(events) != 0 {
 		t.Fatalf("symlinked root events = %+v, want none", events)
 	}
@@ -249,10 +227,7 @@ func TestWalkKeepsTheSpellingOfEachRoot(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.label, func(t *testing.T) {
-			events, err := collectWalk(t, context.Background(), c.roots, isComicFile)
-			if err != nil {
-				t.Fatalf("walk: %v", err)
-			}
+			events := mustWalk(t, c.roots, isComicFile)
 			if got := eventPaths(events, Seen); !slices.Equal(got, c.want) {
 				t.Fatalf("seen = %v, want %v", got, c.want)
 			}
@@ -282,10 +257,7 @@ func TestWalkRelativeRootUnderSymlinkedWorkingDirectory(t *testing.T) {
 		t.Skipf("working directory = %q, %v, want the symlinked spelling %q", cwd, err, alias)
 	}
 
-	events, err := collectWalk(t, context.Background(), []string{"."}, isComicFile)
-	if err != nil {
-		t.Fatalf("walk: %v", err)
-	}
+	events := mustWalk(t, []string{"."}, isComicFile)
 	if got := eventPaths(events, Seen); !slices.Equal(got, []string{filepath.Join("Series", "ch1.cbz")}) {
 		t.Fatalf("seen = %v, want the file below the relative root", got)
 	}
@@ -307,9 +279,7 @@ func TestWalkRelativeRootUnderSymlinkedWorkingDirectory(t *testing.T) {
 		t.Fatalf("gone = %v, want the row retained", run.gone)
 	}
 
-	if err := os.Remove(stored); err != nil {
-		t.Fatal(err)
-	}
+	must(t, os.Remove(stored))
 	if run = indexThenWalk(t, []string{"."}, rows, nil); !slices.Equal(run.gone, []string{"c1"}) {
 		t.Fatalf("gone = %v, want the removal proven through the symlinked cwd", run.gone)
 	}
@@ -363,16 +333,13 @@ func TestWalkAdapterFixtures(t *testing.T) {
 	writeFile(t, broken, "not a zip")
 
 	comics := &ComicsScanner{}
-	events, err := collectWalk(t, context.Background(), []string{dir}, comics.FileEligible)
-	if err != nil {
-		t.Fatalf("walk: %v", err)
-	}
+	events := mustWalk(t, []string{dir}, comics.FileEligible)
 	if got := eventPaths(events, Seen); !slices.Equal(got, []string{comicPath, broken}) {
 		t.Fatalf("comic files = %v", got)
 	}
 
 	item := comics.ParseFile(FSFile{Path: comicPath})
-	if item == nil || item.URIPart != "ch1" || item.Series == nil || item.Series.URIPart != "Foo_2019" || item.Series.Title != "Foo" {
+	if item == nil || item.URIPart != "ch1" || item.Series == nil || item.Series.URIPart != "Foo_2019" {
 		t.Fatalf("comic item = %+v", item)
 	}
 	if item.Series.FileURI == nil || *item.Series.FileURI != filepath.Dir(comicPath) {
@@ -386,10 +353,7 @@ func TestWalkAdapterFixtures(t *testing.T) {
 	}
 
 	books := &BooksScanner{}
-	events, err = collectWalk(t, context.Background(), []string{dir}, books.FileEligible)
-	if err != nil {
-		t.Fatalf("walk: %v", err)
-	}
+	events = mustWalk(t, []string{dir}, books.FileEligible)
 	if got := eventPaths(events, Seen); !slices.Equal(got, []string{bookPath}) {
 		t.Fatalf("book files = %v", got)
 	}

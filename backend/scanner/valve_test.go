@@ -1,7 +1,6 @@
 package scanner
 
 import (
-	"context"
 	"maps"
 	"os"
 	"path/filepath"
@@ -14,20 +13,13 @@ import (
 func realTempDir(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	must(t, err)
 	return root
 }
 
 func walkInto(t *testing.T, w *writer, roots ...string) {
 	t.Helper()
-	out := make(chan Event, 4096)
-	if err := walk(context.Background(), roots, isComicFile, out); err != nil {
-		t.Fatalf("walk %v: %v", roots, err)
-	}
-	close(out)
-	for ev := range out {
+	for _, ev := range mustWalk(t, roots, isComicFile) {
 		w.event(ev)
 	}
 }
@@ -95,9 +87,7 @@ func TestScanValveKeepsRowsWhoseFileMovedDuringTheScan(t *testing.T) {
 	root := realTempDir(t)
 
 	writeFile(t, filepath.Join(root, "A", "ch1.cbz"), "one")
-	if err := os.MkdirAll(filepath.Join(root, "B"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	must(t, os.MkdirAll(filepath.Join(root, "B"), 0o755))
 	alias := filepath.Join(root, "Alias")
 	symlink(t, filepath.Join(root, "A"), alias)
 
@@ -115,12 +105,8 @@ func TestScanValveKeepsRowsWhoseFileMovedDuringTheScan(t *testing.T) {
 
 	r := newScanRun(t, pool, lib, &ComicsScanner{})
 
-	if err := os.Rename(filepath.Join(root, "A", "ch1.cbz"), filepath.Join(root, "B", "ch1.cbz")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Remove(alias); err != nil {
-		t.Fatal(err)
-	}
+	must(t, os.Rename(filepath.Join(root, "A", "ch1.cbz"), filepath.Join(root, "B", "ch1.cbz")))
+	must(t, os.Remove(alias))
 	symlink(t, filepath.Join(root, "B"), alias)
 
 	walkInto(t, r.w, filepath.Join(root, "A"))
@@ -140,38 +126,22 @@ func TestScanValveKeepsRowsWhoseFileMovedDuringTheScan(t *testing.T) {
 }
 
 func TestScanPipelineRemovesDescendantsOfADirectoryReplacedByAFile(t *testing.T) {
-	run := func(t *testing.T, rel string, legacy bool) []string {
-		p := newPipeline(t, "comics")
-		scan := p.mustScan
-		if legacy {
-			scan = p.mustLegacyScan
-		}
-		dir := filepath.Join(p.root, "S")
-		writeCBZFixture(t, filepath.Join(dir, filepath.FromSlash(rel)), "S", "1")
-		if r := scan(ScanInput{}); r.Added != 1 {
-			t.Fatalf("seed scan = %+v", r)
-		}
-
-		if err := os.RemoveAll(dir); err != nil {
-			t.Fatal(err)
-		}
-		writeFile(t, dir, "no longer a directory")
-
-		if r := scan(ScanInput{}); r.Removed != 1 {
-			t.Fatalf("rescan = %+v, want the orphaned chapter removed", r)
-		}
-		return contentURIs(t, p.pool, p.lib)
-	}
-
 	for _, rel := range []string{"ch1.cbz", "Sub/ch1.cbz"} {
 		t.Run(rel, func(t *testing.T) {
-			got, want := run(t, rel, false), run(t, rel, true)
-			if !slices.Equal(got, want) {
-				t.Fatalf("uris = %v, want the legacy outcome %v", got, want)
+			p := newPipeline(t, "comics")
+			dir := filepath.Join(p.root, "S")
+			writeCBZFixture(t, filepath.Join(dir, filepath.FromSlash(rel)), "S", "1")
+			if r := p.mustScan(ScanInput{}); r.Added != 1 {
+				t.Fatalf("seed scan = %+v", r)
 			}
-			if len(got) != 0 {
-				t.Fatalf("uris = %v, want the series and its chapter gone", got)
+
+			must(t, os.RemoveAll(dir))
+			writeFile(t, dir, "no longer a directory")
+
+			if r := p.mustScan(ScanInput{}); r.Removed != 1 {
+				t.Fatalf("rescan = %+v, want the orphaned chapter removed", r)
 			}
+			assertCatalog(t, p.pool, p.lib, nil)
 		})
 	}
 }
@@ -188,9 +158,7 @@ func retargetFixture(t *testing.T) (string, string, *writer) {
 	w := testWriter([]Fingerprint{leafFP("l1", filepath.Join(root, "Lib", "Series", "ch1.cbz"), "ch1", "p1")},
 		[]SeriesRef{seriesRefOf("p1", "Series", series)})
 
-	if err := os.Remove(alias); err != nil {
-		t.Fatal(err)
-	}
+	must(t, os.Remove(alias))
 	symlink(t, filepath.Join(root, "Other"), alias)
 	return root, series, w
 }
@@ -232,9 +200,7 @@ func TestWalkerIdentityRejectsAHandleWhosePathWasRetargeted(t *testing.T) {
 
 	series := filepath.Join(alias, "Series")
 	f, err := os.Open(series)
-	if err != nil {
-		t.Fatal(err)
-	}
+	must(t, err)
 	defer f.Close()
 
 	w := walker{res: newResolver()}
@@ -242,9 +208,7 @@ func TestWalkerIdentityRejectsAHandleWhosePathWasRetargeted(t *testing.T) {
 		t.Fatalf("identity = %q, want the directory the handle was opened on", id)
 	}
 
-	if err := os.Remove(alias); err != nil {
-		t.Fatal(err)
-	}
+	must(t, os.Remove(alias))
 	symlink(t, filepath.Join(root, "Other"), alias)
 
 	if id := w.identity(f, series); id != "" {
@@ -266,13 +230,9 @@ func TestWriterValveRejectsAFileProofOvertakenByADirectory(t *testing.T) {
 	ev := Event{Kind: Listed, Path: root, Dir: mustResolveDir(t, w.res, root),
 		Names: []string{"S"}, Files: []string{"S"}}
 
-	if err := os.Remove(blocker); err != nil {
-		t.Fatal(err)
-	}
+	must(t, os.Remove(blocker))
 	writeFile(t, filepath.Join(blocker, "Sub", "ch1.cbz"), "one")
-	if err := os.Chmod(blocker, 0o000); err != nil {
-		t.Fatal(err)
-	}
+	must(t, os.Chmod(blocker, 0o000))
 	t.Cleanup(func() { os.Chmod(blocker, 0o755) })
 	if f, err := os.Open(filepath.Join(blocker, "Sub")); err == nil {
 		f.Close()

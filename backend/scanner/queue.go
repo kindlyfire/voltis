@@ -14,22 +14,16 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type QueueBroadcaster interface {
-	BroadcastScanQueue(libraryIDs []string)
-	CatalogChanged(ev CatalogChanged)
-}
-
 type Queue struct {
 	manager *tasks.Manager
 	pool    *pgxpool.Pool
-	hub     QueueBroadcaster
 	def     *tasks.TaskDef
 }
 
-func NewQueue(manager *tasks.Manager, pool *pgxpool.Pool, hub QueueBroadcaster) *Queue {
-	def := NewScanTask(hub)
+func NewQueue(manager *tasks.Manager, pool *pgxpool.Pool, notify Notifier) *Queue {
+	def := NewScanTask(notify)
 	manager.Register(def)
-	return &Queue{manager: manager, pool: pool, hub: hub, def: def}
+	return &Queue{manager: manager, pool: pool, def: def}
 }
 
 func (q *Queue) Enqueue(libraryID string, force bool, filterPaths []string) (string, error) {
@@ -69,10 +63,7 @@ func (q *Queue) Enqueue(libraryID string, force bool, filterPaths []string) (str
 		return "", fmt.Errorf("push scan task: %w", err)
 	}
 
-	q.broadcastQueue()
-
 	go func() {
-		defer q.broadcastQueue()
 		resultAny, err := handle.Wait()
 		if err != nil {
 			slog.Error("[scanner] scan failed", "library", lib.ID, "err", err)
@@ -94,13 +85,4 @@ func (q *Queue) Enqueue(libraryID string, force bool, filterPaths []string) (str
 	}()
 
 	return handle.ID(), nil
-}
-
-func (q *Queue) broadcastQueue() {
-	pending := q.manager.Pending("scan_library")
-	ids := fp.Dedup(fp.Map(pending, func(p tasks.Pending) string {
-		si, _ := p.Input.(ScanInput)
-		return si.LibraryID
-	}))
-	q.hub.BroadcastScanQueue(ids)
 }

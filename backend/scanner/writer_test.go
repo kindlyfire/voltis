@@ -43,7 +43,7 @@ func comicResult(path, part, series, dir string) Result {
 		OrderParts:  []*float32{new(float32(1))},
 	}
 	if series != "" {
-		item.Series = &ParsedSeries{URIPrefix: "comic", URIPart: series, ContentType: "comic_series", Title: series}
+		item.Series = &ParsedSeries{URIPrefix: "comic", URIPart: series, ContentType: "comic_series"}
 		if dir != "" {
 			item.Series.FileURI = new(dir)
 		}
@@ -522,42 +522,6 @@ func TestWriterRunEmptyScanStillFlushes(t *testing.T) {
 	}
 }
 
-func TestWriterRunDrainsOutstandingResultsAndCommits(t *testing.T) {
-	fastFlushes(t)
-	w := testWriter(nil, nil)
-	rig := newRig(t, w)
-	rig.start()
-
-	rig.seen(fsFile("/lib/S/ch1.cbz", baseTime, 10))
-	rig.walkOver()
-
-	job := rig.job()
-	if job.Path != "/lib/S/ch1.cbz" {
-		t.Fatalf("job = %+v", job)
-	}
-	rig.jobsClosed()
-	rig.result(comicResult(job.Path, "ch1", "S", "/lib/S"))
-
-	first := rig.takeFlush(t)
-	if first.final || len(first.sets) != 1 {
-		t.Fatalf("first flush = %+v", first)
-	}
-	rig.commit(committed{seq: first.seq, counts: Counts{Added: 1}})
-
-	final := rig.takeFlush(t)
-	if !final.final || len(final.sets) != 0 {
-		t.Fatalf("final flush = %+v", final)
-	}
-	rig.commit(committed{seq: final.seq})
-
-	if err := rig.finish(t); err != nil {
-		t.Fatalf("run: %v", err)
-	}
-	if w.prog.Saved.Added != 1 || w.prog.Processed != 1 || w.prog.CommitSeq != final.seq {
-		t.Fatalf("progress = %+v", w.prog)
-	}
-}
-
 func TestWriterRunPropagatesCommitError(t *testing.T) {
 	fastFlushes(t)
 	w := testWriter(nil, nil)
@@ -653,6 +617,10 @@ func TestWriterRunDoesNotSpaceTheFinalFlush(t *testing.T) {
 	rig.walkOver()
 
 	job := rig.job()
+	if job.Path != "/lib/S/ch1.cbz" {
+		t.Fatalf("job = %+v", job)
+	}
+	rig.jobsClosed()
 	rig.result(comicResult(job.Path, "ch1", "S", "/lib/S"))
 
 	first := rig.takeFlush(t)
@@ -678,7 +646,7 @@ func TestWriterRunDoesNotSpaceTheFinalFlush(t *testing.T) {
 	if _, open := rigRecv(t, rig.flushes, "the flushes channel to close"); open {
 		t.Fatal("flushes must be closed after the final one")
 	}
-	if w.prog.Phase != "done" || w.prog.CommitSeq != final.seq || w.prog.Saved.Added != 1 {
+	if w.prog.Phase != "done" || w.prog.CommitSeq != final.seq || w.prog.Saved.Added != 1 || w.prog.Processed != 1 {
 		t.Fatalf("progress = %+v", w.prog)
 	}
 }

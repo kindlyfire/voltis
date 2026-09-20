@@ -48,10 +48,3 @@ func (cs *ComicsScanner) SeriesCover(series SeriesRef, ordered []Child) (*string
 	}
 	return nil, nil
 }
-
-func (cs *ComicsScanner) UpdateSeries(r *repository, series *models.Content, ordered []Child) {
-	inheritChildMetadata(r, series, ordered)
-
-	series.CoverURI, series.FileMtime = cs.SeriesCover(seriesRef(series), ordered)
-	r.markDirty(series)
-}

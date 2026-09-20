@@ -23,7 +23,6 @@ func TestLibraryCRUD(t *testing.T) {
 	dir1 := t.TempDir()
 	dir2 := t.TempDir()
 
-	// Create
 	lib := c.Post("/api/libraries/new", map[string]any{
 		"name": "test", "type": "comics",
 		"sources": []map[string]any{{"path_uri": dir1}},
@@ -33,24 +32,20 @@ func TestLibraryCRUD(t *testing.T) {
 	assertEq(t, s(lib["type"]), "comics")
 	id := s(lib["id"])
 
-	// List
 	libs := c.Get("/api/libraries").Assert(t, 200).JSONArray()
 	assertLen(t, libs, 1)
 	assertEq(t, s(libs[0]["id"]), id)
 
-	// Update
 	updated := c.Post("/api/libraries/"+id, map[string]any{
 		"name": "test2", "type": "books",
 		"sources": []map[string]any{{"path_uri": dir2}},
 	}).Assert(t, 200).JSON()
 
 	assertEq(t, s(updated["name"]), "test2")
-	assertEq(t, s(updated["type"]), "comics") // type can't change
+	assertEq(t, s(updated["type"]), "comics")
 
-	// Delete
 	c.Delete("/api/libraries/"+id).Assert(t, 200)
 
-	// Verify gone
 	libs = c.Get("/api/libraries").Assert(t, 200).JSONArray()
 	assertLen(t, libs, 0)
 }
@@ -59,38 +54,18 @@ func TestLibraryValidation(t *testing.T) {
 	pool := newTestPool(t)
 	c := newAdminClient(t, pool)
 
-	// Invalid source path
 	c.Post("/api/libraries/new", map[string]any{
 		"name": "test", "type": "comics",
 		"sources": []map[string]any{{"path_uri": "/nonexistent/path"}},
 	}).Assert(t, 400)
 
-	// Delete nonexistent
 	c.Delete("/api/libraries/nonexistent").Assert(t, 404)
 }
 
-func writeEPUB(t *testing.T, path, title, series string) {
+func writeZip(t *testing.T, path string, entries map[string]string) {
 	t.Helper()
-	seriesMeta := ""
-	if series != "" {
-		seriesMeta = `<meta name="calibre:series" content="` + series + `"/>` +
-			`<meta name="calibre:series_index" content="1"/>`
-	}
 	buf := &bytes.Buffer{}
 	zw := zip.NewWriter(buf)
-	entries := map[string]string{
-		"META-INF/container.xml": `<?xml version="1.0"?><container><rootfiles>` +
-			`<rootfile full-path="content.opf"/></rootfiles></container>`,
-		"content.opf": `<?xml version="1.0"?>
-<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
-  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
-    <dc:title>` + title + `</dc:title>
-    <dc:language>en</dc:language>
-    ` + seriesMeta + `
-  </metadata>
-  <manifest/>
-</package>`,
-	}
 	for _, name := range slices.Sorted(maps.Keys(entries)) {
 		w, err := zw.Create(name)
 		if err != nil {
@@ -104,8 +79,30 @@ func writeEPUB(t *testing.T, path, title, series string) {
 		t.Fatalf("zip close: %v", err)
 	}
 	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
-		t.Fatalf("write epub: %v", err)
+		t.Fatalf("write archive: %v", err)
 	}
+}
+
+func writeEPUB(t *testing.T, path, title, series string) {
+	t.Helper()
+	seriesMeta := ""
+	if series != "" {
+		seriesMeta = `<meta name="calibre:series" content="` + series + `"/>` +
+			`<meta name="calibre:series_index" content="1"/>`
+	}
+	writeZip(t, path, map[string]string{
+		"META-INF/container.xml": `<?xml version="1.0"?><container><rootfiles>` +
+			`<rootfile full-path="content.opf"/></rootfiles></container>`,
+		"content.opf": `<?xml version="1.0"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>` + title + `</dc:title>
+    <dc:language>en</dc:language>
+    ` + seriesMeta + `
+  </metadata>
+  <manifest/>
+</package>`,
+	})
 }
 
 func runScans(t *testing.T, pool *pgxpool.Pool, c *testClient, body map[string]any) []string {
@@ -149,11 +146,7 @@ func TestScanningABookSeriesLeavesUnrelatedBooksAlone(t *testing.T) {
 	writeEPUB(t, filepath.Join(dir, "Bar v1.epub"), "Bar Volume 1", "Bar")
 	writeEPUB(t, solo, "Solo", "")
 
-	lib := c.Post("/api/libraries/new", map[string]any{
-		"name": "books", "type": "books",
-		"sources": []map[string]any{{"path_uri": dir}},
-	}).Assert(t, 200).JSON()
-	libID := s(lib["id"])
+	libID := libraryAt(t, c, "books", dir)
 
 	runScans(t, pool, c, map[string]any{"ids": []string{libID}})
 	runScans(t, pool, c, map[string]any{"ids": []string{libID}, "force": true})
@@ -181,7 +174,7 @@ func TestScanningABookSeriesLeavesUnrelatedBooksAlone(t *testing.T) {
 	if status != models.TaskStatusCompleted {
 		t.Fatalf("selected scan status = %d, want it completed", status)
 	}
-	if (out != scanner.ScanResult{Updated: 1, Duration: out.Duration}) {
+	if (out != scanner.ScanResult{Counts: scanner.Counts{Updated: 1}, Duration: out.Duration}) {
 		t.Fatalf("selected scan = %+v, want exactly the selected member reparsed", out)
 	}
 

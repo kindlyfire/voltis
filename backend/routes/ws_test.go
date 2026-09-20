@@ -137,7 +137,7 @@ func mustBroadcast(t *testing.T, h *WebSocketHub, id string) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		h.BroadcastScanQueue([]string{id})
+		h.broadcast(toAdmins, map[string]any{"type": "ping", "id": id})
 	}()
 	waitFor(t, done, fmt.Sprintf("broadcast %q to return", id))
 }
@@ -228,10 +228,10 @@ func TestTaskAudienceIsAdminOnly(t *testing.T) {
 		LogLen:   143})
 	h.TaskUpdate(tasks.Snapshot{ID: "task_2", Name: "scan_library", Status: 2,
 		Output: json.RawMessage(`{"added":1}`)})
-	mustBroadcast(t, h, "queue")
 
 	msg := nextMessage(t, admin)
 	assertEq(t, s(msg["type"]), "task_update")
+	assertEq(t, len(msg), 2)
 	task, _ := msg["task"].(map[string]any)
 	if task == nil {
 		t.Fatalf("task payload = %v, want the nested snapshot", msg["task"])
@@ -247,12 +247,10 @@ func TestTaskAudienceIsAdminOnly(t *testing.T) {
 	if progress == nil || s(progress["phase"]) != "parsing" {
 		t.Fatalf("progress = %v, want the nested scan progress", task["progress"])
 	}
-	if msg["progress"] == nil {
-		t.Fatal("legacy top-level progress field is missing")
+	if task["log"] != nil || task["logs"] != nil {
+		t.Fatalf("task = %v, want the log served by its own route, not the snapshot", task)
 	}
-
 	expectMessage(t, admin, `"task_update"`, `"task_2"`, `"added":1`)
-	expectMessage(t, admin, `"scan_queue_update"`, `"queue"`)
 	expectNoMessage(t, plain)
 
 	h.broadcast(func(c *userConn) bool { return c.user == "u2" },

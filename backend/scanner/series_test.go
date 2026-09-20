@@ -4,56 +4,17 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 	"time"
 
-	"voltis/lib/sources"
 	"voltis/models"
-	"voltis/models/metaraw"
 )
 
 func f32(v float32) *float32 { return new(v) }
 
 func childOf(id string, parts []*float32, m models.Metadata) Child {
-	return Child{
-		ID:         id,
-		URI:        "comic/s/" + id,
-		URIPart:    id,
-		OrderParts: parts,
-		Valid:      true,
-		Meta:       rawMeta(m),
-	}
-}
-
-func seriesChild(kind, id string, parts ...*float32) models.Content {
-	ext := ".cbz"
-	if kind == "book" {
-		ext = ".epub"
-	}
-	c := testLeaf(id, kind, "/lib/s/"+id+ext, baseTime, 10, true)
-	c.URI = kind + "/s/" + id
-	c.ParentID = new("p")
-	c.OrderParts = parts
-	return c
-}
-
-func seriesRepo(kind string, children ...models.Content) *repository {
-	r := newRepository(nil, "library")
-	r.content = append([]models.Content{{
-		ID: "p", LibraryID: "library", Type: kind + "_series", URIPart: "s", URI: kind + "/s", Valid: true,
-	}}, children...)
-	return r
-}
-
-func comicChild(id string, part float32, m models.Metadata) (models.Content, *metadataRow) {
-	c := seriesChild("comic", id, new(part))
-	return c, &metadataRow{URI: c.URI, LibraryID: "library", DataRaw: rawMeta(m)}
-}
-
-func orderedChildren(r *repository) []Child {
-	return order(r.children(r.childrenOf("p")))
+	return Child{ID: id, OrderParts: parts, Meta: rawMeta(m)}
 }
 
 func ids(children []Child) string {
@@ -123,67 +84,33 @@ func TestOrderSortsByPartsThenID(t *testing.T) {
 	}
 }
 
-func TestOrderAcceptedChangeTiedSiblingsRankByIDNotRepositoryOrder(t *testing.T) {
-	tied := func(id string, mtime time.Time) models.Content {
-		c := seriesChild("book", id, f32(0))
+func TestTiedChildrenChooseCoverAndMetadataByID(t *testing.T) {
+	tied := func(id string, mtime time.Time, m models.Metadata) Child {
+		c := childOf(id, []*float32{f32(0)}, m)
 		c.CoverURI = new("/lib/s/" + id + ".epub/cover.jpg")
 		c.FileMtime = &mtime
 		return c
 	}
-	r := seriesRepo("book", tied("z", baseTime.Add(2*time.Hour)), tied("a", baseTime.Add(time.Hour)))
-	r.metadata = []*metadataRow{
-		{URI: "book/s/z", LibraryID: "library", DataRaw: rawMeta(models.Metadata{Series: "Zed Series", Publisher: "Zed Press"})},
-		{URI: "book/s/a", LibraryID: "library", DataRaw: rawMeta(models.Metadata{Series: "Alpha Series", Publisher: "Alpha Press"})},
-	}
+	z := tied("z", baseTime.Add(2*time.Hour), models.Metadata{Series: "Zed Series", Publisher: "Zed Press"})
+	a := tied("a", baseTime.Add(time.Hour), models.Metadata{Series: "Alpha Series", Publisher: "Alpha Press"})
 
-	updateGroupSeries(&BooksScanner{}, r, map[string]bool{"p": true})
-
-	ranked := map[string]int{}
-	for i := range r.content {
-		if c := r.content[i]; c.Order != nil {
-			ranked[c.ID] = *c.Order
+	for _, arrival := range [][]Child{{z, a}, {a, z}} {
+		ordered := order(arrival)
+		if ids(ordered) != "a,z" {
+			t.Fatalf("tied siblings order by ID, got %s", ids(ordered))
 		}
-	}
-	if len(ranked) != 2 || ranked["a"] != 0 || ranked["z"] != 1 {
-		t.Fatalf("accepted change: tied siblings order by ID, got %v", ranked)
-	}
 
-	series := r.content[0]
-	if series.CoverURI == nil || *series.CoverURI != "/lib/s/a.epub/cover.jpg" {
-		t.Fatalf("accepted change: series cover comes from the lowest-ID tied child, got %v", series.CoverURI)
-	}
-	if series.FileMtime == nil || !series.FileMtime.Equal(baseTime.Add(time.Hour)) {
-		t.Fatalf("accepted change: series mtime comes from the lowest-ID tied child, got %v", series.FileMtime)
-	}
+		cover, mtime := (&BooksScanner{}).SeriesCover(SeriesRef{ID: "p", URIPart: "s"}, ordered)
+		if cover == nil || *cover != "/lib/s/a.epub/cover.jpg" {
+			t.Fatalf("series cover comes from the lowest-ID tied child, got %v", cover)
+		}
+		if mtime == nil || !mtime.Equal(baseTime.Add(time.Hour)) {
+			t.Fatalf("series mtime comes from the lowest-ID tied child, got %v", mtime)
+		}
 
-	file := r.getMetadata("book/s").DataRaw.File.Raw
-	if file.Title != "Alpha Series" || file.Publisher != "Alpha Press" {
-		t.Fatalf("accepted change: the lowest-ID tied child wins inherited fields, got %+v", file)
-	}
-}
-
-type capturingScanner struct {
-	BooksScanner
-	ordered []Child
-}
-
-func (cs *capturingScanner) UpdateSeries(r *repository, series *models.Content, ordered []Child) {
-	cs.ordered = slices.Clone(ordered)
-	cs.BooksScanner.UpdateSeries(r, series, ordered)
-}
-
-func TestOrderStampsRanksOntoChildrenPassedToAdapters(t *testing.T) {
-	r := seriesRepo("book", seriesChild("book", "b", f32(2)), seriesChild("book", "a", f32(1)))
-
-	cs := &capturingScanner{}
-	updateGroupSeries(cs, r, map[string]bool{"p": true})
-
-	if len(cs.ordered) != 2 {
-		t.Fatalf("adapter saw %d children, want 2", len(cs.ordered))
-	}
-	for i, c := range cs.ordered {
-		if c.Order == nil || *c.Order != i {
-			t.Fatalf("child %s reached the adapter with order %v, want %d", c.ID, c.Order, i)
+		file := inherit(SeriesRef{ID: "p", URIPart: "s"}, ordered)
+		if file.Title != "Alpha Series" || file.Publisher != "Alpha Press" {
+			t.Fatalf("the lowest-ID tied child wins inherited fields, got %+v", file)
 		}
 	}
 }
@@ -253,17 +180,6 @@ func TestInheritIsPure(t *testing.T) {
 	}
 }
 
-func TestInheritRetainsInvalidChildren(t *testing.T) {
-	invalid := childOf("a", []*float32{f32(1)}, models.Metadata{Series: "Retained Series", Publisher: "Retained Press"})
-	invalid.Valid = false
-	valid := childOf("b", []*float32{f32(2)}, models.Metadata{Series: "Other", Publisher: "Other Press", Genre: "Action"})
-
-	got := inherit(SeriesRef{URIPart: "s"}, order([]Child{invalid, valid}))
-	if got.Title != "Retained Series" || got.Publisher != "Retained Press" || got.Genre != "Action" {
-		t.Fatalf("inherited = %+v", got)
-	}
-}
-
 func TestInheritTitleFallback(t *testing.T) {
 	if got := inherit(SeriesRef{URIPart: "Fallback Part"}, nil); got.Title != "Fallback Part" {
 		t.Fatalf("empty children title = %q", got.Title)
@@ -293,95 +209,6 @@ func TestInheritTitleFallsBackToTheFolderOnlyWhenItSanitizesToTheKey(t *testing.
 	book := SeriesRef{URIPart: "Foo_bar", Type: "book_series"}
 	if got := inherit(book, nil); got.Title != "Foo_bar" {
 		t.Errorf("book title = %q, want the uri part", got.Title)
-	}
-}
-
-func TestInheritCorrectsAfterEarlierChildArrives(t *testing.T) {
-	late, lateMeta := comicChild("a", 2, models.Metadata{Series: "B Series", Publisher: "B Press", Genre: "Action"})
-	r := seriesRepo("comic", late)
-	r.metadata = []*metadataRow{lateMeta}
-
-	inheritChildMetadata(r, &r.content[0], orderedChildren(r))
-	if got := r.getMetadata("comic/s").DataRaw.File.Raw; got.Title != "B Series" || got.Publisher != "B Press" {
-		t.Fatalf("b alone = %+v", got)
-	}
-
-	early, earlyMeta := comicChild("z", 1, models.Metadata{Series: "A Series", Publisher: "A Press"})
-	r.content = append(r.content, early)
-	r.metadata = append(r.metadata, earlyMeta)
-
-	inheritChildMetadata(r, &r.content[0], orderedChildren(r))
-	got := r.getMetadata("comic/s").DataRaw.File.Raw
-	if got.Title != "A Series" || got.Publisher != "A Press" {
-		t.Fatalf("not corrected by the earlier child: %+v", got)
-	}
-	if got.Genre != "Action" {
-		t.Fatalf("later child field dropped: %+v", got)
-	}
-}
-
-func TestInheritReplacesWholeFileLayer(t *testing.T) {
-	child, childMeta := comicChild("a", 1, models.Metadata{Series: "New Series", Genre: "Child Genre", Language: "en"})
-	r := seriesRepo("comic", child)
-	r.metadata = []*metadataRow{childMeta, {
-		URI: "comic/s", LibraryID: "library", DataRaw: metaraw.MetadataRaw{
-			File: &metaraw.RawContainer[models.Metadata]{Raw: models.Metadata{
-				Title: "Stale", Publisher: "Stale Press", Genre: "Stale Genre", Language: "jp",
-			}},
-			MangaBaka: &metaraw.RawContainer[sources.Series]{Raw: sources.Series{
-				ID: 7, Title: "External Title", Genres: []string{"Action", "Drama"},
-				Publishers: []sources.Publisher{{Name: new("External Press")}},
-			}},
-			Overrides: &metaraw.RawContainer[models.Metadata]{Raw: models.Metadata{Publisher: "Override Press"}},
-		},
-	}}
-
-	inheritChildMetadata(r, &r.content[0], orderedChildren(r))
-
-	row := r.getMetadata("comic/s")
-	if !row.dirty {
-		t.Fatal("series metadata not marked dirty")
-	}
-	file := row.DataRaw.File.Raw
-	if file.Title != "New Series" || file.Genre != "Child Genre" || file.Language != "en" {
-		t.Fatalf("file layer = %+v", file)
-	}
-	if file.Publisher != "" {
-		t.Fatalf("stale file fields persisted: %+v", file)
-	}
-	if row.DataRaw.MangaBaka == nil || row.DataRaw.MangaBaka.Raw.Title != "External Title" ||
-		row.DataRaw.MangaBaka.Raw.ID != 7 {
-		t.Fatalf("external layer = %+v", row.DataRaw.MangaBaka)
-	}
-	if row.DataRaw.Overrides == nil || row.DataRaw.Overrides.Raw.Publisher != "Override Press" {
-		t.Fatalf("overrides = %+v", row.DataRaw.Overrides)
-	}
-
-	merged := row.DataRaw.Merge()
-	if merged.Title != "External Title" || merged.Genre != "Action, Drama" {
-		t.Fatalf("external layer must beat file: %+v", merged)
-	}
-	if merged.Publisher != "Override Press" {
-		t.Fatalf("overrides must beat external: %+v", merged)
-	}
-	if merged.Language != "en" {
-		t.Fatalf("file layer must survive where higher layers are empty: %+v", merged)
-	}
-}
-
-func TestInheritSkipsSeriesWithoutChildren(t *testing.T) {
-	r := newRepository(nil, "library")
-	series := models.Content{ID: "p", LibraryID: "library", Type: "comic_series", URIPart: "s", URI: "comic/s"}
-	r.metadata = []*metadataRow{{
-		URI: "comic/s", LibraryID: "library",
-		DataRaw: rawMeta(models.Metadata{Title: "Existing"}),
-	}}
-
-	inheritChildMetadata(r, &series, nil)
-
-	row := r.getMetadata("comic/s")
-	if row.dirty || row.DataRaw.File.Raw.Title != "Existing" {
-		t.Fatalf("row = %+v", row.DataRaw.File.Raw)
 	}
 }
 
@@ -437,13 +264,9 @@ func TestSeriesCoverComics(t *testing.T) {
 
 	dir := t.TempDir()
 	coverPath := filepath.Join(dir, "cover.png")
-	if err := os.WriteFile(coverPath, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	must(t, os.WriteFile(coverPath, []byte("x"), 0o644))
 	info, err := os.Stat(coverPath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	must(t, err)
 
 	uri, mtime := cs.SeriesCover(SeriesRef{ID: "p", FileURI: &dir}, []Child{child})
 	if uri == nil || *uri != coverPath || mtime == nil || !mtime.Equal(info.ModTime().UTC()) {
