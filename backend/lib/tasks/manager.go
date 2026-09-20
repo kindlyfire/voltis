@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -266,8 +267,9 @@ func (m *Manager) setStatus(e *entry, status int) {
 	e.snap.Status = status
 	e.snap.UpdatedAt = time.Now().UTC()
 	e.dirty = true
+	output, updated := e.snap.Output, e.snap.UpdatedAt
 	e.mu.Unlock()
-	_ = m.persist(context.Background(), e)
+	_ = m.persist(context.Background(), e, status, output, updated)
 }
 
 func (m *Manager) finish(e *entry, status int, output, result any, err error) {
@@ -275,29 +277,36 @@ func (m *Manager) finish(e *entry, status int, output, result any, err error) {
 	if output != nil {
 		encoded, marshalErr := json.Marshal(output)
 		if marshalErr != nil {
-			slog.Error("[tasks] failed to marshal task output", "id", e.snap.ID, "err", marshalErr)
+			err = errors.Join(err, fmt.Errorf("marshal task output: %w", marshalErr))
 		} else {
 			data = encoded
 		}
 	}
 
 	e.mu.Lock()
-	e.snap.Status = status
+	term := e.snap
+	term.Status = status
 	if data != nil {
-		e.snap.Output = data
+		term.Output = data
 	}
-	e.snap.UpdatedAt = time.Now().UTC()
-	e.dirty = false
-	snap := e.snapshotLocked()
+	term.UpdatedAt = time.Now().UTC()
 	e.mu.Unlock()
 
-	_ = m.persist(context.Background(), e)
-	if m.publish != nil {
-		m.publish(snap)
+	if persistErr := m.persist(context.Background(), e, term.Status, term.Output, term.UpdatedAt); persistErr != nil {
+		err = errors.Join(err, fmt.Errorf("persist terminal task state: %w", persistErr))
+	} else {
+		e.mu.Lock()
+		e.snap.Status, e.snap.Output, e.snap.UpdatedAt = term.Status, term.Output, term.UpdatedAt
+		e.dirty = false
+		snap := e.snapshotLocked()
+		e.mu.Unlock()
+		if m.publish != nil {
+			m.publish(snap)
+		}
 	}
 
 	m.mu.Lock()
-	delete(m.live, snap.ID)
+	delete(m.live, term.ID)
 	m.running = fp.Remove(m.running, e)
 	m.scheduleUnlocked()
 	m.mu.Unlock()
@@ -339,10 +348,9 @@ func (m *Manager) publishLoop(ctx context.Context) {
 	}
 }
 
-func (m *Manager) persist(ctx context.Context, e *entry) error {
+func (m *Manager) persist(ctx context.Context, e *entry, status int, output json.RawMessage, updated time.Time) error {
 	e.mu.Lock()
-	id, status, output, updated := e.snap.ID, e.snap.Status, e.snap.Output, e.snap.UpdatedAt
-	logs := e.logs.String()
+	id, logs := e.snap.ID, e.logs.String()
 	e.mu.Unlock()
 
 	var logsPtr *string
@@ -352,10 +360,13 @@ func (m *Manager) persist(ctx context.Context, e *entry) error {
 
 	writeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	_, err := m.pool.Exec(writeCtx, `
+	tag, err := m.pool.Exec(writeCtx, `
 		UPDATE tasks SET status = $1, output = $2, logs = $3, updated_at = $4
 		WHERE id = $5
 	`, status, output, logsPtr, updated, id)
+	if err == nil && tag.RowsAffected() != 1 {
+		err = fmt.Errorf("persist task %s: %d rows affected", id, tag.RowsAffected())
+	}
 	if err != nil {
 		slog.Error("[tasks] failed to persist task", "id", id, "err", err)
 	}
