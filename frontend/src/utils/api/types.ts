@@ -275,7 +275,11 @@ export interface CustomListReorderRequest {
 }
 
 export interface OkResponse {
-    success: boolean
+    ok: boolean
+}
+
+export interface ErrorResponse {
+    error: string
 }
 
 export const TaskStatus = {

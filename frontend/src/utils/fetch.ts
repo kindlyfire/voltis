@@ -1,3 +1,5 @@
+import type { ErrorResponse } from './api/types'
+
 export const API_URL = import.meta.env.VITE_API_URL ?? '/api'
 
 export class RequestError extends Error {
@@ -14,28 +16,9 @@ export class RequestError extends Error {
     }
 
     static getMessage(error: unknown): string {
-        if (!(error instanceof RequestError) || !error.json || !(error.json as any).detail) {
-            return String(error)
-        }
-
-        const json = error.json as Record<string, unknown>
-        if (typeof json.detail === 'string') {
-            return json.detail
-        }
-        if (Array.isArray(json.detail)) {
-            return json.detail
-                .map(d => {
-                    if (typeof d === 'object' && d !== null) {
-                        if (d.loc && d.msg) {
-                            return `${(d.loc as string[]).join('.')}: ${d.msg}`
-                        }
-                        return JSON.stringify(d)
-                    }
-                    return String(d)
-                })
-                .join(', ')
-        }
-        return JSON.stringify(json.detail)
+        if (!(error instanceof RequestError)) return String(error)
+        const err = (error.json as ErrorResponse | undefined)?.error
+        return typeof err === 'string' && err ? err : error.message
     }
 }
 

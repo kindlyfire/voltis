@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import { apiFetch } from '../fetch'
+import type { OkResponse } from './types'
 
 export interface LoginRequest {
     username: string
@@ -16,7 +17,7 @@ export const authApi = {
         const queryClient = useQueryClient()
         return useMutation({
             mutationFn: async (credentials: LoginRequest) =>
-                apiFetch<{ success: boolean }>('/auth/login', {
+                apiFetch<OkResponse>('/auth/login', {
                     method: 'POST',
                     body: JSON.stringify(credentials),
                 }),
@@ -30,7 +31,7 @@ export const authApi = {
         const queryClient = useQueryClient()
         return useMutation({
             mutationFn: async (credentials: RegisterRequest) =>
-                apiFetch<{ success: boolean }>('/auth/register', {
+                apiFetch<OkResponse>('/auth/register', {
                     method: 'POST',
                     body: JSON.stringify(credentials),
                 }),
@@ -44,7 +45,7 @@ export const authApi = {
         const queryClient = useQueryClient()
         return useMutation({
             mutationFn: async () =>
-                apiFetch<{ success: boolean }>('/auth/logout', {
+                apiFetch<OkResponse>('/auth/logout', {
                     method: 'POST',
                 }),
             onSuccess: () => {
