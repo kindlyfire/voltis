@@ -2,6 +2,7 @@ import { acceptHMRUpdate, defineStore } from 'pinia'
 import { ref, type Ref } from 'vue'
 import { useRouter, type Router } from 'vue-router'
 import { isBookLocator, type BookEntry } from './bookEntry'
+import { useBookSettings } from './bookSettings'
 import {
     createBookSession,
     type BookAnchor,
@@ -41,9 +42,7 @@ export const useBookDisplayStore = defineStore('book-display', () => {
     const router = useRouter()
     const sidebarOpen = ref(false)
     const session: Ref<BookSession | null> = ref(null)
-
-    // Left over from the removed book settings.
-    localStorage.removeItem('reader:books')
+    const settings = useBookSettings()
 
     function setContent(contentId: string, entry: BookEntry) {
         if (session.value?.contentId === contentId) {
@@ -61,7 +60,7 @@ export const useBookDisplayStore = defineStore('book-display', () => {
         return current?.dispose()
     }
 
-    return { session, sidebarOpen, setContent, dispose }
+    return { session, sidebarOpen, settings, setContent, dispose }
 })
 
 if (import.meta.hot) {

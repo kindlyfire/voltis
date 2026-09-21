@@ -1,9 +1,8 @@
 import { onMounted, onUnmounted } from 'vue'
 import { getScrollParent, getViewportHeight } from '@/utils/css'
 import { getLayoutTop } from '@/utils/misc'
+import { getClickZone, isTyping } from '../useClickZones'
 import { useReaderStore } from './useComicDisplayStore'
-
-type ClickZone = 'prev' | 'next' | 'menu'
 
 const scrollParent = () => getScrollParent(document.getElementById('longstrip-container')!)
 
@@ -71,16 +70,7 @@ export function useReaderControls() {
     }
 
     function handleKeydown(e: KeyboardEvent) {
-        // Ignore when an input element is focused
-        const active = document.activeElement
-        if (
-            active instanceof HTMLInputElement ||
-            active instanceof HTMLTextAreaElement ||
-            active instanceof HTMLSelectElement ||
-            (active instanceof HTMLElement && active.isContentEditable)
-        ) {
-            return
-        }
+        if (isTyping()) return
 
         switch (e.key) {
             case 'ArrowLeft':
@@ -118,43 +108,4 @@ export function useReaderControls() {
             }
         },
     }
-}
-
-const HEIGHT_ZONE = 0.2
-
-function getClickZone(e: MouseEvent): ClickZone {
-    const target = e.currentTarget as HTMLElement
-    const rect = target.getBoundingClientRect()
-
-    // Vertical: use visible viewport portion (accounts for navbar/scroll)
-    const visibleTop = Math.max(0, rect.top)
-    const visibleBottom = Math.min(window.innerHeight, rect.bottom)
-    const visibleHeight = visibleBottom - visibleTop
-    const relativeY = e.clientY - visibleTop
-    const heightPercent = relativeY / visibleHeight
-
-    // Horizontal: use element bounds (accounts for sidebar)
-    const centerWidth = Math.min(rect.width / 3, 300)
-    const widthZone1 = (rect.width - centerWidth) / 2
-    const widthZone2 = widthZone1 + centerWidth
-    const relativeX = e.clientX - rect.left
-
-    // Top 20% = prev
-    if (heightPercent < HEIGHT_ZONE) {
-        return 'prev'
-    }
-    // Bottom 20% = next
-    if (heightPercent > 1 - HEIGHT_ZONE) {
-        return 'next'
-    }
-    // Left third = prev
-    if (relativeX < widthZone1) {
-        return 'prev'
-    }
-    // Right third = next
-    if (relativeX > widthZone2) {
-        return 'next'
-    }
-    // Center = menu
-    return 'menu'
 }

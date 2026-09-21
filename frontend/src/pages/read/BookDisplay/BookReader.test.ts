@@ -16,17 +16,14 @@ vi.mock('@/utils/api/content', () => ({
     },
 }))
 
-const pass = { template: '<div><slot /></div>' }
 const stubs = {
-    VAppBar: pass,
-    VAppBarTitle: pass,
-    VSpacer: { template: '<div />' },
     VBtn: { template: '<button><slot /></button>' },
     VIcon: { template: '<i />' },
     VDivider: { template: '<hr />' },
     VProgressCircular: { template: '<div class="loading" />' },
     VAlert: { template: '<div class="alert"><slot /></div>' },
-    BookContentsDrawer: true,
+    VProgressLinear: { template: '<div />' },
+    BookReaderDrawer: true,
 }
 
 const STRUCTURE: BookStructure = {
@@ -135,24 +132,8 @@ describe('BookReader host lifecycle', () => {
         expect(mountedText(wrapper)).toContain('second chapter')
         // The sentinel comes back with the page chrome, so completion can work.
         expect(wrapper.find('.h-px').exists()).toBe(true)
-
-        wrapper.unmount()
-        await store.dispose()
-    })
-
-    it('attaches both the host and the end sentinel on a healthy load', async () => {
-        vi.mocked(contentApi.bookDocument).mockResolvedValue(
-            '<html><body><p id="p">first chapter</p></body></html>'
-        )
-
-        const wrapper = render()
-        const store = useBookDisplayStore(pinia)
-        store.setContent('c_1', { ch: null, frag: null })
-        await settle()
-
-        expect(mountedText(wrapper)).toContain('first chapter')
-        expect(wrapper.find('.h-px').exists()).toBe(true)
-        expect(wrapper.text()).toContain('Next: Two')
+        expect(wrapper.text()).toContain('Previous: One')
+        expect(wrapper.text()).toContain('End of book')
 
         wrapper.unmount()
         await store.dispose()
@@ -186,6 +167,7 @@ describe('BookReader across books', () => {
         store.setContent('c_a', { ch: null, frag: null })
         await settle()
         expect(mountedText(wrapper)).toContain('book a text')
+        expect(wrapper.find('.h-px').exists()).toBe(true)
 
         // The reader stays mounted; only the book changes.
         store.setContent('c_b', { ch: null, frag: null })

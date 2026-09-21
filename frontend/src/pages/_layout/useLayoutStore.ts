@@ -20,7 +20,9 @@ export const useLayoutStore = defineStore('layout', () => {
         'comicReaderPaged',
         // Opening the reader sidebar always shows the navbar
         'comicReaderSidebar',
-        // Same for the book reader's contents drawer
+        // The book reader hides all chrome
+        'bookReader',
+        // ...until its drawer is opened
         'bookReaderSidebar',
     ])
     watch(
@@ -32,13 +34,20 @@ export const useLayoutStore = defineStore('layout', () => {
     const navbarTemporary = computed(() => {
         // Navbar scroll hide doesn't count, since it will always show when the
         // viewport is near the top of the scroll area
-        return navbarHidden.getLayer('comicReaderPaged') || false
+        return (
+            navbarHidden.getLayer('comicReaderPaged') ||
+            navbarHidden.getLayer('bookReader') ||
+            false
+        )
     })
 
     /** sidebarTemporary has the default state (true on mobile), and an override
      * (reader pages make the sidebar temporary). temporary = uses an overlay
      * instead of taking up space in the layout */
-    const sidebarTemporary = createOverridableValue(() => !mdAndUp.value, ['comicReader'])
+    const sidebarTemporary = createOverridableValue(
+        () => !mdAndUp.value,
+        ['comicReader', 'bookReader']
+    )
 
     /** sidebarOpen has the default state (hidden on mobile), and an override
      * (clicking the sidebar icon should show it) */

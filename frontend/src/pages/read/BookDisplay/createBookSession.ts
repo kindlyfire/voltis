@@ -46,6 +46,7 @@ import {
     fetchBookResource,
     mountTree,
     prepareDocument,
+    updateUserStyles,
     type PrepareContext,
     type PreparedDocument,
 } from './prepareDocument'
@@ -203,6 +204,11 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
     let stampTimer: ReturnType<typeof setTimeout> | null = null
     let writeController: AbortController | null = null
     let standaloneReturn: { pageIndex: number; locator: BookLocator | null } | null = null
+    let publisherFonts = false
+    /** The entry a backwards turn pushed, to be opened at its bottom. Keyed by
+     * entry, so a push that never arrives is cleared by the next route change
+     * instead of stranding the flag on a page index. */
+    let landingEnd: string | null = null
 
     const hostWaiters: Array<() => void> = []
     const controller = new AbortController()
@@ -373,7 +379,7 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
         return candidates[0]!
     }
 
-    async function applyEntry(current: BookEntry, token: number, initial: boolean) {
+    async function applyEntry(current: BookEntry, token: number, initial: boolean, atEnd = false) {
         if (!isCurrent(token)) return
         if (!state.pages.length) {
             settleTransition(token)
@@ -415,6 +421,7 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
                       ? positionLocator(urlPosition)
                       : null,
                 anchor,
+                atEnd,
             },
             token
         )
@@ -437,6 +444,10 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
         requestAnimationFrame(() => {
             programmaticScrolls = Math.max(0, programmaticScrolls - 1)
         })
+    }
+
+    function scrollToEnd() {
+        scrollWindowTo(document.documentElement.scrollHeight)
     }
 
     function scrollToElement(el: Element) {
@@ -470,7 +481,7 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
                 slice,
                 prepared: source,
                 holder,
-                root: mountTree(holder, source, body),
+                root: mountTree(holder, source, body, publisherFonts),
                 startOffset: textOffsetAtPath(docBody(source.doc)!, slice.start),
             }
         })
@@ -550,7 +561,7 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
 
     async function navigateTo(
         index: number,
-        target: { locator?: BookLocator | null; anchor?: BookAnchor | null },
+        target: { locator?: BookLocator | null; anchor?: BookAnchor | null; atEnd?: boolean },
         token: number
     ) {
         const page = state.pages[index]
@@ -582,16 +593,23 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
         }
 
         commit(next, { kind: 'page', index })
-        scrollWindowTo(0)
+        // Already at the end before settling, so the reader doesn't spend the
+        // image and font wait sitting at the top of the page.
+        if (target.atEnd) scrollToEnd()
+        else scrollWindowTo(0)
         await settle()
         if (!isCurrent(token)) return
 
         if (!restoreCancelled) {
-            const el =
-                (target.anchor ? locateAnchor(target.anchor) : null) ??
-                (target.locator ? locateInMounted(target.locator) : null)
-            if (el) scrollToElement(el)
-            else if (target.anchor) state.notice = 'That link points somewhere unavailable.'
+            if (target.atEnd) {
+                scrollToEnd()
+            } else {
+                const el =
+                    (target.anchor ? locateAnchor(target.anchor) : null) ??
+                    (target.locator ? locateInMounted(target.locator) : null)
+                if (el) scrollToElement(el)
+                else if (target.anchor) state.notice = 'That link points somewhere unavailable.'
+            }
         }
 
         settleTransition(token)
@@ -808,6 +826,16 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
         void onResizeEnd()
     }
 
+    /** The user stylesheet is rebuilt in place: a remount would lose the
+     * reading position. `onResize` runs first so the passage is captured
+     * against the old layout, whoever else asks for a reflow after this. */
+    function setPublisherFonts(value: boolean) {
+        if (publisherFonts === value) return
+        publisherFonts = value
+        onResize()
+        for (const slice of mounted) updateUserStyles(slice.holder, publisherFonts)
+    }
+
     function onClick(event: MouseEvent) {
         if (event.defaultPrevented || event.button !== 0) return
         if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
@@ -928,6 +956,8 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
         setEntry(next: BookEntry) {
             if (entryKey(next) === currentEntryKey) return
             currentEntryKey = entryKey(next)
+            const atEnd = landingEnd === currentEntryKey
+            landingEnd = null
             // The history entry has already moved, so this passage belongs to
             // the one we are leaving and must not be stamped onto it.
             flushProgress(false, false)
@@ -935,16 +965,22 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
                 pendingEntry = next
                 return
             }
-            void applyEntry(next, begin(), false)
+            void applyEntry(next, begin(), false, atEnd)
         },
 
         snapshotPassage,
+        setPublisherFonts,
 
-        goToPage(index: number) {
+        /** Restores the passage after a layout change of our own, the way a
+         * window resize does. */
+        reflow: onResize,
+
+        goToPage(index: number, atEnd = false) {
             const target = state.pages[index]?.target
             if (!target) return
             snapshotPassage()
             cancelPending()
+            landingEnd = atEnd ? entryKey({ ch: target.href, frag: target.fragment || null }) : null
             nav.push(target)
         },
 

@@ -361,13 +361,13 @@ const READER_CSS = `
 :host {
     display: block;
     box-sizing: border-box;
-    max-width: calc(45em + 4rem);
+    max-width: var(--reader-max-width, calc(45em + 4rem));
     margin: 0 auto;
     padding: 2rem;
     color-scheme: dark light;
-    font-family: Georgia, 'Times New Roman', serif;
-    line-height: 1.8;
-    font-size: 1.1rem;
+    font-family: var(--reader-font-family, Georgia, 'Times New Roman', serif);
+    line-height: var(--reader-line-height, 1.8);
+    font-size: var(--reader-font-size, 1.1rem);
 }
 html, body { display: block; }
 body { margin: 0; }
@@ -376,9 +376,57 @@ a { color: inherit; }
 a[data-book-missing] { text-decoration: line-through; opacity: 0.7; }
 `
 
+export const MONO_STACK = "ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace"
+
+/** Repeated `:not(#x)` outranks the class selectors books style their text
+ * with: between two `!important` declarations, specificity still decides.
+ * `:is()` costs nothing extra, it takes the specificity of its argument. */
+const BEAT = ':not(#reader-user-css):not(#reader-user-css)'
+/** `html` and `body` included: a book that rescales either one would otherwise
+ * resize every paragraph inheriting from it. */
+const TEXT = ':is(html, body, p, li, dd, dt, blockquote, div, span, td, th, figcaption)'
+const MONO = ':is(pre, code, kbd, samp, tt)'
+
+const USER_STYLE_MARK = 'data-reader-user'
+
+/** Sits after the book's own sheets so the reader's font settings win. The
+ * sizes are `inherit` rather than values: that keeps every element tied to the
+ * one size on `:host` without flattening headings. */
+function userCss(publisherFonts: boolean): string {
+    let css = `
+${TEXT}${BEAT} {
+    font-size: inherit !important;
+    line-height: inherit !important;
+}
+`
+    if (!publisherFonts) {
+        css += `
+${BEAT} {
+    font-family: inherit !important;
+}
+${MONO}${BEAT}, ${MONO} ${BEAT} {
+    font-family: ${MONO_STACK} !important;
+}
+`
+    }
+    return css
+}
+
+/** Swaps the user sheet of an already mounted tree, for settings that the
+ * inherited custom properties can't carry. */
+export function updateUserStyles(host: HTMLElement, publisherFonts = false) {
+    const style = host.shadowRoot?.querySelector(`style[${USER_STYLE_MARK}]`)
+    if (style) style.textContent = userCss(publisherFonts)
+}
+
 /** Attaches a document's (possibly pruned) body into its own shadow root,
  * keeping the `html`/`body` elements so authored tag selectors still match. */
-export function mountTree(host: HTMLElement, prepared: PreparedDocument, body: Element): Element {
+export function mountTree(
+    host: HTMLElement,
+    prepared: PreparedDocument,
+    body: Element,
+    publisherFonts = false
+): Element {
     const shadow = host.shadowRoot ?? host.attachShadow({ mode: 'open' })
     const base = document.createElement('style')
     base.textContent = READER_CSS
@@ -400,7 +448,11 @@ export function mountTree(host: HTMLElement, prepared: PreparedDocument, body: E
         style.textContent = css
         nodes.push(style)
     }
-    nodes.push(root)
+
+    const user = document.createElement('style')
+    user.setAttribute(USER_STYLE_MARK, '')
+    user.textContent = userCss(publisherFonts)
+    nodes.push(user, root)
     shadow.replaceChildren(...nodes)
     return mounted
 }

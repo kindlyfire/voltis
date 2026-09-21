@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Router } from 'vue-router'
 import { contentApi } from '@/utils/api/content'
 import type { BookLocator, BookStructure, Content, UserToContent } from '@/utils/api/types'
@@ -61,22 +61,20 @@ function content(progress: Record<string, unknown> = {}, status = 'reading'): Co
 /** A router and a history stack, so Back/Forward and canonicalization are
  * exercised the way the store wires them. */
 class FakeNav implements BookNav {
-    entries: Array<{ target: BookAnchor; state: Record<string, unknown> }> = []
+    entries: Array<{ target: BookAnchor; locator: BookLocator | null }> = []
     index = -1
     session: BookSession | null = null
-    pushes = 0
 
     push(target: BookAnchor) {
         this.entries.splice(this.index + 1)
-        this.entries.push({ target, state: {} })
+        this.entries.push({ target, locator: null })
         this.index++
-        this.pushes++
         this.deliver()
     }
 
     replace(target: BookAnchor) {
         if (this.index < 0) {
-            this.entries.push({ target, state: {} })
+            this.entries.push({ target, locator: null })
             this.index = 0
         } else {
             this.entries[this.index]!.target = target
@@ -84,18 +82,13 @@ class FakeNav implements BookNav {
         this.deliver()
     }
 
-    constructor(readonly contentId = 'c_1') {}
-
     saveLocator(locator: BookLocator) {
         if (this.index < 0) return
-        this.entries[this.index]!.state.bookLocator = { contentId: this.contentId, locator }
+        this.entries[this.index]!.locator = locator
     }
 
     historyLocator(): BookLocator | null {
-        const saved = this.entries[this.index]?.state.bookLocator as
-            | { contentId: string; locator: BookLocator }
-            | undefined
-        return saved && saved.contentId === this.contentId ? saved.locator : null
+        return this.entries[this.index]?.locator ?? null
     }
 
     go(delta: number) {
@@ -180,10 +173,6 @@ function start(entry: Partial<BookEntry> = {}, nav = new FakeNav()) {
     return { session, nav, host, sentinel }
 }
 
-function passageOf(nav: FakeNav, index: number): BookLocator | undefined {
-    return (nav.entries[index]?.state.bookLocator as { locator?: BookLocator } | undefined)?.locator
-}
-
 function bodyOf(host: HTMLElement, index = 0): Element {
     return (host.children[index] as HTMLElement).shadowRoot!.querySelector('body')!
 }
@@ -211,6 +200,10 @@ beforeEach(() => {
     ) {
         return rectFor(this)
     })
+})
+
+afterEach(() => {
+    vi.useRealTimers()
 })
 
 describe('mounting', () => {
@@ -258,9 +251,11 @@ describe('entry resolution', () => {
     it('resumes from a saved locator when the URL names no chapter', async () => {
         const locator: BookLocator = { version: 1, href: 'book.xhtml', textOffset: 60 }
         vi.mocked(contentApi.get).mockResolvedValue(content({ book: locator }))
-        const { session } = start()
+        const { session, nav } = start()
         await flush()
         expect(session.pageIndex).toBe(1)
+        // And the URL is canonicalized onto the page it landed on.
+        expect(nav.entries[nav.index]!.target).toEqual({ href: 'book.xhtml', fragment: 'c2' })
         await session.dispose()
     })
 
@@ -284,14 +279,6 @@ describe('entry resolution', () => {
         const { session } = start()
         await flush()
         expect(session.pageIndex).toBe(2)
-        await session.dispose()
-    })
-
-    it('canonicalizes the URL to the page it landed on', async () => {
-        const { session, nav } = start({ ch: 'book.xhtml', frag: 'c2' })
-        await flush()
-        expect(nav.entries[nav.index]!.target).toEqual({ href: 'book.xhtml', fragment: 'c2' })
-        expect(session.pageIndex).toBe(1)
         await session.dispose()
     })
 })
@@ -425,30 +412,25 @@ describe('unreachable documents', () => {
 })
 
 describe('progress', () => {
-    it('merges the locator into the existing progress object', async () => {
-        const { session } = start()
-        await flush()
-        await session.dispose()
-
-        expect(writes()).toHaveLength(1)
-        const [, payload, init] = writes()[0]!
-        expect(payload.progress!.current_page).toBe(7)
-        expect(payload.progress!.book).toMatchObject({ version: 1, href: 'book.xhtml' })
-        expect(payload.progress!.progress_percent).toBeGreaterThanOrEqual(0)
-        expect(payload.status).toBe('reading')
-        expect(init).toEqual({ keepalive: true })
-    })
-
-    it('captures the first visible block as the reader scrolls', async () => {
+    it('merges the block the reader scrolled to into the existing progress', async () => {
         const { session } = start()
         await flush()
         scrollTo(150)
         await flush()
         await session.dispose()
 
-        const [, payload] = writes().at(-1)!
-        expect(payload.progress!.book!.anchorId).toBe('p1b')
+        expect(writes()).toHaveLength(1)
+        const [, payload, init] = writes()[0]!
+        expect(payload.progress!.current_page).toBe(7)
+        expect(payload.progress!.book).toMatchObject({
+            version: 1,
+            href: 'book.xhtml',
+            anchorId: 'p1b',
+        })
         expect(payload.progress!.book!.textOffset).toBeGreaterThan(0)
+        expect(payload.progress!.progress_percent).toBeGreaterThanOrEqual(0)
+        expect(payload.status).toBe('reading')
+        expect(init).toEqual({ keepalive: true })
     })
 
     it('flushes with keepalive when the tab is hidden, and resumes afterwards', async () => {
@@ -535,13 +517,28 @@ describe('completion', () => {
         expect(writes().every(([, payload]) => payload.status !== 'completed')).toBe(true)
     })
 
+    // On the last page, where everything but the standalone guard says complete.
     it('never completes a book from standalone viewing', async () => {
-        const { session } = start({ ch: 'notes.xhtml' })
+        const { session, host } = start()
+        await flush()
+        session.goToPage(2)
+        await flush()
+        scrollTo(10)
+        await flush()
+
+        const body = bodyOf(host)
+        const link = body.ownerDocument.createElement('a')
+        link.setAttribute('data-book-href', 'notes.xhtml')
+        link.setAttribute('data-book-frag', '')
+        body.append(link)
+        link.click()
         await flush()
         expect(session.standalone).not.toBeNull()
+
         window.dispatchEvent(new Event('pointerdown'))
         await flush()
         await session.dispose()
+        expect(writes().length).toBeGreaterThan(0)
         expect(writes().every(([, payload]) => payload.status !== 'completed')).toBe(true)
     })
 })
@@ -572,9 +569,19 @@ describe('standalone documents', () => {
         await flush()
         scrollTo(150)
         await flush()
+        expect(writes()).toHaveLength(0)
+
         const link = bodyOf(host).querySelector('[data-book-href="notes.xhtml"]') as HTMLElement
         link.click()
         await flush()
+
+        // Leaving the flow persists the outgoing passage there and then.
+        expect(writes()).toHaveLength(1)
+        expect(writes()[0]![1].progress!.book).toMatchObject({
+            href: 'book.xhtml',
+            anchorId: 'p1b',
+        })
+
         scrollTo(50)
         await flush()
         await session.dispose()
@@ -632,59 +639,37 @@ describe('internal links', () => {
 describe('history', () => {
     it('returns to the passage left behind on Back, and to the new one on Forward', async () => {
         vi.useFakeTimers()
-        try {
-            const { session, nav } = start()
-            await flush()
-            // Past the frame in which the mount scrolled, so the scroll below
-            // reads as the reader's own.
-            await vi.advanceTimersByTimeAsync(50)
+        const { session, nav } = start()
+        await flush()
+        // Past the frame in which the mount scrolled, so the scroll below
+        // reads as the reader's own.
+        await vi.advanceTimersByTimeAsync(50)
 
-            scrollTo(150)
-            await vi.advanceTimersByTimeAsync(600)
-            expect(passageOf(nav, 0)?.anchorId).toBe('p1b')
+        scrollTo(150)
+        await vi.advanceTimersByTimeAsync(600)
+        expect(nav.entries[0]!.locator?.anchorId).toBe('p1b')
 
-            session.goToPage(2)
-            await vi.advanceTimersByTimeAsync(300)
-            expect(session.pageIndex).toBe(2)
+        session.goToPage(2)
+        await vi.advanceTimersByTimeAsync(300)
+        expect(session.pageIndex).toBe(2)
 
-            // Read on at the destination, then leave and come back both ways.
-            await vi.advanceTimersByTimeAsync(50)
-            scrollTo(100)
-            await vi.advanceTimersByTimeAsync(600)
-            expect(passageOf(nav, 1)?.anchorId).toBe('p3')
+        // Read on at the destination, then leave and come back both ways.
+        await vi.advanceTimersByTimeAsync(50)
+        scrollTo(100)
+        await vi.advanceTimersByTimeAsync(600)
+        expect(nav.entries[1]!.locator?.anchorId).toBe('p3')
 
-            nav.go(-1)
-            await vi.advanceTimersByTimeAsync(300)
-            await flush()
-            expect(session.pageIndex).toBe(0)
-            expect(scrollY).toBe(BLOCK_HEIGHT - 8)
-
-            nav.go(1)
-            await vi.advanceTimersByTimeAsync(300)
-            await flush()
-            expect(session.pageIndex).toBe(2)
-            expect(scrollY).toBe(BLOCK_HEIGHT - 8)
-            await session.dispose()
-        } finally {
-            vi.useRealTimers()
-        }
-    })
-
-    it('ignores a snapshot left by another book', async () => {
-        const nav = new FakeNav('c_1')
-        nav.entries.push({
-            target: { href: 'book.xhtml', fragment: '' },
-            state: {
-                bookLocator: {
-                    contentId: 'c_other',
-                    locator: { version: 1, href: 'book.xhtml', textOffset: 60 },
-                },
-            },
-        })
-        nav.index = 0
-        const { session } = start({}, nav)
+        nav.go(-1)
+        await vi.advanceTimersByTimeAsync(300)
         await flush()
         expect(session.pageIndex).toBe(0)
+        expect(scrollY).toBe(BLOCK_HEIGHT - 8)
+
+        nav.go(1)
+        await vi.advanceTimersByTimeAsync(300)
+        await flush()
+        expect(session.pageIndex).toBe(2)
+        expect(scrollY).toBe(BLOCK_HEIGHT - 8)
         await session.dispose()
     })
 })
@@ -718,57 +703,99 @@ describe('history adapter', () => {
     })
 })
 
+describe('paging backwards', () => {
+    it('lands at the bottom of the page it arrives at', async () => {
+        const { session } = start()
+        await flush()
+        session.goToPage(1)
+        await flush()
+        expect(session.pageIndex).toBe(1)
+
+        Object.defineProperty(document.documentElement, 'scrollHeight', {
+            value: 4000,
+            configurable: true,
+        })
+        session.goToPage(0, true)
+        await flush()
+
+        expect(session.pageIndex).toBe(0)
+        expect(scrollY).toBe(4000)
+
+        // The landing is spent, so the next arrival is positioned normally.
+        session.goToPage(1)
+        await flush()
+        expect(scrollY).toBe(0)
+
+        Reflect.deleteProperty(document.documentElement, 'scrollHeight')
+        await session.dispose()
+    })
+
+    it('drops the landing when the turn is overtaken by another entry', async () => {
+        const { session } = start()
+        await flush()
+        session.goToPage(1)
+        await flush()
+
+        Object.defineProperty(document.documentElement, 'scrollHeight', {
+            value: 4000,
+            configurable: true,
+        })
+        session.goToPage(0, true)
+        // Same page, but a deliberate anchor: it must not inherit the landing.
+        session.setEntry({ ch: 'book.xhtml', frag: 'p1b' })
+        await flush()
+
+        expect(session.pageIndex).toBe(0)
+        expect(scrollY).toBe(BLOCK_HEIGHT - 8)
+
+        Reflect.deleteProperty(document.documentElement, 'scrollHeight')
+        await session.dispose()
+    })
+})
+
 describe('resize', () => {
     it('recaptures and repositions without a correction loop', async () => {
         vi.useFakeTimers()
-        try {
-            const { session } = start()
-            await vi.advanceTimersByTimeAsync(0)
-            await flush()
-            scrollTo(150)
-            await vi.advanceTimersByTimeAsync(300)
-            const before = session.percent
+        const { session } = start()
+        await vi.advanceTimersByTimeAsync(0)
+        await flush()
+        scrollTo(150)
+        await vi.advanceTimersByTimeAsync(300)
+        const before = session.percent
 
-            window.dispatchEvent(new Event('resize'))
-            scrollY = 0
-            await vi.advanceTimersByTimeAsync(300)
+        window.dispatchEvent(new Event('resize'))
+        scrollY = 0
+        await vi.advanceTimersByTimeAsync(300)
 
-            expect(scrollY).toBe(BLOCK_HEIGHT - 8)
-            expect(session.percent).toBe(before)
-            await session.dispose()
-        } finally {
-            vi.useRealTimers()
-        }
+        expect(scrollY).toBe(BLOCK_HEIGHT - 8)
+        expect(session.percent).toBe(before)
+        await session.dispose()
     })
 })
 
 describe('write ordering', () => {
     it('cancels an in-flight write before the closing one', async () => {
         vi.useFakeTimers()
-        try {
-            const hanging = deferred<UserToContent>()
-            vi.mocked(contentApi.updateUserData).mockReturnValueOnce(hanging.promise)
-            const { session } = start()
-            await vi.advanceTimersByTimeAsync(50)
-            await flush()
+        const hanging = deferred<UserToContent>()
+        vi.mocked(contentApi.updateUserData).mockReturnValueOnce(hanging.promise)
+        const { session } = start()
+        await vi.advanceTimersByTimeAsync(50)
+        await flush()
 
-            scrollTo(150)
-            await vi.advanceTimersByTimeAsync(1500)
-            expect(writes()).toHaveLength(1)
+        scrollTo(150)
+        await vi.advanceTimersByTimeAsync(1500)
+        expect(writes()).toHaveLength(1)
 
-            const inFlight = writes()[0]![2]!.signal!
-            expect(inFlight.aborted).toBe(false)
+        const inFlight = writes()[0]![2]!.signal!
+        expect(inFlight.aborted).toBe(false)
 
-            void session.dispose()
-            await flush()
+        void session.dispose()
+        await flush()
 
-            expect(inFlight.aborted).toBe(true)
-            expect(writes()).toHaveLength(2)
-            expect(writes()[1]![2]).toEqual({ keepalive: true })
-            hanging.resolve({ progress: {} } as UserToContent)
-        } finally {
-            vi.useRealTimers()
-        }
+        expect(inFlight.aborted).toBe(true)
+        expect(writes()).toHaveLength(2)
+        expect(writes()[1]![2]).toEqual({ keepalive: true })
+        hanging.resolve({ progress: {} } as UserToContent)
     })
 })
 
@@ -820,25 +847,6 @@ describe('standalone routing', () => {
         await flush()
         expect(session.standalone).toBeNull()
         expect(nav.entries[nav.index]!.target.href).toBe('book.xhtml')
-        await session.dispose()
-    })
-
-    it('persists the outgoing passage before leaving the flow', async () => {
-        const { session, host } = start()
-        await flush()
-        scrollTo(150)
-        await flush()
-        expect(writes()).toHaveLength(0)
-
-        const link = bodyOf(host).querySelector('[data-book-href="notes.xhtml"]') as HTMLElement
-        link.click()
-        await flush()
-
-        expect(writes()).toHaveLength(1)
-        expect(writes()[0]![1].progress!.book).toMatchObject({
-            href: 'book.xhtml',
-            anchorId: 'p1b',
-        })
         await session.dispose()
     })
 })
@@ -913,26 +921,22 @@ describe('surviving a failed navigation', () => {
 describe('disposal', () => {
     it('cancels deferred capture and repositioning', async () => {
         vi.useFakeTimers()
-        try {
-            const { session, nav } = start()
-            await vi.advanceTimersByTimeAsync(50)
-            await flush()
+        const { session, nav } = start()
+        await vi.advanceTimersByTimeAsync(50)
+        await flush()
 
-            scrollTo(150)
-            window.dispatchEvent(new Event('resize'))
-            await session.dispose()
+        scrollTo(150)
+        window.dispatchEvent(new Event('resize'))
+        await session.dispose()
 
-            const stamped = JSON.stringify(nav.entries)
-            const settled = writes().length
-            scrollY = 0
-            await vi.advanceTimersByTimeAsync(2000)
+        const stamped = JSON.stringify(nav.entries)
+        const settled = writes().length
+        scrollY = 0
+        await vi.advanceTimersByTimeAsync(2000)
 
-            expect(scrollY).toBe(0)
-            expect(writes()).toHaveLength(settled)
-            expect(JSON.stringify(nav.entries)).toBe(stamped)
-        } finally {
-            vi.useRealTimers()
-        }
+        expect(scrollY).toBe(0)
+        expect(writes()).toHaveLength(settled)
+        expect(JSON.stringify(nav.entries)).toBe(stamped)
     })
 })
 

@@ -187,7 +187,7 @@ describe('range construction', () => {
         expectExactTiling(f, pages)
     })
 
-    it('absorbs an image-only interstitial into the preceding page', () => {
+    it('absorbs an image-only interstitial into the preceding page, whole', () => {
         const f = fixture(
             spine([{ href: 'ch1.xhtml' }, { href: 'plate.xhtml' }, { href: 'ch2.xhtml' }]),
             toc([
@@ -196,51 +196,39 @@ describe('range construction', () => {
             ]),
             {
                 'ch1.xhtml': '<p>one</p>',
-                'plate.xhtml': '<img src="plate.png" alt="plate" />',
+                'plate.xhtml': '<img src="a.png" /><img src="b.png" />',
                 'ch2.xhtml': '<p>two</p>',
             }
         )
         const pages = buildPages(f.structure, f.docs)
         expect(pages).toHaveLength(2)
         expect(pages[0]!.slices.map(s => s.href)).toEqual(['ch1.xhtml', 'plate.xhtml'])
+        expect(pageLeaves(f, [pages[0]!]).filter(leaf => leaf.includes(':')).length).toBe(3)
         expectExactTiling(f, pages)
     })
 
-    it('nudges a mid-table boundary out to the table', () => {
+    it.each([
+        [
+            'table',
+            `<p>before</p> <table><tbody><tr><td>a</td></tr> <tr><td id="inside">b</td></tr></tbody></table> <p>after</p>`,
+            'tr',
+        ],
+        ['list', `<p>before</p> <ul><li>a</li> <li id="inside">b</li></ul> <p>after</p>`, 'li'],
+    ])('nudges a boundary inside a %s out to the whole of it', (_kind, markup, child) => {
         const f = fixture(
             spine([{ href: 'doc.xhtml' }]),
             toc([
                 { id: 'c1', title: 'One', href: 'doc.xhtml' },
                 { id: 'c2', title: 'Two', href: 'doc.xhtml', fragment: 'inside' },
             ]),
-            {
-                'doc.xhtml': `<p>before</p> <table><tbody><tr><td>a</td></tr> <tr><td id="inside">b</td></tr></tbody></table> <p>after</p>`,
-            }
+            { 'doc.xhtml': markup }
         )
         const pages = buildPages(f.structure, f.docs)
         expect(pages).toHaveLength(2)
         const second = f.docs.get('doc.xhtml')!.body.cloneNode(true) as HTMLElement
         pruneToRange(second, pages[1]!.slices[0]!.start, pages[1]!.slices[0]!.end)
-        expect(second.querySelectorAll('tr')).toHaveLength(2)
+        expect(second.querySelectorAll(child)).toHaveLength(2)
         expect(words(second.textContent)).toEqual(['a', 'b', 'after'])
-        expectExactTiling(f, pages)
-    })
-
-    it('nudges a mid-list boundary out to the list', () => {
-        const f = fixture(
-            spine([{ href: 'doc.xhtml' }]),
-            toc([
-                { id: 'c1', title: 'One', href: 'doc.xhtml' },
-                { id: 'c2', title: 'Two', href: 'doc.xhtml', fragment: 'item2' },
-            ]),
-            {
-                'doc.xhtml': `<p>before</p> <ul><li>a</li> <li id="item2">b</li></ul> <p>after</p>`,
-            }
-        )
-        const pages = buildPages(f.structure, f.docs)
-        const body = f.docs.get('doc.xhtml')!.body.cloneNode(true) as HTMLElement
-        pruneToRange(body, pages[1]!.slices[0]!.start, pages[1]!.slices[0]!.end)
-        expect(body.querySelectorAll('li')).toHaveLength(2)
         expectExactTiling(f, pages)
     })
 
@@ -258,7 +246,7 @@ describe('range construction', () => {
         expectExactTiling(f, pages)
     })
 
-    it('keeps linear="no" documents out of the flow', () => {
+    it('keeps linear="no" and off-spine documents out of the flow', () => {
         const f = fixture(
             spine([
                 { href: 'ch1.xhtml' },
@@ -268,6 +256,7 @@ describe('range construction', () => {
             toc([
                 { id: 'c1', title: 'One', href: 'ch1.xhtml' },
                 { id: 'n', title: 'Notes', href: 'notes.xhtml' },
+                { id: 'ghost', title: 'Ghost', href: 'elsewhere.xhtml' },
                 { id: 'c2', title: 'Two', href: 'ch2.xhtml' },
             ]),
             {
@@ -304,18 +293,6 @@ describe('range construction', () => {
             ])
         )
         expectExactTiling(f, pages)
-    })
-
-    it('ignores targets outside the spine', () => {
-        const f = fixture(
-            spine([{ href: 'a.xhtml' }]),
-            toc([
-                { id: 'c1', title: 'One', href: 'a.xhtml' },
-                { id: 'ghost', title: 'Ghost', href: 'elsewhere.xhtml' },
-            ]),
-            { 'a.xhtml': '<p>one</p>' }
-        )
-        expect(buildPages(f.structure, f.docs)).toHaveLength(1)
     })
 
     it('resolves legacy name anchors', () => {
@@ -450,24 +427,6 @@ describe('equivalent and extreme boundaries', () => {
         expect(section.getAttribute('class')).toBe('chapter')
         expect(section.getAttribute('lang')).toBe('en')
         expect(section.querySelectorAll('p')).toHaveLength(1)
-        expectExactTiling(f, pages)
-    })
-
-    it('keeps an image-only document whole inside its page', () => {
-        const f = fixture(
-            spine([{ href: 'ch1.xhtml' }, { href: 'plate.xhtml' }, { href: 'ch2.xhtml' }]),
-            toc([
-                { id: 'c1', title: 'One', href: 'ch1.xhtml' },
-                { id: 'c2', title: 'Two', href: 'ch2.xhtml' },
-            ]),
-            {
-                'ch1.xhtml': '<p>one</p>',
-                'plate.xhtml': '<img src="a.png" /><img src="b.png" />',
-                'ch2.xhtml': '<p>two</p>',
-            }
-        )
-        const pages = buildPages(f.structure, f.docs)
-        expect(pageLeaves(f, [pages[0]!]).filter(leaf => leaf.includes(':')).length).toBe(3)
         expectExactTiling(f, pages)
     })
 })

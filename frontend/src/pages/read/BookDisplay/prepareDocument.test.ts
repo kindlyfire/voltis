@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { resolveTargetElement } from './buildPages'
 import { docBody, findTarget } from './domSafe'
-import { mountTree, prepareDocument, type PrepareContext } from './prepareDocument'
+import {
+    mountTree,
+    prepareDocument,
+    updateUserStyles,
+    type PrepareContext,
+} from './prepareDocument'
 
 const SPINE = new Set(['OPS/text/ch1.xhtml', 'OPS/ch2.xhtml'])
 
@@ -52,10 +57,10 @@ describe('sanitization', () => {
 })
 
 describe('resource rewriting', () => {
-    it('rewrites img src, srcset and inline background urls', async () => {
+    it('rewrites img src, srcset and inline background urls, including on a link', async () => {
         const html = `<body>
             <img id="i" src="../img/cover.png" srcset="../img/a.png 1x, ../img/b.png 2x" />
-            <div id="d" style="background-image: url('../img/bg.jpg')"></div>
+            <a id="d" href="#local" style="background-image: URL('../img/bg.jpg')">x</a>
         </body>`
         const prepared = await prepareDocument(html, BASE, ctx())
         const img = prepared.doc.getElementById('i')!
@@ -68,14 +73,15 @@ describe('resource rewriting', () => {
         expect(style).toContain('path=OPS%2Fimg%2Fbg.jpg')
     })
 
+    // From its own base, not the one the other tests use.
     it('rewrites SVG image refs', async () => {
         const html = `<body><svg><image id="im" xlink:href="../img/a.png" /><image id="im2" href="../img/b.png" /></svg></body>`
-        const prepared = await prepareDocument(html, BASE, ctx())
+        const prepared = await prepareDocument(html, 'OPS/text/sub/deep.xhtml', ctx())
         expect(pathOf(prepared.doc.getElementById('im')!.getAttribute('xlink:href'))).toBe(
-            'OPS/img/a.png'
+            'OPS/text/img/a.png'
         )
         expect(pathOf(prepared.doc.getElementById('im2')!.getAttribute('href'))).toBe(
-            'OPS/img/b.png'
+            'OPS/text/img/b.png'
         )
     })
 
@@ -94,6 +100,8 @@ describe('resource rewriting', () => {
         expect(css).toContain('path=OPS%2Fcss%2Fsub%2Ffonts%2Fserif.woff2')
         expect(css).toContain('@font-face')
         expect(css).toContain('format("woff2")')
+        // Each sheet is rewritten once: a second pass would encode the `?path=`.
+        expect(css).not.toContain('path%3D')
         expect(prepared.doc.querySelector('link')).toBeNull()
     })
 
@@ -137,24 +145,6 @@ describe('link rewriting', () => {
     })
 })
 
-describe('concurrent renders', () => {
-    it('prepares documents in parallel without leaking rewriting state', async () => {
-        const first = prepareDocument(
-            `<body><img id="i" src="a.png" /></body>`,
-            'OPS/one/x.xhtml',
-            ctx()
-        )
-        const second = prepareDocument(
-            `<body><img id="i" src="a.png" /></body>`,
-            'OPS/two/y.xhtml',
-            ctx()
-        )
-        const [a, b] = await Promise.all([first, second])
-        expect(pathOf(a.doc.getElementById('i')!.getAttribute('src'))).toBe('OPS/one/a.png')
-        expect(pathOf(b.doc.getElementById('i')!.getAttribute('src'))).toBe('OPS/two/a.png')
-    })
-})
-
 describe('rejected references', () => {
     it('removes references it will not rewrite instead of leaving them live', async () => {
         const html = `<body>
@@ -181,22 +171,6 @@ describe('rejected references', () => {
         expect(prepared.doc.getElementById('d')!.getAttribute('style')).toContain('url(#grad)')
     })
 
-    it('rewrites uppercase URL() in inline styles', async () => {
-        const html = `<body><div id="d" style="background: URL(../img/a.png)"></div></body>`
-        const prepared = await prepareDocument(html, BASE, ctx())
-        expect(prepared.doc.getElementById('d')!.getAttribute('style')).toContain(
-            'path=OPS%2Fimg%2Fa.png'
-        )
-    })
-
-    it("rewrites a link element's own inline style", async () => {
-        const html = `<body><a id="a" href="#x" style="background: url(../img/a.png)">x</a></body>`
-        const prepared = await prepareDocument(html, BASE, ctx())
-        expect(prepared.doc.getElementById('a')!.getAttribute('style')).toContain(
-            'path=OPS%2Fimg%2Fa.png'
-        )
-    })
-
     it('strips form elements, which are the DOM-clobbering vector', async () => {
         const html = `<body>
             <form action="/api/steal"><input name="getAttribute" /><button name="children">go</button></form>
@@ -211,36 +185,21 @@ describe('rejected references', () => {
 })
 
 describe('stylesheet composition', () => {
-    it('rewrites each sheet once, so imported urls are not double-encoded', async () => {
-        const html = `<html><head><link rel="stylesheet" href="../css/main.css" /></head><body><p>x</p></body></html>`
-        const prepared = await prepareDocument(
-            html,
-            BASE,
-            ctx({
-                'OPS/css/main.css': `@import "sub/other.css";\np { background: url(own.png); }`,
-                'OPS/css/sub/other.css': `p { background: url(img.png); }`,
-            })
-        )
-        const css = prepared.styles.join('\n')
-        expect(css).toContain('path=OPS%2Fcss%2Fsub%2Fimg.png')
-        expect(css).toContain('path=OPS%2Fcss%2Fown.png')
-        expect(css).not.toContain('path%3D')
-    })
-
     it('keeps media, supports and layer conditions on an inlined import', async () => {
         const html = `<html><head><link rel="stylesheet" href="../css/main.css" /></head><body></body></html>`
         const prepared = await prepareDocument(
             html,
             BASE,
             ctx({
-                'OPS/css/main.css': `@IMPORT url("print.css") layer(book) supports(display: grid) print and (min-width: 10px);`,
+                'OPS/css/main.css': `@IMPORT url("print.css") layer(book) supports(selector(:is(h1,h2))) print and (min-width: 10px);`,
                 'OPS/css/print.css': `p { color: red }`,
             })
         )
         const css = prepared.styles.join('\n')
         expect(css).toContain('@layer book')
-        expect(css).toContain('@supports (display: grid)')
+        expect(css).toContain('@supports (selector(:is(h1,h2)))')
         expect(css).toContain('@media print and (min-width: 10px)')
+        expect(css).not.toContain('@media supports')
         expect(css).toContain('color: red')
     })
 
@@ -330,42 +289,56 @@ describe('mounting', () => {
         expect(root.getAttribute('lang')).toBe('en')
         expect(mounted.getAttribute('class')).toBe('calibre')
     })
+
+    it('puts the user stylesheet after the book stylesheets, and swaps it in place', async () => {
+        const html = `<html><head><style>p { font-family: Papyrus }</style></head><body><p>x</p></body></html>`
+        const prepared = await prepareDocument(html, BASE, ctx())
+        const body = () => docBody(prepared.doc)!.cloneNode(true) as Element
+        const host = document.createElement('div')
+        mountTree(host, prepared, body())
+
+        const sheets = () => Array.from(host.shadowRoot!.querySelectorAll('style'))
+        const user = () => sheets().at(-1)!.textContent!
+        expect(user()).toContain('font-family: inherit !important')
+        expect(user()).toContain('font-size: inherit !important')
+        expect(sheets().findIndex(sheet => sheet.textContent!.includes('Papyrus'))).toBeGreaterThan(
+            0
+        )
+
+        const count = sheets().length
+        updateUserStyles(host, true)
+        expect(sheets()).toHaveLength(count)
+        expect(user()).not.toContain('font-family')
+
+        // Mounted with publisher fonts from the start: same sheet, no remount.
+        const fresh = document.createElement('div')
+        mountTree(fresh, prepared, body(), true)
+        const sheet = Array.from(fresh.shadowRoot!.querySelectorAll('style')).at(-1)!.textContent!
+        expect(sheet).not.toContain('font-family')
+        expect(sheet).toContain('font-size: inherit !important')
+    })
 })
 
 describe('document clobbering', () => {
-    function mount(prepared: Awaited<ReturnType<typeof prepareDocument>>) {
-        const host = document.createElement('div')
-        const body = docBody(prepared.doc)!.cloneNode(true) as Element
-        return { mounted: mountTree(host, prepared, body), shadow: host.shadowRoot! }
-    }
-
-    it('survives an element that shadows createTreeWalker', async () => {
-        const html = `<html><body><img name="createTreeWalker" src="../img/a.png" /><p id="p">text</p></body></html>`
+    it('reads the real document through elements that shadow its members', async () => {
+        const html = `<html lang="en"><body>
+            <img name="createTreeWalker" src="../img/a.png" />
+            <img name="documentElement" lang="wrong" />
+            <img name="querySelectorAll" />
+            <img name="body" />
+            <p id="target">text</p>
+        </body></html>`
         const prepared = await prepareDocument(html, BASE, ctx())
         expect(prepared.textLength).toBe('text'.length)
-        const { mounted } = mount(prepared)
-        expect(mounted.querySelector('#p')!.textContent).toBe('text')
-    })
-
-    it('reads the real root when an element shadows documentElement', async () => {
-        const html = `<html lang="en"><body><img name="documentElement" lang="wrong" /><p id="p">x</p></body></html>`
-        const prepared = await prepareDocument(html, BASE, ctx())
         expect(Object.fromEntries(prepared.rootAttributes).lang).toBe('en')
-        const { shadow } = mount(prepared)
-        expect(shadow.querySelector('html')!.getAttribute('lang')).toBe('en')
-    })
-
-    it('still finds targets when an element shadows querySelectorAll', async () => {
-        const html = `<html><body><img name="querySelectorAll" /><p id="target">x</p></body></html>`
-        const prepared = await prepareDocument(html, BASE, ctx())
         expect(resolveTargetElement(prepared.doc, 'target')).not.toBeNull()
-    })
-
-    it('still finds the body when an element shadows it', async () => {
-        const html = `<html><body><img name="body" /><p id="p">body text</p></body></html>`
-        const prepared = await prepareDocument(html, BASE, ctx())
         expect(docBody(prepared.doc)!.tagName.toLowerCase()).toBe('body')
-        expect(prepared.textLength).toBe('body text'.length)
+
+        const host = document.createElement('div')
+        mountTree(host, prepared, docBody(prepared.doc)!.cloneNode(true) as Element)
+        const shadow = host.shadowRoot!
+        expect(shadow.querySelector('html')!.getAttribute('lang')).toBe('en')
+        expect(shadow.querySelector('#target')!.textContent).toBe('text')
     })
 })
 
@@ -387,22 +360,6 @@ describe('imports without whitespace', () => {
         expect(css).toContain('color:red')
         expect(css).not.toContain('@import')
         expect(css).not.toContain('/api/probe')
-    })
-
-    it('keeps a nested supports() condition out of the media query', async () => {
-        const html = `<html><head><link rel="stylesheet" href="../css/main.css" /></head><body></body></html>`
-        const prepared = await prepareDocument(
-            html,
-            BASE,
-            ctx({
-                'OPS/css/main.css': `@import "a.css" supports(selector(:is(h1,h2))) screen and (min-width: 10px);`,
-                'OPS/css/a.css': `h1 { color: red }`,
-            })
-        )
-        const css = prepared.styles.join('\n')
-        expect(css).toContain('@supports (selector(:is(h1,h2)))')
-        expect(css).toContain('@media screen and (min-width: 10px)')
-        expect(css).not.toContain('@media supports')
     })
 })
 

@@ -6,6 +6,7 @@
 import { useHead } from '@unhead/vue'
 import { onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { useLayoutStore } from '@/pages/_layout/useLayoutStore'
 import { parseBookEntry } from './bookEntry'
 import BookReader from './BookReader.vue'
 import { useBookDisplayStore } from './useBookDisplayStore'
@@ -16,6 +17,9 @@ const props = defineProps<{
 
 const route = useRoute()
 const store = useBookDisplayStore()
+const layout = useLayoutStore()
+layout.navbarHidden.useLayer('bookReader', true)
+layout.sidebarTemporary.useLayer('bookReader', true)
 
 watch(
     () => [props.contentId, route.query.ch, route.query.frag, route.query.page],
