@@ -57,7 +57,7 @@
             </span>
         </VCard>
 
-        <div v-if="!settings.hideTitle" class="line-clamp-2 pt-2 text-sm">
+        <div v-if="!settings.hideTitle" :title="content.title" class="line-clamp-2 pt-2 text-sm">
             {{ content.title }}
         </div>
     </div>
