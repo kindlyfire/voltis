@@ -47,11 +47,12 @@ export function createComicState(contentId: string, initialPage: number | 'last'
 
         updateProgressPromise = updateProgressPromise
             .then(async () => {
+                const pages = state.pageDimensions.length
                 // Only update status if it's not set or is 'reading', so we don't
                 // switch it back from 'completed' or other statuses
                 let status: ReadingStatus | undefined = undefined
                 if (!userData?.status || userData.status === 'reading') {
-                    if (state.page === state.pageDimensions.length - 1) {
+                    if (state.page === pages - 1) {
                         status = 'completed'
                     } else {
                         status = 'reading'
@@ -63,6 +64,9 @@ export function createComicState(contentId: string, initialPage: number | 'last'
                     progress: {
                         ...userData?.progress,
                         current_page: state.page,
+                        ...(pages > 0 && {
+                            progress_percent: Math.round(((state.page + 1) / pages) * 1000) / 10,
+                        }),
                     },
                 })
             })

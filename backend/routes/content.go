@@ -152,8 +152,18 @@ func (cr *ContentRoutes) get(c echo.Context) error {
 	ctx := reqCtx(c)
 	contentID := c.Param("content_id")
 
-	r, err := db.SelectOne[contentWithUTCRow](ctx, cr.pool, `
+	r, err := db.SelectOne[contentListRow](ctx, cr.pool, `
 		SELECT c.*,
+			(SELECT COUNT(*) FROM content child WHERE child.parent_id = c.id) AS children_count,
+			(SELECT COUNT(*) FROM content child
+				LEFT JOIN user_to_content child_utc
+					ON child_utc.library_id = child.library_id
+					AND child_utc.uri = child.uri
+					AND child_utc.user_id = $1
+				WHERE child.parent_id = c.id
+					AND (child_utc.id IS NULL OR child_utc.status IS NULL
+						OR child_utc.status NOT IN ('completed', 'dropped'))
+			) AS unread_children_count,
 			utc.id AS utc_id, utc.user_id AS utc_user_id, utc.library_id AS utc_library_id,
 			utc.uri AS utc_uri, utc.starred AS utc_starred, utc.status AS utc_status,
 			utc.status_updated_at AS utc_status_updated_at, utc.notes AS utc_notes,
@@ -175,10 +185,12 @@ func (cr *ContentRoutes) get(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, contentToDTO(r.Content, contentDTOOpts{
-		meta:            r.MetaData,
-		userToContent:   r.utc(),
-		includeFileData: true,
-		includeMeta:     true,
+		meta:                r.MetaData,
+		childrenCount:       r.ChildrenCount,
+		unreadChildrenCount: r.UnreadChildrenCount,
+		userToContent:       r.utc(),
+		includeFileData:     true,
+		includeMeta:         true,
 	}))
 }
 

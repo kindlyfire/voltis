@@ -19,6 +19,17 @@
                 />
             </component>
 
+            <div v-if="!settings.hideProgress && progress" class="absolute right-0 bottom-0 left-0">
+                <VProgressLinear
+                    :model-value="progress.fraction * 100"
+                    :title="progress.label"
+                    height="6"
+                    color="primary"
+                    bg-color="black"
+                    bg-opacity="0.6"
+                />
+            </div>
+
             <span
                 v-if="content.user_data?.status && !settings.hideStatus"
                 class="absolute top-2 left-2 flex aspect-square w-5 items-center justify-center rounded-full bg-black/80 p-1 text-white"
@@ -34,9 +45,11 @@
                 {{ childrenCount }}
             </span>
 
-            <div class="absolute bottom-0 left-0 rounded-tr-md bg-white/70 p-1 dark:bg-black/60">
+            <div
+                v-if="selecting"
+                class="absolute bottom-0 left-0 rounded-tr-md bg-white/70 p-1 dark:bg-black/60"
+            >
                 <VCheckboxBtn
-                    v-if="selecting"
                     :model-value="selected"
                     density="compact"
                     @click.stop="emit('toggleSelect', $event.shiftKey)"
@@ -68,6 +81,7 @@ import { computed, toRef } from 'vue'
 import { RouterLink } from 'vue-router'
 import { READING_STATUS_LABELS } from '@/utils/api/types'
 import type { Content, ReadingStatus } from '@/utils/api/types'
+import { contentProgress } from '@/utils/contentProgress'
 import { API_URL } from '@/utils/fetch'
 import { useContentGridStore } from './store'
 
@@ -115,6 +129,8 @@ const childrenCount = computed(() => {
     if (settings.value.itemCountMode === 'unread' && count === 0) return null
     return count
 })
+
+const progress = computed(() => contentProgress(props.content))
 
 const statusIcon = computed(() => {
     if (!props.content.user_data?.status) return

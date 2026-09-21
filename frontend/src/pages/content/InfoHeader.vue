@@ -24,7 +24,7 @@
                             <img
                                 v-if="content?.cover_uri"
                                 :src="`${API_URL}/files/cover/${content.id}`"
-                                class="block rounded"
+                                class="block"
                                 :style="{
                                     aspectRatio: '2 / 3',
                                     objectFit: 'cover',
@@ -32,6 +32,7 @@
                                 }"
                             />
                         </div>
+                        <CoverProgress v-if="content.cover_uri" :content="content" />
                     </VCard>
                 </div>
                 <div class="grow">
@@ -168,7 +169,7 @@
                             <img
                                 v-if="content?.cover_uri"
                                 :src="`${API_URL}/files/cover/${content.id}`"
-                                class="block rounded"
+                                class="block"
                                 :style="{
                                     aspectRatio: '2 / 3',
                                     objectFit: 'cover',
@@ -176,6 +177,7 @@
                                 }"
                             />
                         </div>
+                        <CoverProgress v-if="content.cover_uri" :content="content" />
                     </VCard>
                 </div>
                 <div class="grow space-y-4!">
@@ -225,6 +227,7 @@ import { contentApi } from '@/utils/api/content'
 import type { Content } from '@/utils/api/types'
 import { API_URL } from '@/utils/fetch'
 import ContinueReadingButton from './components/ContinueReadingButton.vue'
+import CoverProgress from './components/CoverProgress.vue'
 import OptionsButton from './components/OptionsButton.vue'
 import RatingButton from './components/RatingButton.vue'
 import ReadingStatusButton from './components/ReadingStatusButton.vue'

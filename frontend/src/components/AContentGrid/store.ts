@@ -10,6 +10,7 @@ export interface GridSettings {
     itemCountMode: 'unread' | 'total'
     hideStatus: boolean
     hideTitle: boolean
+    hideProgress: boolean
 }
 
 const DEFAULTS: GridSettings = {
@@ -18,6 +19,7 @@ const DEFAULTS: GridSettings = {
     itemCountMode: 'unread',
     hideStatus: false,
     hideTitle: false,
+    hideProgress: false,
 }
 
 export const useContentGridStore = defineStore('contentGrid', () => {

@@ -55,6 +55,12 @@
                     hide-details
                 />
                 <VCheckbox v-model="hideTitle" label="Hide title" density="compact" hide-details />
+                <VCheckbox
+                    v-model="hideProgress"
+                    label="Hide progress"
+                    density="compact"
+                    hide-details
+                />
 
                 <VDivider class="my-3" />
 
@@ -136,6 +142,7 @@ function showAll() {
         hideItemCount: false,
         hideStatus: false,
         hideTitle: false,
+        hideProgress: false,
         itemCountMode: 'unread',
     }
 }
@@ -162,6 +169,12 @@ const hideTitle = computed({
     get: () => settings.value.hideTitle,
     set: (v: boolean) => {
         settings.value = { hideTitle: v }
+    },
+})
+const hideProgress = computed({
+    get: () => settings.value.hideProgress,
+    set: (v: boolean) => {
+        settings.value = { hideProgress: v }
     },
 })
 </script>
