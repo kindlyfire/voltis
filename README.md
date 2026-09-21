@@ -3,11 +3,11 @@
 Voltis is a self-hosted media servers that supports comics/manga and ebooks. It
 will support series, movies, and YouTube video libraries in the future as well.
 
-**[Documentation](https://voltis.tijlvdb.me/)**
+**[Documentation](https://voltis.tijlvdb.me/)** • **[Discord](https://discord.gg/hUywUpAKfn)**
 
 This repository is a mirror from
 [git.tijlvdb.me](https://git.tijlvdb.me/tijlvdb/voltis), and does not accept
-issues or pull requests at the moment.
+issues or pull requests at the moment. Please report issues on Discord for now.
 
 ![Voltis home screen](docs/home.png)
 
