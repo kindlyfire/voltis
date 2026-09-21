@@ -354,16 +354,23 @@ export async function prepareDocument(
     }
 }
 
+/** The page frame sits on the host, not on `body`: EPUB stylesheets are
+ * appended after this one and routinely reset `body { margin: 0 }`. Nothing in
+ * a book can target `:host`. */
 const READER_CSS = `
 :host {
     display: block;
+    box-sizing: border-box;
+    max-width: calc(45em + 4rem);
+    margin: 0 auto;
+    padding: 2rem;
     color-scheme: dark light;
     font-family: Georgia, 'Times New Roman', serif;
     line-height: 1.8;
     font-size: 1.1rem;
 }
 html, body { display: block; }
-body { max-width: 45em; margin: 0 auto; padding: 2rem; }
+body { margin: 0; }
 img, svg, video { max-width: 100%; height: auto; }
 a { color: inherit; }
 a[data-book-missing] { text-decoration: line-through; opacity: 0.7; }
