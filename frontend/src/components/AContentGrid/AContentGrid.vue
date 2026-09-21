@@ -32,7 +32,7 @@
                 size="small"
                 :color="selectMode ? 'primary' : undefined"
                 title="Select items"
-                @click="toggleSelectMode"
+                @click="setSelectMode(!selectMode)"
             >
                 <VIcon>{{
                     selectMode
@@ -158,7 +158,7 @@
 </template>
 
 <script setup lang="ts">
-import { keepPreviousData } from '@tanstack/vue-query'
+import { hashKey, keepPreviousData } from '@tanstack/vue-query'
 import { useElementSize } from '@vueuse/core'
 import { computed, ref, toRef, watch } from 'vue'
 import { showScanModal } from '@/pages/settings/ScanModal.vue'
@@ -291,11 +291,16 @@ const selectMode = ref(false)
 const selectedIds = ref(new Set<string>())
 const lastSelectedIndex = ref<number | null>(null)
 
-function toggleSelectMode() {
-    selectMode.value = !selectMode.value
+function setSelectMode(on: boolean) {
+    selectMode.value = on
     selectedIds.value = new Set()
     lastSelectedIndex.value = null
 }
+
+watch(
+    () => hashKey([props.params]),
+    () => setSelectMode(false)
+)
 
 function toggleSelect(id: string, shiftKey: boolean) {
     const next = new Set(selectedIds.value)
