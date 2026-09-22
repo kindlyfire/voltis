@@ -20,6 +20,7 @@ import { useScroll, useWindowSize } from '@vueuse/core'
 import { watch, computed, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useLayoutStore } from '@/pages/_layout/useLayoutStore'
+import { useReaderTutorial } from '../useReaderTutorial'
 import ReaderModeLongstrip from './ReaderModeLongstrip.vue'
 import ReaderModePaged from './ReaderModePaged.vue'
 import ReaderSidebar from './ReaderSidebar.vue'
@@ -59,6 +60,13 @@ onUnmounted(() => {
 })
 
 const controls = useReaderControls()
+
+// Not the page count: a zero-page comic would never be ready. Not
+// `setHandlers({ onReady })` either: that single slot belongs to the store.
+useReaderTutorial(
+    'comic',
+    computed(() => !!reader.state && !reader.state.loading && !reader.state.error)
+)
 
 const { y: scrollY } = useScroll(window)
 const { height: windowHeight } = useWindowSize()

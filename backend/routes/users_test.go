@@ -1,6 +1,8 @@
 package routes
 
 import (
+	"context"
+	"encoding/json"
 	"testing"
 )
 
@@ -133,4 +135,109 @@ func TestUserAdminDemotionGuards(t *testing.T) {
 
 	users = b.Get("/api/users").Assert(t, 200).JSONArray()
 	assertEq(t, countAdmins(t, users), 1)
+}
+
+type testPrefs struct {
+	Libraries map[string]struct {
+		Visibility string `json:"visibility"`
+	} `json:"libraries"`
+	Tutorials struct {
+		ComicReader bool `json:"comicReader"`
+		BookReader  bool `json:"bookReader"`
+	} `json:"tutorials"`
+}
+
+// Decodes into typed fields, so a wrong JSON type fails instead of matching a
+// stringified comparison.
+func prefs(t *testing.T, r *response) testPrefs {
+	t.Helper()
+	var dto struct {
+		Preferences testPrefs `json:"preferences"`
+	}
+	if err := json.Unmarshal(r.Body, &dto); err != nil {
+		t.Fatalf("invalid preferences: %s", string(r.Body))
+	}
+	return dto.Preferences
+}
+
+func rawPrefs(t *testing.T, r *response) string {
+	t.Helper()
+	var dto struct {
+		Preferences json.RawMessage `json:"preferences"`
+	}
+	if err := json.Unmarshal(r.Body, &dto); err != nil {
+		t.Fatalf("invalid response: %s", string(r.Body))
+	}
+	return string(dto.Preferences)
+}
+
+func TestPatchPreferences(t *testing.T) {
+	pool := newTestPool(t)
+	c := newAdminClient(t, pool)
+
+	c.Patch("/api/users/me/preferences", map[string]any{
+		"libraries": map[string]any{"x": map[string]any{"visibility": "hide"}},
+	}).Assert(t, 200)
+
+	p := prefs(t, c.Patch("/api/users/me/preferences", map[string]any{
+		"tutorials": map[string]any{"comicReader": true},
+	}).Assert(t, 200))
+	assertEq(t, p.Tutorials.ComicReader, true)
+	assertEq(t, p.Tutorials.BookReader, false)
+	assertEq(t, p.Libraries["x"].Visibility, "hide")
+
+	p = prefs(t, c.Patch("/api/users/me/preferences", map[string]any{
+		"tutorials": map[string]any{"bookReader": true},
+	}).Assert(t, 200))
+	assertEq(t, p.Tutorials.ComicReader, true)
+	assertEq(t, p.Tutorials.BookReader, true)
+	assertEq(t, p.Libraries["x"].Visibility, "hide")
+
+	// A null member deletes the key.
+	p = prefs(t, c.Patch("/api/users/me/preferences", map[string]any{
+		"libraries": map[string]any{"x": nil},
+	}).Assert(t, 200))
+	assertEq(t, len(p.Libraries), 0)
+	assertEq(t, p.Tutorials.ComicReader, true)
+	assertEq(t, p.Tutorials.BookReader, true)
+
+	for _, body := range []string{"", "null", "[1]", `"str"`, "{", "{} {}", "{} garbage"} {
+		c.PatchRaw("/api/users/me/preferences", body).Assert(t, 400)
+	}
+
+	c.newSession(t).Patch("/api/users/me/preferences", map[string]any{}).Assert(t, 401)
+
+	// POST /users/me no longer touches preferences, even when its body
+	// conflicts with everything stored.
+	c.Patch("/api/users/me/preferences", map[string]any{
+		"libraries": map[string]any{"z": map[string]any{"visibility": "overflow"}},
+	}).Assert(t, 200)
+	before := rawPrefs(t, c.Get("/api/users/me").Assert(t, 200))
+
+	c.Post("/api/users/me", map[string]any{
+		"username": "admin",
+		"preferences": map[string]any{
+			"tutorials": map[string]any{"comicReader": false, "bookReader": false},
+			"libraries": map[string]any{"z": map[string]any{"visibility": "hide"}},
+		},
+	}).Assert(t, 200)
+	assertEq(t, rawPrefs(t, c.Get("/api/users/me").Assert(t, 200)), before)
+}
+
+// The column holds arbitrary JSON, which the old POST /users/me accepted. A
+// non-object must be replaced, not 500.
+func TestPatchPreferencesOverNonObject(t *testing.T) {
+	pool := newTestPool(t)
+	c := newAdminClient(t, pool)
+
+	me := c.Get("/api/users/me").Assert(t, 200).JSON()
+	if _, err := pool.Exec(context.Background(),
+		"UPDATE users SET preferences = $1 WHERE id = $2", json.RawMessage(`[1,2]`), s(me["id"])); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	p := prefs(t, c.Patch("/api/users/me/preferences", map[string]any{
+		"tutorials": map[string]any{"comicReader": true},
+	}).Assert(t, 200))
+	assertEq(t, p.Tutorials.ComicReader, true)
 }

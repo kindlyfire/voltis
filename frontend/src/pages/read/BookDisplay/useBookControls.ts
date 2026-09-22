@@ -1,6 +1,6 @@
 import { onMounted, onUnmounted } from 'vue'
 import { getLayoutTop } from '@/utils/misc'
-import { getClickZone, isTyping } from '../useClickZones'
+import { getClickZone, shouldIgnoreKeys } from '../useClickZones'
 import { hasAttr } from './domSafe'
 import { useBookDisplayStore } from './useBookDisplayStore'
 
@@ -95,7 +95,7 @@ export function useBookControls() {
     }
 
     function handleKeydown(e: KeyboardEvent) {
-        if (isTyping() || e.metaKey || e.ctrlKey || e.altKey) return
+        if (shouldIgnoreKeys() || e.metaKey || e.ctrlKey || e.altKey) return
         if (store.sidebarOpen) {
             if (e.key !== 'Escape') return
             store.sidebarOpen = false

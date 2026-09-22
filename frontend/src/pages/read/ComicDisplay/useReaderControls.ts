@@ -1,7 +1,7 @@
 import { onMounted, onUnmounted } from 'vue'
 import { getScrollParent, getViewportHeight } from '@/utils/css'
 import { getLayoutTop } from '@/utils/misc'
-import { getClickZone, isTyping } from '../useClickZones'
+import { getClickZone, shouldIgnoreKeys } from '../useClickZones'
 import { useReaderStore } from './useComicDisplayStore'
 
 const scrollParent = () => getScrollParent(document.getElementById('longstrip-container')!)
@@ -70,7 +70,7 @@ export function useReaderControls() {
     }
 
     function handleKeydown(e: KeyboardEvent) {
-        if (isTyping()) return
+        if (shouldIgnoreKeys()) return
 
         switch (e.key) {
             case 'ArrowLeft':

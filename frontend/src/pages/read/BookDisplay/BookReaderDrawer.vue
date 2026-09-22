@@ -65,9 +65,13 @@
 
             <div class="text-sm opacity-60">
                 <div class="mb-1">Keyboard shortcuts</div>
-                <div v-for="s in kbShortcuts" class="flex justify-between gap-4 text-xs!">
-                    <span class="shrink-0">{{ s[1] }}</span>
-                    <span class="text-right font-mono">{{ s[0] }}</span>
+                <div
+                    v-for="[keys, action] in kbShortcuts"
+                    :key="keys"
+                    class="flex justify-between gap-4 text-xs!"
+                >
+                    <span class="shrink-0">{{ action }}</span>
+                    <span class="text-right font-mono">{{ keys }}</span>
                 </div>
             </div>
         </div>
@@ -77,6 +81,7 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
 import { useLayoutStore } from '@/pages/_layout/useLayoutStore'
+import { BOOK_SHORTCUTS, type Shortcut } from '../shortcuts'
 import BookContents from './BookContents.vue'
 import BookSettings from './BookSettings.vue'
 import { useBookDisplayStore } from './useBookDisplayStore'
@@ -87,13 +92,7 @@ const store = useBookDisplayStore()
 const layout = useLayoutStore()
 const session = computed(() => store.session)
 
-const kbShortcuts = [
-    ['Space, ↓, →, PgDn', 'Forward'],
-    ['Shift+Space, ↑, ←, PgUp', 'Back'],
-    ['Comma', 'Previous chapter'],
-    ['Period', 'Next chapter'],
-    ['Escape', 'Close this panel'],
-]
+const kbShortcuts: Shortcut[] = [...BOOK_SHORTCUTS, ['Escape', 'Close this panel']]
 
 const navbarHidden = layout.navbarHidden.useLayer('bookReaderSidebar')
 watch(

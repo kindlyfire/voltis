@@ -69,6 +69,7 @@
 
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
+import { useReaderTutorial } from '../useReaderTutorial'
 import BookReaderDrawer from './BookReaderDrawer.vue'
 import { FONT_STACKS, type BookFont } from './bookSettings'
 import { useBookControls } from './useBookControls'
@@ -82,6 +83,11 @@ const ready = computed(() => !!session.value && !session.value.loading && !sessi
 const host = ref<HTMLDivElement>()
 const sentinel = ref<HTMLDivElement>()
 const controls = useBookControls()
+
+useReaderTutorial(
+    'book',
+    computed(() => ready.value && !!session.value?.firstPageMounted)
+)
 
 const publisherFonts = computed(() => store.settings.fontFamily === 'publisher')
 

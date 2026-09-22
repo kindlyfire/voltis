@@ -16,6 +16,9 @@ vi.mock('@/utils/api/content', () => ({
     },
 }))
 
+// Real, it would pull in Vue Query with no provider.
+vi.mock('../useReaderTutorial', () => ({ useReaderTutorial: vi.fn() }))
+
 const stubs = {
     VBtn: { template: '<button><slot /></button>' },
     VIcon: { template: '<i />' },

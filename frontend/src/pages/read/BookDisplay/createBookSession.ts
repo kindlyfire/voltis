@@ -9,6 +9,7 @@ import type {
     UserToContent,
 } from '@/utils/api/types'
 import { getLayoutTop, queryClient } from '@/utils/misc'
+import { hasOpenModal } from '@/utils/modals'
 import { chooseEntryPage, entryKey, isBookLocator, type BookEntry } from './bookEntry'
 import { flowWeights, progressPercent, type FlowWeights } from './bookProgress'
 import {
@@ -108,6 +109,9 @@ export interface BookSessionValues {
     notice: string | null
     restoring: boolean
     percent: number
+    /** Latched after content first mounts; `loading` can clear before the first
+     * chapter succeeds. */
+    firstPageMounted: boolean
 }
 
 type Destination =
@@ -179,6 +183,7 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
         notice: null,
         restoring: false,
         percent: 0,
+        firstPageMounted: false,
     })
 
     let disposed = false
@@ -555,6 +560,7 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
         if (!isCurrent(token)) return
         state.restoring = false
         restoreCancelled = false
+        if (mounted.length > 0) state.firstPageMounted = true
         captureEnabled = mounted.length > 0 && !state.standalone
         captureNow()
     }
@@ -799,7 +805,9 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
     }
 
     function onInput() {
-        if (state.restoring) return
+        // The input that dismisses a modal isn't reading: without this, it can
+        // mark a short final chapter completed.
+        if (state.restoring || hasOpenModal.value) return
         inputSincePage = true
         checkCompletion()
     }

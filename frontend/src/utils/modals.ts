@@ -1,4 +1,4 @@
-import { type Component, defineComponent, h, type Ref, ref, shallowRef } from 'vue'
+import { type Component, computed, defineComponent, h, type Ref, ref, shallowRef } from 'vue'
 
 interface ModalEntry {
     id: number
@@ -14,6 +14,9 @@ let nextId = 0
 function removeEntry(id: number) {
     entries.value = entries.value.filter(e => e.id !== id)
 }
+
+/** Checks `open` rather than the entry count: entries linger for 1s after close. */
+export const hasOpenModal = computed(() => entries.value.some(e => e.open.value))
 
 export const Modals = {
     show<T = void>(component: Component, props: Record<string, unknown> = {}): Promise<T> {

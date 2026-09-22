@@ -1,10 +1,12 @@
 package routes
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"slices"
 	"time"
@@ -27,6 +29,7 @@ func (ur *UserRoutes) Register(g *echo.Group) {
 	g.GET("", adminOnly(ur.list))
 	g.GET("/me", ur.me)
 	g.POST("/me", ur.updateMe)
+	g.PATCH("/me/preferences", ur.patchPreferences)
 	g.POST("/:id_or_new", ur.upsert)
 	g.DELETE("/:user_id", adminOnly(ur.delete))
 }
@@ -81,9 +84,8 @@ func (ur *UserRoutes) me(c echo.Context) error {
 }
 
 type updateMeRequest struct {
-	Username    string           `json:"username"`
-	Password    *string          `json:"password"`
-	Preferences *json.RawMessage `json:"preferences"`
+	Username string  `json:"username"`
+	Password *string `json:"password"`
 }
 
 func (ur *UserRoutes) updateMe(c echo.Context) error {
@@ -109,20 +111,64 @@ func (ur *UserRoutes) updateMe(c echo.Context) error {
 		passwordHash = string(hash)
 	}
 
-	preferences := user.Preferences
-	if req.Preferences != nil {
-		preferences = *req.Preferences
-	}
-
 	_, err = ur.pool.Exec(reqCtx(c), `
-		UPDATE users SET username = $1, password_hash = $2, preferences = $3, updated_at = $4
-		WHERE id = $5
-	`, req.Username, passwordHash, preferences, time.Now().UTC(), user.ID)
+		UPDATE users SET username = $1, password_hash = $2, updated_at = $3
+		WHERE id = $4
+	`, req.Username, passwordHash, time.Now().UTC(), user.ID)
 	if err != nil {
 		return err
 	}
 
 	updated, err := getUser(reqCtx(c), ur.pool, user.ID)
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, userToDTO(updated))
+}
+
+func (ur *UserRoutes) patchPreferences(c echo.Context) error {
+	user, err := requireUser(c)
+	if err != nil {
+		return err
+	}
+
+	// Not c.Bind: it accepts an empty body without touching the target.
+	dec := json.NewDecoder(c.Request().Body)
+	dec.UseNumber()
+	var patch map[string]any
+	if err := dec.Decode(&patch); err != nil || patch == nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "body must be a JSON object")
+	}
+	// A single Decode stops at the end of the first value, so `{} {}` and
+	// `{} garbage` would otherwise pass.
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return echo.NewHTTPError(http.StatusBadRequest, "body must be a JSON object")
+	}
+
+	ctx := reqCtx(c)
+	var updated models.User
+	err = db.WithTx(ctx, ur.pool, func(tx pgx.Tx) error {
+		raw, err := db.SelectScalar[json.RawMessage](ctx, tx,
+			"SELECT preferences FROM users WHERE id = $1 FOR UPDATE", user.ID)
+		if err != nil {
+			return err
+		}
+
+		// Into `any`, not a map: the old POST /users/me accepted arbitrary
+		// JSON here, and mergePatch already replaces a non-object target.
+		var current any
+		d := json.NewDecoder(bytes.NewReader(raw))
+		d.UseNumber()
+		if err := d.Decode(&current); err != nil && !errors.Is(err, io.EOF) {
+			return err
+		}
+
+		updated, err = db.SelectOne[models.User](ctx, tx, `
+			UPDATE users SET preferences = $1, updated_at = $2
+			WHERE id = $3 RETURNING *
+		`, mergePatch(current, patch), time.Now().UTC(), user.ID)
+		return err
+	})
 	if err != nil {
 		return err
 	}

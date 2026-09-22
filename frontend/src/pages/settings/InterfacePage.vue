@@ -42,6 +42,20 @@
                 </VBtn>
             </VCardText>
         </VCard>
+
+        <VCard class="mt-6">
+            <VCardTitle>Reader</VCardTitle>
+            <VCardText>
+                <div class="flex flex-wrap gap-4">
+                    <VBtn variant="tonal" @click="showReaderTutorial('comic')">
+                        Show comic tutorial
+                    </VBtn>
+                    <VBtn variant="tonal" @click="showReaderTutorial('book')">
+                        Show book tutorial
+                    </VBtn>
+                </div>
+            </VCardText>
+        </VCard>
     </VContainer>
 </template>
 
@@ -49,8 +63,9 @@
 import { useHead } from '@unhead/vue'
 import { ref, watch } from 'vue'
 import AQueryError from '@/components/AQueryError.vue'
+import { showReaderTutorial } from '@/pages/read/ReaderTutorialModal.vue'
 import { librariesApi } from '@/utils/api/libraries'
-import type { LibraryPreference } from '@/utils/api/types'
+import type { LibraryPreference, PreferencesPatch } from '@/utils/api/types'
 import { usersApi } from '@/utils/api/users'
 import { jsonClone } from '@/utils/misc'
 
@@ -58,7 +73,7 @@ useHead({ title: 'Interface' })
 
 const qMe = usersApi.useMe()
 const qLibraries = librariesApi.useList()
-const mutation = usersApi.useUpdateMe()
+const mutation = usersApi.usePatchPreferences()
 
 const libraryPrefs = ref<Record<string, LibraryPreference>>({})
 
@@ -95,9 +110,18 @@ function setVisibility(libraryId: string, value: string) {
 async function save() {
     const me = qMe.data.value
     if (!me) return
-    await mutation.mutateAsync({
-        username: me.username,
-        preferences: { libraries: libraryPrefs.value },
-    })
+
+    // A merge patch only carries what is sent, so removals need an explicit
+    // null. Stored preferences are arbitrary JSON: an entry that keeps other
+    // keys would otherwise hold on to its old `visibility`.
+    const server = me.preferences.libraries ?? {}
+    const local = libraryPrefs.value
+    const libraries: NonNullable<PreferencesPatch['libraries']> = {}
+    for (const id of new Set([...Object.keys(server), ...Object.keys(local)])) {
+        const entry = local[id]
+        libraries[id] = entry ? { visibility: entry.visibility ?? null } : null
+    }
+
+    await mutation.mutateAsync({ libraries })
 }
 </script>

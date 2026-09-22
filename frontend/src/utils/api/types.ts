@@ -4,6 +4,13 @@ export interface LibraryPreference {
 
 export interface UserPreferences {
     libraries?: Record<string, LibraryPreference>
+    tutorials?: { comicReader?: boolean; bookReader?: boolean }
+}
+
+/** RFC 7396 merge patch over `UserPreferences`: `null` deletes a member. */
+export interface PreferencesPatch {
+    libraries?: Record<string, { visibility?: LibraryPreference['visibility'] | null } | null>
+    tutorials?: { comicReader?: boolean | null; bookReader?: boolean | null }
 }
 
 export interface User {
@@ -25,7 +32,6 @@ export interface UserUpsert {
 export interface UpdateMe {
     username: string
     password?: string
-    preferences?: UserPreferences
 }
 
 export type ScannerType = 'comics' | 'books'

@@ -92,6 +92,21 @@ func (c *testClient) Post(path string, body any) *response {
 	return readResponse(resp)
 }
 
+func (c *testClient) Patch(path string, body any) *response {
+	data, _ := json.Marshal(body)
+	return c.PatchRaw(path, string(data))
+}
+
+func (c *testClient) PatchRaw(path, body string) *response {
+	req, _ := http.NewRequest("PATCH", c.server.URL+path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		c.t.Fatalf("PATCH %s: %v", path, err)
+	}
+	return readResponse(resp)
+}
+
 func (c *testClient) Delete(path string) *response {
 	req, _ := http.NewRequest("DELETE", c.server.URL+path, nil)
 	resp, err := c.http.Do(req)

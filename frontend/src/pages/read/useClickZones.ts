@@ -1,6 +1,8 @@
+import { hasOpenModal } from '@/utils/modals'
+
 type ClickZone = 'prev' | 'next' | 'menu'
 
-const HEIGHT_ZONE = 0.2
+export const HEIGHT_ZONE = 0.2
 
 export function getClickZone(e: MouseEvent): ClickZone {
     const target = e.currentTarget as HTMLElement
@@ -34,9 +36,13 @@ export function getClickZone(e: MouseEvent): ClickZone {
     return 'menu'
 }
 
-export function isTyping(): boolean {
+/** Keys belong to the modal on top or the field being typed in, not to the
+ * reader behind them. Vuetify's focus trap only captures Tab, and both readers
+ * listen on `window`. */
+export function shouldIgnoreKeys(): boolean {
     const active = document.activeElement
     return (
+        hasOpenModal.value ||
         active instanceof HTMLInputElement ||
         active instanceof HTMLTextAreaElement ||
         active instanceof HTMLSelectElement ||

@@ -123,11 +123,13 @@
 
             <div class="text-sm opacity-60">
                 <div class="mb-1">Keyboard shortcuts</div>
-                <div v-for="s in kbShortcuts" class="flex justify-between text-xs!">
-                    <span>{{ s[1] }}</span>
-                    <span class="font-mono">
-                        {{ s[0] }}
-                    </span>
+                <div
+                    v-for="[keys, action] in kbShortcuts"
+                    :key="keys"
+                    class="flex justify-between text-xs!"
+                >
+                    <span>{{ action }}</span>
+                    <span class="font-mono">{{ keys }}</span>
                 </div>
             </div>
         </div>
@@ -140,18 +142,12 @@ import { onUnmounted, ref, watch, type Ref } from 'vue'
 import { useLayoutStore } from '@/pages/_layout/useLayoutStore'
 import { contentApi } from '@/utils/api/content'
 import type { Content } from '@/utils/api/types'
+import { COMIC_SHORTCUTS as kbShortcuts } from '../shortcuts'
 import type { ReaderMode } from './types'
 import { useReaderStore } from './useComicDisplayStore'
 
 const reader = useReaderStore()
 const layout = useLayoutStore()
-
-const kbShortcuts = [
-    ['Left arrow', 'Previous Page'],
-    ['Right arrow', 'Next Page'],
-    ['Comma', 'Previous Entry'],
-    ['Period', 'Next Entry'],
-]
 
 const navbarHidden = layout.navbarHidden.useLayer('comicReaderSidebar')
 watch(

@@ -2,7 +2,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { apiFetch, RequestError } from '../fetch'
 import { queryClient } from '../misc'
 import { ws } from '../ws'
-import type { UpdateMe, User, UserUpsert } from './types'
+import type { PreferencesPatch, UpdateMe, User, UserUpsert } from './types'
+
+/** Shared by every mutation that writes `['users','me']`, so their responses
+ * can't be applied out of order: an unscoped POST landing after a slow PATCH
+ * would otherwise restore the pre-POST user and stick (`refetchOnMount: false`). */
+const ME_SCOPE = { id: 'users-me' }
 
 const revalidateMe = () => queryClient.invalidateQueries({ queryKey: ['users', 'me'] })
 
@@ -39,6 +44,7 @@ export const usersApi = {
     useUpdateMe: () => {
         const queryClient = useQueryClient()
         return useMutation({
+            scope: ME_SCOPE,
             mutationFn: async (body: UpdateMe) => {
                 return apiFetch<User>('/users/me', {
                     method: 'POST',
@@ -47,6 +53,26 @@ export const usersApi = {
             },
             onSuccess: () => {
                 queryClient.invalidateQueries({ queryKey: ['users', 'me'] })
+            },
+        })
+    },
+
+    usePatchPreferences: () => {
+        const queryClient = useQueryClient()
+        return useMutation({
+            scope: ME_SCOPE,
+            mutationFn: async (body: PreferencesPatch) =>
+                apiFetch<User>('/users/me/preferences', {
+                    method: 'PATCH',
+                    body: JSON.stringify(body),
+                }),
+            onSuccess: async user => {
+                // The ws `$open`/`$close` invalidation can start a GET while
+                // this PATCH is in flight. Cancelling here, rather than in
+                // `onMutate`, stops its stale response from landing after
+                // `setQueryData` and sticking.
+                await queryClient.cancelQueries({ queryKey: ['users', 'me'] })
+                queryClient.setQueryData(['users', 'me'], user)
             },
         })
     },
