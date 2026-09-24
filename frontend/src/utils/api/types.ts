@@ -18,20 +18,79 @@ export interface User {
     created_at: string
     updated_at: string
     username: string
+    email: string | null
     permissions: string[]
     preferences: UserPreferences
+    has_password: boolean
+}
+
+export type SessionMethod = 'password' | 'oidc' | 'proxy'
+
+export interface Me extends User {
+    session_method: SessionMethod
+    can_logout: boolean
 }
 
 export interface UserUpsert {
     id?: string
     username: string
+    email?: string | null
     password?: string
     permissions: string[]
 }
 
 export interface UpdateMe {
     username: string
+    email?: string | null
     password?: string
+}
+
+export type IdentityProvider = 'oidc' | 'proxy'
+
+export interface Identity {
+    id: string
+    provider: IdentityProvider
+    issuer: string
+    subject: string
+    email: string | null
+    created_at: string
+}
+
+export interface IdentityLink {
+    provider: IdentityProvider
+    issuer: string
+    subject: string
+}
+
+export type SettingType = 'bool' | 'int' | 'string' | 'string_list' | 'secret'
+
+export interface Setting {
+    key: string
+    type: SettingType
+    value: boolean | number | string | string[] | null
+    secret: boolean
+    set?: boolean
+    help: string
+}
+
+export interface ProxyAuthStatus {
+    enabled: boolean
+    trusted_cidrs: string[]
+    user_header: string
+    email_header: string
+    groups_header: string
+}
+
+export interface OidcPending {
+    needs: 'confirm' | 'pick_username'
+    username: string
+    email: string
+    match_username: string
+}
+
+export interface LogoutResponse {
+    ok: boolean
+    redirect_url: string
 }
 
 export type ScannerType = 'comics' | 'books'

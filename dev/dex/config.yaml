@@ -1,0 +1,38 @@
+# Dex for local OIDC testing. Brought up with:
+#   docker compose --profile oidc up -d
+issuer: http://localhost:5556/dex
+
+storage:
+  type: memory
+
+web:
+  http: 0.0.0.0:5556
+
+oauth2:
+  skipApprovalScreen: true
+
+staticClients:
+  - id: voltis
+    name: Voltis
+    secret: voltis-secret
+    redirectURIs:
+      - http://localhost:8080/api/auth/oidc/callback
+
+enablePasswordDB: true
+staticPasswords:
+  # Password for both users: password
+  - email: alice@example.com
+    username: alice
+    userID: 11111111-1111-1111-1111-111111111111
+    hash: "$2a$10$JQSjjiPSfzUZDywTDzTo7uB/zj7vWlkqahzQNun1xmXLhV.h0HSbu"
+  - email: bob@example.com
+    username: bob
+    userID: 22222222-2222-2222-2222-222222222222
+    hash: "$2a$10$JQSjjiPSfzUZDywTDzTo7uB/zj7vWlkqahzQNun1xmXLhV.h0HSbu"
+
+# Dex's local users cannot carry groups, so the mock connector provides the one
+# identity that does: kilgore@kilgore.trout in the "authors" group.
+connectors:
+  - type: mockCallback
+    id: mock
+    name: Mock user (groups)

@@ -302,7 +302,7 @@ func TestScanProgressAdvancesAndCommitsNotify(t *testing.T) {
 	pool := newTestPool(t)
 	c := newAdminClient(t, pool)
 	sock := newFakeSocket(false)
-	serveFake(t, c.hub, sock, "u1", true)
+	serveFake(t, c.hub, sock, meID(t, c), true)
 
 	libID := comicLibrary(t, c)
 	scan := c.Post("/api/libraries/scan", map[string]any{"ids": []string{libID}}).Assert(t, 200).JSON()
@@ -364,7 +364,7 @@ func TestScanCommitFailureSavesNothingAndNotifiesNobody(t *testing.T) {
 	pool := newTestPool(t)
 	c := newAdminClient(t, pool)
 	sock := newFakeSocket(false)
-	serveFake(t, c.hub, sock, "u1", true)
+	serveFake(t, c.hub, sock, meID(t, c), true)
 
 	libID := comicLibrary(t, c)
 	if _, err := pool.Exec(context.Background(), `

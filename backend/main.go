@@ -11,6 +11,7 @@ import (
 	"voltis/config"
 	"voltis/db"
 	"voltis/routes"
+	"voltis/settings"
 
 	"github.com/cshum/vipsgen/vips"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -30,6 +31,49 @@ func main() {
 				Name:   "server",
 				Usage:  "Start the HTTP server",
 				Action: func(ctx context.Context, _ *cli.Command) error { return runServer(ctx) },
+			},
+			{
+				Name:  "settings",
+				Usage: "Read and write server settings",
+				Commands: []*cli.Command{
+					{
+						Name:  "list",
+						Usage: "List all settings",
+						Action: func(ctx context.Context, _ *cli.Command) error {
+							pool := connectDB(ctx)
+							defer pool.Close()
+							return cmd.ListSettings(ctx, pool)
+						},
+					},
+					{
+						Name:      "get",
+						Usage:     "Show the value of a setting",
+						ArgsUsage: "<key>",
+						Action: func(ctx context.Context, c *cli.Command) error {
+							key := c.Args().First()
+							if key == "" {
+								return errors.New("key is required")
+							}
+							pool := connectDB(ctx)
+							defer pool.Close()
+							return cmd.GetSetting(ctx, pool, key)
+						},
+					},
+					{
+						Name:      "set",
+						Usage:     "Change the value of a setting",
+						ArgsUsage: "<key> <value>",
+						Action: func(ctx context.Context, c *cli.Command) error {
+							key, value := c.Args().Get(0), c.Args().Get(1)
+							if key == "" || c.Args().Len() < 2 {
+								return errors.New("key and value are required")
+							}
+							pool := connectDB(ctx)
+							defer pool.Close()
+							return cmd.SetSetting(ctx, pool, key, value)
+						},
+					},
+				},
 			},
 			{
 				Name:  "users",
@@ -130,6 +174,16 @@ func runServer(ctx context.Context) error {
 	defer vips.Shutdown()
 
 	cfg := config.Get()
+	if cfg.ProxyAuthErr != nil {
+		return cfg.ProxyAuthErr
+	}
+
+	store, err := settings.New(ctx, pool)
+	if err != nil {
+		return err
+	}
+	store.Listen()
+	defer store.Close()
 
 	e := echo.New()
 	e.HideBanner = true
@@ -146,7 +200,7 @@ func runServer(ctx context.Context) error {
 		}
 	}
 
-	routes.Register(e, pool)
+	routes.Register(e, pool, store, cfg.ProxyAuth)
 
 	slog.Info("starting server", "url", "http://localhost:"+cfg.Port)
 	return e.Start(":" + cfg.Port)

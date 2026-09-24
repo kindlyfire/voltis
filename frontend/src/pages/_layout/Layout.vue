@@ -50,6 +50,9 @@
                 </VListItem>
                 <template v-if="isAdmin">
                     <VDivider class="my-2" />
+                    <VListItem to="/settings/general" prepend-icon="mdi-tune">
+                        <VListItemTitle>General</VListItemTitle>
+                    </VListItem>
                     <VListItem to="/settings/users" prepend-icon="mdi-account-group">
                         <VListItemTitle>Users</VListItemTitle>
                     </VListItem>
@@ -90,7 +93,8 @@
                                 </template>
                                 <VList>
                                     <VListItem
-                                        @click="handleLogout"
+                                        v-if="canLogout"
+                                        @click="logout"
                                         :disabled="mLogout.isPending.value"
                                     >
                                         <VListItemTitle>Logout</VListItemTitle>
@@ -120,11 +124,9 @@
 </template>
 
 <script setup lang="ts">
-import { useQueryClient } from '@tanstack/vue-query'
 import { onLongPress, useEventListener, useThrottleFn } from '@vueuse/core'
 import { computed, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { authApi } from '@/utils/api/auth'
 import { contentApi } from '@/utils/api/content'
 import { usersApi } from '@/utils/api/users'
 import { ModalContainer } from '@/utils/modals'
@@ -132,6 +134,7 @@ import Libraries from './Libraries.vue'
 import ScanIndicator from './ScanIndicator.vue'
 import SearchBox from './SearchBox.vue'
 import { useLayoutStore } from './useLayoutStore'
+import { useLogout } from './useLogout'
 
 const store = useLayoutStore()
 
@@ -139,18 +142,11 @@ const router = useRouter()
 const route = useRoute()
 const isSettings = computed(() => route.path.startsWith('/settings'))
 const qMe = usersApi.useMe()
-const mLogout = authApi.useLogout()
-const queryClient = useQueryClient()
+const { canLogout, logout, mutation: mLogout } = useLogout()
 
 const isAdmin = computed(() => qMe.data.value?.permissions.includes('ADMIN'))
 const qBrokenRefs = contentApi.useBrokenRefsSummary({ enabled: () => isSettings.value })
 const hasBrokenRefs = computed(() => (qBrokenRefs.data.value?.length ?? 0) > 0)
-
-async function handleLogout() {
-    await mLogout.mutateAsync()
-    queryClient.invalidateQueries({ queryKey: ['users', 'me'] })
-    // The watcher in App.vue will redirect
-}
 
 /** We out here overcomplicating things to the bone. It's nice, though. */
 const themeBtnRef = ref<HTMLElement | null>(null)

@@ -5,7 +5,31 @@
                 <VCard>
                     <VCardTitle class="text-h5">Login</VCardTitle>
                     <VCardText>
-                        <VForm @submit="onSubmit" class="space-y-4!">
+                        <VAlert v-if="error" type="error" variant="tonal" class="mb-4">
+                            {{ error }}
+                        </VAlert>
+
+                        <VBtn
+                            v-if="info?.oidc_enabled"
+                            block
+                            color="primary"
+                            variant="tonal"
+                            prepend-icon="mdi-shield-account"
+                            @click="startSso"
+                        >
+                            {{ info.oidc_button_label || 'Sign in with SSO' }}
+                        </VBtn>
+
+                        <div
+                            v-if="info?.oidc_enabled && passwordLogin"
+                            class="my-4 flex items-center gap-3"
+                        >
+                            <VDivider class="grow" />
+                            <span class="text-xs opacity-60">or</span>
+                            <VDivider class="grow" />
+                        </div>
+
+                        <VForm v-if="passwordLogin" @submit="onSubmit" class="space-y-4!">
                             <AInput :input="getInputProps('username')" label="Username" autofocus />
                             <AInput
                                 :input="getInputProps('password')"
@@ -23,8 +47,12 @@
                                 Login
                             </VBtn>
                         </VForm>
+
+                        <VAlert v-else-if="info && !info.oidc_enabled" type="info" variant="tonal">
+                            No sign-in method is enabled. Ask an administrator.
+                        </VAlert>
                     </VCardText>
-                    <VCardActions>
+                    <VCardActions v-if="passwordLogin && info?.registration_enabled">
                         <VSpacer />
                         <RouterLink to="/auth/register">Don't have an account?</RouterLink>
                     </VCardActions>
@@ -37,12 +65,14 @@
 <script setup lang="ts">
 import { useQueryClient } from '@tanstack/vue-query'
 import { useHead } from '@unhead/vue'
-import { watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { z } from 'zod'
 import AInput from '@/components/AInput.vue'
 import AQueryError from '@/components/AQueryError.vue'
 import { authApi } from '@/utils/api/auth'
+import { miscApi } from '@/utils/api/misc'
+import { clearSignedOut, isSignedOut, OIDC_LOGIN_URL, shouldAutoRedirect } from '@/utils/api/oidc'
 import { usersApi } from '@/utils/api/users'
 import { useForm } from '@/utils/forms'
 
@@ -52,8 +82,30 @@ useHead({
 
 const login = authApi.useLogin()
 const router = useRouter()
+const route = useRoute()
 const queryClient = useQueryClient()
+const qInfo = miscApi.useInfo()
 useAlreadyLoggedInRedirect()
+
+const info = computed(() => qInfo.data.value)
+const error = computed(() => (route.query.error as string) || '')
+const hasError = computed(() => 'error' in route.query)
+const passwordLogin = computed(() => info.value?.password_login_enabled !== false)
+
+function startSso() {
+    clearSignedOut()
+    window.location.href = OIDC_LOGIN_URL
+}
+
+watch(
+    () => [info.value, hasError.value, route.query.local] as const,
+    ([i, failed, local]) => {
+        if (shouldAutoRedirect(i, failed, local, isSignedOut())) {
+            startSso()
+        }
+    },
+    { immediate: true }
+)
 
 const schema = z.object({
     username: z.string().min(1),

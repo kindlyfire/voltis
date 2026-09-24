@@ -1,9 +1,11 @@
 package routes
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -12,48 +14,104 @@ import (
 	"strings"
 	"testing"
 
+	"voltis/config"
 	"voltis/db/dbtest"
+	"voltis/settings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 )
+
+const testRemoteAddrHeader = "X-Test-Remote-Addr"
 
 func newTestPool(t *testing.T) *pgxpool.Pool {
 	return dbtest.Pool(t)
 }
 
 type testClient struct {
-	t      *testing.T
-	server *httptest.Server
-	http   *http.Client
-	hub    *WebSocketHub
+	t       *testing.T
+	server  *httptest.Server
+	http    *http.Client
+	hub     *WebSocketHub
+	st      *settings.Store
+	db      *pgxpool.Pool
+	headers map[string]string
+	extra   http.Header
+}
+
+func (c *testClient) pool() *pgxpool.Pool { return c.db }
+
+func newStore(t *testing.T, pool *pgxpool.Pool) *settings.Store {
+	t.Helper()
+	st, err := settings.New(context.Background(), pool)
+	if err != nil {
+		t.Fatalf("settings: %v", err)
+	}
+	st.Listen()
+	t.Cleanup(st.Close)
+	return st
 }
 
 func newClient(t *testing.T, pool *pgxpool.Pool) *testClient {
+	return newProxyClient(t, pool, config.ProxyAuth{})
+}
+
+func newProxyClient(t *testing.T, pool *pgxpool.Pool, proxy config.ProxyAuth) *testClient {
 	t.Helper()
 
-	firstUserFlow.Store(true)
+	st := newStore(t, pool)
 
 	e := echo.New()
-	hub, manager := Register(e, pool)
+	hub, manager := Register(e, pool, st, proxy)
 	t.Cleanup(manager.Close)
 
-	server := httptest.NewTestServer(t, e)
+	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if addr := r.Header.Get(testRemoteAddrHeader); addr != "" {
+			r.RemoteAddr = addr
+			r.Header.Del(testRemoteAddrHeader)
+		}
+		e.ServeHTTP(w, r)
+	}))
 	server.Start()
 
+	return &testClient{t: t, server: server, http: newHTTPClient(), hub: hub, st: st, db: pool}
+}
+
+func newHTTPClient() *http.Client {
 	jar, _ := cookiejar.New(nil)
-	return &testClient{
-		t:      t,
-		server: server,
-		http:   &http.Client{Jar: jar},
-		hub:    hub,
+	return &http.Client{
+		Jar:           jar,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 }
 
 func (c *testClient) newSession(t *testing.T) *testClient {
 	t.Helper()
-	jar, _ := cookiejar.New(nil)
-	return &testClient{t: t, server: c.server, http: &http.Client{Jar: jar}, hub: c.hub}
+	clone := *c
+	clone.t = t
+	clone.http = newHTTPClient()
+	return &clone
+}
+
+func (c *testClient) WithHeader(key, value string) *testClient {
+	clone := *c
+	clone.headers = maps.Clone(c.headers)
+	if clone.headers == nil {
+		clone.headers = map[string]string{}
+	}
+	clone.headers[key] = value
+	return &clone
+}
+
+// WithRawHeader sends a header verbatim, including more than once.
+func (c *testClient) WithRawHeader(key string, values ...string) *testClient {
+	clone := *c
+	clone.extra = http.Header{key: values}
+	return &clone
+}
+
+func (c *testClient) WithRemoteAddr(addr string) *testClient {
+	return c.WithHeader(testRemoteAddrHeader, addr)
 }
 
 func newAdminClient(t *testing.T, pool *pgxpool.Pool) *testClient {
@@ -70,61 +128,105 @@ func newAdminClient(t *testing.T, pool *pgxpool.Pool) *testClient {
 	return c
 }
 
-func (c *testClient) HasCookie(name string) bool {
+func (c *testClient) url() *url.URL {
 	u, _ := url.Parse(c.server.URL)
-	return slices.ContainsFunc(c.http.Jar.Cookies(u), func(ck *http.Cookie) bool { return ck.Name == name })
+	return u
 }
 
-func (c *testClient) Get(path string) *response {
-	resp, err := c.http.Get(c.server.URL + path)
+func (c *testClient) HasCookie(name string) bool {
+	return slices.ContainsFunc(c.http.Jar.Cookies(c.url()), func(ck *http.Cookie) bool { return ck.Name == name })
+}
+
+func (c *testClient) cookie(name string) string {
+	for _, ck := range c.http.Jar.Cookies(c.url()) {
+		if ck.Name == name {
+			return ck.Value
+		}
+	}
+	return ""
+}
+
+func (c *testClient) SetCookie(name, value string) {
+	c.http.Jar.SetCookies(c.url(), []*http.Cookie{{Name: name, Value: value}})
+}
+
+func (c *testClient) do(method, path string, body any) *response {
+	c.t.Helper()
+	var reader io.Reader
+	if body != nil {
+		data, _ := json.Marshal(body)
+		reader = strings.NewReader(string(data))
+	}
+	return c.doRaw(method, path, reader)
+}
+
+func (c *testClient) doRaw(method, path string, body io.Reader) *response {
+	c.t.Helper()
+	req, err := http.NewRequest(method, c.server.URL+path, body)
 	if err != nil {
-		c.t.Fatalf("GET %s: %v", path, err)
+		c.t.Fatalf("%s %s: %v", method, path, err)
+	}
+	if body != nil {
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	}
+	for k, v := range c.headers {
+		req.Header.Set(k, v)
+	}
+	for k, values := range c.extra {
+		for _, v := range values {
+			req.Header.Add(k, v)
+		}
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		c.t.Fatalf("%s %s: %v", method, path, err)
 	}
 	return readResponse(resp)
 }
 
-func (c *testClient) Post(path string, body any) *response {
-	data, _ := json.Marshal(body)
-	resp, err := c.http.Post(c.server.URL+path, "application/json", strings.NewReader(string(data)))
-	if err != nil {
-		c.t.Fatalf("POST %s: %v", path, err)
-	}
-	return readResponse(resp)
-}
+func (c *testClient) Get(path string) *response { return c.do(http.MethodGet, path, nil) }
 
 func (c *testClient) Patch(path string, body any) *response {
-	data, _ := json.Marshal(body)
-	return c.PatchRaw(path, string(data))
+	return c.do(http.MethodPatch, path, body)
 }
 
 func (c *testClient) PatchRaw(path, body string) *response {
-	req, _ := http.NewRequest("PATCH", c.server.URL+path, strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
-	if err != nil {
-		c.t.Fatalf("PATCH %s: %v", path, err)
-	}
-	return readResponse(resp)
+	return c.doRaw(http.MethodPatch, path, strings.NewReader(body))
 }
 
-func (c *testClient) Delete(path string) *response {
-	req, _ := http.NewRequest("DELETE", c.server.URL+path, nil)
-	resp, err := c.http.Do(req)
-	if err != nil {
-		c.t.Fatalf("DELETE %s: %v", path, err)
+func (c *testClient) Post(path string, body any) *response {
+	if body == nil {
+		body = map[string]any{}
 	}
-	return readResponse(resp)
+	return c.do(http.MethodPost, path, body)
+}
+
+// Mirrors the client, which sends a JSON body so the CSRF gate is satisfied.
+func (c *testClient) Delete(path string) *response {
+	return c.do(http.MethodDelete, path, map[string]any{})
 }
 
 type response struct {
 	StatusCode int
 	Body       []byte
+	Headers    http.Header
+	Cookies    []*http.Cookie
 }
 
 func readResponse(r *http.Response) *response {
 	defer func() { _ = r.Body.Close() }()
 	body, _ := io.ReadAll(r.Body)
-	return &response{StatusCode: r.StatusCode, Body: body}
+	return &response{StatusCode: r.StatusCode, Body: body, Headers: r.Header, Cookies: r.Cookies()}
+}
+
+func (r *response) Cookie(name string) *http.Cookie {
+	for _, ck := range r.Cookies {
+		if ck.Name == name {
+			return ck
+		}
+	}
+	return nil
 }
 
 func (r *response) JSON() map[string]any {

@@ -2,7 +2,6 @@ package routes
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,8 +12,10 @@ import (
 
 	"voltis/db"
 	"voltis/models"
+	"voltis/settings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 	"golang.org/x/crypto/bcrypt"
@@ -23,6 +24,7 @@ import (
 type UserRoutes struct {
 	pool *pgxpool.Pool
 	hub  *WebSocketHub
+	st   *settings.Store
 }
 
 func (ur *UserRoutes) Register(g *echo.Group) {
@@ -30,6 +32,11 @@ func (ur *UserRoutes) Register(g *echo.Group) {
 	g.GET("/me", ur.me)
 	g.POST("/me", ur.updateMe)
 	g.PATCH("/me/preferences", ur.patchPreferences)
+	g.GET("/me/identities", ur.myIdentities)
+	g.DELETE("/me/identities/:identity_id", ur.unlinkMine)
+	g.GET("/:user_id/identities", adminOnly(ur.identities))
+	g.POST("/:user_id/identities", adminOnly(ur.linkIdentity))
+	g.DELETE("/:user_id/identities/:identity_id", adminOnly(ur.unlinkIdentity))
 	g.POST("/:id_or_new", ur.upsert)
 	g.DELETE("/:user_id", adminOnly(ur.delete))
 }
@@ -39,8 +46,16 @@ type UserDTO struct {
 	CreatedAt   time.Time       `json:"created_at"`
 	UpdatedAt   time.Time       `json:"updated_at"`
 	Username    string          `json:"username"`
+	Email       *string         `json:"email"`
 	Permissions []string        `json:"permissions"`
 	Preferences json.RawMessage `json:"preferences"`
+	HasPassword bool            `json:"has_password"`
+}
+
+type MeDTO struct {
+	UserDTO
+	SessionMethod string `json:"session_method"`
+	CanLogout     bool   `json:"can_logout"`
 }
 
 func userToDTO(u models.User) UserDTO {
@@ -57,8 +72,10 @@ func userToDTO(u models.User) UserDTO {
 		CreatedAt:   u.CreatedAt,
 		UpdatedAt:   u.UpdatedAt,
 		Username:    u.Username,
+		Email:       u.Email,
 		Permissions: perms,
 		Preferences: prefs,
+		HasPassword: u.PasswordHash != nil,
 	}
 }
 
@@ -80,11 +97,19 @@ func (ur *UserRoutes) me(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	return c.JSON(http.StatusOK, userToDTO(*user))
+	method := models.SessionPassword
+	if session := requestSession(c); session != nil {
+		method = session.Method
+	}
+	// A proxy session can only end upstream, so without that URL there is
+	// nothing a logout button could do.
+	canLogout := method != models.SessionProxy || ur.st.String(settings.AuthProxyLogoutURL) != ""
+	return c.JSON(http.StatusOK, MeDTO{UserDTO: userToDTO(*user), SessionMethod: method, CanLogout: canLogout})
 }
 
 type updateMeRequest struct {
 	Username string  `json:"username"`
+	Email    *string `json:"email"`
 	Password *string `json:"password"`
 }
 
@@ -99,22 +124,45 @@ func (ur *UserRoutes) updateMe(c echo.Context) error {
 		return err
 	}
 
-	passwordHash := user.PasswordHash
-	if req.Password != nil && *req.Password != "" {
-		if len(*req.Password) > 72 {
-			return echo.NewHTTPError(http.StatusBadRequest, "password must be at most 72 characters")
+	var passwordHash *string
+	setsPassword := req.Password != nil && *req.Password != ""
+	if setsPassword {
+		if !ur.st.Bool(settings.AuthPasswordLoginEnabled) {
+			return errPasswordLoginDisabled()
 		}
-		hash, err := bcrypt.GenerateFromPassword([]byte(*req.Password), bcrypt.DefaultCost)
+		hash, err := hashPassword(*req.Password)
 		if err != nil {
 			return err
 		}
-		passwordHash = string(hash)
+		passwordHash = hash
 	}
 
-	_, err = ur.pool.Exec(reqCtx(c), `
-		UPDATE users SET username = $1, password_hash = $2, updated_at = $3
-		WHERE id = $4
-	`, req.Username, passwordHash, time.Now().UTC(), user.ID)
+	setsEmail, email, err := parseEmail(req.Email)
+	if err != nil {
+		return err
+	}
+
+	err = db.WithTx(reqCtx(c), ur.pool, func(tx pgx.Tx) error {
+		if setsPassword {
+			if err := requirePasswordLogin(reqCtx(c), tx); err != nil {
+				return err
+			}
+		}
+		// Only the supplied columns are written: values read at authentication
+		// are stale by now, and writing them back can undo another request.
+		_, err := tx.Exec(reqCtx(c), `
+			UPDATE users SET
+				username = COALESCE($1::text, username),
+				password_hash = COALESCE($2::text, password_hash),
+				email = CASE WHEN $3 THEN $4::text ELSE email END,
+				updated_at = $5
+			WHERE id = $6
+		`, nullable(req.Username), passwordHash, setsEmail, email, time.Now().UTC(), user.ID)
+		return err
+	})
+	if msg := uniqueViolation(err); msg != "" {
+		return echo.NewHTTPError(http.StatusBadRequest, msg)
+	}
 	if err != nil {
 		return err
 	}
@@ -177,6 +225,7 @@ func (ur *UserRoutes) patchPreferences(c echo.Context) error {
 
 type upsertUserRequest struct {
 	Username    string   `json:"username"`
+	Email       *string  `json:"email"`
 	Password    *string  `json:"password"`
 	Permissions []string `json:"permissions"`
 }
@@ -201,28 +250,41 @@ func (ur *UserRoutes) upsert(c echo.Context) error {
 	ctx := reqCtx(c)
 	now := time.Now().UTC()
 
-	if idOrNew == "new" && (req.Password == nil || *req.Password == "") {
-		return echo.NewHTTPError(http.StatusBadRequest, "Password is required for new users")
-	}
-
-	newHash := ""
+	var newHash *string
 	if req.Password != nil && *req.Password != "" {
-		if len(*req.Password) > 72 {
-			return echo.NewHTTPError(http.StatusBadRequest, "password must be at most 72 characters")
+		if !ur.st.Bool(settings.AuthPasswordLoginEnabled) {
+			return errPasswordLoginDisabled()
 		}
-		hash, err := bcrypt.GenerateFromPassword([]byte(*req.Password), bcrypt.DefaultCost)
+		newHash, err = hashPassword(*req.Password)
 		if err != nil {
 			return err
 		}
-		newHash = string(hash)
 	}
 
 	if idOrNew == "new" {
 		id := models.MakeUserID()
-		_, err = ur.pool.Exec(ctx, `
-			INSERT INTO users (id, created_at, updated_at, username, password_hash, permissions)
-			VALUES ($1, $2, $3, $4, $5, $6)
-		`, id, now, now, req.Username, newHash, req.Permissions)
+		_, email, err := parseEmail(req.Email)
+		if err != nil {
+			return err
+		}
+		err = db.WithTx(ctx, ur.pool, func(tx pgx.Tx) error {
+			if err := db.LockAdminMutation(ctx, tx); err != nil {
+				return err
+			}
+			if newHash != nil {
+				if err := requirePasswordLogin(ctx, tx); err != nil {
+					return err
+				}
+			}
+			_, err := tx.Exec(ctx, `
+				INSERT INTO users (id, created_at, updated_at, username, email, password_hash, permissions)
+				VALUES ($1, $2, $3, $4, $5, $6, $7)
+			`, id, now, now, req.Username, email, newHash, req.Permissions)
+			return err
+		})
+		if msg := uniqueViolation(err); msg != "" {
+			return echo.NewHTTPError(http.StatusBadRequest, msg)
+		}
 		if err != nil {
 			return err
 		}
@@ -236,8 +298,13 @@ func (ur *UserRoutes) upsert(c echo.Context) error {
 
 	var user models.User
 	err = db.WithTx(ctx, ur.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", adminMutationLockKey); err != nil {
+		if err := db.LockAdminMutation(ctx, tx); err != nil {
 			return err
+		}
+		if newHash != nil {
+			if err := requirePasswordLogin(ctx, tx); err != nil {
+				return err
+			}
 		}
 
 		existing, err := getUser(ctx, tx, idOrNew)
@@ -256,16 +323,28 @@ func (ur *UserRoutes) upsert(c echo.Context) error {
 			}
 		}
 
+		setsEmail, email, err := parseEmail(req.Email)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `
-			UPDATE users SET username = $1, password_hash = $2, permissions = $3, updated_at = $4
-			WHERE id = $5
-		`, req.Username, cmp.Or(newHash, existing.PasswordHash), req.Permissions, now, idOrNew); err != nil {
+			UPDATE users SET
+				username = COALESCE($1::text, username),
+				password_hash = COALESCE($2::text, password_hash),
+				permissions = $3,
+				email = CASE WHEN $4 THEN $5::text ELSE email END,
+				updated_at = $6
+			WHERE id = $7
+		`, nullable(req.Username), newHash, req.Permissions, setsEmail, email, now, idOrNew); err != nil {
 			return err
 		}
 
 		user, err = getUser(ctx, tx, idOrNew)
 		return err
 	})
+	if msg := uniqueViolation(err); msg != "" {
+		return echo.NewHTTPError(http.StatusBadRequest, msg)
+	}
 	if err != nil {
 		return err
 	}
@@ -273,14 +352,12 @@ func (ur *UserRoutes) upsert(c echo.Context) error {
 	return c.JSON(http.StatusOK, userToDTO(user))
 }
 
-const adminMutationLockKey int64 = 7263845190
-
 func (ur *UserRoutes) delete(c echo.Context) error {
 	ctx := reqCtx(c)
 	userID := c.Param("user_id")
 
 	err := db.WithTx(ctx, ur.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", adminMutationLockKey); err != nil {
+		if err := db.LockAdminMutation(ctx, tx); err != nil {
 			return err
 		}
 
@@ -313,6 +390,48 @@ func (ur *UserRoutes) delete(c echo.Context) error {
 	}
 	ur.hub.Drop(userID)
 	return okResponse(c)
+}
+
+// Stored lowercase, as external logins write them. The first result reports
+// whether the caller asked for a change at all.
+func parseEmail(requested *string) (bool, *string, error) {
+	if requested == nil {
+		return false, nil, nil
+	}
+	email := normalizeEmail(*requested)
+	if email == "" {
+		return true, nil, nil
+	}
+	if validate.Var(email, "email") != nil {
+		return false, nil, echo.NewHTTPError(http.StatusBadRequest, "that is not a valid email address")
+	}
+	return true, &email, nil
+}
+
+func uniqueViolation(err error) string {
+	pgErr, ok := errors.AsType[*pgconn.PgError](err)
+	if !ok || pgErr.Code != "23505" {
+		return ""
+	}
+	switch pgErr.ConstraintName {
+	case "users_email_lower_key":
+		return "that email address is already in use"
+	case "users_username_key":
+		return "that username is already taken"
+	}
+	return "that value is already in use"
+}
+
+func hashPassword(password string) (*string, error) {
+	if len(password) > 72 {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "password must be at most 72 characters")
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, err
+	}
+	s := string(hash)
+	return &s, nil
 }
 
 func getUser(ctx context.Context, q db.Querier, id string) (models.User, error) {

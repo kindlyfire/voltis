@@ -62,6 +62,25 @@ func WithTx(ctx context.Context, pool *pgxpool.Pool, fn func(pgx.Tx) error) erro
 	return tx.Commit(ctx)
 }
 
+const adminMutationLockKey int64 = 7263845190
+
+func LockAdminMutation(ctx context.Context, tx pgx.Tx) error {
+	_, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", adminMutationLockKey)
+	return err
+}
+
+func LockUserSessions(ctx context.Context, tx pgx.Tx, userID string) error {
+	_, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtext('sessions:' || $1))", userID)
+	return err
+}
+
+func LockIdentity(ctx context.Context, tx pgx.Tx, provider, issuer, subject string) error {
+	_, err := tx.Exec(ctx,
+		"SELECT pg_advisory_xact_lock(hashtext('identity:' || $1 || ':' || $2 || ':' || $3))",
+		provider, issuer, subject)
+	return err
+}
+
 func LockMetadata(ctx context.Context, tx pgx.Tx, libraryID string) error {
 	_, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtext('metadata:' || $1))", libraryID)
 	return err

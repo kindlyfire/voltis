@@ -27,5 +27,39 @@ services:
       timeout: 3s
       retries: 10
 
+  # Local OIDC provider. Only started with: docker compose --profile oidc up -d
+  dex:
+    profiles: ["oidc"]
+    image: ghcr.io/dexidp/dex:v2.44.0
+    command: dex serve /etc/dex/config.yaml
+    ports:
+      - "127.0.0.1:5556:5556"
+    volumes:
+      - ./dev/dex/config.yaml:/etc/dex/config.yaml:ro
+
+  # Forwarded auth. Only started with: docker compose --profile proxy-auth up -d
+  authelia:
+    profiles: ["proxy-auth"]
+    image: authelia/authelia:4.37.5
+    ports:
+      - "127.0.0.1:9091:9091"
+    volumes:
+      - ./dev/authelia/configuration.yml:/config/configuration.yml:ro
+      - ./dev/authelia/users.yml:/config/users.yml:ro
+      - authelia_data:/data
+
+  caddy:
+    profiles: ["proxy-auth"]
+    image: caddy:2.10-alpine
+    ports:
+      - "127.0.0.1:9443:9443"
+    volumes:
+      - ./dev/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - authelia
+
 volumes:
   postgres_data:
+  authelia_data:

@@ -115,7 +115,7 @@ func serveFake(t *testing.T, h *WebSocketHub, s *fakeSocket, user string, admin 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		h.serve(s, user, admin, h.dropGen())
+		h.serve(s, user, admin, h.dropGen(), nil)
 	}()
 	t.Cleanup(func() {
 		_ = s.Close()
@@ -327,7 +327,7 @@ func TestDropClosesOutsideHubLock(t *testing.T) {
 	served := make(chan struct{})
 	go func() {
 		defer close(served)
-		h.serve(&lockingSocket{fakeSocket: f, h: h}, "u1", true, 0)
+		h.serve(&lockingSocket{fakeSocket: f, h: h}, "u1", true, 0, nil)
 	}()
 	waitFor(t, f.ready, "the connection to register")
 
@@ -356,7 +356,7 @@ func TestDropDuringUpgradeRefusesRegistration(t *testing.T) {
 		gen := h.dropGen()
 		close(snapped)
 		<-resolved
-		h.serve(upgrading, "u1", true, gen)
+		h.serve(upgrading, "u1", true, gen, nil)
 	}()
 
 	waitFor(t, snapped, "the handler to snapshot the drop generation")
@@ -385,7 +385,7 @@ func TestDropOfAnotherUserDoesNotRefuseUpgrade(t *testing.T) {
 	served := make(chan struct{})
 	go func() {
 		defer close(served)
-		h.serve(s, "u1", true, gen)
+		h.serve(s, "u1", true, gen, nil)
 	}()
 	t.Cleanup(func() {
 		_ = s.Close()
@@ -402,11 +402,12 @@ func dialWS(t *testing.T, h *WebSocketHub) (*websocket.Conn, chan struct{}) {
 	served := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer close(served)
-		ws, err := upgrader.Upgrade(w, r, nil)
+		up := websocket.Upgrader{}
+		ws, err := up.Upgrade(w, r, nil)
 		if err != nil {
 			return
 		}
-		h.serve(ws, "u1", true, 0)
+		h.serve(ws, "u1", true, 0, nil)
 	}))
 	c, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http"), nil)
 	if err != nil {
@@ -510,5 +511,37 @@ func TestCatalogChangedGoesToEveryone(t *testing.T) {
 		assertEq(t, s(msg["task_id"]), "t_1")
 		assertEq(t, msg["commit_seq"].(float64), float64(2))
 		assertEq(t, len(msg), 4)
+	}
+}
+
+func TestServeDropsAConnectionRevokedDuringTheHandshake(t *testing.T) {
+	h := NewHub()
+	s := newFakeSocket(false)
+	done := make(chan struct{})
+
+	// count() takes the hub lock, so this also proves serve does not hold it.
+	// Revoking only once registered means an early call leaves the socket up
+	// and fails the assertion below.
+	still := func() bool {
+		registered := h.count() == 1
+		if !registered {
+			t.Error("the revocation check ran before the connection was registered")
+		}
+		return !registered
+	}
+
+	go func() {
+		defer close(done)
+		h.serve(s, "u1", true, 0, still)
+	}()
+
+	waitFor(t, done, "serve to return")
+	if h.count() != 0 {
+		t.Fatalf("hub has %d conns, want 0", h.count())
+	}
+	select {
+	case <-s.closed:
+	default:
+		t.Fatal("the revoked socket was left open")
 	}
 }

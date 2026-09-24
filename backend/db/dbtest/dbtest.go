@@ -64,7 +64,7 @@ func drop(t *testing.T, adminURL, name string) {
 		return
 	}
 	defer admin.Close()
-	if _, err := admin.Exec(ctx, "DROP DATABASE "+name); err != nil {
+	if _, err := admin.Exec(ctx, "DROP DATABASE "+name+" WITH (FORCE)"); err != nil {
 		t.Logf("cleanup drop database: %v", err)
 	}
 }

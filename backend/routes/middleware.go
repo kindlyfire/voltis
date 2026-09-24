@@ -5,14 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"reflect"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"voltis/config"
 	"voltis/db"
 	"voltis/models"
+	"voltis/settings"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/jackc/pgx/v5"
@@ -35,25 +38,73 @@ const (
 	sessionRefreshThresholdDays = 14
 	sessionMaxAge               = sessionDurationDays * 24 * 60 * 60
 	contextKeyUser              = "user"
+	contextKeySession           = "session"
 )
 
-func setSessionCookie(c echo.Context, token string) {
-	secure := c.Scheme() == "https"
+// sessionInfo is the session the request ended up on, not the cookie it
+// arrived with: forwarded auth may have replaced it.
+type sessionInfo struct {
+	Token  string
+	Method string
+}
+
+func requestSession(c echo.Context) *sessionInfo {
+	session, _ := c.Get(contextKeySession).(*sessionInfo)
+	return session
+}
+
+// cookieSecure never trusts X-Forwarded-Proto, which any client can set.
+func cookieSecure(c echo.Context, st *settings.Store) bool {
+	if u, err := url.Parse(st.String(settings.AppPublicURL)); err == nil && strings.EqualFold(u.Scheme, "https") {
+		return true
+	}
+	return c.Request().TLS != nil
+}
+
+func setSessionCookie(c echo.Context, st *settings.Store, token string) {
 	c.SetCookie(&http.Cookie{
 		Name:     "voltis_session",
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   secure,
+		Secure:   cookieSecure(c, st),
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   sessionMaxAge,
 	})
 }
 
-func authMiddleware(pool *pgxpool.Pool) echo.MiddlewareFunc {
+func clearSessionCookie(c echo.Context, st *settings.Store) {
+	c.SetCookie(&http.Cookie{
+		Name:     "voltis_session",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   cookieSecure(c, st),
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+	})
+}
+
+// Cross-site requests cannot set this header without a preflight CORS rejects.
+func requireJSON(c echo.Context) error {
+	ct := c.Request().Header.Get(echo.HeaderContentType)
+	if !strings.HasPrefix(ct, echo.MIMEApplicationJSON) {
+		return echo.NewHTTPError(http.StatusUnsupportedMediaType, "expected a JSON request body")
+	}
+	return nil
+}
+
+type resolver struct {
+	pool  *pgxpool.Pool
+	st    *settings.Store
+	hub   *WebSocketHub
+	proxy config.ProxyAuth
+}
+
+func authMiddleware(r *resolver) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
-			user, err := resolveUser(c, pool)
+			user, err := r.resolve(c)
 			if err != nil {
 				return err
 			}
@@ -67,22 +118,133 @@ func authMiddleware(pool *pgxpool.Pool) echo.MiddlewareFunc {
 
 type userWithSession struct {
 	models.User
-	SessionToken     string    `db:"session_token"`
-	SessionExpiresAt time.Time `db:"session_expires_at"`
+	SessionToken     string     `db:"session_token"`
+	SessionExpiresAt time.Time  `db:"session_expires_at"`
+	SessionMethod    string     `db:"session_method"`
+	SessionAbsolute  *time.Time `db:"session_absolute_expires_at"`
 }
 
-func resolveUser(c echo.Context, pool *pgxpool.Pool) (*models.User, error) {
+func (r *resolver) resolve(c echo.Context) (*models.User, error) {
+	id, forwarded, err := r.proxyIdentity(c)
+	if err != nil {
+		return nil, err
+	}
+
+	row, err := sessionUser(c, r.pool)
+	if err != nil {
+		return nil, err
+	}
+	if forwarded {
+		return r.resolveForwarded(c, id, row)
+	}
+	// A proxy session without its header means the proxy was bypassed.
+	if row == nil || row.SessionMethod == models.SessionProxy {
+		return nil, nil
+	}
+	r.refresh(c, row)
+	c.Set(contextKeySession, &sessionInfo{Token: row.SessionToken, Method: row.SessionMethod})
+	return &row.User, nil
+}
+
+func (r *resolver) resolveForwarded(c echo.Context, id ExternalIdentity, row *userWithSession) (*models.User, error) {
+	ctx := reqCtx(c)
+	login, err := r.resolveExternalLogin(ctx, id)
+	if err == nil && login.User == nil {
+		err = echo.NewHTTPError(http.StatusForbidden, "no account for this login; ask an administrator")
+	}
+	if err != nil {
+		// The session this would have replaced must not outlive the rejection.
+		if _, rejected := errors.AsType[*echo.HTTPError](err); rejected && row != nil {
+			if _, delErr := r.pool.Exec(ctx, "DELETE FROM sessions WHERE token = $1", row.SessionToken); delErr != nil {
+				return nil, delErr
+			}
+			r.hub.Drop(row.ID)
+		}
+		return nil, err
+	}
+	user := login.User
+
+	var token string
+	if row != nil && row.SessionMethod == models.SessionProxy && row.ID == user.ID {
+		r.refresh(c, row)
+		token = row.SessionToken
+	} else {
+		err := db.WithTx(ctx, r.pool, func(tx pgx.Tx) error {
+			if err := db.LockUserSessions(ctx, tx, user.ID); err != nil {
+				return err
+			}
+			// User first: a concurrent delete cascades in that same order.
+			if _, err := db.SelectScalar[string](ctx, tx,
+				"SELECT id FROM users WHERE id = $1 FOR KEY SHARE", user.ID); err != nil {
+				return err
+			}
+			if row != nil {
+				if _, err := tx.Exec(ctx, "DELETE FROM sessions WHERE token = $1", row.SessionToken); err != nil {
+					return err
+				}
+			}
+
+			// Per-request proxy authorization makes session reuse safe.
+			live, err := db.SelectScalar[string](ctx, tx, `
+				SELECT token FROM sessions
+				WHERE user_id = $1 AND method = $2 AND `+liveSession+`
+				ORDER BY expires_at DESC LIMIT 1
+			`, user.ID, models.SessionProxy)
+			if err == nil {
+				token = live
+				return nil
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+			token, err = createSession(ctx, tx, r.st, user.ID, models.SessionProxy)
+			return err
+		})
+		if err != nil {
+			return nil, err
+		}
+		if row != nil && row.ID != user.ID {
+			r.hub.Drop(row.ID)
+		}
+		setSessionCookie(c, r.st, token)
+	}
+	c.Set(contextKeySession, &sessionInfo{Token: token, Method: models.SessionProxy})
+
+	syncEmail(ctx, r.pool, user, id.Email)
+	if err := r.syncAdmin(ctx, user, id); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+func (r *resolver) refresh(c echo.Context, row *userWithSession) {
+	if time.Until(row.SessionExpiresAt) >= sessionRefreshThresholdDays*24*time.Hour {
+		return
+	}
+	newExpiry := time.Now().Add(sessionDurationDays * 24 * time.Hour)
+	if row.SessionAbsolute != nil && newExpiry.After(*row.SessionAbsolute) {
+		newExpiry = *row.SessionAbsolute
+	}
+	if !newExpiry.After(row.SessionExpiresAt) {
+		return
+	}
+	_, _ = r.pool.Exec(reqCtx(c), "UPDATE sessions SET expires_at = $1 WHERE token = $2", newExpiry, row.SessionToken)
+	setSessionCookie(c, r.st, row.SessionToken)
+}
+
+func sessionUser(c echo.Context, q db.Querier) (*userWithSession, error) {
 	cookie, err := c.Cookie("voltis_session")
 	if err != nil || cookie.Value == "" {
 		return nil, nil
 	}
 
-	ctx := c.Request().Context()
-	row, err := db.SelectOne[userWithSession](ctx, pool, `
-		SELECT u.*, s.token AS session_token, s.expires_at AS session_expires_at
+	row, err := db.SelectOne[userWithSession](reqCtx(c), q, `
+		SELECT u.*, s.token AS session_token, s.expires_at AS session_expires_at,
+		       s.method AS session_method, s.absolute_expires_at AS session_absolute_expires_at
 		FROM users u
 		JOIN sessions s ON s.user_id = u.id
 		WHERE s.token = $1 AND s.expires_at > NOW()
+		  AND (s.absolute_expires_at IS NULL OR s.absolute_expires_at > NOW())
 	`, cookie.Value)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -90,16 +252,7 @@ func resolveUser(c echo.Context, pool *pgxpool.Pool) (*models.User, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	// Refresh session if expiring within threshold
-	timeUntilExpiry := time.Until(row.SessionExpiresAt)
-	if timeUntilExpiry < sessionRefreshThresholdDays*24*time.Hour {
-		newExpiry := time.Now().Add(sessionDurationDays * 24 * time.Hour)
-		_, _ = pool.Exec(ctx, "UPDATE sessions SET expires_at = $1 WHERE token = $2", newExpiry, row.SessionToken)
-		setSessionCookie(c, row.SessionToken)
-	}
-
-	return &row.User, nil
+	return &row, nil
 }
 
 func requireUser(c echo.Context) (*models.User, error) {

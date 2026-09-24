@@ -13,15 +13,43 @@ type User struct {
 	CreatedAt    time.Time `db:"created_at" json:"created_at"`
 	UpdatedAt    time.Time `db:"updated_at" json:"updated_at"`
 	Username     string    `db:"username" json:"username"`
-	PasswordHash string    `db:"password_hash" json:"-"`
+	PasswordHash *string   `db:"password_hash" json:"-"`
+	Email        *string   `db:"email" json:"email"`
 	Permissions  []string  `db:"permissions" json:"permissions"`
 	Preferences  JSONB     `db:"preferences" json:"preferences"`
 }
 
+const (
+	SessionPassword = "password"
+	SessionOIDC     = "oidc"
+	SessionProxy    = "proxy"
+)
+
 type Session struct {
-	Token     string    `db:"token"`
-	UserID    string    `db:"user_id"`
-	ExpiresAt time.Time `db:"expires_at"`
+	Token             string     `db:"token"`
+	UserID            string     `db:"user_id"`
+	ExpiresAt         time.Time  `db:"expires_at"`
+	Method            string     `db:"method"`
+	AbsoluteExpiresAt *time.Time `db:"absolute_expires_at"`
+}
+
+type AuthPending struct {
+	ID           string    `db:"id"`
+	Kind         string    `db:"kind"`
+	Data         JSONB     `db:"data"`
+	UserID       *string   `db:"user_id"`
+	SessionToken *string   `db:"session_token"`
+	ExpiresAt    time.Time `db:"expires_at"`
+}
+
+type UserIdentity struct {
+	ID        string    `db:"id" json:"id"`
+	Provider  string    `db:"provider" json:"provider"`
+	Issuer    string    `db:"issuer" json:"issuer"`
+	Subject   string    `db:"subject" json:"subject"`
+	UserID    string    `db:"user_id" json:"user_id"`
+	Email     *string   `db:"email" json:"email"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
 
 type Library struct {
@@ -136,3 +164,5 @@ func MakeUserToContentID() string     { return makeID("utc") }
 func MakeCustomListID() string        { return makeID("cl") }
 func MakeCustomListContentID() string { return makeID("clc") }
 func MakeTaskID() string              { return makeID("t") }
+func MakeIdentityID() string          { return makeID("ui") }
+func MakeAuthPendingID() string       { return makeID("ap") }

@@ -2,16 +2,13 @@ package routes
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"net/http"
-	"sync/atomic"
 	"time"
 
-	"voltis/config"
 	"voltis/db"
 	"voltis/models"
+	"voltis/settings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -23,6 +20,7 @@ import (
 type AuthRoutes struct {
 	pool *pgxpool.Pool
 	hub  *WebSocketHub
+	st   *settings.Store
 }
 
 func (a *AuthRoutes) Register(g *echo.Group) {
@@ -39,6 +37,9 @@ func (a *AuthRoutes) login(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return err
 	}
+	if !a.st.Bool(settings.AuthPasswordLoginEnabled) {
+		return errPasswordLoginDisabled()
+	}
 
 	ctx := reqCtx(c)
 	user, err := db.SelectOne[models.User](ctx, a.pool, "SELECT * FROM users WHERE username = $1", req.Username)
@@ -49,11 +50,14 @@ func (a *AuthRoutes) login(c echo.Context) error {
 		return err
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+	if user.PasswordHash == nil {
+		return echo.NewHTTPError(http.StatusUnauthorized, "invalid credentials")
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(*user.PasswordHash), []byte(req.Password)); err != nil {
 		return echo.NewHTTPError(http.StatusUnauthorized, "invalid credentials")
 	}
 
-	return a.startSession(c, user.ID)
+	return a.startPasswordSession(c, user.ID)
 }
 
 func (a *AuthRoutes) register(c echo.Context) error {
@@ -70,57 +74,57 @@ func (a *AuthRoutes) register(c echo.Context) error {
 	if len(req.Password) < 8 {
 		return echo.NewHTTPError(http.StatusBadRequest, "password must be at least 8 characters")
 	}
-	if len(req.Password) > 72 {
-		return echo.NewHTTPError(http.StatusBadRequest, "password must be at most 72 characters")
-	}
 
 	ctx := reqCtx(c)
-	cfg := config.Get()
-	firstUser, err := isFirstUserFlow(ctx, a.pool)
+	firstUser, err := isFirstUserFlow(ctx, a.pool, a.st)
 	if err != nil {
 		return err
 	}
-	if !cfg.RegistrationEnabled && !firstUser {
-		return echo.NewHTTPError(http.StatusForbidden, "registration is disabled")
+	if err := registerAllowed(ctx, a.pool, firstUser); err != nil {
+		return err
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hash, err := hashPassword(req.Password)
 	if err != nil {
 		return err
 	}
 
 	userID := models.MakeUserID()
-	insertUser := func(q db.Querier, permissions []string) error {
-		_, err := q.Exec(ctx,
+	var token string
+	err = db.WithTx(ctx, a.pool, func(tx pgx.Tx) error {
+		if err := db.LockAdminMutation(ctx, tx); err != nil {
+			return err
+		}
+		if err := settings.LockVersionWrite(ctx, tx); err != nil {
+			return err
+		}
+
+		first, err := isFirstUserFlow(ctx, tx, a.st)
+		if err != nil {
+			return err
+		}
+		if err := registerAllowed(ctx, tx, first); err != nil {
+			return err
+		}
+
+		permissions := []string{}
+		if first {
+			permissions = []string{"ADMIN"}
+		}
+		if _, err := tx.Exec(ctx,
 			`INSERT INTO users (id, username, password_hash, permissions) VALUES ($1, $2, $3, $4)`,
-			userID, req.Username, string(hash), permissions,
-		)
+			userID, req.Username, hash, permissions,
+		); err != nil {
+			return err
+		}
+		if first {
+			if err := settings.WriteTx(ctx, tx, settings.BootstrapCompleted, true); err != nil {
+				return err
+			}
+		}
+		token, err = createSession(ctx, tx, a.st, userID, models.SessionPassword)
 		return err
-	}
-
-	if firstUser {
-		err = db.WithTx(ctx, a.pool, func(tx pgx.Tx) error {
-			if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", adminMutationLockKey); err != nil {
-				return err
-			}
-
-			firstUser, err := isFirstUserFlow(ctx, tx)
-			if err != nil {
-				return err
-			}
-			if !cfg.RegistrationEnabled && !firstUser {
-				return echo.NewHTTPError(http.StatusForbidden, "registration is disabled")
-			}
-
-			permissions := []string{}
-			if firstUser {
-				permissions = []string{"ADMIN"}
-			}
-			return insertUser(tx, permissions)
-		})
-	} else {
-		err = insertUser(a.pool, []string{})
-	}
+	})
 	if err != nil {
 		if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == "23505" {
 			return echo.NewHTTPError(http.StatusBadRequest, "username already exists")
@@ -128,75 +132,156 @@ func (a *AuthRoutes) register(c echo.Context) error {
 		return err
 	}
 
-	return a.startSession(c, userID)
+	return a.finishSession(c, token)
 }
 
-func (a *AuthRoutes) startSession(c echo.Context, userID string) error {
-	token := generateToken()
-	_, err := a.pool.Exec(reqCtx(c),
-		"INSERT INTO sessions (token, user_id, expires_at) VALUES ($1, $2, $3)",
-		token, userID, time.Now().Add(sessionDurationDays*24*time.Hour),
-	)
+// The bootstrap admin may register and get a session even with password login
+// off: it is the documented recovery path.
+func registerAllowed(ctx context.Context, q db.Querier, firstUser bool) error {
+	if firstUser {
+		return nil
+	}
+	if err := requirePasswordLoginIn(ctx, q); err != nil {
+		return err
+	}
+	enabled, err := settings.Read(ctx, q, settings.AuthRegistrationEnabled)
 	if err != nil {
 		return err
 	}
+	if enabled != true {
+		return echo.NewHTTPError(http.StatusForbidden, "registration is disabled")
+	}
+	return nil
+}
 
-	setSessionCookie(c, token)
+func errPasswordLoginDisabled() error {
+	return echo.NewHTTPError(http.StatusForbidden, "password login is disabled")
+}
+
+// requirePasswordLogin holds off any concurrent disable until the caller's
+// transaction, which must not write settings itself, has committed.
+func requirePasswordLogin(ctx context.Context, tx pgx.Tx) error {
+	if err := settings.LockVersion(ctx, tx); err != nil {
+		return err
+	}
+	return requirePasswordLoginIn(ctx, tx)
+}
+
+func requirePasswordLoginIn(ctx context.Context, q db.Querier) error {
+	enabled, err := settings.Read(ctx, q, settings.AuthPasswordLoginEnabled)
+	if err != nil {
+		return err
+	}
+	if enabled != true {
+		return errPasswordLoginDisabled()
+	}
+	return nil
+}
+
+func (a *AuthRoutes) startPasswordSession(c echo.Context, userID string) error {
+	ctx := reqCtx(c)
+	var token string
+	err := db.WithTx(ctx, a.pool, func(tx pgx.Tx) error {
+		if err := requirePasswordLogin(ctx, tx); err != nil {
+			return err
+		}
+		var err error
+		token, err = createSession(ctx, tx, a.st, userID, models.SessionPassword)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	return a.finishSession(c, token)
+}
+
+func (a *AuthRoutes) finishSession(c echo.Context, token string) error {
+	setSessionCookie(c, a.st, token)
 	return okResponse(c)
 }
 
+func createSession(ctx context.Context, q db.Querier, st *settings.Store, userID, method string) (string, error) {
+	token := randomToken()
+	var absolute *time.Time
+	if method != models.SessionPassword {
+		t := time.Now().Add(time.Duration(st.Int(settings.AuthExternalSessionMaxDays)) * 24 * time.Hour)
+		absolute = &t
+	}
+	_, err := q.Exec(ctx, `
+		INSERT INTO sessions (token, user_id, expires_at, method, absolute_expires_at)
+		VALUES ($1, $2, $3, $4, $5)
+	`, token, userID, time.Now().Add(sessionDurationDays*24*time.Hour), method, absolute)
+	if err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
 func (a *AuthRoutes) logout(c echo.Context) error {
-	cookie, err := c.Cookie("voltis_session")
-	if err != nil || cookie.Value == "" {
+	if err := requireJSON(c); err != nil {
+		return err
+	}
+	// The resolver may have replaced the incoming cookie on this very request.
+	session := requestSession(c)
+	if session == nil {
 		return echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
 	}
 
-	userID, err := db.SelectScalar[string](reqCtx(c),
-		a.pool, "DELETE FROM sessions WHERE token = $1 RETURNING user_id", cookie.Value)
+	userID, err := db.SelectScalar[string](reqCtx(c), a.pool,
+		"DELETE FROM sessions WHERE token = $1 RETURNING user_id", session.Token)
+	redirect := ""
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 	case err != nil:
 		return err
 	default:
 		a.hub.Drop(userID)
+		if session.Method == models.SessionProxy {
+			redirect = a.st.String(settings.AuthProxyLogoutURL)
+		}
 	}
 
-	c.SetCookie(&http.Cookie{
-		Name:     "voltis_session",
-		Value:    "",
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   c.Scheme() == "https",
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   -1,
-	})
-
-	return okResponse(c)
+	clearSessionCookie(c, a.st)
+	return c.JSON(http.StatusOK, map[string]any{"ok": true, "redirect_url": redirect})
 }
 
-var firstUserFlow atomic.Bool
-
-func init() {
-	firstUserFlow.Store(true)
-}
-
-func isFirstUserFlow(ctx context.Context, q db.Querier) (bool, error) {
-	if !firstUserFlow.Load() {
+func isFirstUserFlow(ctx context.Context, q db.Querier, st *settings.Store) (bool, error) {
+	if st.Bool(settings.BootstrapCompleted) {
 		return false, nil
 	}
-	adminExists, err := db.SelectScalar[bool](ctx, q,
-		"SELECT EXISTS (SELECT 1 FROM users WHERE permissions @> ARRAY['ADMIN'])")
+	v, err := settings.Read(ctx, q, settings.BootstrapCompleted)
 	if err != nil {
 		return false, err
 	}
-	if adminExists {
-		firstUserFlow.Store(false)
-	}
-	return !adminExists, nil
+	done, _ := v.(bool)
+	return !done, nil
 }
 
-func generateToken() string {
-	b := make([]byte, 32)
-	rand.Read(b)
-	return hex.EncodeToString(b)
+// Call after the change, with settings.LockVersion held. Lock and check are
+// separate statements so the check sees what a racing unlink committed.
+func requireLoginMethod(ctx context.Context, tx pgx.Tx, userID string) error {
+	passwords, err := settings.Read(ctx, tx, settings.AuthPasswordLoginEnabled)
+	if err != nil {
+		return err
+	}
+	_, err = db.SelectScalar[string](ctx, tx, "SELECT id FROM users WHERE id = $1 FOR UPDATE", userID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return echo.NewHTTPError(http.StatusNotFound, "User not found")
+	}
+	if err != nil {
+		return err
+	}
+
+	ok, err := db.SelectScalar[bool](ctx, tx, `
+		SELECT ($2 AND password_hash IS NOT NULL)
+		    OR EXISTS (SELECT 1 FROM user_identities WHERE user_id = $1)
+		FROM users WHERE id = $1
+	`, userID, passwords == true)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return echo.NewHTTPError(http.StatusBadRequest, "this would leave the account with no way to log in")
+	}
+	return nil
 }

@@ -7,6 +7,10 @@ export interface Info {
     version: string
     registration_enabled: boolean
     first_user_flow: boolean
+    password_login_enabled: boolean
+    oidc_enabled: boolean
+    oidc_button_label: string
+    oidc_auto_redirect: boolean
 }
 
 export const miscApi = {

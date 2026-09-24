@@ -1,0 +1,17 @@
+# Password for both users: password
+users:
+  alice:
+    disabled: false
+    displayname: "Alice"
+    password: "$argon2id$v=19$m=65536,t=3,p=4$0XhTPFfunX/IbdyeK/wMVg$ORyyRLqj18//PNoHZ+PxNRQBJ+D1PfOeT6m93d3k8P0"
+    email: alice@example.com
+    groups:
+      - admins
+      - users
+  bob:
+    disabled: false
+    displayname: "Bob"
+    password: "$argon2id$v=19$m=65536,t=3,p=4$0XhTPFfunX/IbdyeK/wMVg$ORyyRLqj18//PNoHZ+PxNRQBJ+D1PfOeT6m93d3k8P0"
+    email: bob@example.com
+    groups:
+      - users

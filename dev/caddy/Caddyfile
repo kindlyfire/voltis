@@ -1,0 +1,36 @@
+# Caddy in front of Voltis, authenticating through Authelia.
+#
+# Authelia refuses to protect a plain-http target, so this listens on https with
+# Caddy's own CA. The browser warns once on the first visit; accept and proceed.
+{
+	auto_https disable_redirects
+}
+
+https://localhost:9443 {
+	tls internal
+
+	handle /authelia* {
+		reverse_proxy authelia:9091
+	}
+
+	handle {
+		route {
+			# The trust model rests on this: a client can send Remote-User
+			# itself, and the app cannot tell it apart from one the proxy set.
+			# Strip every configured identity header before forward_auth puts
+			# the real ones on.
+			request_header -Remote-User
+			request_header -Remote-Email
+			request_header -Remote-Groups
+			request_header -Remote-Name
+
+			forward_auth authelia:9091 {
+				uri /authelia/api/verify?rd=https://localhost:9443/authelia/
+				copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+			}
+
+			# `just app server` runs Voltis on the host, not in a container.
+			reverse_proxy host.docker.internal:8080
+		}
+	}
+}

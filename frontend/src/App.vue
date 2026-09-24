@@ -27,6 +27,10 @@ watch(
         [qMe.data.value, qMe.isLoading.value, router.currentRoute.value, qInfo.data.value] as const,
     ([me, isLoading, route, info]) => {
         if (!isLoading && !me && info) {
+            // The sign-in is verified but unfinished: it owns this page.
+            if (route.path === '/auth/oidc/complete') {
+                return
+            }
             if (info.first_user_flow && route.path !== '/auth/register') {
                 router.replace('/auth/register')
                 return

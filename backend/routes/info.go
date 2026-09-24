@@ -4,28 +4,37 @@ import (
 	"net/http"
 
 	"voltis/config"
+	"voltis/settings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 )
 
 type infoDTO struct {
-	Version             string `json:"version"`
-	RegistrationEnabled bool   `json:"registration_enabled"`
-	FirstUserFlow       bool   `json:"first_user_flow"`
+	Version              string `json:"version"`
+	RegistrationEnabled  bool   `json:"registration_enabled"`
+	FirstUserFlow        bool   `json:"first_user_flow"`
+	PasswordLoginEnabled bool   `json:"password_login_enabled"`
+	OIDCEnabled          bool   `json:"oidc_enabled"`
+	OIDCButtonLabel      string `json:"oidc_button_label"`
+	OIDCAutoRedirect     bool   `json:"oidc_auto_redirect"`
 }
 
-func infoHandler(pool *pgxpool.Pool) echo.HandlerFunc {
+func infoHandler(pool *pgxpool.Pool, st *settings.Store) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		cfg := config.Get()
-		first, err := isFirstUserFlow(reqCtx(c), pool)
+		first, err := isFirstUserFlow(reqCtx(c), pool, st)
 		if err != nil {
 			return err
 		}
+		oidcOn := oidcConfigOf(st).usable()
 		return c.JSON(http.StatusOK, infoDTO{
-			Version:             config.AppVersion,
-			RegistrationEnabled: cfg.RegistrationEnabled,
-			FirstUserFlow:       first,
+			Version:              config.AppVersion,
+			RegistrationEnabled:  st.Bool(settings.AuthRegistrationEnabled),
+			FirstUserFlow:        first,
+			PasswordLoginEnabled: st.Bool(settings.AuthPasswordLoginEnabled),
+			OIDCEnabled:          oidcOn,
+			OIDCButtonLabel:      st.String(settings.OIDCButtonLabel),
+			OIDCAutoRedirect:     oidcOn && st.Bool(settings.OIDCAutoRedirect),
 		})
 	}
 }

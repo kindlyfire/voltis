@@ -72,6 +72,11 @@ docker compose exec app sh
 ./voltis users create myuser --admin --password mypass123
 ```
 
+## Signing in with SSO or a reverse proxy
+
+Voltis can also sign users in through an OIDC provider or a reverse proxy that
+authenticates them for it. See [Authentication](/authentication).
+
 ## Adding libraries and scanning
 
 Under "Settings" in the web interface, you can manage users and libraries, and

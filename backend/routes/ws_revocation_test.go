@@ -2,7 +2,6 @@ package routes
 
 import (
 	"net/http"
-	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -14,10 +13,15 @@ import (
 
 func (c *testClient) dialWS(t *testing.T) *websocket.Conn {
 	t.Helper()
-	u, _ := url.Parse(c.server.URL)
 	header := http.Header{}
-	for _, ck := range c.http.Jar.Cookies(u) {
+	for _, ck := range c.http.Jar.Cookies(c.url()) {
 		header.Add("Cookie", ck.Name+"="+ck.Value)
+	}
+	for k, v := range c.headers {
+		header.Set(k, v)
+	}
+	for k, values := range c.extra {
+		header[k] = values
 	}
 	conn, resp, err := websocket.DefaultDialer.Dial(
 		"ws"+strings.TrimPrefix(c.server.URL, "http")+"/api/ws", header)

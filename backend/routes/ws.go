@@ -1,23 +1,54 @@
 package routes
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
+	"voltis/db"
 	"voltis/lib/tasks"
 	"voltis/scanner"
+	"voltis/settings"
 
 	"github.com/gorilla/websocket"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 )
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
+func newUpgrader(st *settings.Store) websocket.Upgrader {
+	return websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool { return originAllowed(r, st) },
+	}
+}
+
+func originAllowed(r *http.Request, st *settings.Store) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	want := authority(u.Scheme, u.Host)
+	if want == authority(u.Scheme, r.Host) || isDevOrigin(origin) {
+		return true
+	}
+	public, err := url.Parse(st.String(settings.AppPublicURL))
+	return err == nil && public.Host != "" && want == authority(public.Scheme, public.Host)
+}
+
+func authority(scheme, host string) string {
+	scheme, host = strings.ToLower(scheme), strings.ToLower(host)
+	if strings.HasSuffix(host, ":80") && scheme == "http" || strings.HasSuffix(host, ":443") && scheme == "https" {
+		host = host[:strings.LastIndex(host, ":")]
+	}
+	return host
 }
 
 var (
@@ -71,7 +102,9 @@ func (c *userConn) close() {
 	})
 }
 
-func (h *WebSocketHub) serve(conn socket, user string, admin bool, gen uint64) {
+// still runs once the connection is visible to Drop, closing the gap between
+// the caller's check and registration.
+func (h *WebSocketHub) serve(conn socket, user string, admin bool, gen uint64, still func() bool) {
 	c := &userConn{conn: conn, user: user, admin: admin, out: make(chan []byte, queueDepth), done: make(chan struct{})}
 
 	h.mu.Lock()
@@ -87,6 +120,11 @@ func (h *WebSocketHub) serve(conn socket, user string, admin bool, gen uint64) {
 		delete(h.conns, c)
 		h.mu.Unlock()
 	}()
+
+	if still != nil && !still() {
+		_ = conn.Close()
+		return
+	}
 
 	written := make(chan struct{})
 	go func() {
@@ -188,6 +226,42 @@ func (h *WebSocketHub) Drop(user string) {
 	}
 }
 
+const liveSession = "expires_at > NOW() AND (absolute_expires_at IS NULL OR absolute_expires_at > NOW())"
+
+func hasLiveSession(ctx context.Context, q db.Querier, userID string) bool {
+	live, err := db.SelectScalar[bool](ctx, q,
+		"SELECT EXISTS (SELECT 1 FROM sessions WHERE user_id = $1 AND "+liveSession+")", userID)
+	return err == nil && live
+}
+
+func (h *WebSocketHub) DropSessionless(ctx context.Context, q db.Querier) {
+	h.mu.Lock()
+	var users []string
+	for c := range h.conns {
+		if !slices.Contains(users, c.user) {
+			users = append(users, c.user)
+		}
+	}
+	h.mu.Unlock()
+	if len(users) == 0 {
+		return
+	}
+
+	live, err := db.SelectScalars[string](ctx, q,
+		"SELECT DISTINCT user_id FROM sessions WHERE user_id = ANY($1) AND "+liveSession, users)
+	if err != nil {
+		// Fail closed: nothing retries this scan, and a needless drop only
+		// costs a reconnect.
+		slog.Error("[ws] dropping unverifiable connections", "err", err)
+		live = nil
+	}
+	for _, user := range users {
+		if !slices.Contains(live, user) {
+			h.Drop(user)
+		}
+	}
+}
+
 func (h *WebSocketHub) TaskUpdate(s tasks.Snapshot) {
 	h.broadcast(toAdmins, map[string]any{
 		"type": "task_update",
@@ -204,20 +278,29 @@ func (h *WebSocketHub) CatalogChanged(ev scanner.CatalogChanged) {
 	})
 }
 
-func wsHandler(pool *pgxpool.Pool, hub *WebSocketHub) echo.HandlerFunc {
+func wsHandler(r *resolver) echo.HandlerFunc {
+	upgrader := newUpgrader(r.st)
 	return func(c echo.Context) error {
-		gen := hub.dropGen()
-		user, err := resolveUser(c, pool)
+		gen := r.hub.dropGen()
+		user, err := r.resolve(c)
 		if err != nil || user == nil {
 			return c.NoContent(http.StatusUnauthorized)
 		}
 
-		ws, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
+		// Upgrade drops the response headers, so carry any new session cookie over.
+		var header http.Header
+		if cookies := c.Response().Header().Values("Set-Cookie"); len(cookies) > 0 {
+			header = http.Header{"Set-Cookie": cookies}
+		}
+
+		ws, err := upgrader.Upgrade(c.Response(), c.Request(), header)
 		if err != nil {
 			return err
 		}
 
-		hub.serve(ws, user.ID, slices.Contains(user.Permissions, "ADMIN"), gen)
+		r.hub.serve(ws, user.ID, slices.Contains(user.Permissions, "ADMIN"), gen, func() bool {
+			return hasLiveSession(reqCtx(c), r.pool, user.ID)
+		})
 		return nil
 	}
 }

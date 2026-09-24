@@ -1,8 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { toValue, type MaybeRefOrGetter } from 'vue'
 import { apiFetch, RequestError } from '../fetch'
 import { queryClient } from '../misc'
 import { ws } from '../ws'
-import type { PreferencesPatch, UpdateMe, User, UserUpsert } from './types'
+import { beginSignOut, sessionConfirmation } from './oidc'
+import type {
+    Identity,
+    IdentityLink,
+    Me,
+    PreferencesPatch,
+    UpdateMe,
+    User,
+    UserUpsert,
+} from './types'
 
 /** Shared by every mutation that writes `['users','me']`, so their responses
  * can't be applied out of order: an unscoped POST landing after a slow PATCH
@@ -25,9 +35,11 @@ export const usersApi = {
         useQuery({
             queryKey: ['users', 'me'],
             queryFn: async () => {
+                const confirmSession = sessionConfirmation()
                 try {
-                    const u = await apiFetch<User>('/users/me')
+                    const u = await apiFetch<Me>('/users/me')
                     if (u?.id) {
+                        confirmSession()
                         ws.connect()
                     }
                     return u
@@ -82,6 +94,44 @@ export const usersApi = {
         return useMutation({
             mutationFn: async ({ id, ...body }: UserUpsert) =>
                 apiFetch<User>(`/users/${id ?? 'new'}`, {
+                    method: 'POST',
+                    body: JSON.stringify(body),
+                }),
+            onSuccess: () => {
+                queryClient.invalidateQueries({ queryKey: ['users'] })
+            },
+        })
+    },
+
+    useIdentities: (userId: MaybeRefOrGetter<string>) =>
+        useQuery({
+            queryKey: ['users', 'identities', () => toValue(userId)],
+            queryFn: async () => apiFetch<Identity[]>(`/users/${toValue(userId)}/identities`),
+        }),
+
+    useUnlinkIdentity: (userId: MaybeRefOrGetter<string>) => {
+        const queryClient = useQueryClient()
+        return useMutation({
+            onMutate: () => {
+                if (toValue(userId) === 'me') return beginSignOut()
+            },
+            onSettled: (_data, _error, _variables, endSignOut) => endSignOut?.(),
+            mutationFn: async (identityId: string) =>
+                apiFetch<unknown>(`/users/${toValue(userId)}/identities/${identityId}`, {
+                    method: 'DELETE',
+                    body: '{}',
+                }),
+            onSuccess: () => {
+                queryClient.invalidateQueries({ queryKey: ['users'] })
+            },
+        })
+    },
+
+    useLinkIdentity: (userId: MaybeRefOrGetter<string>) => {
+        const queryClient = useQueryClient()
+        return useMutation({
+            mutationFn: async (body: IdentityLink) =>
+                apiFetch<Identity[]>(`/users/${toValue(userId)}/identities`, {
                     method: 'POST',
                     body: JSON.stringify(body),
                 }),

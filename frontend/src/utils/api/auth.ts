@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import { apiFetch } from '../fetch'
-import type { OkResponse } from './types'
+import { beginSignOut, clearSignedOut } from './oidc'
+import type { LogoutResponse, OkResponse } from './types'
 
 export interface LoginRequest {
     username: string
@@ -22,6 +23,7 @@ export const authApi = {
                     body: JSON.stringify(credentials),
                 }),
             onSuccess: () => {
+                clearSignedOut()
                 queryClient.invalidateQueries({ queryKey: ['users', 'me'] })
             },
         })
@@ -36,6 +38,7 @@ export const authApi = {
                     body: JSON.stringify(credentials),
                 }),
             onSuccess: () => {
+                clearSignedOut()
                 queryClient.invalidateQueries({ queryKey: ['users', 'me'] })
             },
         })
@@ -44,9 +47,12 @@ export const authApi = {
     useLogout: () => {
         const queryClient = useQueryClient()
         return useMutation({
+            onMutate: beginSignOut,
+            onSettled: (_data, _error, _variables, endSignOut) => endSignOut?.(),
             mutationFn: async () =>
-                apiFetch<OkResponse>('/auth/logout', {
+                apiFetch<LogoutResponse>('/auth/logout', {
                     method: 'POST',
+                    body: '{}',
                 }),
             onSuccess: () => {
                 queryClient.invalidateQueries()

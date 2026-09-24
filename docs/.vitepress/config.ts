@@ -19,6 +19,10 @@ export default defineConfig({
 				link: '/installation',
 			},
 			{
+				text: 'Authentication',
+				link: '/authentication',
+			},
+			{
 				text: 'CLI Reference',
 				link: '/cli',
 			},

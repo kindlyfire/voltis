@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import AppLayout from './pages/_layout/Layout.vue'
 import PageLogin from './pages/auth/PageLogin.vue'
+import PageOidcComplete from './pages/auth/PageOidcComplete.vue'
 import PageRegister from './pages/auth/PageRegister.vue'
 import ContentPage from './pages/content/ContentPage.vue'
 import HomePage from './pages/HomePage.vue'
@@ -10,6 +11,7 @@ import ListsPage from './pages/lists/ListsPage.vue'
 import ReadPage from './pages/read/ReadPage.vue'
 import SettingsAccountPage from './pages/settings/AccountPage.vue'
 import SettingsBrokenRefsPage from './pages/settings/BrokenRefsPage.vue'
+import SettingsGeneralPage from './pages/settings/GeneralPage.vue'
 import SettingsInterfacePage from './pages/settings/InterfacePage.vue'
 import SettingsLibrariesPage from './pages/settings/LibrariesPage.vue'
 import SettingsTasksPage from './pages/settings/TasksPage.vue'
@@ -63,6 +65,11 @@ const router = createRouter({
                     component: SettingsAccountPage,
                 },
                 {
+                    path: '/settings/general',
+                    name: 'settings-general',
+                    component: SettingsGeneralPage,
+                },
+                {
                     path: '/settings/users',
                     name: 'settings-users',
                     component: SettingsUsersPage,
@@ -93,6 +100,11 @@ const router = createRouter({
             path: '/auth/register',
             name: 'register',
             component: PageRegister,
+        },
+        {
+            path: '/auth/oidc/complete',
+            name: 'oidc-complete',
+            component: PageOidcComplete,
         },
     ],
 })
