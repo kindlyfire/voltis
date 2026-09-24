@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0-alpha.4] - 2026-09-24
+
+- New UI
+- New scanner
+- Single sign-on (OIDC) and forwarded authentication
+
 ## [1.0.0-alpha.3] - 2026-03-29
 
 - Added healthcheck to the Postgres container
