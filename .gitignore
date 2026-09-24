@@ -2,3 +2,6 @@
 .vscode
 old_python
 backend/voltis
+.plans
+CLAUDE.md
+.claude
