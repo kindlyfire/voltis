@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
 	"time"
@@ -107,25 +108,29 @@ func commit(ctx context.Context, tx pgx.Tx, s FileScanner, libraryID string, f f
 		dropped[id] = true
 	}
 
-	pairs := map[string][]rename{}
+	// Ref moves, from stored URIs, for renamed series and their unwritten children, then for every
+	// written leaf. A series created in this flush stored nothing, whatever its OldURI says.
+	var moves []rename
 	for _, id := range setIDs {
 		set := f.sets[id]
-		if !set.renamed() {
+		stored, ok := cur[id]
+		if set.New || !ok || stored.URI == set.Ref.URI {
 			continue
 		}
-		list := []rename{{Old: set.OldURI, New: set.Ref.URI}}
-		var childID, part string
-		err := query(ctx, tx, `SELECT id, uri_part FROM content WHERE parent_id = $1`,
-			[]any{set.Ref.ID}, []any{&childID, &part}, func() error {
-				if !dropped[childID] {
-					list = append(list, rename{Old: set.OldURI + "/" + part, New: set.Ref.URI + "/" + part})
+		moves = append(moves, rename{Old: stored.URI, New: set.Ref.URI})
+		var childID, uri, part string
+		err := query(ctx, tx, `SELECT id, uri, uri_part FROM content WHERE parent_id = $1`,
+			[]any{set.Ref.ID}, []any{&childID, &uri, &part}, func() error {
+				// A written child (cur holds exactly the written rows) moves once, from its stored URI
+				// to its final one, with the leaves.
+				if _, written := cur[childID]; !dropped[childID] && !written {
+					moves = append(moves, rename{Old: uri, New: set.Ref.URI + "/" + part})
 				}
 				return nil
 			})
 		if err != nil {
 			return counts, err
 		}
-		pairs[id] = list
 	}
 
 	if len(deletes) > 0 {
@@ -144,7 +149,7 @@ func commit(ctx context.Context, tx pgx.Tx, s FileScanner, libraryID string, f f
 	var metaWrites []metaWrite
 	for _, st := range steps {
 		if st.write == nil {
-			if err := identityStep(ctx, tx, libraryID, st.set, pairs[st.set.Ref.ID], now); err != nil {
+			if err := identityStep(ctx, tx, libraryID, st.set, now); err != nil {
 				return counts, err
 			}
 			continue
@@ -160,6 +165,9 @@ func commit(ctx context.Context, tx pgx.Tx, s FileScanner, libraryID string, f f
 		var old *models.Content
 		if c, ok := cur[st.write.id]; ok {
 			old = &c
+			if c.URI != uri {
+				moves = append(moves, rename{Old: c.URI, New: uri})
+			}
 		}
 		if err := upsertContent(ctx, tx, leafRow(st.write.id, libraryID, uri, *item, parentID, old, now)); err != nil {
 			return counts, err
@@ -170,6 +178,9 @@ func commit(ctx context.Context, tx pgx.Tx, s FileScanner, libraryID string, f f
 			counts.Updated++
 		}
 		metaWrites = append(metaWrites, metaWrite{uri: uri, file: item.MetaRaw})
+	}
+	if err := applyRenames(ctx, tx, libraryID, moves); err != nil {
+		return counts, err
 	}
 
 	for _, id := range setIDs {
@@ -231,12 +242,12 @@ func commitSeries(ctx context.Context, tx pgx.Tx, s FileScanner, libraryID strin
 		var parentID string
 		var raw json.RawMessage
 		err := query(ctx, tx, `
-			SELECT c.id, c.order_parts, c.cover_uri, c.file_mtime, c.parent_id,
+			SELECT c.id, c.uri_part, c.order_parts, c.cover_uri, c.file_mtime, c.parent_id,
 			       COALESCE(m.data_raw, '{}') AS data_raw
 			FROM content c LEFT JOIN content_metadata m ON m.library_id = c.library_id AND m.uri = c.uri
 			WHERE c.library_id = $1 AND c.parent_id = ANY($2::text[])
 		`, []any{libraryID, seriesIDs},
-			[]any{&kid.ID, &kid.OrderParts, &kid.CoverURI, &kid.FileMtime, &parentID, &raw}, func() error {
+			[]any{&kid.ID, &kid.URIPart, &kid.OrderParts, &kid.CoverURI, &kid.FileMtime, &parentID, &raw}, func() error {
 				if dropped[kid.ID] {
 					return nil
 				}
@@ -286,7 +297,7 @@ func commitSeries(ctx context.Context, tx pgx.Tx, s FileScanner, libraryID strin
 	return writeMetadata(ctx, tx, libraryID, now, seriesMeta)
 }
 
-func identityStep(ctx context.Context, tx pgx.Tx, libraryID string, set *SeriesChanges, pairs []rename, now time.Time) error {
+func identityStep(ctx context.Context, tx pgx.Tx, libraryID string, set *SeriesChanges, now time.Time) error {
 	ref := set.Ref
 	if set.New {
 		return upsertContent(ctx, tx, models.Content{
@@ -309,39 +320,39 @@ func identityStep(ctx context.Context, tx pgx.Tx, libraryID string, set *SeriesC
 	}
 	_, err = tx.Exec(ctx, "UPDATE content SET uri = $2 || '/' || uri_part, updated_at = $3 WHERE parent_id = $1",
 		ref.ID, ref.URI, now)
-	if err != nil {
-		return err
-	}
-	return applyRenames(ctx, tx, libraryID, pairs)
+	return err
 }
 
+// applyRenames moves refs in two phases: every source first moves to its own temporary URI, which no
+// real URI can equal, so chains and swaps never overwrite a live source; then each moves to its
+// destination, where the source wins over any row left there, which can only be an orphan.
 func applyRenames(ctx context.Context, tx pgx.Tx, libraryID string, pairs []rename) error {
 	if len(pairs) == 0 {
 		return nil
 	}
 	olds := fp.Map(pairs, func(r rename) string { return r.Old })
 	news := fp.Map(pairs, func(r rename) string { return r.New })
-	stmts := []string{
-		`DELETE FROM content_metadata m USING unnest($2::text[], $3::text[]) AS r(old, new)
-		 WHERE m.library_id = $1 AND m.uri = r.new
-		   AND EXISTS (SELECT 1 FROM content_metadata s WHERE s.library_id = $1 AND s.uri = r.old)`,
-		`UPDATE content_metadata m SET uri = r.new
-		 FROM unnest($2::text[], $3::text[]) AS r(old, new)
-		 WHERE m.library_id = $1 AND m.uri = r.old`,
-		`UPDATE user_to_content u SET uri = r.new
-		 FROM unnest($2::text[], $3::text[]) AS r(old, new)
-		 WHERE u.library_id = $1 AND u.uri = r.old
-		   AND NOT EXISTS (SELECT 1 FROM user_to_content d
-		                   WHERE d.user_id = u.user_id AND d.library_id = u.library_id AND d.uri = r.new)`,
-		`UPDATE custom_list_to_content l SET uri = r.new
-		 FROM unnest($2::text[], $3::text[]) AS r(old, new)
-		 WHERE l.library_id = $1 AND l.uri = r.old
-		   AND NOT EXISTS (SELECT 1 FROM custom_list_to_content d
-		                   WHERE d.custom_list_id = l.custom_list_id AND d.library_id = l.library_id AND d.uri = r.new)`,
+	tmps := make([]string, len(pairs))
+	for i := range tmps {
+		tmps[i] = fmt.Sprintf("\x01rename/%d", i)
 	}
-	for _, stmt := range stmts {
-		if _, err := tx.Exec(ctx, stmt, libraryID, olds, news); err != nil {
-			return err
+	for _, t := range []struct{ table, owner string }{
+		{"content_metadata", "library_id"},
+		{"user_to_content", "user_id"},
+		{"custom_list_to_content", "custom_list_id"},
+	} {
+		move := `UPDATE ` + t.table + ` m SET uri = r.dst FROM unnest($2::text[], $3::text[]) AS r(src, dst)
+			WHERE m.library_id = $1 AND m.uri = r.src`
+		orphans := `DELETE FROM ` + t.table + ` d USING unnest($2::text[], $3::text[]) AS r(src, dst)
+			WHERE d.library_id = $1 AND d.uri = r.dst AND EXISTS (SELECT 1 FROM ` + t.table + ` s
+				WHERE s.library_id = $1 AND s.uri = r.src AND s.` + t.owner + ` = d.` + t.owner + `)`
+		for _, st := range []struct {
+			sql      string
+			src, dst []string
+		}{{move, olds, tmps}, {orphans, tmps, news}, {move, tmps, news}} {
+			if _, err := tx.Exec(ctx, st.sql, libraryID, st.src, st.dst); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

@@ -165,6 +165,10 @@ func opfWith(meta, manifest string) string {
 func TestClassifyBookGoldens(t *testing.T) {
 	root := t.TempDir()
 	coverItem := `<item id="cover-img" href="cover.jpg" media-type="image/jpeg"/>`
+	const ser = "Ironbound - From Nothing to Legend's End"
+	pubMeta := `<dc:creator id="creator01">Kai Writer</dc:creator>` +
+		`<meta property="role" refines="#creator01" scheme="marc:relators">aut</meta>` +
+		`<dc:language>en</dc:language><dc:publisher>Pub</dc:publisher>`
 	cases := []struct {
 		name string
 		rel  string
@@ -184,23 +188,48 @@ func TestClassifyBookGoldens(t *testing.T) {
 			"standalone without series",
 			"Books/lonely-book.epub",
 			opfWith(`<dc:title>Lonely Book</dc:title><meta name="cover" content="cover-img"/>`, coverItem),
-			"prefix=book type=book part=lonely-book order=[0] cover=cover.jpg title=Lonely Book series=nil index=0 data=",
+			"prefix=book type=book part=lonely-book order=[nil] cover=cover.jpg title=Lonely Book series=nil index=0 data=",
 		},
 		{
 			"missing title falls back to stem",
 			"Books/untitled-file.epub",
 			opfWith(``, ``),
-			"prefix=book type=book part=untitled-file order=[0] cover=nil title=untitled-file series=nil index=0 data=",
+			"prefix=book type=book part=untitled-file order=[nil] cover=nil title=untitled-file series=nil index=0 data=",
 		},
 		{
 			"cover path absent from archive",
 			"Books/broken-cover.epub",
 			opfWith(`<dc:title>Broken</dc:title><meta name="cover" content="cover-img"/>`,
 				`<item id="cover-img" href="missing.jpg" media-type="image/jpeg"/>`),
-			"prefix=book type=book part=broken-cover order=[0] cover=nil title=Broken series=nil index=0 data=",
+			"prefix=book type=book part=broken-cover order=[nil] cover=nil title=Broken series=nil index=0 data=",
+		},
+		{
+			"curly title without series metadata",
+			ser + " v02 [Pub] [Tier] [Group] {x}.epub",
+			opfWith(`<dc:title>Ironbound: From Nothing to Legend’s End Vol. 02</dc:title>`+pubMeta, ``),
+			"prefix=book type=book part=" + ser + " v02 [Pub] [Tier] [Group] {x} order=[2] cover=nil " +
+				"title=Ironbound: From Nothing to Legend’s End Vol. 02 " +
+				"series=book|book_series|Ironbound: From Nothing to Legend’s End index=0 data=",
+		},
+		{
+			"special with calibre series",
+			ser + " SP02 - Volume 10 [STORE☆FRONT Exclusive Short Story] [Group].epub",
+			opfWith(`<dc:title>Ironbound Volume 10 - STORE☆FRONT Exclusive Popularity Poll Short Story</dc:title>`+pubMeta+
+				`<meta name="calibre:series" content="Ironbound: From Nothing to Legend's End"/>`+
+				`<meta name="calibre:series_index" content="100000"/>`, ``),
+			"prefix=book type=book part=" + ser + " SP02 - Volume 10 [STORE☆FRONT Exclusive Short Story] [Group] " +
+				"order=[100000] cover=nil title=Ironbound Volume 10 - STORE☆FRONT Exclusive Popularity Poll Short Story " +
+				"series=book|book_series|Ironbound: From Nothing to Legend's End index=100000 data=",
+		},
+		{
+			"volume title",
+			"Ironbound Zero - From Nothing to Legend's End v01 [Pub] [Crew].epub",
+			opfWith(`<dc:title>Ironbound Zero: Volume 1</dc:title>`+pubMeta, ``),
+			"prefix=book type=book part=Ironbound Zero - From Nothing to Legend's End v01 [Pub] [Crew] " +
+				"order=[1] cover=nil title=Ironbound Zero: Volume 1 series=book|book_series|Ironbound Zero index=0 data=",
 		},
 	}
-	bs := &BooksScanner{}
+	bs := &BooksScanner{Infer: true}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			path := writeEPUB(t, filepath.Join(root, c.name, c.rel), c.opf)

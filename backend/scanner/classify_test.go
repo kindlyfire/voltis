@@ -58,19 +58,84 @@ func TestClassifyComicTuples(t *testing.T) {
 func TestClassifyBookTuples(t *testing.T) {
 	check := func(t *testing.T, path string, meta epub.Metadata, want string) {
 		t.Helper()
-		item := classifyBook(FSFile{Path: path, Mtime: baseTime, Size: 10}, meta, false, nil)
+		item := classifyBook(FSFile{Path: path, Mtime: baseTime, Size: 10}, meta, false, nil, false)
 		if got := summarize(&item); got != want {
 			t.Errorf("got  %s\nwant %s", got, want)
 		}
 	}
 	t.Run("invalid cover is dropped", func(t *testing.T) {
 		check(t, "/lib/Books/broken.epub", epub.Metadata{Title: "Broken", CoverPath: "missing.jpg"},
-			"prefix=book type=book part=broken order=[0] cover=nil title=Broken series=nil index=0 data=")
+			"prefix=book type=book part=broken order=[nil] cover=nil title=Broken series=nil index=0 data=")
 	})
 	t.Run("series without index", func(t *testing.T) {
 		check(t, "/lib/Books/no-index.epub", epub.Metadata{Title: "No Index", Series: "Book Series"},
-			"prefix=book type=book part=no-index order=[0] cover=nil title=No Index series=book|book_series|Book Series index=0 data=")
+			"prefix=book type=book part=no-index order=[nil] cover=nil title=No Index series=book|book_series|Book Series index=0 data=")
 	})
+}
+
+func TestClassifyBookInference(t *testing.T) {
+	const ser = "Ironbound - From Nothing to Legend's End"
+	cases := []struct {
+		name, stem string
+		meta       epub.Metadata
+		infer      bool
+		series     string // empty for a standalone book
+		order      *float32
+	}{
+		{
+			"title marker", ser + " v02 [Pub] {x}",
+			epub.Metadata{Title: "Ironbound: From Nothing to Legend’s End Vol. 02"}, true,
+			"Ironbound: From Nothing to Legend’s End", f32(2),
+		},
+		{
+			"filename fallback", ser + " v03 [Pub] {x}",
+			epub.Metadata{Title: "Ironbound"}, true, ser, f32(3),
+		},
+		{
+			"title and filename volumes differ", ser + " v03",
+			epub.Metadata{Title: "Ironbound Vol. 4"}, true, "", nil,
+		},
+		{
+			"special title", ser + " SP02 - Volume 10 [STORE☆FRONT Exclusive Short Story]",
+			epub.Metadata{Title: "Ironbound Volume 10 - STORE☆FRONT Exclusive Popularity Poll Short Story"}, true, "", nil,
+		},
+		{
+			"metadata series wins", ser + " SP03",
+			epub.Metadata{Title: "Other Vol. 3", Series: "Meta Series", SeriesIndex: 100000, HasSeriesIndex: true}, true,
+			"Meta Series", f32(100000),
+		},
+		{
+			"explicit index wins over the inferred volume", "Zero v01",
+			epub.Metadata{Title: "Ironbound Zero: Volume 1", HasSeriesIndex: true}, true, "Ironbound Zero", f32(0),
+		},
+		{
+			"inference off", ser + " v01",
+			epub.Metadata{Title: "Ironbound: From Nothing to Legend's End Vol. 01"}, false, "", nil,
+		},
+		{"no marker", "Plenty - Jane Author", epub.Metadata{Title: "Plenty"}, true, "", nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			item := classifyBook(FSFile{Path: "/lib/" + c.stem + ".epub"}, c.meta, false, nil, c.infer)
+			series := ""
+			if item.Series != nil {
+				series = item.Series.URIPart
+				if item.Series.Inferred != (c.meta.Series == "") {
+					t.Errorf("inferred = %v, want %v", item.Series.Inferred, c.meta.Series == "")
+				}
+			}
+			if series != c.series {
+				t.Errorf("series = %q, want %q", series, c.series)
+			}
+			if len(item.OrderParts) != 1 || !reflect.DeepEqual(item.OrderParts[0], c.order) {
+				t.Errorf("order = %v, want [%v]", item.OrderParts, c.order)
+			}
+			if item.MetaRaw.Series != c.meta.Series || item.MetaRaw.SeriesIndex != c.meta.SeriesIndex {
+				t.Errorf("child series = %q/%g, want the metadata values %q/%g",
+					item.MetaRaw.Series, item.MetaRaw.SeriesIndex, c.meta.Series, c.meta.SeriesIndex)
+			}
+		})
+	}
 }
 
 func TestClassifyBookMetadata(t *testing.T) {
@@ -84,7 +149,7 @@ func TestClassifyBookMetadata(t *testing.T) {
 		PublicationDate: "2020-01-02",
 		Series:          "Book Series",
 	}
-	got := classifyBook(file, meta, false, nil).MetaRaw
+	got := classifyBook(file, meta, false, nil, false).MetaRaw
 	want := models.Metadata{
 		Title:       "Story",
 		Description: "A story",
@@ -131,7 +196,7 @@ func TestSanitizeURIPart(t *testing.T) {
 
 func TestSanitizeURIPartAtBookProducers(t *testing.T) {
 	file := FSFile{Path: "/lib/Books/a\tb\\c.epub", Mtime: baseTime, Size: 10}
-	item := classifyBook(file, epub.Metadata{Series: "Foo/bar\x01"}, false, nil)
+	item := classifyBook(file, epub.Metadata{Series: "Foo/bar\x01"}, false, nil, false)
 
 	if item.URIPart != "a_b_c" {
 		t.Errorf("item part = %q, want the stem sanitized", item.URIPart)
@@ -146,7 +211,7 @@ func TestSanitizeURIPartAtBookProducers(t *testing.T) {
 		t.Errorf("metadata series = %q, want it kept verbatim", item.MetaRaw.Series)
 	}
 
-	empty := classifyBook(FSFile{Path: "/lib/Books/.epub"}, epub.Metadata{Series: "/"}, false, nil)
+	empty := classifyBook(FSFile{Path: "/lib/Books/.epub"}, epub.Metadata{Series: "/"}, false, nil, false)
 	if empty.URIPart != "_" || empty.Series.URIPart != "_" {
 		t.Errorf("parts = %q and %q, want the empty fallback", empty.URIPart, empty.Series.URIPart)
 	}
@@ -212,8 +277,8 @@ func TestClassifySanitizesEveryURIPartProducer(t *testing.T) {
 func TestClassifyCollisionFallsThroughToConflictHandling(t *testing.T) {
 	first := FSFile{Path: "/lib/Books/a_b.epub", Mtime: baseTime, Size: 10}
 	second := FSFile{Path: "/lib/Books/a\tb.epub", Mtime: baseTime, Size: 10}
-	one := classifyBook(first, epub.Metadata{}, false, nil)
-	two := classifyBook(second, epub.Metadata{}, false, nil)
+	one := classifyBook(first, epub.Metadata{}, false, nil, false)
+	two := classifyBook(second, epub.Metadata{}, false, nil, false)
 	if one.URIPart != two.URIPart {
 		t.Fatalf("parts = %q and %q, want sanitization to collide them", one.URIPart, two.URIPart)
 	}
@@ -266,12 +331,12 @@ func TestComicFallbackSeriesLeavesTheInferredNameOffTheChild(t *testing.T) {
 
 func TestClassifyBookWords(t *testing.T) {
 	item := classifyBook(FSFile{Path: "/lib/Books/x.epub", Mtime: baseTime, Size: 10},
-		epub.Metadata{Title: "X"}, false, map[string]int{"OEBPS/b.xhtml": 7, "OEBPS/a.xhtml": 120})
+		epub.Metadata{Title: "X"}, false, map[string]int{"OEBPS/b.xhtml": 7, "OEBPS/a.xhtml": 120}, false)
 
 	if got := string(item.FileData); got != `{"words":{"OEBPS/a.xhtml":120,"OEBPS/b.xhtml":7}}` {
 		t.Errorf("file data = %s", got)
 	}
-	if empty := classifyBook(FSFile{Path: "/lib/Books/x.epub"}, epub.Metadata{}, false, nil); empty.FileData != nil {
+	if empty := classifyBook(FSFile{Path: "/lib/Books/x.epub"}, epub.Metadata{}, false, nil, false); empty.FileData != nil {
 		t.Errorf("file data = %s, want none without counts", empty.FileData)
 	}
 }

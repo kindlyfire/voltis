@@ -24,6 +24,7 @@ type ParsedSeries struct {
 	URIPart     string
 	ContentType string
 	FileURI     *string
+	Inferred    bool
 }
 
 type ParsedItem struct {
@@ -44,12 +45,13 @@ type Result struct {
 }
 
 type ScanInput struct {
-	LibraryID   string   `json:"library_id"`
-	LibraryType string   `json:"library_type"`
-	Sources     []string `json:"sources"`
-	Force       bool     `json:"force"`
-	FilterPaths []string `json:"filter_paths,omitempty"`
-	Concurrency int      `json:"concurrency"`
+	LibraryID   string                 `json:"library_id"`
+	LibraryType string                 `json:"library_type"`
+	Settings    models.LibrarySettings `json:"settings"`
+	Sources     []string               `json:"sources"`
+	Force       bool                   `json:"force"`
+	FilterPaths []string               `json:"filter_paths,omitempty"`
+	Concurrency int                    `json:"concurrency"`
 }
 
 type ScanResult struct {
@@ -131,7 +133,7 @@ func runScan(ctx context.Context, in ScanInput, tc *tasks.TaskContext, notify No
 	start := time.Now()
 	tc.Progress(Progress{Phase: "walking"})
 
-	s := newFileScanner(in.LibraryType)
+	s := newFileScanner(in)
 	if s == nil {
 		return ScanResult{}, fmt.Errorf("unsupported library type: %s", in.LibraryType)
 	}
@@ -157,6 +159,7 @@ func runScan(ctx context.Context, in ScanInput, tc *tasks.TaskContext, notify No
 	}
 
 	slog_scan("starting scan", "library", in.LibraryID, "type", in.LibraryType, "force", in.Force,
+		"book_series_inference", in.Settings.BookSeriesInference,
 		"filter_paths", in.FilterPaths, "concurrency", workers)
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -194,12 +197,12 @@ func runScan(ctx context.Context, in ScanInput, tc *tasks.TaskContext, notify No
 	}, err
 }
 
-func newFileScanner(libraryType string) FileScanner {
-	switch libraryType {
+func newFileScanner(in ScanInput) FileScanner {
+	switch in.LibraryType {
 	case "comics":
 		return &ComicsScanner{}
 	case "books":
-		return &BooksScanner{}
+		return &BooksScanner{Infer: in.Settings.BookSeriesInference != models.BookSeriesInferenceOff}
 	default:
 		return nil
 	}

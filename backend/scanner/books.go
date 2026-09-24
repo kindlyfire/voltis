@@ -8,7 +8,10 @@ import (
 	"voltis/lib/epub"
 )
 
-type BooksScanner struct{}
+type BooksScanner struct {
+	// Infer groups books without series metadata by the volume marker in their title or filename.
+	Infer bool
+}
 
 func (bs *BooksScanner) FileEligible(path string) bool {
 	return strings.ToLower(filepath.Ext(path)) == ".epub"
@@ -27,7 +30,7 @@ func (bs *BooksScanner) ParseFile(file FSFile) *ParsedItem {
 	}
 
 	coverValid := meta.CoverPath != "" && epub.ValidateCoverPath(file.Path, meta.CoverPath)
-	return new(classifyBook(file, *meta, coverValid, words))
+	return new(classifyBook(file, *meta, coverValid, words, bs.Infer))
 }
 
 func (bs *BooksScanner) SeriesCover(series SeriesRef, ordered []Child) (*string, *time.Time) {

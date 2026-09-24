@@ -71,7 +71,7 @@ func TestMetadataScanRaceEditBeforeRename(t *testing.T) {
 	}
 }
 
-func TestScanConcurrencyAnnotationDestinationKept(t *testing.T) {
+func TestScanConcurrencyAnnotationSourceWins(t *testing.T) {
 	pool := newTestPool(t)
 	lib := newTestLibrary(t, pool, "comics")
 	r, _ := seedSeriesScan(t, pool, lib)
@@ -93,14 +93,8 @@ func TestScanConcurrencyAnnotationDestinationKept(t *testing.T) {
 	rows, err := db.Select[models.UserToContent](context.Background(), pool,
 		"SELECT * FROM user_to_content WHERE library_id = $1 ORDER BY id", lib)
 	must(t, err)
-	if len(rows) != 2 {
-		t.Fatalf("annotations = %+v", rows)
-	}
-	if rows[0].ID != "dst" || rows[0].URI != "comic/S_2019/ch1" || deref(rows[0].Notes) != "destination" {
-		t.Fatalf("destination = %+v, want it kept", rows[0])
-	}
-	if rows[1].ID != "src" || rows[1].URI != "comic/S/ch1" {
-		t.Fatalf("source = %+v, want it left behind", rows[1])
+	if len(rows) != 1 || rows[0].ID != "src" || rows[0].URI != "comic/S_2019/ch1" {
+		t.Fatalf("annotations = %+v, want the source moved over the orphaned destination", rows)
 	}
 
 	if got := readMeta(t, pool, lib, "comic/S_2019/ch1").Overrides; got == nil || got.Raw.Title != "winner" {

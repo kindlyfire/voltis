@@ -33,10 +33,118 @@ func TestKeysParseVolume(t *testing.T) {
 		{"Series", "nil"},
 		{"Series ch3", "nil"},
 		{"Series v", "nil"},
+		{"Series_v01", "1"},
+		{"Series-v01", "1"},
+		{"Vol.8 Series", "8"},
+		{"Dev 2", "nil"},
+		{"Revolver 3", "nil"},
+		{"Series#7", "7"},
+		{"Series#2 ch2", "2"},
 	}
 	for _, c := range cases {
 		if got := fmtFloatPtr(ParseVolume(c.in)); got != c.want {
 			t.Errorf("ParseVolume(%q) = %s, want %s", c.in, got, c.want)
+		}
+	}
+}
+
+func TestKeysParseBookVolume(t *testing.T) {
+	const ser = "Ironbound: From Nothing to Legend's End"
+	cases := []struct {
+		in, prefix string
+		vol        float64
+	}{
+		{ser + " Vol. 01", ser, 1},
+		{"Ironbound: From Nothing to Legend’s End Vol. 14", "Ironbound: From Nothing to Legend’s End", 14},
+		{"Ironbound Zero: Volume 1", "Ironbound Zero", 1},
+		{"Ironbound Zero: Volume 6", "Ironbound Zero", 6},
+		{"Series, Vol. 3", "Series", 3},
+		{"Series Vol. 3: Subtitle", "Series", 3},
+		{"Series Vol 3, Subtitle", "Series", 3},
+		{"Series - Volume 2 - The Return", "Series", 2},
+		{"Series v2.5", "Series", 2.5},
+		{"Series_v01", "Series", 1},
+		{"Foo:\nVolume 1", "Foo", 1},
+		{"Foo Vol.\u00a01", "Foo", 1},
+		{"Foo Vol.\u20021:\u00a0Sub", "Foo", 1},
+		{"Foo\u00a0-\u00a0Vol. 2", "Foo", 2},
+		{"Ünïcødé 漫画 Volume 4", "Ünïcødé 漫画", 4},
+		{"転生したらスライムだった件 Vol. 5", "転生したらスライムだった件", 5},
+		// Rejected: no prefix, in-word markers, ranges, several markers, trailing text, bare numbers.
+		{"Volume 1", "", 0},
+		{"Vol. 1: Subtitle", "", 0},
+		{"Dev 2", "", 0},
+		{"Revolver 3", "", 0},
+		{"Series v1-3", "", 0},
+		{"Series Vol. 1-2", "", 0},
+		{"Foo Vol. 1 - 3", "", 0},
+		{"Foo Vol.\u00a01\u00a0-\u00a03", "", 0},
+		{"Foo Vol. 1 – 3", "", 0},
+		{"Foo v1 ~ 3", "", 0},
+		{"Foo Vol. 1 - 3 Days", "", 0},
+		{"Series Vol. 1 Vol. 2", "", 0},
+		{"Series Vol. 3rd Edition", "", 0},
+		{"Series Vol. 3 Part 2", "", 0},
+		{"Series #3", "", 0},
+		{"Series 3", "", 0},
+		{"Series vo. 3", "", 0},
+	}
+	for _, c := range cases {
+		prefix, vol, ok := ParseBookVolume(c.in)
+		if prefix != c.prefix || vol != c.vol || ok != (c.prefix != "") {
+			t.Errorf("ParseBookVolume(%q) = %q/%g/%v, want %q/%g", c.in, prefix, vol, ok, c.prefix, c.vol)
+		}
+	}
+}
+
+func TestKeysParseBookFileVolume(t *testing.T) {
+	const ser = "Ironbound - From Nothing to Legend's End"
+	cases := []struct {
+		in, prefix string
+		vol        float64
+	}{
+		{ser + " v01 [Pub] [Tier] [Group] {x}", ser, 1},
+		{ser + " v14 [Pub] [Tier] [Group]", ser, 14},
+		{"Ironbound Zero - From Nothing to Legend's End v06 [Pub] [Crew]",
+			"Ironbound Zero - From Nothing to Legend's End", 6},
+		{"The Day I Woke Up as a Teapot v17", "The Day I Woke Up as a Teapot", 17},
+		{"Series (2019) Vol. 2 (Digital)", "Series (2019)", 2},
+		// The SP stems parse; IsBookSpecial keeps them out of inference.
+		{ser + " SP02 - Volume 10 [STORE☆FRONT Exclusive Short Story] [Group]", ser + " SP02", 10},
+		{ser + " SP01 - Short Stories [Pub] [Tier] [Group] {x}", "", 0},
+		{"Plenty - Jane Author", "", 0},
+		{"v01 [Tag]", "", 0},
+	}
+	for _, c := range cases {
+		prefix, vol, ok := ParseBookFileVolume(c.in)
+		if prefix != c.prefix || vol != c.vol || ok != (c.prefix != "") {
+			t.Errorf("ParseBookFileVolume(%q) = %q/%g/%v, want %q/%g", c.in, prefix, vol, ok, c.prefix, c.vol)
+		}
+	}
+}
+
+func TestKeysIsBookSpecial(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"Ironbound - From Nothing to Legend's End SP01 - Short Stories [Pub]", true},
+		{"Ironbound Volume 10 - STORE☆FRONT Exclusive Popularity Poll Short Story", true},
+		{"Ironbound Volume 13 - STORE☆FRONT Exclusive Short Story", true},
+		{"Series Vol. 2 Side Story", true},
+		{"Foo Vol. 1 - Short  Stories", true},
+		{"Foo Vol. 1 - Side\u00a0Story", true},
+		{"Series Vol. 2 - Bonus", true},
+		{"Series_sp3", true},
+		{"Series Extra", true},
+		{"Ironbound: From Nothing to Legend's End Vol. 01", false},
+		{"Extraordinary Vol. 2", false},
+		{"Spice and Wolf Vol. 1", false},
+		{"Crisp3 Vol. 1", false},
+	}
+	for _, c := range cases {
+		if got := IsBookSpecial(c.in); got != c.want {
+			t.Errorf("IsBookSpecial(%q) = %v, want %v", c.in, got, c.want)
 		}
 	}
 }

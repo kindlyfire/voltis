@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"unicode"
@@ -15,12 +16,23 @@ import (
 	"voltis/scanner/keys"
 )
 
-func classifyBook(file FSFile, meta epub.Metadata, coverValid bool, words map[string]int) ParsedItem {
+func classifyBook(file FSFile, meta epub.Metadata, coverValid bool, words map[string]int, infer bool) ParsedItem {
 	stem := strings.TrimSuffix(filepath.Base(file.Path), filepath.Ext(file.Path))
 
-	index := 0.0
+	var index float64
+	var order *float32
 	if meta.HasSeriesIndex {
 		index = meta.SeriesIndex
+		order = new(float32(index))
+	}
+
+	// The inferred name and volume only group and order the book; child metadata stays as read.
+	series, inferred := meta.Series, false
+	if series == "" && infer {
+		if name, vol, ok := inferBookSeries(file.Path, meta.Title, stem); ok {
+			series, inferred = name, true
+			order = cmp.Or(order, new(float32(vol)))
+		}
 	}
 
 	item := ParsedItem{
@@ -28,7 +40,7 @@ func classifyBook(file FSFile, meta epub.Metadata, coverValid bool, words map[st
 		URIPrefix:   "book",
 		ContentType: "book",
 		URIPart:     sanitizeURIPart(stem),
-		OrderParts:  []*float32{new(float32(index))},
+		OrderParts:  []*float32{order},
 		MetaRaw: models.Metadata{
 			Title:           cmp.Or(meta.Title, stem),
 			Description:     meta.Description,
@@ -48,14 +60,34 @@ func classifyBook(file FSFile, meta epub.Metadata, coverValid bool, words map[st
 	for _, a := range meta.Authors {
 		item.MetaRaw.Staff = append(item.MetaRaw.Staff, models.StaffEntry{Name: a, Role: "author"})
 	}
-	if meta.Series != "" {
+	if series != "" {
 		item.Series = &ParsedSeries{
 			URIPrefix:   "book",
-			URIPart:     sanitizeURIPart(meta.Series),
+			URIPart:     sanitizeURIPart(series),
 			ContentType: "book_series",
+			Inferred:    inferred,
 		}
 	}
 	return item
+}
+
+// inferBookSeries takes the series name and volume from the title, else from the filename, never
+// pairing a name from one with a volume from the other.
+func inferBookSeries(path, title, stem string) (string, float64, bool) {
+	if keys.IsBookSpecial(title) || keys.IsBookSpecial(stem) {
+		return "", 0, false
+	}
+	name, vol, ok := keys.ParseBookVolume(title)
+	fileName, fileVol, fileOK := keys.ParseBookFileVolume(stem)
+	if ok && fileOK && vol != fileVol {
+		slog.Warn("[scanner] title and filename volumes differ, not inferring a series",
+			"path", path, "title_volume", vol, "file_volume", fileVol)
+		return "", 0, false
+	}
+	if ok {
+		return name, vol, true
+	}
+	return fileName, fileVol, fileOK
 }
 
 func classifyComic(file FSFile, meta models.Metadata, year int, pages []comic.PageInfo) *ParsedItem {

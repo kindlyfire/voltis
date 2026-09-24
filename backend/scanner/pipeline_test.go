@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"syscall"
 	"testing"
@@ -759,4 +760,67 @@ func TestScanKeepsADirectoryPinnedByAnotherMember(t *testing.T) {
 		[]string{"comic/Bar", "comic/Bar/ch1", "comic/Bar/ch9", "comic/Foo", "comic/Foo/ch2", "comic/Foo/ch3"})
 
 	assertSeriesLocation(t, p.pool, foo, a)
+}
+
+func TestScanInfersBookSeriesAndRescansWithoutChurn(t *testing.T) {
+	p := newPipeline(t, "books")
+	dir := filepath.Join(p.root, "Foo")
+	writeEPUBFixture(t, filepath.Join(dir, "Foo v01 [Tag].epub"), "Foo’s Tale Vol. 01", "", "")
+	writeEPUBFixture(t, filepath.Join(dir, "Foo v02 [Tag].epub"), "Foo's Tale Vol. 02", "", "")
+	writeEPUBFixture(t, filepath.Join(dir, "Foo SP01.epub"), "Foo's Tale Vol. 2 Short Stories", "Foo's Tale", "100000")
+	writeEPUBFixture(t, filepath.Join(dir, "Solo.epub"), "Solo", "", "")
+
+	children := func() []string {
+		t.Helper()
+		kids, err := db.SelectScalars[string](context.Background(), p.pool, `
+			SELECT c.uri_part FROM content c JOIN content s ON s.id = c.parent_id
+			WHERE c.library_id = $1 AND s.type = 'book_series' ORDER BY c."order"`, p.lib)
+		must(t, err)
+		return kids
+	}
+	inferred := func() {
+		t.Helper()
+		if got, want := children(), []string{"Foo v01 [Tag]", "Foo v02 [Tag]", "Foo SP01"}; !slices.Equal(got, want) {
+			t.Fatalf("children = %v, want %v", got, want)
+		}
+	}
+
+	p.mustScan(ScanInput{LibraryType: "books"})
+	inferred()
+	before := contentURIs(t, p.pool, p.lib)
+	if len(before) != 5 {
+		t.Fatalf("uris = %v, want one series, three children and Solo", before)
+	}
+
+	p.mustScan(ScanInput{LibraryType: "books", Force: true})
+	inferred()
+	assertCatalog(t, p.pool, p.lib, before)
+
+	// A user's row follows the regrouped book both ways.
+	followsV01 := func() {
+		t.Helper()
+		var content, ref string
+		must(t, p.pool.QueryRow(context.Background(), `
+			SELECT c.uri, u.uri FROM content c, user_to_content u
+			WHERE c.library_id = $1 AND c.uri_part = 'Foo v01 [Tag]' AND u.id = 'probe'`, p.lib).Scan(&content, &ref))
+		if ref != content {
+			t.Fatalf("ref = %s, want it at the book's uri %s", ref, content)
+		}
+	}
+	exec(t, p.pool, "INSERT INTO users (id, username, password_hash) VALUES ('u1', 'u', 'x')")
+	exec(t, p.pool, `INSERT INTO user_to_content (id, user_id, library_id, uri, starred)
+		SELECT 'probe', 'u1', $1, uri, true FROM content WHERE library_id = $1 AND uri_part = 'Foo v01 [Tag]'`, p.lib)
+
+	off := models.LibrarySettings{BookSeriesInference: models.BookSeriesInferenceOff}
+	p.mustScan(ScanInput{LibraryType: "books", Force: true, Settings: off})
+	uris := contentURIs(t, p.pool, p.lib)
+	if got := children(); !slices.Equal(got, []string{"Foo SP01"}) || len(uris) != 5 ||
+		!slices.Contains(uris, "book/Foo v01 [Tag]") || !slices.Contains(uris, "book/Foo v02 [Tag]") {
+		t.Fatalf("uris = %v, want only the metadata series grouped", uris)
+	}
+	followsV01()
+
+	p.mustScan(ScanInput{LibraryType: "books", Force: true})
+	inferred()
+	followsV01()
 }

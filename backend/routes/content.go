@@ -436,11 +436,6 @@ func (cr *ContentRoutes) updateUserData(c echo.Context) error {
 	ctx := reqCtx(c)
 	contentID := c.Param("content_id")
 
-	content, err := getContent(ctx, cr.pool, contentID)
-	if err != nil {
-		return err
-	}
-
 	// Parse raw JSON to detect which fields were sent
 	body := c.Request().Body
 	var rawBody map[string]json.RawMessage
@@ -463,10 +458,8 @@ func (cr *ContentRoutes) updateUserData(c echo.Context) error {
 	vals := []string{"@utc_id", "@user_id", "@library_id", "@uri"}
 	sets := []string{"uri = EXCLUDED.uri"}
 	args := pgx.NamedArgs{
-		"utc_id":     models.MakeUserToContentID(),
-		"user_id":    user.ID,
-		"library_id": content.LibraryID,
-		"uri":        content.URI,
+		"utc_id":  models.MakeUserToContentID(),
+		"user_id": user.ID,
 	}
 	set := func(col string, val any) {
 		cols = append(cols, col)
@@ -505,12 +498,24 @@ func (cr *ContentRoutes) updateUserData(c echo.Context) error {
 		}
 	}
 
-	utc, err := db.SelectOne[models.UserToContent](ctx, cr.pool, fmt.Sprintf(`
-		INSERT INTO user_to_content (%s)
-		VALUES (%s)
-		ON CONFLICT (user_id, library_id, uri) DO UPDATE SET %s
-		RETURNING *
-	`, strings.Join(cols, ", "), strings.Join(vals, ", "), strings.Join(sets, ", ")), args)
+	var utc models.UserToContent
+	err = db.WithTx(ctx, cr.pool, func(tx pgx.Tx) error {
+		if err := lockContentLibraries(ctx, tx, contentID); err != nil {
+			return err
+		}
+		libraryID, uri, err := contentURI(ctx, tx, contentID)
+		if err != nil {
+			return err
+		}
+		args["library_id"], args["uri"] = libraryID, uri
+		utc, err = db.SelectOne[models.UserToContent](ctx, tx, fmt.Sprintf(`
+			INSERT INTO user_to_content (%s)
+			VALUES (%s)
+			ON CONFLICT (user_id, library_id, uri) DO UPDATE SET %s
+			RETURNING *
+		`, strings.Join(cols, ", "), strings.Join(vals, ", "), strings.Join(sets, ", ")), args)
+		return err
+	})
 	if err != nil {
 		return err
 	}
@@ -540,16 +545,17 @@ func (cr *ContentRoutes) setSeriesItemStatuses(c echo.Context) error {
 		return err
 	}
 
-	_, err = getContent(ctx, cr.pool, contentID)
-	if err != nil {
-		return err
-	}
-
 	tx, err := cr.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockContentLibraries(ctx, tx, contentID); err != nil {
+		return err
+	}
+	if _, _, err := contentURI(ctx, tx, contentID); err != nil {
+		return err
+	}
 
 	type childRow struct {
 		ID        string `db:"id"`
@@ -752,6 +758,32 @@ type contentListRow struct {
 	contentWithUTCRow
 	ChildrenCount       *int `db:"children_count"`
 	UnreadChildrenCount *int `db:"unread_children_count"`
+}
+
+// lockContentLibraries takes the metadata locks, under which scans move refs, of the libraries
+// holding the content, in sorted order so that concurrent batches cannot deadlock.
+func lockContentLibraries(ctx context.Context, tx pgx.Tx, contentIDs ...string) error {
+	libs, err := db.SelectScalars[string](ctx, tx,
+		"SELECT DISTINCT library_id FROM content WHERE id = ANY($1) ORDER BY library_id", contentIDs)
+	if err != nil {
+		return err
+	}
+	for _, lib := range libs {
+		if err := db.LockMetadata(ctx, tx, lib); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// contentURI reads the content's current URI; under lockContentLibraries, a ref written with it
+// cannot land on a URI a scan has since moved away from.
+func contentURI(ctx context.Context, tx pgx.Tx, contentID string) (libraryID, uri string, err error) {
+	err = tx.QueryRow(ctx, "SELECT library_id, uri FROM content WHERE id = $1", contentID).Scan(&libraryID, &uri)
+	if errors.Is(err, pgx.ErrNoRows) {
+		err = echo.NewHTTPError(http.StatusNotFound, "Content not found")
+	}
+	return libraryID, uri, err
 }
 
 func getContent(ctx context.Context, pool *pgxpool.Pool, id string) (models.Content, error) {

@@ -25,6 +25,7 @@ type SeriesRef struct {
 
 type Child struct {
 	ID         string
+	URIPart    string
 	OrderParts []*float32
 	CoverURI   *string
 	FileMtime  *time.Time
@@ -92,7 +93,8 @@ func (s *SeriesChanges) renamed() bool { return s.OldURI != "" && s.OldURI != s.
 func order(children []Child) []Child {
 	ordered := slices.Clone(children)
 	slices.SortStableFunc(ordered, func(a, b Child) int {
-		return cmp.Or(compareOrderParts(a.OrderParts, b.OrderParts), strings.Compare(a.ID, b.ID))
+		return cmp.Or(compareOrderParts(a.OrderParts, b.OrderParts),
+			strings.Compare(a.URIPart, b.URIPart), strings.Compare(a.ID, b.ID))
 	})
 	return ordered
 }

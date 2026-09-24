@@ -15,6 +15,14 @@
                 :error="form.field('type').error"
                 @update:model-value="form.field('type')['onUpdate:modelValue']"
             />
+            <ASelect
+                v-if="form.values.value.type === 'books'"
+                :model-value="form.values.value.book_series_inference"
+                :options="inferenceOptions"
+                label="Series without metadata"
+                :hint="inferenceHint"
+                @update:model-value="v => v && form.setValue('book_series_inference', v)"
+            />
             <fieldset ref="sourcesEl" class="flex flex-col gap-2">
                 <legend class="mb-2 text-sm font-semibold">Sources</legend>
                 <div
@@ -103,6 +111,10 @@ const typeOptions = [
     { value: 'comics', label: 'Comics' },
     { value: 'books', label: 'Books' },
 ] as const
+const inferenceOptions = [
+    { value: 'conservative', label: 'Group by volume number in title or filename' },
+    { value: 'off', label: 'Keep as standalone books' },
+] as const
 const sourcesEl = useTemplateRef('sourcesEl')
 const addSourceButton = useTemplateRef<{ $el: HTMLElement }>('addSourceButton')
 
@@ -118,11 +130,13 @@ const form = useForm({
                 path_uri: z.string(),
             })
         ),
+        book_series_inference: z.enum(['off', 'conservative']),
     }),
     initialValues: {
         name: '',
         type: null,
         sources: [],
+        book_series_inference: 'conservative',
     },
     onSubmit: async values => {
         await upsert.mutateAsync({
@@ -130,11 +144,19 @@ const form = useForm({
             name: values.name,
             type: values.type!,
             sources: values.sources.filter(s => s.path_uri.trim() !== ''),
+            settings: { book_series_inference: values.book_series_inference },
         })
         toast.show({ message: isNew.value ? `Created ${values.name}` : 'Library saved' })
         props.close()
     },
 })
+
+const inferenceHint = computed(() =>
+    library.value &&
+    library.value.settings.book_series_inference !== form.values.value.book_series_inference
+        ? 'Existing books are regrouped on the next forced scan.'
+        : undefined
+)
 
 function sourceInputs() {
     return [...(sourcesEl.value?.querySelectorAll('input') ?? [])]
@@ -169,7 +191,12 @@ watch(
     () => library.value,
     l => {
         if (l && !isNew.value) {
-            form.setValues({ name: l.name, type: l.type, sources: l.sources })
+            form.setValues({
+                name: l.name,
+                type: l.type,
+                sources: l.sources,
+                book_series_inference: l.settings.book_series_inference,
+            })
         }
     },
     { immediate: true }

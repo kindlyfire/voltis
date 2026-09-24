@@ -62,6 +62,58 @@ func TestLibraryValidation(t *testing.T) {
 	c.Delete("/api/libraries/nonexistent").Assert(t, 404)
 }
 
+func TestLibrarySettings(t *testing.T) {
+	pool := newTestPool(t)
+	c := newAdminClient(t, pool)
+	dir := t.TempDir()
+	body := func(settings any) map[string]any {
+		b := map[string]any{"name": "books", "type": "books", "sources": []map[string]any{{"path_uri": dir}}}
+		if settings != nil {
+			b["settings"] = settings
+		}
+		return b
+	}
+	mode := func(lib map[string]any) string {
+		return s(lib["settings"].(map[string]any)["book_series_inference"])
+	}
+
+	lib := c.Post("/api/libraries/new", body(nil)).Assert(t, 200).JSON()
+	assertEq(t, mode(lib), "conservative")
+	id := s(lib["id"])
+
+	off := map[string]any{"book_series_inference": "off"}
+	assertEq(t, mode(c.Post("/api/libraries/"+id, body(off)).Assert(t, 200).JSON()), "off")
+	assertEq(t, mode(c.Post("/api/libraries/"+id, body(nil)).Assert(t, 200).JSON()), "off")
+	assertEq(t, mode(c.Get("/api/libraries").Assert(t, 200).JSONArray()[0]), "off")
+
+	c.Post("/api/libraries/"+id, body(map[string]any{"book_series_inference": "aggressive"})).Assert(t, 400)
+	c.Post("/api/libraries/new", body(map[string]any{})).Assert(t, 400)
+	assertEq(t, mode(c.Post("/api/libraries/new", body(off)).Assert(t, 200).JSON()), "off")
+}
+
+func TestScanFollowsTheBookSeriesInferenceSetting(t *testing.T) {
+	fastFlushes(t)
+	pool := newTestPool(t)
+	c := newAdminClient(t, pool)
+
+	dir := t.TempDir()
+	writeEPUB(t, filepath.Join(dir, "Foo v1.epub"), "Foo Vol. 1", "")
+	writeEPUB(t, filepath.Join(dir, "Foo v2.epub"), "Foo Vol. 2", "")
+	libID := libraryAt(t, c, "books", dir)
+
+	runScans(t, pool, c, map[string]any{"ids": []string{libID}})
+	assertContentURIs(t, pool, libID, []string{"book/Foo", "book/Foo/Foo v1", "book/Foo/Foo v2"})
+
+	c.Post("/api/libraries/"+libID, map[string]any{
+		"name": "books", "type": "books", "sources": []map[string]any{{"path_uri": dir}},
+		"settings": map[string]any{"book_series_inference": "off"},
+	}).Assert(t, 200)
+	runScans(t, pool, c, map[string]any{"ids": []string{libID}})
+	assertContentURIs(t, pool, libID, []string{"book/Foo", "book/Foo/Foo v1", "book/Foo/Foo v2"})
+	runScans(t, pool, c, map[string]any{"ids": []string{libID}, "force": true})
+	assertContentURIs(t, pool, libID, []string{"book/Foo v1", "book/Foo v2"})
+}
+
 func writeZip(t *testing.T, path string, entries map[string]string) {
 	t.Helper()
 	buf := &bytes.Buffer{}

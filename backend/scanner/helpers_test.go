@@ -231,7 +231,7 @@ type scanRun struct {
 func newTestScan(t *testing.T, libType string) *scanRun {
 	t.Helper()
 	pool := newTestPool(t)
-	return newScanRun(t, pool, newTestLibrary(t, pool, libType), newFileScanner(libType))
+	return newScanRun(t, pool, newTestLibrary(t, pool, libType), newFileScanner(ScanInput{LibraryType: libType}))
 }
 
 func newScanRun(t *testing.T, pool *pgxpool.Pool, libraryID string, s FileScanner) *scanRun {

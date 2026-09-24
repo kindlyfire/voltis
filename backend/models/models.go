@@ -63,6 +63,22 @@ type Library struct {
 	Settings  JSONB      `db:"settings" json:"settings"`
 }
 
+const (
+	BookSeriesInferenceOff          = "off"
+	BookSeriesInferenceConservative = "conservative"
+)
+
+type LibrarySettings struct {
+	BookSeriesInference string `json:"book_series_inference"`
+}
+
+// ParseLibrarySettings fills in defaults for keys the stored settings lack.
+func ParseLibrarySettings(raw JSONB) LibrarySettings {
+	s := LibrarySettings{BookSeriesInference: BookSeriesInferenceConservative}
+	_ = json.Unmarshal(raw, &s)
+	return s
+}
+
 type Content struct {
 	ID         string     `db:"id" json:"id"`
 	CreatedAt  time.Time  `db:"created_at" json:"created_at"`

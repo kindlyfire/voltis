@@ -25,7 +25,7 @@ func ids(children []Child) string {
 	return strings.Join(out, ",")
 }
 
-func TestOrderSortsByPartsThenID(t *testing.T) {
+func TestOrderSortsByPartsThenURIPartThenID(t *testing.T) {
 	cases := []struct {
 		name string
 		in   []Child
@@ -44,9 +44,9 @@ func TestOrderSortsByPartsThenID(t *testing.T) {
 			"nil parts sort last",
 			[]Child{
 				childOf("nil", []*float32{nil, f32(1)}, models.Metadata{}),
-				childOf("one", []*float32{f32(1), f32(1)}, models.Metadata{}),
+				childOf("zero", []*float32{f32(0), f32(1)}, models.Metadata{}),
 			},
-			"one,nil",
+			"zero,nil",
 		},
 		{
 			"equal parts fall back to id",
@@ -56,6 +56,16 @@ func TestOrderSortsByPartsThenID(t *testing.T) {
 				childOf("a", []*float32{f32(1)}, models.Metadata{}),
 			},
 			"a,m,z",
+		},
+		{
+			"equal parts fall back to uri part before id",
+			[]Child{
+				{ID: "a", URIPart: "SP03", OrderParts: []*float32{f32(100000)}},
+				{ID: "b", URIPart: "SP01", OrderParts: []*float32{f32(100000)}},
+				{ID: "c", URIPart: "SP02", OrderParts: []*float32{f32(100000)}},
+				{ID: "d", URIPart: "v14", OrderParts: []*float32{f32(14)}},
+			},
+			"d,b,c,a",
 		},
 		{
 			"shorter part list first",

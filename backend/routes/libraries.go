@@ -35,15 +35,16 @@ type LibrarySourceDTO struct {
 }
 
 type LibraryDTO struct {
-	ID               string             `json:"id"`
-	CreatedAt        time.Time          `json:"created_at"`
-	UpdatedAt        time.Time          `json:"updated_at"`
-	Name             string             `json:"name"`
-	Type             string             `json:"type"`
-	ContentCount     *int               `json:"content_count"`
-	RootContentCount *int               `json:"root_content_count"`
-	ScannedAt        *time.Time         `json:"scanned_at"`
-	Sources          []LibrarySourceDTO `json:"sources"`
+	ID               string                 `json:"id"`
+	CreatedAt        time.Time              `json:"created_at"`
+	UpdatedAt        time.Time              `json:"updated_at"`
+	Name             string                 `json:"name"`
+	Type             string                 `json:"type"`
+	ContentCount     *int                   `json:"content_count"`
+	RootContentCount *int                   `json:"root_content_count"`
+	ScannedAt        *time.Time             `json:"scanned_at"`
+	Sources          []LibrarySourceDTO     `json:"sources"`
+	Settings         models.LibrarySettings `json:"settings"`
 }
 
 func libraryToDTO(lib models.Library, contentCount, rootContentCount *int) LibraryDTO {
@@ -62,13 +63,15 @@ func libraryToDTO(lib models.Library, contentCount, rootContentCount *int) Libra
 		RootContentCount: rootContentCount,
 		ScannedAt:        lib.ScannedAt,
 		Sources:          sources,
+		Settings:         models.ParseLibrarySettings(lib.Settings),
 	}
 }
 
 type upsertLibraryRequest struct {
-	Name    string             `json:"name"`
-	Type    string             `json:"type"`
-	Sources []LibrarySourceDTO `json:"sources"`
+	Name     string                  `json:"name"`
+	Type     string                  `json:"type"`
+	Sources  []LibrarySourceDTO      `json:"sources"`
+	Settings *models.LibrarySettings `json:"settings"`
 }
 
 func (lr *LibraryRoutes) list(c echo.Context) error {
@@ -216,22 +219,35 @@ func (lr *LibraryRoutes) upsert(c echo.Context) error {
 		return err
 	}
 
+	// Omitted settings keep the stored ones, or the defaults for a new library.
+	var settingsJSON []byte
+	if req.Settings != nil {
+		mode := req.Settings.BookSeriesInference
+		if mode != models.BookSeriesInferenceOff && mode != models.BookSeriesInferenceConservative {
+			return echo.NewHTTPError(http.StatusBadRequest, "Invalid book_series_inference: "+mode)
+		}
+		if settingsJSON, err = json.Marshal(req.Settings); err != nil {
+			return err
+		}
+	}
+
 	now := time.Now().UTC()
 
 	id := idOrNew
 	if idOrNew == "new" {
 		id = models.MakeLibraryID()
 		_, err = lr.pool.Exec(ctx, `
-			INSERT INTO libraries (id, created_at, updated_at, name, type, sources)
-			VALUES ($1, $2, $3, $4, $5, $6)
-		`, id, now, now, req.Name, req.Type, sourcesJSON)
+			INSERT INTO libraries (id, created_at, updated_at, name, type, sources, settings)
+			VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::jsonb, '{}'))
+		`, id, now, now, req.Name, req.Type, sourcesJSON, settingsJSON)
 	} else {
 		if _, err := getLibrary(ctx, lr.pool, idOrNew); err != nil {
 			return echo.NewHTTPError(http.StatusNotFound, "Library not found")
 		}
 		_, err = lr.pool.Exec(ctx, `
-			UPDATE libraries SET name = $1, sources = $2, updated_at = $3 WHERE id = $4
-		`, req.Name, sourcesJSON, now, idOrNew)
+			UPDATE libraries SET name = $1, sources = $2, updated_at = $3, settings = COALESCE($5::jsonb, settings)
+			WHERE id = $4
+		`, req.Name, sourcesJSON, now, idOrNew, settingsJSON)
 	}
 	if err != nil {
 		return err

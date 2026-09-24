@@ -55,6 +55,7 @@ func (q *Queue) Enqueue(libraryID string, force bool, filterPaths []string) (str
 	handle, err := q.manager.Push(q.def, ScanInput{
 		LibraryID:   lib.ID,
 		LibraryType: lib.Type,
+		Settings:    models.ParseLibrarySettings(lib.Settings),
 		Sources:     paths,
 		Force:       force,
 		FilterPaths: filterPaths,

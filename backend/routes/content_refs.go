@@ -225,6 +225,10 @@ func (cr *ContentRefRoutes) fixBrokenRefs(c echo.Context) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	// Scans move refs under this lock; without it a target could be validated mid-rename.
+	if err := db.LockMetadata(ctx, tx, libraryID); err != nil {
+		return err
+	}
 
 	// Delete
 	if len(req.Delete) > 0 {

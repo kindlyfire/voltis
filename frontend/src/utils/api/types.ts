@@ -99,6 +99,12 @@ export interface LibrarySource {
     path_uri: string
 }
 
+export type BookSeriesInference = 'off' | 'conservative'
+
+export interface LibrarySettings {
+    book_series_inference: BookSeriesInference
+}
+
 export interface Library {
     id: string
     created_at: string
@@ -109,6 +115,7 @@ export interface Library {
     root_content_count: number | null
     scanned_at: string | null
     sources: LibrarySource[]
+    settings: LibrarySettings
 }
 
 export interface LibraryUpsert {
@@ -116,6 +123,7 @@ export interface LibraryUpsert {
     name: string
     type: ScannerType
     sources: LibrarySource[]
+    settings?: LibrarySettings
 }
 
 export type ContentType = 'comic' | 'comic_series' | 'book' | 'book_series'

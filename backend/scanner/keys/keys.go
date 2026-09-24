@@ -6,14 +6,24 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 var (
-	volumePattern  = regexp.MustCompile(`(?i)(?:\#|(?:v|vo|vol|volu|volum|volume)\.?)\s*(\d+(?:\.\d+)?)`)
+	// Textual markers need a non-letter before them; not \b, which counts "_" as a word character.
+	volumePattern  = regexp.MustCompile(`(?i)(?:\#|(?:^|[^\p{L}])(?:v|vo|vol|volu|volum|volume)\.?)\s*(\d+(?:\.\d+)?)`)
 	chapterPattern = regexp.MustCompile(`(?i)(?:c|ch|chap|chapt|chapte|chapter)\.?\s*(\d+(?:\.\d+)?)`)
 	numberPattern  = regexp.MustCompile(`(\d+(?:\.\d+)?)`)
 	yearPattern    = regexp.MustCompile(`\((\d+)\)`)
 	trailingTags   = regexp.MustCompile(`\s*[\[\(][^\[\]\(\)]*[\]\)]\s*$`)
+
+	// Book patterns take Unicode spaces (\s alone is ASCII-only), as titles often carry NBSPs.
+	bookVolumePattern = regexp.MustCompile(`(?i)(?:^|[^\p{L}])((?:v|vol\.?|volume)[\s\p{Z}]*(\d+(?:\.\d+)?))`)
+	// After the number: the end of the string, or a subtitle separator followed by text.
+	bookVolumeEnd   = regexp.MustCompile(`^[\s\p{Z}]*(?:$|[:,][\s\p{Z}]*[^\s\p{Z}]|[\s\p{Z}]-[\s\p{Z}]+[^\s\p{Z}])`)
+	bookVolumeRange = regexp.MustCompile(`^[\s\p{Z}]*[-–~][\s\p{Z}]*\d`)
+	bookFileTags    = regexp.MustCompile(`[\s\p{Z}]*[\[\(\{][^\[\]\(\)\{\}]*[\]\)\}][\s\p{Z}]*$`)
+	specialPattern  = regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{N}])(?:sp\d+|(?:short|side)[\s\p{Z}]+stor(?:y|ies)|bonus|extra|exclusive)(?:$|[^\p{L}\p{N}])`)
 )
 
 func parseNumber(pattern *regexp.Regexp, name string) *float64 {
@@ -80,9 +90,11 @@ func ParseSeriesYear(name string) *int {
 	return nil
 }
 
-func CleanSeriesName(name string) string {
+func CleanSeriesName(name string) string { return stripTags(trailingTags, name) }
+
+func stripTags(tags *regexp.Regexp, name string) string {
 	for {
-		cleaned := trailingTags.ReplaceAllString(name, "")
+		cleaned := tags.ReplaceAllString(name, "")
 		if cleaned == name {
 			break
 		}
@@ -90,6 +102,31 @@ func CleanSeriesName(name string) string {
 	}
 	return strings.TrimSpace(name)
 }
+
+// ParseBookVolume finds a single volume marker ("Vol. 3", "Volume 3", "v03") that ends s or
+// precedes a subtitle, and returns the non-empty series prefix before it.
+func ParseBookVolume(s string) (string, float64, bool) {
+	ms := bookVolumePattern.FindAllStringSubmatchIndex(s, -1)
+	if len(ms) != 1 || bookVolumeRange.MatchString(s[ms[0][1]:]) || !bookVolumeEnd.MatchString(s[ms[0][1]:]) {
+		return "", 0, false
+	}
+	prefix := strings.TrimRightFunc(s[:ms[0][2]], func(r rune) bool {
+		return unicode.IsSpace(r) || strings.ContainsRune(":-_,", r)
+	})
+	v, err := strconv.ParseFloat(s[ms[0][4]:ms[0][5]], 64)
+	if prefix == "" || err != nil {
+		return "", 0, false
+	}
+	return prefix, v, true
+}
+
+// ParseBookFileVolume is ParseBookVolume for a file stem, ignoring trailing [..], (..) and {..} tags.
+func ParseBookFileVolume(stem string) (string, float64, bool) {
+	return ParseBookVolume(stripTags(bookFileTags, stem))
+}
+
+// IsBookSpecial reports markers of specials and extras, whose volume numbers refer to another book.
+func IsBookSpecial(s string) bool { return specialPattern.MatchString(s) }
 
 func RemoveCommonPrefix(a, b string) (string, string) {
 	minLen := min(len(b), len(a))

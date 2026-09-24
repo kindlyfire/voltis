@@ -7,11 +7,15 @@ import (
 	"maps"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"voltis/lib/tasks"
 	"voltis/models"
+
+	"golang.org/x/text/cases"
 )
 
 type committed struct {
@@ -32,6 +36,7 @@ type writer struct {
 	keys     map[Key]string
 	series   map[string]SeriesRef
 	byURI    map[string]string
+	byNorm   map[string][]string
 	byDir    map[string][]string
 	cov      *coverage
 	dirs     map[string]*dirPick
@@ -60,6 +65,7 @@ func newWriter(in ScanInput, tc *tasks.TaskContext, notify Notifier, res *resolv
 		keys:    make(map[Key]string, len(fps)+len(refs)),
 		series:  make(map[string]SeriesRef, len(refs)),
 		byURI:   make(map[string]string, len(refs)),
+		byNorm:  map[string][]string{},
 		byDir:   map[string][]string{},
 		dirs:    map[string]*dirPick{},
 		seeded:  map[string]string{},
@@ -85,6 +91,7 @@ func newWriter(in ScanInput, tc *tasks.TaskContext, notify Notifier, res *resolv
 		w.series[ref.ID] = ref
 		w.byURI[ref.URI] = ref.ID
 		w.keys[Key{"", ref.URIPart}] = ref.ID
+		w.addNorm(ref)
 		w.dirs[ref.ID] = &dirPick{stored: ref.FileURI}
 		if ref.FileURI != nil {
 			w.addDir(*ref.FileURI, ref.ID)
@@ -283,6 +290,11 @@ func (w *writer) place(r Result) {
 	}
 
 	parent, ok := w.resolveSeries(r.Item.Series)
+	if !ok && r.Item.Series.Inferred {
+		slog.Warn("[scanner] inferred series conflicts, keeping the book standalone", "path", r.File.Path,
+			"uri_prefix", r.Item.Series.URIPrefix, "uri_part", r.Item.Series.URIPart)
+		r.Item.Series, parent, ok = nil, "", true
+	}
 	if !ok {
 		w.prog.Failed++
 		slog.Warn("[scanner] series key conflict, skipping", "path", r.File.Path,
@@ -291,11 +303,16 @@ func (w *writer) place(r Result) {
 		return
 	}
 
-	s := w.set(parent)
-
 	own := old.ID
 	k := Key{parent, r.Item.URIPart}
 	occ := w.keys[k]
+	// A book named like a book series joins it instead of conflicting with it.
+	if r.Item.Series == nil && r.Item.ContentType == "book" && w.series[occ].Type == "book_series" {
+		parent, k = occ, Key{occ, r.Item.URIPart}
+		occ = w.keys[k]
+		r.Item.OrderParts = []*float32{nil} // a volume inferred for another series means nothing here
+	}
+	s := w.set(parent)
 
 	var id string
 	switch {
@@ -315,7 +332,7 @@ func (w *writer) place(r Result) {
 		return
 	}
 
-	if parent != "" {
+	if r.Item.Series != nil {
 		w.aim(parent, r.Item.Series.FileURI)
 	}
 	if prev, ok := w.byID[id]; ok {
@@ -343,6 +360,17 @@ func (w *writer) resolveSeries(p *ParsedSeries) (string, bool) {
 	if !found && p.FileURI != nil {
 		id, found = w.dirSeries(*p.FileURI)
 	}
+	// A normalized match reuses the series as named: renaming it would flip between spellings.
+	if !found && p.ContentType == "book_series" {
+		switch ids := w.byNorm[normKey(p.URIPart)]; len(ids) {
+		case 0:
+		case 1:
+			return ids[0], true
+		default:
+			slog.Warn("[scanner] series name matches several series", "uri", uri, "ids", ids)
+			return "", false
+		}
+	}
 
 	if !found {
 		if _, taken := w.keys[key]; taken {
@@ -352,6 +380,7 @@ func (w *writer) resolveSeries(p *ParsedSeries) (string, bool) {
 		w.series[ref.ID] = ref
 		w.byURI[uri] = ref.ID
 		w.keys[key] = ref.ID
+		w.addNorm(ref)
 		w.set(ref.ID).New = true
 		return ref.ID, true
 	}
@@ -375,6 +404,23 @@ func (w *writer) resolveSeries(p *ParsedSeries) (string, bool) {
 	w.series[id] = ref
 	s.Ref = ref
 	return id, true
+}
+
+// addNorm indexes book series by normalized name, so "Foo’s" finds "Foo's". Book series have no
+// directory to be renamed through, and empty series are only deleted at commit, so entries are only added.
+func (w *writer) addNorm(ref SeriesRef) {
+	if k := normKey(ref.URIPart); ref.Type == "book_series" && k != "" {
+		w.byNorm[k] = append(w.byNorm[k], ref.ID)
+	}
+}
+
+func normKey(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return r
+		}
+		return -1
+	}, cases.Fold().String(s))
 }
 
 func (w *writer) seed() {

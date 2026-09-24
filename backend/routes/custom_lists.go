@@ -353,11 +353,9 @@ type createEntryRequest struct {
 	Notes     *string `json:"notes"`
 }
 
+// createEntryInner expects the caller to hold lockContentLibraries for the content.
 func createEntryInner(ctx context.Context, tx pgx.Tx, listID string, contentID string, notes *string) error {
-	content, err := db.SelectOne[models.Content](ctx, tx, "SELECT * FROM content WHERE id = $1", contentID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return echo.NewHTTPError(http.StatusNotFound, "Content not found")
-	}
+	libraryID, uri, err := contentURI(ctx, tx, contentID)
 	if err != nil {
 		return err
 	}
@@ -378,7 +376,7 @@ func createEntryInner(ctx context.Context, tx pgx.Tx, listID string, contentID s
 			ON CONFLICT (custom_list_id, library_id, uri) DO NOTHING`
 	}
 
-	_, err = tx.Exec(ctx, query, entryID, now, now, listID, content.LibraryID, content.URI, notes)
+	_, err = tx.Exec(ctx, query, entryID, now, now, listID, libraryID, uri, notes)
 	if err != nil {
 		return err
 	}
@@ -405,6 +403,9 @@ func (cr *CustomListRoutes) createEntry(c echo.Context) error {
 
 	ctx := reqCtx(c)
 	err = db.WithTx(ctx, cr.pool, func(q pgx.Tx) error {
+		if err := lockContentLibraries(ctx, q, req.ContentID); err != nil {
+			return err
+		}
 		return createEntryInner(ctx, q, cl.ID, req.ContentID, req.Notes)
 	})
 	if err != nil {
@@ -454,6 +455,10 @@ func (cr *CustomListRoutes) bulkCreateEntries(c echo.Context) error {
 	}
 
 	err = db.WithTx(ctx, cr.pool, func(q pgx.Tx) error {
+		ids := fp.Map(req.Entries, func(e bulkCreateEntry) string { return e.ContentID })
+		if err := lockContentLibraries(ctx, q, ids...); err != nil {
+			return err
+		}
 		for _, e := range req.Entries {
 			if err := createEntryInner(ctx, q, e.ListID, e.ContentID, e.Notes); err != nil {
 				return err

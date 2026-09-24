@@ -7,6 +7,8 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"voltis/lib/epub"
 )
 
 func leafFP(id, path, part, parent string) Fingerprint {
@@ -771,5 +773,101 @@ func TestWriterRunKeepsPlacingWhileACommitIsOutstanding(t *testing.T) {
 	}
 	if w.prog.Processed != 3 {
 		t.Fatalf("progress = %+v", w.prog)
+	}
+}
+
+func inferredResult(path, title string) Result {
+	item := classifyBook(fsFile(path, baseTime, 10), epub.Metadata{Title: title}, false, nil, true)
+	return Result{File: item.File, Item: &item}
+}
+
+func bookSeriesRef(id, part string) SeriesRef {
+	return SeriesRef{ID: id, URI: "book/" + part, URIPart: part, Type: "book_series"}
+}
+
+func TestWriterMergesPunctuationVariantsOfABookSeries(t *testing.T) {
+	results := []Result{
+		inferredResult("/lib/a.epub", "Foo’s Tale Vol. 1"),
+		inferredResult("/lib/b.epub", "Foo's Tale: Vol. 2"),
+		bookResult("/lib/c.epub", epub.Metadata{Title: "Special", Series: "FOO'S TALE"}),
+	}
+	for _, arrival := range [][]Result{results, {results[2], results[1], results[0]}} {
+		w := testWriter(nil, nil)
+		for _, r := range arrival {
+			w.place(r)
+		}
+		if len(w.series) != 1 || w.prog.Failed != 0 {
+			t.Fatalf("series = %+v, failed = %d, want one series", w.series, w.prog.Failed)
+		}
+		for id, ref := range w.series {
+			if set := w.sets[id]; len(set.Writes) != 3 || !set.New || ref.URIPart != arrival[0].Item.Series.URIPart {
+				t.Fatalf("set = %+v, want all three under the first-seen spelling", set)
+			}
+		}
+	}
+}
+
+func TestWriterReusesAnExistingBookSeriesWithoutRenaming(t *testing.T) {
+	w := testWriter([]Fingerprint{leafFP("l1", "/lib/a.epub", "a", "p1")}, []SeriesRef{bookSeriesRef("p1", "Foo's Tale")})
+
+	w.place(inferredResult("/lib/a.epub", "Foo’s Tale Vol. 1"))
+	w.place(inferredResult("/lib/b.epub", "FOO’S  TALE, Vol. 2"))
+	set := w.sets["p1"]
+	if len(set.Writes) != 2 || set.renamed() || set.New || set.Ref.URI != "book/Foo's Tale" || w.series["p1"].URIPart != "Foo's Tale" {
+		t.Fatalf("set = %+v, want both placed under the stored name", set)
+	}
+	if len(w.series) != 1 {
+		t.Fatalf("series = %+v, want no new series", w.series)
+	}
+}
+
+func TestWriterTreatsSeveralNormalizedMatchesAsAConflict(t *testing.T) {
+	w := testWriter(nil, []SeriesRef{bookSeriesRef("p1", "Foo's Tale"), bookSeriesRef("p2", "Foo’s Tale")})
+
+	w.place(bookResult("/lib/a.epub", epub.Metadata{Title: "A", Series: "Foos Tale"}))
+	if w.prog.Failed != 1 || len(w.sets) != 0 {
+		t.Fatalf("failed = %d, sets = %+v, want a metadata series skipped as a conflict", w.prog.Failed, w.sets)
+	}
+	w.place(inferredResult("/lib/b.epub", "Foos Tale Vol. 2"))
+	if set := w.sets[""]; set == nil || len(set.Writes) != 1 || set.Writes[0].item.Series != nil {
+		t.Fatalf("sets = %+v, want the inferred book kept standalone", w.sets)
+	}
+	w.place(bookResult("/lib/c.epub", epub.Metadata{Title: "C", Series: "Foo’s Tale"}))
+	if set := w.sets["p2"]; set == nil || len(set.Writes) != 1 {
+		t.Fatalf("sets = %+v, want an exact name to still resolve", w.sets)
+	}
+}
+
+func TestWriterKeepsABookStandaloneWhenItsInferredSeriesCollides(t *testing.T) {
+	w := testWriter([]Fingerprint{leafFP("l1", "/lib/Foo.epub", "Foo", "")}, nil)
+
+	w.place(inferredResult("/lib/Foo v2.epub", "Foo Vol. 2"))
+	if w.prog.Failed != 0 || len(w.series) != 0 {
+		t.Fatalf("failed = %d, series = %+v, want no series and no failure", w.prog.Failed, w.series)
+	}
+	if set := w.sets[""]; len(set.Writes) != 1 || set.Writes[0].item.URIPart != "Foo v2" {
+		t.Fatalf("writes = %+v, want the book placed standalone", set.Writes)
+	}
+
+	w.place(bookResult("/lib/Foo v3.epub", epub.Metadata{Title: "Foo 3", Series: "Foo"}))
+	if w.prog.Failed != 1 {
+		t.Fatalf("failed = %d, want a metadata series collision still skipped", w.prog.Failed)
+	}
+}
+
+func TestNormKey(t *testing.T) {
+	cases := []struct{ a, b string }{
+		{"Foo’s Tale", "FOO'S  TALE"},
+		{"Straße", "STRASSE"},
+		{"ΟΣ", "ος"},
+		{"Ünïcødé 漫画", "ünïcødé-漫画"},
+	}
+	for _, c := range cases {
+		if normKey(c.a) != normKey(c.b) {
+			t.Errorf("normKey(%q) = %q, normKey(%q) = %q, want equal", c.a, normKey(c.a), c.b, normKey(c.b))
+		}
+	}
+	if normKey("Foo 1") == normKey("Foo 2") || normKey("☆ - ☆") != "" {
+		t.Error("normKey must keep digits and drop everything but letters and digits")
 	}
 }
