@@ -16,26 +16,25 @@ docker compose exec app sh
 
 ## Environment variables
 
-| Variable                   | Default             | Description                                                                              |
-| -------------------------- | ------------------- | ---------------------------------------------------------------------------------------- |
-| `APP_DATABASE_URL`         | _(required)_        | PostgreSQL connection URL                                                                |
-| `APP_PORT`                 | `8080`              | HTTP server port                                                                         |
-| `APP_CACHE_DIR`            | `/tmp/voltis_cache` | Directory for cached cover images                                                        |
-| `APP_REGISTRATION_ENABLED` | `false`             | Allow open user registration. If no accounts exist, one user will be allowed to register |
-| `APP_STATIC_DIR`           | _(empty)_           | Path to frontend static files (set automatically in the Docker image)                    |
+| Variable                   | Default             | Description                                                                               |
+| -------------------------- | ------------------- | ----------------------------------------------------------------------------------------- |
+| `APP_DATABASE_URL`         | _(required)_        | PostgreSQL connection URL                                                                 |
+| `APP_PORT`                 | `8080`              | HTTP server port                                                                          |
+| `APP_CACHE_DIR`            | `/tmp/voltis_cache` | Directory for cached cover images                                                         |
+| `APP_REGISTRATION_ENABLED` | `false`             | Allow open user registration. If no accounts exist, one user will be allowed to register¹ |
+| `APP_STATIC_DIR`           | _(empty)_           | Path to frontend static files (set automatically in the Docker image)                     |
 
-Forwarded authentication is configured here too, and only here. See
-[Authentication](/authentication#forwarded-authentication) for what each value
-means and for the header-stripping requirement your proxy must meet.
+Forwarded authentication is configured here. See
+[Authentication](/authentication#forwarded-authentication) for the setup details.
 
-| Variable                       | Default   | Description                                                            |
-| ------------------------------ | --------- | ---------------------------------------------------------------------- |
+| Variable                       | Default   | Description                                                             |
+| ------------------------------ | --------- | ----------------------------------------------------------------------- |
 | `APP_AUTH_PROXY_TRUSTED_CIDRS` | _(empty)_ | CIDRs allowed to assert identity headers. Empty disables forwarded auth |
-| `APP_AUTH_PROXY_USER_HEADER`   | _(empty)_ | Header carrying the username, for example `Remote-User`                |
-| `APP_AUTH_PROXY_EMAIL_HEADER`  | _(empty)_ | Header carrying the email address                                      |
-| `APP_AUTH_PROXY_GROUPS_HEADER` | _(empty)_ | Header carrying the group list                                         |
+| `APP_AUTH_PROXY_USER_HEADER`   | _(empty)_ | Header carrying the username, for example `Remote-User`                 |
+| `APP_AUTH_PROXY_EMAIL_HEADER`  | _(empty)_ | Header carrying the email address                                       |
+| `APP_AUTH_PROXY_GROUPS_HEADER` | _(empty)_ | Header carrying the group list                                          |
 
-`APP_REGISTRATION_ENABLED` only seeds `auth.registration_enabled` the first time
+¹ `APP_REGISTRATION_ENABLED` only seeds `auth.registration_enabled` the first time
 Voltis starts against a database. After that the stored setting wins.
 
 ## Commands
@@ -77,16 +76,14 @@ Lists every setting with its current value. Secrets are shown as `<set>` or
 
 ### `settings set`
 
-Changes a setting. A running server picks the change up immediately, which makes
-this the way back in when a sign-in method locks everyone out.
+Changes a setting. A running server picks the change up immediately.
 
 ```bash
 ./voltis settings set auth.password_login_enabled true
 ./voltis settings set auth.oidc.scopes "openid profile email groups"
 ```
 
-Unknown keys and invalid values are rejected. See
-[Authentication](/authentication#settings) for the full list.
+See [Authentication](/authentication#settings) for the full options list.
 
 ### `users update`
 
