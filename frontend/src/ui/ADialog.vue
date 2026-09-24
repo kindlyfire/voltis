@@ -228,7 +228,10 @@ function onCloseAutoFocus(e: Event) {
         flex: 1;
         min-height: 0;
         overflow-y: auto;
-        padding: 14px 24px 0;
+        /* Bottom padding inside the scroll container, so focus rings and shadows on the last
+           element aren't clipped; the actions' top padding makes up the rest of the gap. */
+        padding: 14px 24px 12px;
+        scroll-padding-block: 12px;
         font-size: 14px;
         line-height: 1.5;
         overscroll-behavior: contain;
@@ -239,7 +242,7 @@ function onCloseAutoFocus(e: Event) {
         flex-wrap: wrap;
         justify-content: flex-end;
         gap: 8px;
-        padding: 22px 24px 24px;
+        padding: 10px 24px 24px;
     }
 
     .a-dialog--default > :last-child:not(.a-dialog__actions) {

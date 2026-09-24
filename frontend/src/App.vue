@@ -20,6 +20,7 @@ import { useScanSync } from './stores/scans'
 import ASpinner from './ui/ASpinner.vue'
 import { miscApi } from './utils/api/misc'
 import { usersApi } from './utils/api/users'
+import { useSubmitShortcut } from './utils/submitShortcut'
 
 // Created here so the theme applies to every page, the auth pages included.
 useLayoutStore()
@@ -29,6 +30,7 @@ const qMe = usersApi.useMe()
 const qInfo = miscApi.useInfo()
 
 useScanSync()
+useSubmitShortcut()
 
 watch(
     () =>

@@ -128,7 +128,7 @@
                                         :label="`Delete the data for ${item.uri}`"
                                         size="sm"
                                         :pressed="edits.get(item.id) === 'delete'"
-                                        class="mt-2"
+                                        class="mt-1"
                                         @click="toggleDelete(item.id)"
                                     />
                                 </div>

@@ -30,7 +30,7 @@
                         :disabled="reader.siblings.currentIndex === 0"
                         @click="reader.goToSibling('prev', true)"
                     />
-                    <ASelect
+                    <ACombobox
                         :model-value="reader.siblings.items[reader.siblings.currentIndex]?.id"
                         :options="chapterOptions"
                         label="Chapter"
@@ -110,10 +110,10 @@
 import { useDebounceFn } from '@vueuse/core'
 import { computed, onUnmounted, ref, watch, type Ref } from 'vue'
 import { useLayoutStore } from '@/pages/_layout/useLayoutStore'
+import ACombobox from '@/ui/ACombobox.vue'
 import ADrawer from '@/ui/ADrawer.vue'
 import AIconButton from '@/ui/AIconButton.vue'
 import ASegmented from '@/ui/ASegmented.vue'
-import ASelect from '@/ui/ASelect.vue'
 import ASkeleton from '@/ui/ASkeleton.vue'
 import ASlider from '@/ui/ASlider.vue'
 import { IconChevronLeft, IconChevronRight, IconClose } from '@/ui/icons'

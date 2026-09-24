@@ -26,11 +26,16 @@
         <div
             ref="track"
             class="a-scroll-row__track a-focus"
+            :class="{ dragging }"
             :style="{ '--item-width': `${itemWidth}px` }"
             role="region"
             :aria-labelledby="titleId"
             tabindex="0"
             @scroll.passive="measure"
+            @pointerdown="onPointerdown"
+            @pointermove="onPointermove"
+            @lostpointercapture="endDrag"
+            @dragstart.prevent
         >
             <slot />
         </div>
@@ -38,7 +43,7 @@
 </template>
 
 <script setup lang="ts">
-import { useMutationObserver, useResizeObserver } from '@vueuse/core'
+import { useEventListener, useMutationObserver, useResizeObserver } from '@vueuse/core'
 import { onMounted, ref, useId, useTemplateRef } from 'vue'
 import AIconButton from './AIconButton.vue'
 import { IconChevronLeft, IconChevronRight } from './icons'
@@ -68,6 +73,53 @@ function measure() {
 onMounted(measure)
 useResizeObserver(track, measure)
 useMutationObserver(track, measure, { childList: true, subtree: true })
+
+// Mouse drag scrolls the row (touch scrolls natively).
+const DRAG_THRESHOLD = 5
+const dragging = ref(false)
+let drag: { pointerId: number; x: number; scrollLeft: number } | null = null
+
+function onPointerdown(e: PointerEvent) {
+    if (e.pointerType !== 'mouse' || e.button !== 0 || !track.value) return
+    drag = { pointerId: e.pointerId, x: e.clientX, scrollLeft: track.value.scrollLeft }
+}
+
+function onPointermove(e: PointerEvent) {
+    const el = track.value
+    if (!drag || !el || e.pointerId !== drag.pointerId) return
+    // The button came up where we didn't see it.
+    if (!(e.buttons & 1)) return endDrag()
+    const dx = e.clientX - drag.x
+    if (!dragging.value) {
+        if (Math.abs(dx) < DRAG_THRESHOLD) return
+        dragging.value = true
+        el.setPointerCapture(e.pointerId)
+        getSelection()?.removeAllRanges()
+    }
+    el.scrollLeft = drag.scrollLeft - dx
+}
+
+function endDrag() {
+    drag = null
+    dragging.value = false
+}
+
+// On window: the button may come up outside the row before the drag starts capturing.
+useEventListener(window, 'pointercancel', endDrag)
+useEventListener(window, 'pointerup', (e: PointerEvent) => {
+    if (!drag || e.pointerId !== drag.pointerId) return
+    const dragged = dragging.value
+    endDrag()
+    if (!dragged) return
+    // The click ending a drag must not open the card under the pointer. It follows pointerup in
+    // the same task, if at all.
+    const suppress = (ev: MouseEvent) => {
+        ev.preventDefault()
+        ev.stopPropagation()
+    }
+    window.addEventListener('click', suppress, { capture: true, once: true })
+    setTimeout(() => window.removeEventListener('click', suppress, { capture: true }))
+})
 
 function scroll(direction: 1 | -1) {
     const el = track.value
@@ -130,6 +182,22 @@ function scroll(direction: 1 | -1) {
 
         & > :deep(*) {
             scroll-snap-align: start;
+        }
+
+        @media (pointer: fine) {
+            cursor: grab;
+        }
+
+        /* Snapping resumes on release, which settles the row on a card. */
+        &.dragging {
+            cursor: grabbing;
+            scroll-behavior: auto;
+            scroll-snap-type: none;
+            user-select: none;
+
+            & :deep(*) {
+                cursor: inherit;
+            }
         }
     }
 

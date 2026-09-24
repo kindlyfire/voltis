@@ -147,6 +147,8 @@ function focusControl(e: PointerEvent) {
 
     .a-field__row :deep(:is(input, textarea)) {
         flex: 1;
+        /* Without it, an input's intrinsic width (`size`) still sets the field's min-content width. */
+        width: 0;
         min-width: 0;
         padding: 0;
         border: 0;

@@ -3,6 +3,7 @@
         :open="open"
         :model-value="modelValue"
         :disabled="disabled"
+        :by="sameValue"
         :class="['a-combobox', $attrs.class]"
         :style="$attrs.style"
         open-on-click
@@ -19,6 +20,7 @@
                         :display-value="labelOf"
                         :placeholder="placeholder ?? (size === 'sm' ? label : undefined)"
                         :readonly="readonly"
+                        @input="search = ($event.target as HTMLInputElement).value"
                     />
                 </ComboboxAnchor>
             </template>
@@ -45,23 +47,35 @@
                 :collision-padding="8"
             >
                 <ComboboxViewport>
+                    <DefineOption v-slot="{ option }">
+                        <ComboboxItem
+                            :value="option.value"
+                            :text-value="option.label"
+                            :disabled="option.disabled"
+                            class="a-option"
+                        >
+                            <AIcon v-if="option.icon" :icon="option.icon" class="a-option__icon" />
+                            <span class="a-option__text">
+                                <slot name="option" :option="option">{{ option.label }}</slot>
+                            </span>
+                            <ComboboxItemIndicator class="a-option__check">
+                                <AIcon :icon="IconCheck" />
+                            </ComboboxItemIndicator>
+                        </ComboboxItem>
+                    </DefineOption>
                     <ComboboxEmpty class="a-combobox__empty">{{ emptyText }}</ComboboxEmpty>
-                    <ComboboxItem
-                        v-for="option in items"
-                        :key="option.value"
-                        :value="option.value"
-                        :text-value="option.label"
-                        :disabled="option.disabled"
-                        class="a-option"
+                    <!-- The virtualizer's positioning attributes fall through to the item. -->
+                    <ComboboxVirtualizer
+                        v-if="virtual"
+                        v-slot="{ option }"
+                        :options="filtered"
+                        :estimate-size="OPTION_HEIGHT"
                     >
-                        <AIcon v-if="option.icon" :icon="option.icon" class="a-option__icon" />
-                        <span class="a-option__text">
-                            <slot name="option" :option="option">{{ option.label }}</slot>
-                        </span>
-                        <ComboboxItemIndicator class="a-option__check">
-                            <AIcon :icon="IconCheck" />
-                        </ComboboxItemIndicator>
-                    </ComboboxItem>
+                        <ReuseOption :option="option" />
+                    </ComboboxVirtualizer>
+                    <template v-else>
+                        <ReuseOption v-for="option in items" :key="option.value" :option="option" />
+                    </template>
                 </ComboboxViewport>
             </ComboboxContent>
         </ComboboxPortal>
@@ -69,6 +83,7 @@
 </template>
 
 <script setup lang="ts" generic="V extends OptionValue">
+import { createReusableTemplate } from '@vueuse/core'
 import {
     ComboboxAnchor,
     ComboboxContent,
@@ -80,7 +95,10 @@ import {
     ComboboxRoot,
     ComboboxTrigger,
     ComboboxViewport,
+    ComboboxVirtualizer,
+    useFilter,
 } from 'reka-ui'
+import { computed, ref, watch, watchEffect } from 'vue'
 import AField from './AField.vue'
 import AIcon from './AIcon.vue'
 import AIconButton from './AIconButton.vue'
@@ -89,7 +107,10 @@ import type { Option, Options, OptionValue } from './options'
 import { mergeAria, useControlAttrs } from './useFieldIds'
 import { useSelectField, type SelectFieldProps } from './useSelectField'
 
-/** A select with client-side filtering as you type. */
+/**
+ * A select with client-side filtering as you type. Long option lists are virtualized, with
+ * one-line options.
+ */
 defineOptions({ inheritAttrs: false })
 
 const props = withDefaults(
@@ -111,12 +132,38 @@ const { open, setOpen, items, fieldProps, showClear, box, select, clear } = useS
     props,
     emit
 )
+const [DefineOption, ReuseOption] = createReusableTemplate<{ option: Option<V> }>({
+    props: { option: Object },
+})
 const labelOf = (value: unknown) => items.value.find(o => o.value === value)?.label ?? ''
+
+// Reka mounts every option, which is slow with hundreds (a series' chapters). Virtualized, Reka
+// leaves the filtering to us.
+const VIRTUAL_MIN = 50
+const OPTION_HEIGHT = 44
+// Once the virtualizer has mounted, Reka's virtual mode stays on, so ours does too.
+const virtual = ref(false)
+watchEffect(() => (virtual.value ||= items.value.length > VIRTUAL_MIN))
+const search = ref('')
+// Typing into a closed combobox opens it, so the search only resets on close.
+watch(open, isOpen => isOpen || (search.value = ''))
+const { contains } = useFilter({ sensitivity: 'base' })
+const filtered = computed(() =>
+    items.value.filter(o => !search.value || contains(o.label, search.value))
+)
+// The virtualizer compares its options, which are Option objects, with the model value.
+const valueOf = (v: unknown) => (typeof v === 'object' && v ? (v as Option<V>).value : v)
+const sameValue = (a: unknown, b: unknown) => valueOf(a) === valueOf(b)
 const controlAttrs = useControlAttrs()
 </script>
 
 <style>
 @layer ui {
+    /* Firefox otherwise sizes the root, a flex item at call sites, by the input's intrinsic width. */
+    .a-combobox {
+        min-width: 0;
+    }
+
     .a-combobox__trigger {
         display: grid;
         place-items: center;
@@ -130,6 +177,17 @@ const controlAttrs = useControlAttrs()
 
         &:disabled {
             cursor: not-allowed;
+        }
+    }
+
+    .a-listbox [data-reka-virtualizer] > .a-option {
+        width: 100%;
+        height: 44px;
+
+        & .a-option__text {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
     }
 

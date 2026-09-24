@@ -2,6 +2,7 @@
     <ACard
         ref="card"
         title="Linked accounts"
+        :variant="compact ? 'tonal' : 'raised'"
         :padding="compact ? 'md' : 'lg'"
         :heading-level="compact ? 3 : 2"
         tabindex="-1"

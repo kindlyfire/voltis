@@ -4,8 +4,8 @@
 FROM node:24-alpine AS frontend
 
 WORKDIR /app/frontend
-RUN corepack enable && corepack prepare pnpm@latest --activate
-COPY frontend/package.json frontend/pnpm-lock.yaml ./
+RUN corepack enable && corepack prepare pnpm@11 --activate
+COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store pnpm install --frozen-lockfile
 COPY frontend/ ./
 RUN pnpm build

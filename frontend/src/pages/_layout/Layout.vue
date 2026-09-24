@@ -3,7 +3,7 @@
 
     <aside v-if="store.sidebarPersistent" id="sidebar" class="sidebar" aria-label="Sidebar">
         <!-- Header height, so the toggle doesn't move when it swaps into the header. -->
-        <div class="mb-3.5 flex h-(--header-height) flex-none items-center gap-2.5 px-0.5">
+        <div class="brand mb-3.5 h-(--header-height) px-0.5">
             <AIconButton
                 id="sidebar-toggle"
                 :icon="IconMenu"
@@ -21,7 +21,7 @@
         class="header"
         :class="{ 'is-hidden': store.navbarHidden.value, 'has-menu': !store.sidebarPersistent }"
     >
-        <template v-if="!store.sidebarPersistent">
+        <div v-if="!store.sidebarPersistent" class="brand">
             <AIconButton
                 id="sidebar-toggle"
                 :icon="IconMenu"
@@ -29,8 +29,8 @@
                 :aria-expanded="store.sidebarOpen"
                 @click="toggleSidebar"
             />
-            <RouterLink to="/" class="wordmark a-focus -ml-1 rounded-md">Voltis</RouterLink>
-        </template>
+            <RouterLink to="/" class="wordmark a-focus rounded-md">Voltis</RouterLink>
+        </div>
         <SearchBox class="nav:max-w-[560px] flex-1" />
         <ScanIndicator />
     </header>
@@ -134,6 +134,15 @@ async function toggleSidebar() {
         padding-left: calc(12px + env(safe-area-inset-left));
         background: var(--color-sidebar);
         box-shadow: inset -1px 0 0 var(--color-outline-variant);
+    }
+
+    /* The menu toggle and the wordmark, in the sidebar or the header: the same spacing, so the
+     * wordmark doesn't move when the toggle swaps between them. */
+    .brand {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 10px;
     }
 
     .wordmark {

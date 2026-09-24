@@ -13,7 +13,7 @@
                     <ASpinner />
                 </div>
                 <QueryError :query="qChildren" />
-                <ASelect
+                <ACombobox
                     v-if="qChildren.isSuccess.value"
                     v-model="selectedChildId"
                     :options="childOptions"
@@ -51,9 +51,9 @@ import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import { computed, ref } from 'vue'
 import QueryError from '@/components/QueryError.vue'
 import AButton from '@/ui/AButton.vue'
+import ACombobox from '@/ui/ACombobox.vue'
 import ADialog from '@/ui/ADialog.vue'
 import ARadioGroup from '@/ui/ARadioGroup.vue'
-import ASelect from '@/ui/ASelect.vue'
 import ASpinner from '@/ui/ASpinner.vue'
 import { useToast } from '@/ui/useToast'
 import { contentApi } from '@/utils/api/content'

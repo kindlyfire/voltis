@@ -2,6 +2,7 @@
     <component
         :is="root.is"
         v-bind="rootAttrs"
+        :aria-keyshortcuts="root.is === 'button' && type === 'submit' ? SUBMIT_KEYS : undefined"
         class="a-button a-btn-palette a-state a-focus"
         :class="[
             `variant-${variant}`,
@@ -51,6 +52,8 @@ const props = withDefaults(
 )
 
 const { root, rootAttrs } = useButtonRoot(props)
+// Handled app-wide by `useSubmitShortcut`.
+const SUBMIT_KEYS = 'Control+Enter Meta+Enter'
 </script>
 
 <style scoped>

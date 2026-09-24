@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
 export interface ToastOptions {
     message: string
@@ -17,24 +17,29 @@ export interface Toast extends ToastOptions {
     open: boolean
 }
 
+/** Toasts shown at once. The rest wait. */
+const MAX_VISIBLE = 3
 /** Waiting toasts beyond this drop the oldest waiting one. */
-const MAX_QUEUED = 3
-/** Leaves time for the exit animation before the next toast shows. */
+const MAX_WAITING = 3
+/** A closed toast keeps its slot for its exit animation. */
 const EXIT_MS = 200
 
 let nextId = 0
 
-/** The queue. Only the first toast is shown; AToastRegion renders it. */
+/** Visible toasts first (oldest first), then the waiting ones. */
 export const toasts = ref<Toast[]>([])
+
+/** The toasts AToastRegion renders, closing ones included. */
+export const visibleToasts = computed(() => toasts.value.slice(0, MAX_VISIBLE))
 
 export function dismissToast(id: number) {
     const index = toasts.value.findIndex(t => t.id === id)
     if (index < 0) return
-    if (index > 0) {
+    if (index >= MAX_VISIBLE) {
         toasts.value.splice(index, 1)
         return
     }
-    const toast = toasts.value[0]!
+    const toast = toasts.value[index]!
     if (!toast.open) return
     toast.open = false
     setTimeout(() => {
@@ -45,7 +50,7 @@ export function dismissToast(id: number) {
 function show(options: ToastOptions) {
     const id = nextId++
     toasts.value.push({ ...options, id, open: true })
-    if (toasts.value.length > MAX_QUEUED + 1) toasts.value.splice(1, 1)
+    if (toasts.value.length > MAX_VISIBLE + MAX_WAITING) toasts.value.splice(MAX_VISIBLE, 1)
     return { dismiss: () => dismissToast(id) }
 }
 

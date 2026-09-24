@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { toasts, useToast } from './useToast'
+import { toasts, useToast, visibleToasts } from './useToast'
 
 beforeEach(() => {
     vi.useFakeTimers()
@@ -10,30 +10,31 @@ afterEach(() => {
 })
 
 const messages = () => toasts.value.map(t => t.message)
+const visible = () => visibleToasts.value.map(t => t.message)
 
 describe('useToast', () => {
-    it('shows one toast at a time, the next after the current is dismissed', () => {
+    it('shows up to three toasts, the next waiting one after one is dismissed', () => {
         const { show } = useToast()
-        const first = show({ message: 'first' })
-        show({ message: 'second' })
-        expect(messages()).toEqual(['first', 'second'])
+        const [, second] = [1, 2, 3, 4].map(n => show({ message: `${n}` }))
+        expect(visible()).toEqual(['1', '2', '3'])
 
-        first.dismiss()
-        expect(toasts.value[0]!.open).toBe(false)
+        second!.dismiss()
+        expect(toasts.value[1]!.open).toBe(false)
+        expect(visible()).toEqual(['1', '2', '3'])
         vi.advanceTimersByTime(200)
-        expect(messages()).toEqual(['second'])
+        expect(visible()).toEqual(['1', '3', '4'])
     })
 
-    it('bounds the queue by dropping the oldest waiting toast', () => {
+    it('bounds the waiting toasts by dropping the oldest waiting one', () => {
         const { show } = useToast()
-        for (const n of [1, 2, 3, 4, 5]) show({ message: `${n}` })
-        expect(messages()).toEqual(['1', '3', '4', '5'])
+        for (const n of [1, 2, 3, 4, 5, 6, 7]) show({ message: `${n}` })
+        expect(messages()).toEqual(['1', '2', '3', '5', '6', '7'])
     })
 
     it('removes a waiting toast immediately when dismissed', () => {
         const { show } = useToast()
-        show({ message: 'first' })
-        show({ message: 'second' }).dismiss()
-        expect(messages()).toEqual(['first'])
+        for (const n of [1, 2, 3]) show({ message: `${n}` })
+        show({ message: 'waiting' }).dismiss()
+        expect(messages()).toEqual(['1', '2', '3'])
     })
 })

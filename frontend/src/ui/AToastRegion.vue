@@ -1,74 +1,108 @@
 <template>
     <ToastProvider label="Notification" swipe-direction="right">
         <ToastRoot
-            v-if="current"
-            :key="current.id"
+            v-for="toast in visibleToasts"
+            :key="toast.id"
             class="a-toast"
-            :class="{ 'has-action': current.action }"
-            :open="current.open"
-            :type="current.tone === 'danger' ? 'foreground' : 'background'"
-            :duration="current.duration ?? (current.action ? 8000 : 4000)"
-            @update:open="open => open || close(current!.id)"
+            :data-toast="toast.id"
+            :open="toast.open"
+            :type="toast.tone === 'danger' ? 'foreground' : 'background'"
+            :duration="toast.duration ?? (toast.action ? 8000 : 4000)"
+            @update:open="open => open || onRekaClose(toast.id)"
+            @escape-key-down="(e: KeyboardEvent) => onEscape(e, toast.id)"
         >
-            <AIcon :icon="ICONS[current.tone ?? 'success']" class="a-toast__icon" />
-            <ToastDescription class="a-toast__message">{{ current.message }}</ToastDescription>
-            <template v-if="current.action">
-                <ToastAction :alt-text="current.action.altText" as-child>
-                    <button
-                        type="button"
-                        class="a-toast__action a-state a-focus"
-                        @click="current.action.onClick()"
-                    >
-                        {{ current.action.label }}
-                    </button>
-                </ToastAction>
-                <ToastClose as-child>
-                    <button
-                        type="button"
-                        class="a-toast__close a-state a-focus"
-                        aria-label="Dismiss"
-                    >
-                        <AIcon :icon="IconClose" />
-                    </button>
-                </ToastClose>
-            </template>
+            <AIcon :icon="ICONS[toast.tone ?? 'success']" class="a-toast__icon" />
+            <ToastDescription class="a-toast__message">{{ toast.message }}</ToastDescription>
+            <!-- Not ToastAction/ToastClose: Reka's keyboard close clears the shared pause flag while
+            the other toasts stay paused, and they never expire after that. -->
+            <button
+                v-if="toast.action"
+                type="button"
+                class="a-toast__action a-state a-focus"
+                data-reka-toast-announce-exclude
+                :data-reka-toast-announce-alt="toast.action.altText"
+                @click="(toast.action.onClick(), close(toast.id))"
+            >
+                {{ toast.action.label }}
+            </button>
+            <button
+                type="button"
+                class="a-toast__close a-state a-focus"
+                aria-label="Dismiss"
+                @click="close(toast.id)"
+            >
+                <AIcon :icon="IconClose" />
+            </button>
         </ToastRoot>
-        <ToastViewport class="a-toast-viewport" @focusin="onFocusin" />
+        <!-- Wraps Reka's focus proxies too, and listens to `focus` in the capture phase: Tab lands on a
+        proxy first, which moves focus on in its own focus handler, before any focusin. -->
+        <div ref="wrapper" class="contents" @focus.capture="onFocus">
+            <ToastViewport class="a-toast-viewport" />
+        </div>
     </ToastProvider>
 </template>
 
 <script setup lang="ts">
-import {
-    ToastAction,
-    ToastClose,
-    ToastDescription,
-    ToastProvider,
-    ToastRoot,
-    ToastViewport,
-} from 'reka-ui'
-import { computed } from 'vue'
+import { ToastDescription, ToastProvider, ToastRoot, ToastViewport } from 'reka-ui'
+import { useTemplateRef } from 'vue'
 import AIcon from './AIcon.vue'
 import { IconAlertCircle, IconCheckCircle, IconClose, IconInformation } from './icons'
-import { dismissToast, toasts } from './useToast'
+import { dismissToast, visibleToasts } from './useToast'
 
-/** Shows `useToast()` toasts one at a time. Mount once. F8 focuses the region. */
-const current = computed(() => toasts.value[0])
+/** Shows `useToast()` toasts, a few at a time. Mount once. F8 focuses the region. */
 
 const ICONS = { success: IconCheckCircle, danger: IconAlertCircle, info: IconInformation }
 
-// Focus that entered the region (F8, Tab) goes back where it came from when its toast closes,
-// instead of staying on the empty region.
-let region: HTMLElement | null = null
+// Focus that entered the region (F8, Tab) moves to another open toast when its toast closes, and
+// goes back where it came from with the last one, instead of staying on the empty region.
+const wrapper = useTemplateRef('wrapper')
 let returnTo: HTMLElement | null = null
-function onFocusin(e: FocusEvent) {
-    region = e.currentTarget as HTMLElement
+function onFocus(e: FocusEvent) {
     const from = e.relatedTarget
-    if (from instanceof HTMLElement && !region.contains(from)) returnTo = from
+    if (from instanceof HTMLElement && !wrapper.value?.contains(from)) returnTo = from
+    // F8 focuses the list itself: go on to the newest toast, so that Esc closes it.
+    const target = e.target as HTMLElement
+    if (target.classList.contains('a-toast-viewport')) {
+        const newest = visibleToasts.value.findLast(t => t.open)
+        if (newest) target.querySelector<HTMLElement>(`[data-toast="${newest.id}"]`)?.focus()
+    }
+}
+
+// Reka closes every toast on any Escape in the page, so Esc in a popup, dialog or drawer would
+// dismiss them all. Only the focused toast closes. (Reka's popups and dialogs listen on window
+// after the toasts, so preventing the event here would keep those open instead.)
+let keepOnEscape: number | null = null
+function onEscape(e: KeyboardEvent, id: number) {
+    const target = e.target instanceof Element ? e.target : null
+    if (
+        !e.defaultPrevented &&
+        target?.closest('.a-toast')?.getAttribute('data-toast') !== String(id)
+    )
+        keepOnEscape = id
+}
+function onRekaClose(id: number) {
+    if (keepOnEscape === id) keepOnEscape = null
+    else close(id)
 }
 
 function close(id: number) {
-    if (region?.contains(document.activeElement) && returnTo?.isConnected) returnTo.focus()
-    returnTo = null
+    const region = wrapper.value
+    const active = document.activeElement
+    if (region?.contains(active)) {
+        // The next one in Tab order (newest first), else the one before it.
+        const list = visibleToasts.value
+        const at = list.findIndex(t => t.id === id)
+        const next = list.slice(0, at).findLast(t => t.open) ?? list.slice(at + 1).find(t => t.open)
+        const nextEl = next && region.querySelector<HTMLElement>(`[data-toast="${next.id}"]`)
+        if (nextEl) {
+            // Focus was in the closing toast, or on the region (F8, or Reka's Escape close).
+            const toast = active!.closest('.a-toast')
+            if (!toast || toast.getAttribute('data-toast') === String(id)) nextEl.focus()
+        } else {
+            if (returnTo?.isConnected) returnTo.focus()
+            returnTo = null
+        }
+    }
     dismissToast(id)
 }
 </script>
@@ -82,6 +116,7 @@ function close(id: number) {
         z-index: var(--z-toast);
         display: flex;
         flex-direction: column;
+        gap: 8px;
         width: max-content;
         max-width: calc(100vw - 32px);
         margin: 0;
@@ -89,6 +124,15 @@ function close(id: number) {
         list-style: none;
         transform: translateX(-50%);
         outline: none;
+
+        @media (width < 40rem) {
+            right: 16px;
+            left: 16px;
+            bottom: calc(16px + env(safe-area-inset-bottom));
+            width: auto;
+            max-width: none;
+            transform: none;
+        }
     }
 
     .a-toast {
@@ -102,11 +146,8 @@ function close(id: number) {
         color: var(--color-on-inverse);
         font-size: 14px;
         line-height: 1.4;
+        padding-inline-end: 6px;
         box-shadow: 0 10px 30px -10px oklch(0.3 0.03 60 / 0.35);
-
-        &.has-action {
-            padding-inline-end: 6px;
-        }
 
         &[data-state='open'] {
             animation: a-toast-in var(--duration-medium) var(--ease-standard);

@@ -379,7 +379,10 @@
                     </KitDemo>
                 </KitGroup>
 
-                <KitGroup title="ACombobox" description="Type to filter.">
+                <KitGroup
+                    title="ACombobox"
+                    description="Type to filter. Above 50 options the list is virtualized, and options are one line."
+                >
                     <KitDemo label="empty" stack>
                         <ACombobox v-model="uri" :options="URIS" label="New ref" clearable />
                     </KitDemo>
@@ -400,6 +403,9 @@
                     </KitDemo>
                     <KitDemo label="readonly" stack>
                         <ACombobox v-model="uriSet" :options="URIS" label="New ref" readonly />
+                    </KitDemo>
+                    <KitDemo label="virtualized, 500 options" stack>
+                        <ACombobox v-model="manyChapter" :options="MANY_CHAPTERS" label="Chapter" />
                     </KitDemo>
                 </KitGroup>
 
@@ -645,7 +651,7 @@
 
                 <KitGroup
                     title="Toasts (useToast)"
-                    description="One at a time; further toasts queue (at most 3 waiting). Hover or focus pauses; F8 focuses the region."
+                    description="Up to 3 at once, newest at the bottom; further toasts wait (at most 3). Hover or focus pauses them all; F8 focuses the region."
                 >
                     <KitDemo label="tones" wide>
                         <AButton variant="tonal" @click="toast.show({ message: 'Settings saved' })"
@@ -681,12 +687,12 @@
                         <AButton
                             variant="text"
                             @click="
-                                ['First', 'Second', 'Third'].forEach(m =>
+                                ['First', 'Second', 'Third', 'Fourth', 'Fifth'].forEach(m =>
                                     toast.show({ message: `${m} toast` })
                                 )
                             "
                         >
-                            Queue three
+                            Show five
                         </AButton>
                     </KitDemo>
                 </KitGroup>
@@ -997,7 +1003,7 @@
 
                 <KitGroup
                     title="AScrollRow"
-                    description="Cover cards as on the home page. The row scrolls with the keyboard when focused."
+                    description="Cover cards as on the home page. The row scrolls with the keyboard when focused, and by dragging with a mouse."
                     :min="600"
                 >
                     <KitDemo label="with cards" wide stack>
@@ -1265,6 +1271,10 @@ const CHAPTERS = Array.from({ length: 30 }, (_, i) => ({
     value: `c${i + 1}`,
     label: `Chapter ${i + 1}${i % 7 === 3 ? ': The one with a much longer title' : ''}`,
 }))
+const MANY_CHAPTERS = Array.from({ length: 500 }, (_, i) => ({
+    value: `c${i + 1}`,
+    label: `Chapter ${i + 1}${i % 7 === 3 ? ': The one with a much longer title that has to be cut off' : ''}`,
+}))
 const URIS = [
     'comic/one-piece/v01.cbz',
     'comic/one-piece/v02.cbz',
@@ -1318,6 +1328,7 @@ const notes = ref('Line one\nLine two')
 const status = ref<string | null>('reading')
 const statusEmpty = ref<string | null>(null)
 const chapter = ref<string | null>('c4')
+const manyChapter = ref<string | null>('c250')
 const provider = ref<'oidc' | 'proxy' | null>('oidc')
 const uri = ref<string | null>(null)
 const uriSet = ref<string | null>('book/dune.epub')
