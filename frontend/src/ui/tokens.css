@@ -1,0 +1,163 @@
+/*
+ * Design tokens, generated from the "Voltis App" OKLCH formulas: accent h=45 c=.15 (Ember),
+ * neutral h=75 c=.014. Light values live in @theme (so Tailwind utilities like `bg-surface-2`
+ * exist); `.dark` overrides them. Lightness was raised or lowered from the design where a pair
+ * failed WCAG AA (primary, error, outline, star; see the plan).
+ */
+@theme static {
+    --color-primary: oklch(0.51 0.15 45);
+    --color-on-primary: oklch(0.985 0.01 45);
+    --color-primary-container: oklch(0.92 0.0525 45);
+    --color-on-primary-container: oklch(0.3 0.09 45);
+    --color-secondary-container: oklch(0.92 0.03 45);
+    --color-on-secondary-container: oklch(0.3 0.04 45);
+
+    --color-bg: oklch(0.975 0.014 75);
+    --color-surface-1: oklch(0.97 0.014 75);
+    --color-surface-2: oklch(0.955 0.014 75);
+    --color-surface-3: oklch(0.94 0.014 75);
+    --color-surface-4: oklch(0.92 0.014 75);
+    --color-raised: oklch(0.997 0.0056 75);
+    --color-sidebar: oklch(0.96 0.0154 75);
+    --color-search: oklch(0.915 0.0168 75);
+    --color-field: oklch(0.935 0.014 75);
+    --color-card-line: oklch(0.92 0.014 75);
+
+    --color-fg: oklch(0.22 0.0168 75);
+    --color-fg-muted: oklch(0.45 0.028 75);
+    --color-outline: oklch(0.6 0.028 75);
+    --color-outline-variant: oklch(0.88 0.021 75);
+
+    --color-inverse: oklch(0.28 0.014 75);
+    --color-on-inverse: oklch(0.95 0.014 75);
+    --color-inverse-primary: oklch(0.8 0.105 45);
+
+    --color-error: oklch(0.52 0.18 25);
+    --color-on-error: oklch(0.985 0.01 25);
+    --color-error-container: oklch(0.93 0.05 25);
+    --color-on-error-container: oklch(0.32 0.1 25);
+    --color-success: oklch(0.5 0.13 145);
+    --color-on-success: oklch(0.985 0.01 145);
+    --color-success-container: oklch(0.93 0.05 145);
+    --color-on-success-container: oklch(0.3 0.08 145);
+    --color-warning: oklch(0.52 0.12 70);
+    --color-on-warning: oklch(0.985 0.01 70);
+    --color-warning-container: oklch(0.93 0.06 80);
+    --color-on-warning-container: oklch(0.32 0.08 70);
+    --color-info: oklch(0.52 0.13 245);
+    --color-on-info: oklch(0.985 0.01 245);
+    --color-info-container: oklch(0.93 0.04 245);
+    --color-on-info-container: oklch(0.3 0.08 245);
+    --color-star: oklch(0.62 0.15 70);
+
+    --radius-field: 12px;
+    --radius-card: 18px;
+    --radius-menu: 14px;
+    --radius-menu-item: 8px;
+    --radius-dialog: 22px;
+    --radius-cover: 12px;
+    --radius-toast: 12px;
+    --radius-tooltip: 8px;
+
+    --shadow-card:
+        0 0 0 1px var(--color-card-line), 0 1px 2px oklch(0.2 0.02 75 / 0.06),
+        0 2px 6px oklch(0.2 0.02 75 / 0.05), 0 8px 24px oklch(0.2 0.02 75 / 0.05);
+    --shadow-overlay:
+        0 0 0 1px var(--color-card-line), 0 4px 12px oklch(0.2 0.02 75 / 0.1),
+        0 16px 40px oklch(0.2 0.02 75 / 0.14);
+    --shadow-button-hover: 0 1px 2px oklch(0.2 0.02 75 / 0.15), 0 2px 6px oklch(0.2 0.02 75 / 0.1);
+
+    --font-sans: 'Figtree Variable', ui-sans-serif, system-ui, sans-serif;
+    --font-display: 'Source Serif 4 Variable', ui-serif, Georgia, serif;
+
+    --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+
+    --breakpoint-nav: 60rem;
+}
+
+@layer base {
+    :root {
+        --duration-short: 150ms;
+        --duration-medium: 250ms;
+
+        /* Height of the header. `--layout-top` (the space it reserves) and `--layout-left` (the
+         * persistent sidebar's column) are set by the layout store. */
+        --header-height: 64px;
+        --sidebar-width: 264px;
+        --layout-top: var(--header-height);
+        --layout-left: 0px;
+
+        /*
+         * Stacking, lowest first. The header is above every drawer and scrim, and the main-nav
+         * drawer above the page drawers (the reader's).
+         */
+        --z-drawer-scrim: 100;
+        --z-drawer: 101;
+        --z-sidebar-scrim: 102;
+        --z-sidebar: 103;
+        --z-header: 104;
+        --z-reader-progress: 105;
+        --z-dialog: 200;
+        --z-popover: 300;
+        --z-tooltip: 400;
+        --z-toast: 500;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        :root {
+            --duration-short: 0ms;
+            --duration-medium: 0ms;
+        }
+    }
+
+    .dark {
+        --color-primary: oklch(0.8 0.105 45);
+        --color-on-primary: oklch(0.28 0.075 45);
+        --color-primary-container: oklch(0.36 0.0825 45);
+        --color-on-primary-container: oklch(0.9 0.0525 45);
+        --color-secondary-container: oklch(0.33 0.035 45);
+        --color-on-secondary-container: oklch(0.9 0.03 45);
+
+        --color-bg: oklch(0.155 0.014 75);
+        --color-surface-1: oklch(0.19 0.014 75);
+        --color-surface-2: oklch(0.215 0.014 75);
+        --color-surface-3: oklch(0.245 0.014 75);
+        --color-surface-4: oklch(0.275 0.014 75);
+        --color-raised: oklch(0.275 0.014 75);
+        --color-sidebar: oklch(0.21 0.014 75);
+        --color-search: oklch(0.315 0.014 75);
+        --color-field: oklch(0.36 0.014 75);
+        --color-card-line: oklch(0.345 0.014 75);
+
+        --color-fg: oklch(0.93 0.014 75);
+        --color-fg-muted: oklch(0.76 0.021 75);
+        --color-outline: oklch(0.64 0.021 75);
+        --color-outline-variant: oklch(0.32 0.0168 75);
+
+        --color-inverse: oklch(0.92 0.014 75);
+        --color-on-inverse: oklch(0.25 0.014 75);
+        --color-inverse-primary: oklch(0.5 0.15 45);
+
+        --color-error: oklch(0.75 0.14 25);
+        --color-on-error: oklch(0.25 0.08 25);
+        --color-error-container: oklch(0.32 0.08 25);
+        --color-on-error-container: oklch(0.9 0.05 25);
+        --color-success: oklch(0.78 0.13 145);
+        --color-on-success: oklch(0.25 0.06 145);
+        --color-success-container: oklch(0.32 0.06 145);
+        --color-on-success-container: oklch(0.9 0.05 145);
+        --color-warning: oklch(0.8 0.13 80);
+        --color-on-warning: oklch(0.25 0.06 80);
+        --color-warning-container: oklch(0.32 0.06 80);
+        --color-on-warning-container: oklch(0.9 0.06 80);
+        --color-info: oklch(0.78 0.1 245);
+        --color-on-info: oklch(0.25 0.06 245);
+        --color-info-container: oklch(0.32 0.06 245);
+        --color-on-info-container: oklch(0.9 0.04 245);
+        --color-star: oklch(0.82 0.15 85);
+
+        --shadow-card: 0 0 0 1px var(--color-card-line), 0 2px 8px oklch(0 0 0 / 0.3);
+        --shadow-overlay: 0 0 0 1px var(--color-card-line), 0 16px 40px oklch(0 0 0 / 0.45);
+        --shadow-button-hover: 0 1px 3px oklch(0 0 0 / 0.4);
+    }
+}

@@ -20,12 +20,11 @@ vi.mock('@/utils/api/content', () => ({
 vi.mock('../useReaderTutorial', () => ({ useReaderTutorial: vi.fn() }))
 
 const stubs = {
-    VBtn: { template: '<button><slot /></button>' },
-    VIcon: { template: '<i />' },
-    VDivider: { template: '<hr />' },
-    VProgressCircular: { template: '<div class="loading" />' },
-    VAlert: { template: '<div class="alert"><slot /></div>' },
-    VProgressLinear: { template: '<div />' },
+    AButton: { template: '<button><slot /></button>' },
+    ADivider: { template: '<hr />' },
+    ASpinner: { template: '<div class="loading" />' },
+    AAlert: { template: '<div class="alert"><slot /></div>' },
+    AProgressBar: { template: '<div />' },
     BookReaderDrawer: true,
 }
 

@@ -25,23 +25,7 @@ vi.mock('vue-router', () => ({
     RouterLink: { template: '<a><slot /></a>' },
 }))
 
-const pass = { template: '<div><slot /></div>' }
-const stubs = {
-    VContainer: pass,
-    VRow: pass,
-    VCol: pass,
-    VCard: pass,
-    VCardTitle: pass,
-    VCardText: pass,
-    VCardActions: pass,
-    VForm: { template: '<form><slot /></form>' },
-    VBtn: { template: '<button><slot /></button>' },
-    VAlert: { template: '<div class="alert"><slot /></div>' },
-    VDivider: { template: '<hr />' },
-    VSpacer: { template: '<div />' },
-    AInput: { props: ['input'], template: '<input />' },
-    AQueryError: { template: '<div />' },
-}
+const stubs = { QueryError: { template: '<div />' } }
 
 function render() {
     return mount(PageLogin, { global: { stubs, plugins: [VueQueryPlugin, createHead()] } })
@@ -108,7 +92,7 @@ describe('PageLogin', () => {
             oidc_button_label: 'Company SSO',
         }
         const wrapper = render()
-        expect(wrapper.find('.alert').text()).toBe('the ID token was rejected')
+        expect(wrapper.find('[role=alert]').text()).toBe('the ID token was rejected')
         expect(wrapper.find('form').exists()).toBe(false)
         expect(wrapper.text()).toContain('Company SSO')
     })

@@ -1,86 +1,93 @@
 <template>
-    <VContainer>
-        <h1 class="mb-6 text-4xl">Account</h1>
+    <div class="settings-page max-w-[780px]">
+        <APageHeader title="Account" class="mb-1.5" />
 
-        <VCard class="mb-6">
-            <VCardTitle>User Details</VCardTitle>
-            <VCardText>
-                <VForm @submit="detailsForm.onSubmit" class="space-y-4!">
-                    <AInput :input="detailsForm.getInputProps('username')" label="Username" />
-                    <AInput
-                        :input="detailsForm.getInputProps('email')"
-                        label="Email"
-                        type="email"
-                    />
-                    <AQueryError :mutation="detailsForm.mutation" />
-                    <VBtn
-                        type="submit"
-                        color="primary"
-                        :loading="detailsForm.mutation.isPending.value"
-                        class="mt-4"
-                    >
-                        Save
-                    </VBtn>
-                </VForm>
-            </VCardText>
-        </VCard>
-
-        <IdentitiesCard
-            v-if="me.data.value"
-            class="mb-6"
-            :user-id="'me'"
-            self
-            @unlinked="signedOut"
-        >
-            <VAlert v-if="linkError" type="error" variant="tonal" class="mb-4">
-                {{ linkError }}
-            </VAlert>
-            <VBtn
-                v-if="info.data.value?.oidc_enabled"
-                variant="tonal"
-                prepend-icon="mdi-link-variant"
-                :loading="link.isPending.value"
-                @click="connectSso"
+        <ACard title="User details">
+            <form
+                :id="detailsFormId"
+                novalidate
+                class="flex flex-col gap-3"
+                @submit="detailsForm.onSubmit"
             >
-                Connect SSO
-            </VBtn>
-            <AQueryError :mutation="link" />
+                <ATextField
+                    v-bind="detailsForm.field('username')"
+                    label="Username"
+                    autocomplete="username"
+                />
+                <ATextField
+                    v-bind="detailsForm.field('email')"
+                    label="Email"
+                    type="email"
+                    autocomplete="email"
+                />
+                <QueryError :mutation="detailsForm.mutation" />
+            </form>
+            <template #actions>
+                <AButton
+                    type="submit"
+                    :form="detailsFormId"
+                    :loading="detailsForm.mutation.isPending.value"
+                >
+                    Save
+                </AButton>
+            </template>
+        </ACard>
+
+        <IdentitiesCard v-if="me.data.value" user-id="me" self @unlinked="signedOut">
+            <AAlert v-if="linkError" tone="danger">{{ linkError }}</AAlert>
+            <QueryError :mutation="link" />
+            <div v-if="info.data.value?.oidc_enabled">
+                <AButton
+                    variant="tonal"
+                    :leading-icon="IconLink"
+                    :loading="link.isPending.value"
+                    @click="connectSso"
+                >
+                    Connect SSO
+                </AButton>
+            </div>
         </IdentitiesCard>
 
-        <VCard v-if="info.data.value?.password_login_enabled">
-            <VCardTitle>{{
-                me.data.value?.has_password ? 'Change Password' : 'Set Password'
-            }}</VCardTitle>
-            <VCardText>
-                <VForm @submit="passwordForm.onSubmit">
-                    <AInput
-                        :input="passwordForm.getInputProps('password')"
-                        label="New Password"
-                        type="password"
-                    />
-                    <AQueryError :mutation="passwordForm.mutation" />
-                    <VBtn
-                        type="submit"
-                        color="primary"
-                        :loading="passwordForm.mutation.isPending.value"
-                        class="mt-4"
-                    >
-                        Update Password
-                    </VBtn>
-                </VForm>
-            </VCardText>
-        </VCard>
-    </VContainer>
+        <ACard
+            v-if="info.data.value?.password_login_enabled"
+            :title="me.data.value?.has_password ? 'Change password' : 'Set password'"
+        >
+            <form :id="passwordFormId" novalidate @submit="passwordForm.onSubmit">
+                <ATextField
+                    v-bind="passwordForm.field('password')"
+                    label="New password"
+                    type="password"
+                    autocomplete="new-password"
+                />
+                <QueryError :mutation="passwordForm.mutation" class="mt-3" />
+            </form>
+            <template #actions>
+                <AButton
+                    type="submit"
+                    :form="passwordFormId"
+                    :loading="passwordForm.mutation.isPending.value"
+                >
+                    Update password
+                </AButton>
+            </template>
+        </ACard>
+    </div>
 </template>
 
 <script setup lang="ts">
 import { useQueryClient } from '@tanstack/vue-query'
 import { useHead } from '@unhead/vue'
-import { computed, watch } from 'vue'
+import { computed, useId, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { z } from 'zod'
-import AInput from '@/components/AInput.vue'
-import AQueryError from '@/components/AQueryError.vue'
+import QueryError from '@/components/QueryError.vue'
+import AAlert from '@/ui/AAlert.vue'
+import AButton from '@/ui/AButton.vue'
+import ACard from '@/ui/ACard.vue'
+import APageHeader from '@/ui/APageHeader.vue'
+import ATextField from '@/ui/ATextField.vue'
+import { IconLink } from '@/ui/icons'
+import { useToast } from '@/ui/useToast'
 import { miscApi } from '@/utils/api/misc'
 import { oidcApi } from '@/utils/api/oidc'
 import { usersApi } from '@/utils/api/users'
@@ -98,6 +105,9 @@ const link = oidcApi.useLink()
 const queryClient = useQueryClient()
 const route = useRoute()
 const router = useRouter()
+const toast = useToast()
+const detailsFormId = useId()
+const passwordFormId = useId()
 
 // The SSO callback reports link failures by sending the browser back here.
 const linkError = computed(() => (route.query.error as string) || '')
@@ -115,7 +125,7 @@ function signedOut() {
 
 const detailsForm = useForm({
     schema: z.object({
-        username: z.string().min(3),
+        username: z.string().min(3, 'Use at least 3 characters'),
         email: z.string(),
     }),
     initialValues: {
@@ -127,6 +137,7 @@ const detailsForm = useForm({
             username: values.username,
             email: values.email,
         })
+        toast.show({ message: 'Saved your details' })
     },
 })
 
@@ -145,7 +156,7 @@ watch(
 
 const passwordForm = useForm({
     schema: z.object({
-        password: z.string().min(8),
+        password: z.string().min(8, 'Use at least 8 characters'),
     }),
     initialValues: {
         password: '',
@@ -159,6 +170,7 @@ const passwordForm = useForm({
             password: values.password,
         })
         passwordForm.reset()
+        toast.show({ message: 'Password updated' })
     },
 })
 </script>

@@ -1,20 +1,28 @@
 <template>
-    <div
-        v-if="qMe.isLoading.value || qInfo.isLoading.value"
-        class="flex h-screen w-screen items-center justify-center"
-    >
-        <VProgressCircular indeterminate size="64" />
-    </div>
-    <RouterView v-else />
+    <TooltipProvider :delay-duration="400">
+        <div
+            v-if="qMe.isLoading.value || qInfo.isLoading.value"
+            class="flex h-screen w-screen items-center justify-center"
+        >
+            <ASpinner size="lg" />
+        </div>
+        <RouterView v-else />
+    </TooltipProvider>
 </template>
 
 <script setup lang="ts">
 import { useHead } from '@unhead/vue'
+import { TooltipProvider } from 'reka-ui'
 import { watch } from 'vue'
 import { RouterView, useRouter } from 'vue-router'
+import { useLayoutStore } from './pages/_layout/useLayoutStore'
 import { useScanSync } from './stores/scans'
+import ASpinner from './ui/ASpinner.vue'
 import { miscApi } from './utils/api/misc'
 import { usersApi } from './utils/api/users'
+
+// Created here so the theme applies to every page, the auth pages included.
+useLayoutStore()
 
 const router = useRouter()
 const qMe = usersApi.useMe()
@@ -29,6 +37,9 @@ watch(
         if (!isLoading && !me && info) {
             // The sign-in is verified but unfinished: it owns this page.
             if (route.path === '/auth/oidc/complete') {
+                return
+            }
+            if (import.meta.env.DEV && route.path === '/_kit') {
                 return
             }
             if (info.first_user_flow && route.path !== '/auth/register') {
@@ -49,26 +60,3 @@ useHead({
     },
 })
 </script>
-
-<style lang="css">
-.v-btn {
-    text-transform: none;
-    letter-spacing: normal;
-}
-
-.v-overlay__content > .v-card > .v-card-title {
-    padding: 16px 24px 0;
-}
-
-body {
-    touch-action: manipulation;
-}
-
-.v-navigation-drawer__scrim {
-    @apply select-none;
-
-    &.fade-transition-leave-active {
-        pointer-events: none;
-    }
-}
-</style>

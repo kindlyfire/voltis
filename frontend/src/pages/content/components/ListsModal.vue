@@ -1,61 +1,58 @@
 <template>
-    <VDialog :model-value="open" @update:model-value="v => !v && close()" max-width="400">
-        <VCard>
-            <VCardTitle>Add to list</VCardTitle>
-            <VCardText class="space-y-4!">
-                <AQueryError :query="qLists" />
-                <AQueryError :query="qInLists" />
+    <ADialog :open="open" title="Add to list" size="sm" @update:open="v => !v && close()">
+        <div class="flex flex-col gap-4">
+            <QueryError :query="qLists" />
+            <QueryError :query="qInLists" />
 
-                <div
-                    v-if="qLists.isLoading.value || qInLists.isLoading.value"
-                    class="py-10 text-center"
+            <div
+                v-if="qLists.isLoading.value || qInLists.isLoading.value"
+                class="flex justify-center py-8"
+            >
+                <ASpinner />
+            </div>
+
+            <fieldset
+                v-else-if="qLists.isSuccess.value && qInLists.isSuccess.value"
+                class="flex flex-col"
+            >
+                <legend class="sr-only">Lists</legend>
+                <ACheckbox
+                    v-for="list in qLists.data.value ?? []"
+                    :key="list.id"
+                    :model-value="pendingListIds.has(list.id) !== inListIds.has(list.id)"
+                    :label="list.name"
+                    :readonly="pendingListIds.has(list.id)"
+                    :aria-busy="pendingListIds.has(list.id) || undefined"
+                    @update:model-value="toggleList(list)"
                 >
-                    <VProgressCircular indeterminate />
-                </div>
+                    {{ list.name }}
+                    <span class="text-fg-muted text-sm capitalize">· {{ list.visibility }}</span>
+                </ACheckbox>
+                <p v-if="!qLists.data.value?.length" class="text-fg-muted">
+                    No lists yet. Create one from the Lists page.
+                </p>
+            </fieldset>
 
-                <VList v-else-if="qLists.isSuccess.value && qInLists.isSuccess.value">
-                    <VListItem
-                        v-for="list in qLists.data?.value ?? []"
-                        :key="list.id"
-                        :title="list.name"
-                        :subtitle="list.visibility"
-                        @click="toggleList(list.id)"
-                    >
-                        <template #append>
-                            <VProgressCircular
-                                v-if="pendingListIds.has(list.id)"
-                                indeterminate
-                                size="24"
-                                width="2"
-                            />
-                            <VIcon
-                                v-else-if="inListIds.has(list.id)"
-                                icon="mdi-check"
-                                color="success"
-                            />
-                        </template>
-                    </VListItem>
-                    <div v-if="!qLists.data?.value?.length" class="opacity-60">
-                        No lists yet. Create one from the Lists page.
-                    </div>
-                </VList>
-
-                <AQueryError :mutation="mToggle" />
-            </VCardText>
-            <VCardActions>
-                <VSpacer />
-                <VBtn variant="text" @click="close()">Close</VBtn>
-            </VCardActions>
-        </VCard>
-    </VDialog>
+            <QueryError :mutation="mToggle" />
+        </div>
+        <template #actions>
+            <AButton variant="text" tone="neutral" @click="close()">Close</AButton>
+        </template>
+    </ADialog>
 </template>
 
 <script setup lang="ts">
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import { computed, ref } from 'vue'
-import AQueryError from '@/components/AQueryError.vue'
+import QueryError from '@/components/QueryError.vue'
+import AButton from '@/ui/AButton.vue'
+import ACheckbox from '@/ui/ACheckbox.vue'
+import ADialog from '@/ui/ADialog.vue'
+import ASpinner from '@/ui/ASpinner.vue'
+import { useToast } from '@/ui/useToast'
 import { contentApi } from '@/utils/api/content'
 import { customListsApi } from '@/utils/api/custom-lists'
+import type { CustomListPartial } from '@/utils/api/types'
 
 const props = defineProps<{
     open: boolean
@@ -64,6 +61,7 @@ const props = defineProps<{
 }>()
 
 const queryClient = useQueryClient()
+const toast = useToast()
 
 const qLists = customListsApi.useList('me')
 const qInLists = contentApi.useLists(() => props.contentId)
@@ -94,12 +92,16 @@ const mToggle = useMutation({
     },
 })
 
-async function toggleList(listId: string) {
-    pendingListIds.value.add(listId)
+async function toggleList(list: CustomListPartial) {
+    const adding = !inListIds.value.has(list.id)
+    pendingListIds.value.add(list.id)
     try {
-        await mToggle.mutateAsync(listId)
+        await mToggle.mutateAsync(list.id)
+        toast.show({ message: adding ? `Added to ${list.name}` : `Removed from ${list.name}` })
+    } catch {
+        // Shown by QueryError.
     } finally {
-        pendingListIds.value.delete(listId)
+        pendingListIds.value.delete(list.id)
     }
 }
 </script>

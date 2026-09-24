@@ -1,61 +1,56 @@
 <template>
-    <VContainer>
+    <div class="page-frame">
         <div
             v-if="!qLibraries.isLoading.value && libraries?.length === 0 && user"
-            class="flex flex-col items-center justify-center"
-            style="min-height: 75vh"
+            class="flex min-h-[70dvh] flex-col items-center justify-center gap-4 text-center"
         >
+            <h1 class="font-display text-[30px] font-semibold">No libraries yet</h1>
             <template v-if="user.permissions.includes('ADMIN')">
-                <div class="text-h6 mb-4 opacity-60">No libraries. Add one in settings!</div>
-                <VBtn color="primary" to="/settings/libraries">Libraries</VBtn>
+                <p class="text-fg-muted">Add one in the settings to get started.</p>
+                <AButton to="/settings/libraries">Libraries</AButton>
             </template>
-            <template v-else>
-                <div class="text-h6 mb-4 opacity-60">
-                    No libraries. Ask your server admin to import something!
-                </div>
-            </template>
+            <p v-else class="text-fg-muted">Ask your server admin to import something.</p>
         </div>
-        <div v-else class="space-y-4">
-            <section v-if="lastRead?.length">
-                <ACarousel title="Recently Read">
-                    <template v-if="qLastRead.isLoading.value">
-                        <ACarouselItem v-for="i in 3" :key="i">
-                            <AContentGridItemSkeleton />
-                        </ACarouselItem>
-                    </template>
-                    <template v-else>
-                        <ACarouselItem v-for="item in lastRead" :key="item.id">
-                            <AContentGridItem :content="item" />
-                        </ACarouselItem>
-                    </template>
-                </ACarousel>
-            </section>
+        <div v-else class="flex flex-col gap-9">
+            <h1 class="sr-only">Home</h1>
+            <QueryError :query="qLastRead" />
+            <AScrollRow
+                v-if="qLastRead.isLoading.value || lastRead.length"
+                title="Recently Read"
+                :aria-busy="qLastRead.isLoading.value || undefined"
+            >
+                <template v-if="qLastRead.isLoading.value">
+                    <ContentGridItemSkeleton v-for="i in 6" :key="i" />
+                </template>
+                <ContentGridItem v-for="item in lastRead" v-else :key="item.id" :content="item" />
+            </AScrollRow>
 
-            <section>
-                <ACarousel title="Newly Added">
-                    <template v-if="qNewest.isLoading.value">
-                        <ACarouselItem v-for="i in 3" :key="i">
-                            <AContentGridItemSkeleton />
-                        </ACarouselItem>
-                    </template>
-                    <template v-else>
-                        <ACarouselItem v-for="item in newest?.data ?? []" :key="item.id">
-                            <AContentGridItem :content="item" />
-                        </ACarouselItem>
-                    </template>
-                </ACarousel>
-            </section>
+            <QueryError :query="qNewest" />
+            <AScrollRow
+                v-if="qNewest.isLoading.value || newest.length"
+                title="Newly Added"
+                :aria-busy="qNewest.isLoading.value || undefined"
+            >
+                <template v-if="qNewest.isLoading.value">
+                    <ContentGridItemSkeleton v-for="i in 6" :key="i" />
+                </template>
+                <ContentGridItem v-for="item in newest" v-else :key="item.id" :content="item" />
+            </AScrollRow>
+            <p v-else-if="qNewest.isSuccess.value" class="text-fg-muted py-12 text-center">
+                Nothing has been added yet.
+            </p>
         </div>
-    </VContainer>
+    </div>
 </template>
 
 <script setup lang="ts">
 import { useHead } from '@unhead/vue'
 import { computed } from 'vue'
-import ACarousel from '@/components/ACarousel.vue'
-import ACarouselItem from '@/components/ACarouselItem.vue'
-import AContentGridItem from '@/components/AContentGrid/Item.vue'
-import AContentGridItemSkeleton from '@/components/AContentGrid/ItemSkeleton.vue'
+import ContentGridItem from '@/components/ContentGrid/Item.vue'
+import ContentGridItemSkeleton from '@/components/ContentGrid/ItemSkeleton.vue'
+import QueryError from '@/components/QueryError.vue'
+import AButton from '@/ui/AButton.vue'
+import AScrollRow from '@/ui/AScrollRow.vue'
 import { contentApi } from '@/utils/api/content'
 import { librariesApi } from '@/utils/api/libraries'
 import { usersApi } from '@/utils/api/users'
@@ -84,5 +79,5 @@ const qNewest = contentApi.useList({
     sort_order: 'desc',
     limit: 10,
 })
-const newest = computed(() => qNewest.data.value)
+const newest = computed(() => qNewest.data.value?.data ?? [])
 </script>

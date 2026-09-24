@@ -136,7 +136,7 @@ describe('scanRow', () => {
                 progress: null,
                 output: { added: 5, updated: 1, removed: 2, failed: 0, unchanged: 9, duration: 1 },
             },
-            want: { detail: '5 added, 1 updated, 2 removed', color: 'success' },
+            want: { detail: '5 added, 1 updated, 2 removed', tone: 'success' },
         },
         {
             name: 'reports queued tasks',

@@ -1,9 +1,9 @@
 <template>
-    <VContainer v-if="qContent.error.value">
-        <AQueryError :query="qContent" />
-    </VContainer>
+    <div v-if="qContent.error.value" class="nav:px-10 px-4 pt-3">
+        <QueryError :query="qContent" />
+    </div>
     <div v-else-if="!contentType" class="absolute inset-0 flex items-center justify-center">
-        <VProgressCircular indeterminate size="64" />
+        <ASpinner size="lg" />
     </div>
     <template v-else>
         <ComicDisplay v-if="contentType === 'comic'" :contentId="contentId" />
@@ -15,7 +15,8 @@
 import { useHead } from '@unhead/vue'
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import AQueryError from '@/components/AQueryError.vue'
+import QueryError from '@/components/QueryError.vue'
+import ASpinner from '@/ui/ASpinner.vue'
 import { contentApi } from '@/utils/api/content'
 import type { ContentType } from '@/utils/api/types'
 import BookDisplay from '../read/BookDisplay/BookDisplay.vue'

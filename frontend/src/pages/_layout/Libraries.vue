@@ -1,48 +1,49 @@
 <template>
-    <VListSubheader>
-        <template v-if="qLibraries.isLoading.value || libraries?.length">Libraries</template>
-        <template v-else>No libraries...</template>
-    </VListSubheader>
-    <VListItem
+    <ANavLabel>
+        {{ qLibraries.isLoading.value || libraries?.length ? 'Libraries' : 'No libraries' }}
+    </ANavLabel>
+    <ANavItem
         v-for="library in shownLibraries"
         :key="library.id"
         :to="`/${library.id}`"
-        prepend-icon="mdi-bookshelf"
-        :active="library.id === activeLibraryId"
-    >
-        <VListItemTitle>{{ library.name }}</VListItemTitle>
-    </VListItem>
-    <VListItem
+        :icon="IconBookshelf"
+        :active-icon="IconBookshelfFilled"
+        :label="library.name"
+        :active="library.id === activeLibraryId || undefined"
+    />
+    <ANavItem
         v-if="activeNonShownLibrary"
         :key="activeNonShownLibrary.id"
         :to="`/${activeNonShownLibrary.id}`"
-        prepend-icon="mdi-bookshelf"
+        :icon="IconBookshelf"
+        :active-icon="IconBookshelfFilled"
+        :label="activeNonShownLibrary.name"
         active
-    >
-        <VListItemTitle>{{ activeNonShownLibrary.name }}</VListItemTitle>
-    </VListItem>
-    <VMenu v-if="overflowLibraries.length" location="end">
-        <template #activator="{ props }">
-            <VListItem v-bind="props" prepend-icon="mdi-dots-horizontal">
-                <VListItemTitle>Others</VListItemTitle>
-            </VListItem>
+    />
+    <AMenu v-if="overflowLibraries.length" side="right">
+        <template #trigger>
+            <ANavItem :icon="IconDotsHorizontal" label="Others" />
         </template>
-        <VList nav>
-            <VListItem
-                v-for="library in overflowLibraries"
-                :key="library.id"
-                :to="`/${library.id}`"
-            >
-                <VListItemTitle class="min-w-[100px]">{{ library.name }}</VListItemTitle>
-            </VListItem>
-        </VList>
-    </VMenu>
+        <AMenuItem
+            v-for="library in overflowLibraries"
+            :key="library.id"
+            :to="`/${library.id}`"
+            :leading-icon="IconBookshelf"
+        >
+            {{ library.name }}
+        </AMenuItem>
+    </AMenu>
 </template>
 
 <script setup lang="ts">
 import { keepPreviousData, useQuery } from '@tanstack/vue-query'
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
+import AMenu from '@/ui/AMenu.vue'
+import AMenuItem from '@/ui/AMenuItem.vue'
+import ANavItem from '@/ui/ANavItem.vue'
+import ANavLabel from '@/ui/ANavLabel.vue'
+import { IconBookshelf, IconBookshelfFilled, IconDotsHorizontal } from '@/ui/icons'
 import { contentApi } from '@/utils/api/content'
 import { librariesApi } from '@/utils/api/libraries'
 import { usersApi } from '@/utils/api/users'

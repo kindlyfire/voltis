@@ -1,36 +1,35 @@
 <template>
-    <VDialog :model-value="open" @update:model-value="v => !v && close(false)" max-width="400">
-        <VCard>
-            <VCardTitle>You've completed this series</VCardTitle>
-            <VCardText>
-                <div>Do you want to start again? This will mark all chapters as unread.</div>
-                <AQueryError :mutation="mResetReading" class="mt-4" />
-            </VCardText>
-
-            <VCardActions>
-                <VSpacer />
-                <VBtn
-                    variant="text"
-                    @click="close(false)"
-                    :disabled="mResetReading.isPending.value"
-                >
-                    No
-                </VBtn>
-                <VBtn
-                    color="primary"
-                    @click="mResetReading.mutate()"
-                    :loading="mResetReading.isPending.value"
-                >
-                    Yes
-                </VBtn>
-            </VCardActions>
-        </VCard>
-    </VDialog>
+    <ADialog
+        :open="open"
+        title="You've completed this series"
+        description="Do you want to start again? This will mark all chapters as unread."
+        size="sm"
+        :dismissible="!mResetReading.isPending.value"
+        @update:open="v => !v && close(false)"
+    >
+        <QueryError :mutation="mResetReading" />
+        <template #actions>
+            <AButton
+                variant="text"
+                tone="neutral"
+                :disabled="mResetReading.isPending.value"
+                @click="close(false)"
+            >
+                No
+            </AButton>
+            <AButton :loading="mResetReading.isPending.value" @click="mResetReading.mutate()">
+                Yes, start again
+            </AButton>
+        </template>
+    </ADialog>
 </template>
 
 <script setup lang="ts">
 import { useMutation } from '@tanstack/vue-query'
-import AQueryError from '@/components/AQueryError.vue'
+import QueryError from '@/components/QueryError.vue'
+import AButton from '@/ui/AButton.vue'
+import ADialog from '@/ui/ADialog.vue'
+import { useToast } from '@/ui/useToast'
 import { contentApi } from '@/utils/api/content'
 
 const props = defineProps<{
@@ -39,10 +38,15 @@ const props = defineProps<{
     contentId: string
 }>()
 
+const toast = useToast()
+
 const mResetReading = useMutation({
     mutationFn: async () => {
         await contentApi.setSeriesItemStatuses(props.contentId, null)
         await contentApi.updateUserData(props.contentId, { status: 'reading' })
+    },
+    onSuccess() {
+        toast.show({ message: 'Marked all chapters as unread' })
         props.close(true)
     },
 })

@@ -6,12 +6,11 @@
 
     <ReaderSidebar />
 
-    <VProgressLinear
-        :model-value="progressValue"
+    <AProgressBar
+        :value="progressValue / 100"
+        label="Reading progress"
         class="reader-progress"
         :class="`mode-${reader.mode}`"
-        height="3"
-        color="primary"
     />
 </template>
 
@@ -20,6 +19,7 @@ import { useScroll, useWindowSize } from '@vueuse/core'
 import { watch, computed, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useLayoutStore } from '@/pages/_layout/useLayoutStore'
+import AProgressBar from '@/ui/AProgressBar.vue'
 import { useReaderTutorial } from '../useReaderTutorial'
 import ReaderModeLongstrip from './ReaderModeLongstrip.vue'
 import ReaderModePaged from './ReaderModePaged.vue'
@@ -83,20 +83,21 @@ const progressValue = computed(() => {
 .reader-main {
     position: relative;
     width: 100%;
-    min-height: calc(100dvh - var(--v-layout-top, 0px));
+    min-height: calc(100dvh - var(--layout-top, 0px));
 }
 
 .reader-progress {
     position: fixed;
-    bottom: 0 !important;
-    top: auto !important;
+    bottom: 0;
     left: 0;
     right: 0;
-    z-index: 10000;
+    z-index: var(--z-reader-progress);
+    border-radius: 0;
     pointer-events: none;
+}
 
-    &.mode-longstrip {
-        transition: none;
-    }
+/* Scrolling drives it continuously; easing would only make it lag. */
+.reader-progress.mode-longstrip :deep(.a-progress__fill) {
+    transition: none;
 }
 </style>

@@ -17,50 +17,20 @@ vi.mock('@/stores/scans', () => ({ useScanSync: vi.fn() }))
 vi.mock('@/pages/_layout/useLayoutStore', () => ({
     useLayoutStore: () => ({
         navbarHidden: { value: false },
-        sidebarOpen: { value: true },
+        sidebarPersistent: true,
         sidebarTemporary: { value: false },
+        closeDrawer: () => {},
     }),
 }))
-vi.mock('@/components/AConfirmModal.vue', () => ({
+vi.mock('@/components/ConfirmModal.vue', () => ({
     showConfirmModal: vi.fn(async () => true),
 }))
 
 const pass = { template: '<div><slot /></div>' }
-const button = { template: '<button><slot /></button>' }
 const stubs = {
-    ...Object.fromEntries(
-        [
-            'VApp',
-            'VAppBar',
-            'VAppBarTitle',
-            'VList',
-            'VListItemTitle',
-            'VMain',
-            'VProgressCircular',
-            'VContainer',
-            'VRow',
-            'VCol',
-            'VCard',
-            'VCardTitle',
-            'VCardText',
-            'VCardActions',
-            'VAlert',
-            'VSpacer',
-            'VTable',
-        ].map(name => [name, pass])
-    ),
-    VNavigationDrawer: { template: '<div><slot /><slot name="append" /></div>' },
-    VMenu: { template: '<div><slot name="activator" :props="{}" /><slot /></div>' },
-    VForm: { template: '<form><slot /></form>' },
-    VBtn: button,
-    VListItem: button,
-    VAppBarNavIcon: button,
-    VDivider: { template: '<hr />' },
-    AInput: {
-        props: ['input'],
-        template: `<input :value="input.modelValue" @input="input['onUpdate:modelValue']($event.target.value)" />`,
-    },
-    AQueryError: { template: '<div />' },
+    AMenu: { template: '<div><slot name="trigger" /><slot /></div>' },
+    AMenuItem: { template: '<button @click="$emit(\'select\')"><slot /></button>' },
+    QueryError: { template: '<div />' },
     Libraries: true,
     ScanIndicator: true,
     SearchBox: true,
@@ -188,7 +158,7 @@ const actions = [
     {
         action: 'self-unlink',
         path: '/settings/account',
-        label: 'Unlink (signs you out everywhere)',
+        label: 'Unlink alice',
     },
 ]
 
@@ -199,7 +169,7 @@ describe.each(actions)('$action with auto-redirect on', ({ path, label }) => {
         sessionResponse = response.promise
         await wrapper
             .findAll('button')
-            .find(button => button.text() === label || button.attributes('title') === label)!
+            .find(button => button.text() === label || button.attributes('aria-label') === label)!
             .trigger('click')
         await flushPromises()
 
@@ -222,7 +192,7 @@ describe.each(actions)('$action with auto-redirect on', ({ path, label }) => {
         signOutResponse = response.promise
         await wrapper
             .findAll('button')
-            .find(button => button.text() === label || button.attributes('title') === label)!
+            .find(button => button.text() === label || button.attributes('aria-label') === label)!
             .trigger('click')
         await flushPromises()
         expect(signedIn).toBe(false)
@@ -245,7 +215,7 @@ describe.each(actions)('$action with auto-redirect on', ({ path, label }) => {
         })
         await wrapper
             .findAll('button')
-            .find(button => button.text() === label || button.attributes('title') === label)!
+            .find(button => button.text() === label || button.attributes('aria-label') === label)!
             .trigger('click')
         await flushPromises()
 
@@ -264,7 +234,9 @@ describe.each(actions)('$action with auto-redirect on', ({ path, label }) => {
             signOutFailure = failure
             await wrapper
                 .findAll('button')
-                .find(button => button.text() === label || button.attributes('title') === label)!
+                .find(
+                    button => button.text() === label || button.attributes('aria-label') === label
+                )!
                 .trigger('click')
             await flushPromises()
             expect(signedIn).toBe(false)
@@ -285,7 +257,7 @@ describe.each(actions)('$action with auto-redirect on', ({ path, label }) => {
         signOutRevokes = false
         await wrapper
             .findAll('button')
-            .find(button => button.text() === label || button.attributes('title') === label)!
+            .find(button => button.text() === label || button.attributes('aria-label') === label)!
             .trigger('click')
         await flushPromises()
         expect(errors).toHaveBeenCalled()
@@ -317,7 +289,9 @@ describe.each(actions)('$action with auto-redirect on', ({ path, label }) => {
             if (started === 'before') await refetch()
             await wrapper
                 .findAll('button')
-                .find(button => button.text() === label || button.attributes('title') === label)!
+                .find(
+                    button => button.text() === label || button.attributes('aria-label') === label
+                )!
                 .trigger('click')
             await flushPromises()
             if (started === 'during') await refetch()
@@ -370,8 +344,8 @@ it('auto-redirects a later expiry after signing out and signing back in with a p
     expect(router.currentRoute.value.path).toBe('/auth/login')
     expect(window.location.href).toBe('')
 
-    await wrapper.find('input[label="Username"]').setValue('alice')
-    await wrapper.find('input[label="Password"]').setValue('password')
+    await wrapper.find('input[autocomplete="username"]').setValue('alice')
+    await wrapper.find('input[autocomplete="current-password"]').setValue('password')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
     expect(router.currentRoute.value.path).toBe('/')

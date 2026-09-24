@@ -1,48 +1,50 @@
 <template>
-    <VMenu v-if="visible" v-model="menuOpen" :close-on-content-click="false" max-width="350">
-        <template #activator="{ props }">
-            <VBtn v-bind="props" icon="mdi-sync" variant="text" :class="active && 'scan-spin'" />
+    <APopover v-if="visible" v-model:open="menuOpen" label="Library scans" align="end" :width="340">
+        <template #trigger>
+            <AIconButton
+                :icon="IconSync"
+                :label="active ? 'Library scans (running)' : 'Library scans'"
+                :class="{ 'scan-spin': active }"
+            />
         </template>
-        <VCard>
-            <VCardText class="flex flex-col gap-3">
-                <div v-for="row in rows" :key="row.id" class="min-w-[300px] rounded border p-3">
-                    <div class="flex items-center gap-2 font-medium">
-                        {{ getLibraryName(row.libraryId) }}
-                        <VIcon
-                            v-if="row.status >= TaskStatus.COMPLETED"
-                            :icon="
-                                row.status === TaskStatus.COMPLETED
-                                    ? 'mdi-check'
-                                    : 'mdi-alert-circle'
-                            "
-                            :color="row.color"
-                            size="small"
-                        />
-                    </div>
-                    <VProgressLinear
-                        v-if="row.status !== TaskStatus.PENDING"
-                        :model-value="row.value"
-                        :indeterminate="row.indeterminate"
-                        :color="row.color"
-                        class="mt-2"
-                        rounded
-                        height="6"
+        <ul class="flex flex-col gap-3">
+            <li
+                v-for="row in rows"
+                :key="row.id"
+                class="border-outline-variant flex flex-col gap-2 rounded-xl border p-3"
+            >
+                <div class="flex items-center gap-2 text-sm font-semibold">
+                    <span class="min-w-0 truncate">{{ getLibraryName(row.libraryId) }}</span>
+                    <AIcon
+                        v-if="row.status >= TaskStatus.COMPLETED"
+                        :icon="row.status === TaskStatus.COMPLETED ? IconCheck : IconAlertCircle"
+                        :label="row.status === TaskStatus.COMPLETED ? 'Done' : 'Failed'"
+                        :class="row.tone === 'success' ? 'text-success' : 'text-error'"
+                        class="text-lg"
                     />
-                    <div
-                        class="mt-1 opacity-60"
-                        :class="row.status === TaskStatus.PENDING ? 'text-sm' : 'text-xs'"
-                    >
-                        {{ row.detail }}
-                    </div>
                 </div>
-            </VCardText>
-        </VCard>
-    </VMenu>
+                <AProgressBar
+                    v-if="row.status !== TaskStatus.PENDING"
+                    :value="row.value / 100"
+                    :indeterminate="row.indeterminate"
+                    :tone="row.tone"
+                    :label="`Scan of ${getLibraryName(row.libraryId)}`"
+                    :thickness="6"
+                />
+                <div class="text-fg-muted text-xs">{{ row.detail }}</div>
+            </li>
+        </ul>
+    </APopover>
 </template>
 
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { isTerminal, scanRow, useScanStore } from '@/stores/scans'
+import AIcon from '@/ui/AIcon.vue'
+import AIconButton from '@/ui/AIconButton.vue'
+import APopover from '@/ui/APopover.vue'
+import AProgressBar from '@/ui/AProgressBar.vue'
+import { IconAlertCircle, IconCheck, IconSync } from '@/ui/icons'
 import { librariesApi } from '@/utils/api/libraries'
 import { TaskStatus } from '@/utils/api/types'
 import { usersApi } from '@/utils/api/users'
@@ -116,14 +118,17 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.scan-spin :deep(.mdi-sync) {
+.scan-spin :deep(svg) {
     animation: spin 1.5s linear infinite;
 }
 
-@keyframes spin {
-    from {
-        transform: rotate(0deg);
+@media (prefers-reduced-motion: reduce) {
+    .scan-spin :deep(svg) {
+        animation: none;
     }
+}
+
+@keyframes spin {
     to {
         transform: rotate(360deg);
     }

@@ -114,12 +114,12 @@ export const contentApi = {
         useMutation({
             mutationFn: (data: UserToContentUpdate & { contentId: string }) =>
                 contentApi.updateUserData(data.contentId, data),
-            onSuccess(_data, variables) {
-                queryClient.invalidateQueries({ queryKey: ['content', variables.contentId] })
-                queryClient.invalidateQueries({
-                    queryKey: ['content', 'list'],
-                })
-            },
+            // Returned, so `mutateAsync` resolves once the fresh data is in.
+            onSuccess: (_data, variables) =>
+                Promise.all([
+                    queryClient.invalidateQueries({ queryKey: ['content', variables.contentId] }),
+                    queryClient.invalidateQueries({ queryKey: ['content', 'list'] }),
+                ]),
         }),
 
     updateUserData: async (

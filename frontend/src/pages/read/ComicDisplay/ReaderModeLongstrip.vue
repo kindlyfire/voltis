@@ -14,16 +14,21 @@
                     v-if="loader.error"
                     class="reader-longstrip__placeholder flex flex-col items-center justify-center gap-2"
                 >
-                    <div class="text-error">{{ loader.error }}</div>
-                    <VBtn size="small" @click.stop="loader.load()">Retry</VBtn>
+                    <div class="text-(--color-error)">{{ loader.error }}</div>
+                    <AButton variant="tonal" size="sm" @click.stop="loader.load()">Retry</AButton>
                 </div>
                 <div
                     v-else-if="loader.loading || !loader.blobUrl"
                     class="reader-longstrip__placeholder flex items-center justify-center"
                 >
-                    <VProgressCircular indeterminate size="32" />
+                    <ASpinner decorative />
                 </div>
-                <img v-else :src="loader.blobUrl" class="reader-longstrip__image" />
+                <img
+                    v-else
+                    :src="loader.blobUrl"
+                    :alt="`Page ${index + 1}`"
+                    class="reader-longstrip__image"
+                />
             </div>
         </template>
     </div>
@@ -35,6 +40,8 @@
 import { useDebounceFn, useEventListener } from '@vueuse/core'
 import { ref, onMounted } from 'vue'
 import { useNavbarScrollHide } from '@/pages/_layout/useLayoutStore'
+import AButton from '@/ui/AButton.vue'
+import ASpinner from '@/ui/ASpinner.vue'
 import { useReaderStore } from './useComicDisplayStore'
 
 const reader = useReaderStore()
@@ -83,7 +90,7 @@ onMounted(() => {
 <style scoped>
 .reader-longstrip {
     width: 100%;
-    min-height: calc(100dvh - var(--v-layout-top, 0px));
+    min-height: calc(100dvh - var(--layout-top, 0px));
 }
 
 .reader-longstrip__page {

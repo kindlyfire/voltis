@@ -1,6 +1,8 @@
 import { onMounted, onUnmounted } from 'vue'
+import { keysOwnedElsewhere, navDrawerOpen } from '@/ui/overlay'
 import { getLayoutTop } from '@/utils/misc'
-import { getClickZone, shouldIgnoreKeys } from '../useClickZones'
+import { isDrawerToggle } from '../shortcuts'
+import { getClickZone } from '../useClickZones'
 import { hasAttr } from './domSafe'
 import { useBookDisplayStore } from './useBookDisplayStore'
 
@@ -95,13 +97,15 @@ export function useBookControls() {
     }
 
     function handleKeydown(e: KeyboardEvent) {
-        if (shouldIgnoreKeys() || e.metaKey || e.ctrlKey || e.altKey) return
-        if (store.sidebarOpen) {
-            if (e.key !== 'Escape') return
-            store.sidebarOpen = false
+        if (keysOwnedElsewhere(e) || e.metaKey || e.ctrlKey || e.altKey) return
+        if (isDrawerToggle(e)) {
+            // Under an open main-nav drawer it would open unseen.
+            if (!navDrawerOpen.value) store.sidebarOpen = !store.sidebarOpen
             e.preventDefault()
             return
         }
+        // No page turns while the drawer is open (ADrawer handles Esc).
+        if (store.sidebarOpen) return
 
         // Space activates whatever chrome has focus; the arrows mean nothing
         // to a button, so they keep paging.

@@ -354,16 +354,12 @@ export async function prepareDocument(
     }
 }
 
-/** The page frame sits on the host, not on `body`: EPUB stylesheets are
- * appended after this one and routinely reset `body { margin: 0 }`. Nothing in
- * a book can target `:host`. */
+/** Typography inherits from the host, not `body`: EPUB stylesheets are appended
+ * after this one and routinely reset `body`. Nothing in a book can target `:host`.
+ * The page frame (width, margin, padding) is `.book-page` in BookReader.vue: box
+ * properties on `:host` lose to the page's own reset of every element. */
 const READER_CSS = `
 :host {
-    display: block;
-    box-sizing: border-box;
-    max-width: var(--reader-max-width, calc(45em + 4rem));
-    margin: 0 auto;
-    padding: 2rem;
     color-scheme: dark light;
     font-family: var(--reader-font-family, Georgia, 'Times New Roman', serif);
     line-height: var(--reader-line-height, 1.8);
@@ -412,6 +408,29 @@ ${MONO}${BEAT}, ${MONO} ${BEAT} {
     return css
 }
 
+/** Night mode, as Readium does it: every book color gives way to the reader's
+ * text on the reader's background, so no light box or dark text survives. Links
+ * inherit the text color (`READER_CSS`), so they keep an underline instead. */
+const DARK_CSS = `
+${BEAT} {
+    color: inherit !important;
+    background-color: transparent !important;
+}
+:is(html, body)${BEAT} {
+    background-image: none !important;
+}
+a[href]${BEAT} {
+    text-decoration: underline !important;
+}
+`
+
+/** Adopted by every mounted slice, so a theme change restyles them all at once. */
+const themeSheet = new CSSStyleSheet()
+
+export function setReaderDark(dark: boolean) {
+    themeSheet.replaceSync(dark ? DARK_CSS : '')
+}
+
 /** Swaps the user sheet of an already mounted tree, for settings that the
  * inherited custom properties can't carry. */
 export function updateUserStyles(host: HTMLElement, publisherFonts = false) {
@@ -428,6 +447,7 @@ export function mountTree(
     publisherFonts = false
 ): Element {
     const shadow = host.shadowRoot ?? host.attachShadow({ mode: 'open' })
+    host.classList.add('book-page')
     const base = document.createElement('style')
     base.textContent = READER_CSS
 
@@ -454,5 +474,6 @@ export function mountTree(
     user.textContent = userCss(publisherFonts)
     nodes.push(user, root)
     shadow.replaceChildren(...nodes)
+    shadow.adoptedStyleSheets = [themeSheet]
     return mounted
 }

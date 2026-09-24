@@ -4,6 +4,7 @@ import { docBody, findTarget } from './domSafe'
 import {
     mountTree,
     prepareDocument,
+    setReaderDark,
     updateUserStyles,
     type PrepareContext,
 } from './prepareDocument'
@@ -316,6 +317,38 @@ describe('mounting', () => {
         const sheet = Array.from(fresh.shadowRoot!.querySelectorAll('style')).at(-1)!.textContent!
         expect(sheet).not.toContain('font-family')
         expect(sheet).toContain('font-size: inherit !important')
+    })
+
+    it('shares one dark-mode sheet that neutralizes every book color', async () => {
+        const html = `<html><head><style>
+            pre, table { background: #eee }
+            .ink { color: #000 }
+        </style></head><body>
+            <pre>code</pre><table><tr><td>cell</td></tr></table>
+            <p><span class="ink">inked</span> <font color="#000">old</font>
+            <span style="color: #000; background: #fff">inline</span></p>
+        </body></html>`
+        const prepared = await prepareDocument(html, BASE, ctx())
+        const hosts = [0, 1].map(() => {
+            const host = document.createElement('div')
+            mountTree(host, prepared, docBody(prepared.doc)!.cloneNode(true) as Element)
+            return host
+        })
+        const [a, b] = hosts.map(host => host.shadowRoot!.adoptedStyleSheets[0]!)
+        expect(a).toBe(b)
+
+        const text = () => Array.from(a!.cssRules, rule => rule.cssText).join('\n')
+        setReaderDark(true)
+        const neutral = Array.from(a!.cssRules as CSSRuleList)
+            .map(rule => rule as CSSStyleRule)
+            .find(rule => rule.style.getPropertyValue('background-color') === 'transparent')!
+        expect(neutral.style.getPropertyPriority('color')).toBe('important')
+        const root = hosts[0]!.shadowRoot!
+        for (const selector of ['html', 'body', 'pre', 'table', 'td', '.ink', 'font', '[style]']) {
+            expect(root.querySelector(selector)!.matches(neutral.selectorText), selector).toBe(true)
+        }
+        setReaderDark(false)
+        expect(text()).toBe('')
     })
 })
 

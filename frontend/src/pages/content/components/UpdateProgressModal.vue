@@ -1,56 +1,61 @@
 <template>
-    <VDialog :model-value="open" @update:model-value="v => !v && close()" max-width="500">
-        <VCard>
-            <VCardTitle>Update progress</VCardTitle>
-            <VCardText>
-                <VRadioGroup v-model="action" hide-details>
-                    <VRadio label="Reset progress" value="reset" />
-                    <VRadio label="Mark all as read" value="mark_all" />
-                    <VRadio label="Mark read until..." value="mark_until" />
-                </VRadioGroup>
+    <ADialog
+        :open="open"
+        title="Update progress"
+        :dismissible="!mUpdate.isPending.value"
+        @update:open="v => !v && close()"
+    >
+        <div class="flex flex-col gap-4">
+            <ARadioGroup v-model="action" :options="actionOptions" label="Action" hide-label />
 
-                <div v-if="action === 'mark_until'" class="mt-4">
-                    <div v-if="qChildren.isLoading.value" class="py-4 text-center">
-                        <VProgressCircular indeterminate />
-                    </div>
-                    <AQueryError :query="qChildren" />
-
-                    <VSelect
-                        v-if="qChildren.isSuccess.value"
-                        v-model="selectedChildId"
-                        :items="qChildren.data.value?.data ?? []"
-                        item-title="title"
-                        item-value="id"
-                        label="Select chapter"
-                        messages="Everything up to and including the selected chapter will be marked as completed, and chapters after will be marked unread."
-                    />
+            <template v-if="action === 'mark_until'">
+                <div v-if="qChildren.isLoading.value" class="flex justify-center py-4">
+                    <ASpinner />
                 </div>
+                <QueryError :query="qChildren" />
+                <ASelect
+                    v-if="qChildren.isSuccess.value"
+                    v-model="selectedChildId"
+                    :options="childOptions"
+                    label="Chapter"
+                    placeholder="Select a chapter"
+                    hint="Everything up to and including the selected chapter will be marked as completed, and chapters after will be marked unread."
+                />
+            </template>
 
-                <AQueryError :mutation="mUpdate" class="mt-4" />
-            </VCardText>
+            <QueryError :mutation="mUpdate" />
+        </div>
 
-            <VCardActions>
-                <VSpacer />
-                <VBtn variant="text" @click="close()" :disabled="mUpdate.isPending.value">
-                    Cancel
-                </VBtn>
-                <VBtn
-                    color="primary"
-                    @click="mUpdate.mutate()"
-                    :loading="mUpdate.isPending.value"
-                    :disabled="!action || (action === 'mark_until' && !selectedChildId)"
-                >
-                    Confirm
-                </VBtn>
-            </VCardActions>
-        </VCard>
-    </VDialog>
+        <template #actions>
+            <AButton
+                variant="text"
+                tone="neutral"
+                :disabled="mUpdate.isPending.value"
+                @click="close()"
+            >
+                Cancel
+            </AButton>
+            <AButton
+                :loading="mUpdate.isPending.value"
+                :disabled="!action || (action === 'mark_until' && !selectedChildId)"
+                @click="mUpdate.mutate()"
+            >
+                Confirm
+            </AButton>
+        </template>
+    </ADialog>
 </template>
 
 <script setup lang="ts">
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import { computed, ref } from 'vue'
-import AQueryError from '@/components/AQueryError.vue'
+import QueryError from '@/components/QueryError.vue'
+import AButton from '@/ui/AButton.vue'
+import ADialog from '@/ui/ADialog.vue'
+import ARadioGroup from '@/ui/ARadioGroup.vue'
+import ASelect from '@/ui/ASelect.vue'
+import ASpinner from '@/ui/ASpinner.vue'
+import { useToast } from '@/ui/useToast'
 import { contentApi } from '@/utils/api/content'
 
 const props = defineProps<{
@@ -61,9 +66,16 @@ const props = defineProps<{
 
 type Action = 'reset' | 'mark_all' | 'mark_until'
 
+const actionOptions = [
+    { value: 'reset', label: 'Reset progress' },
+    { value: 'mark_all', label: 'Mark all as read' },
+    { value: 'mark_until', label: 'Mark read until…' },
+] as const
+
 const action = ref<Action | null>(null)
 const selectedChildId = ref<string | null>(null)
 const queryClient = useQueryClient()
+const toast = useToast()
 
 const qChildren = contentApi.useList(
     () => ({
@@ -72,6 +84,10 @@ const qChildren = contentApi.useList(
         sort_order: 'asc',
     }),
     { enabled: computed(() => action.value === 'mark_until') }
+)
+
+const childOptions = computed(() =>
+    (qChildren.data.value?.data ?? []).map(c => ({ value: c.id, label: c.title }))
 )
 
 const mUpdate = useMutation({
@@ -88,6 +104,9 @@ const mUpdate = useMutation({
             )
         }
         queryClient.invalidateQueries()
+    },
+    onSuccess() {
+        toast.show({ message: 'Updated the reading progress' })
         props.close()
     },
 })

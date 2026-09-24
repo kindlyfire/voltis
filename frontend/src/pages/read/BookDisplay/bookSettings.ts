@@ -1,4 +1,5 @@
 import z from 'zod'
+import type { Option } from '@/ui/options'
 import { useLocalStorage } from '@/utils/localStorage'
 import { MONO_STACK } from './prepareDocument'
 
@@ -17,15 +18,15 @@ export type BookFont = keyof typeof FONT_STACKS
  * leaves the book's own font rules standing. */
 export type FontChoice = BookFont | 'publisher'
 
-export const FONT_OPTIONS: Array<{ value: FontChoice; title: string }> = [
-    { value: 'publisher', title: 'Publisher' },
-    { value: 'serif', title: 'Serif' },
-    { value: 'sans', title: 'Sans' },
-    { value: 'mono', title: 'Mono' },
-    { value: 'fast-serif', title: 'Fast Serif' },
-    { value: 'fast-sans', title: 'Fast Sans' },
-    { value: 'dyslexic', title: 'OpenDyslexic' },
-]
+export const FONT_OPTIONS = [
+    { value: 'publisher', label: 'Publisher' },
+    { value: 'serif', label: 'Serif' },
+    { value: 'sans', label: 'Sans' },
+    { value: 'mono', label: 'Mono' },
+    { value: 'fast-serif', label: 'Fast Serif' },
+    { value: 'fast-sans', label: 'Fast Sans' },
+    { value: 'dyslexic', label: 'OpenDyslexic' },
+] as const satisfies readonly Option<FontChoice>[]
 
 /** Per field, so one stale or out-of-range value can't discard the rest. */
 export const zBookSettings = z.object({

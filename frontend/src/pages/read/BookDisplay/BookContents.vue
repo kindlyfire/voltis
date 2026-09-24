@@ -1,45 +1,47 @@
 <template>
-    <div v-if="usable">
-        <VList density="compact" nav>
-            <VListItem
-                v-for="entry in structure.toc"
-                :key="entry.id"
-                :to="entry.href ? linkFor(entry.href, entry.fragment) : undefined"
-                :active="isActive(entry.id)"
-                :disabled="!entry.href"
-                :style="{ paddingInlineStart: `${entry.depth * 1.25 + 0.5}rem` }"
-                @click="emit('select')"
-            >
-                <VListItemTitle :class="entry.depth === 0 ? 'font-medium' : 'opacity-80'">
+    <nav v-if="usable" aria-label="Table of contents">
+        <ul>
+            <li v-for="entry in structure.toc" :key="entry.id">
+                <ANavItem
+                    :to="entry.href ? linkFor(entry.href, entry.fragment) : undefined"
+                    :active="isActive(entry.id)"
+                    :disabled="!entry.href"
+                    :indent="entry.depth"
+                    wrap
+                    :class="{
+                        'text-fg-muted': entry.href && entry.depth > 0 && !isActive(entry.id),
+                    }"
+                    @click="emit('select')"
+                >
                     {{ entry.title || entry.href }}
-                </VListItemTitle>
-            </VListItem>
-        </VList>
-    </div>
-    <div v-else>
-        <p class="mb-2 text-sm opacity-60">
+                </ANavItem>
+            </li>
+        </ul>
+    </nav>
+    <nav v-else :aria-labelledby="headingId">
+        <p class="text-fg-muted mb-2 text-sm">
             This book has no usable table of contents, so its files are listed instead.
         </p>
-        <h3 class="mb-1 text-sm font-medium">Book sections</h3>
-        <VList density="compact" nav>
-            <VListItem
-                v-for="(item, index) in linearSpine"
-                :key="item.href"
-                :to="linkFor(item.href, '')"
-                :active="activeHref === item.href"
-                @click="emit('select')"
-            >
-                <template #prepend>
-                    <span class="mr-4 opacity-60">{{ index + 1 }}</span>
-                </template>
-                <VListItemTitle>{{ item.title || item.href }}</VListItemTitle>
-            </VListItem>
-        </VList>
-    </div>
+        <h3 :id="headingId" class="mb-1 text-sm font-medium">Book sections</h3>
+        <ul>
+            <li v-for="(item, index) in linearSpine" :key="item.href">
+                <ANavItem
+                    :to="linkFor(item.href, '')"
+                    :active="activeHref === item.href"
+                    wrap
+                    @click="emit('select')"
+                >
+                    <template #prefix>{{ index + 1 }}</template>
+                    {{ item.title || item.href }}
+                </ANavItem>
+            </li>
+        </ul>
+    </nav>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, useId } from 'vue'
+import ANavItem from '@/ui/ANavItem.vue'
 import type { BookStructure } from '@/utils/api/types'
 import { hasUsableToc } from './buildPages'
 
@@ -58,6 +60,8 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), { fallback: undefined })
 
 const emit = defineEmits<{ select: [] }>()
+
+const headingId = useId()
 
 const usable = computed(() =>
     props.fallback == null ? hasUsableToc(props.structure) : !props.fallback

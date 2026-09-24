@@ -10,20 +10,16 @@ import {
     type Ref,
 } from 'vue'
 import { useRouter } from 'vue-router'
-import type { ContentType, ReadingStatus } from '@/utils/api/types'
+import type { Option } from '@/ui/options'
+import { READING_STATUS_LABELS, type ContentType, type ReadingStatus } from '@/utils/api/types'
 
 export const queryClient = new QueryClient({})
 
+/** Height reserved at the top of the page for the header, in px (`--layout-top` on :root). */
 export function getLayoutTop() {
-    try {
-        return parseInt(
-            getComputedStyle(document.getElementsByClassName('v-main')[0]!).getPropertyValue(
-                '--v-layout-top'
-            ) || '0'
-        )
-    } catch {
-        return 0
-    }
+    return (
+        parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--layout-top')) || 0
+    )
 }
 
 /** Like `Array.at` but without looking backwards for negative indexes */
@@ -92,33 +88,6 @@ export function createOverridableValue<TValue, const TLayer extends string>(
     }
 
     return obj
-}
-
-/**
- * Returns pointer event handlers that fire `fn` immediately on press,
- * then repeatedly after an initial delay.
- */
-export function useRepeatOnHold(fn: () => void, { initialDelay = 400, interval = 100 } = {}) {
-    let timer: any = null
-    function stop() {
-        if (timer != null) {
-            clearTimeout(timer)
-            timer = null
-        }
-    }
-    function start() {
-        stop()
-        fn()
-        const schedule = (delay: number) => {
-            timer = setTimeout(() => {
-                fn()
-                schedule(interval)
-            }, delay)
-        }
-        schedule(initialDelay)
-    }
-    onUnmounted(stop)
-    return { onPointerdown: start, onPointerup: stop, onPointerleave: stop }
 }
 
 export function useSystemTheme() {
@@ -190,14 +159,15 @@ const contentTypeLabels: Record<ContentType, string> = {
     book_series: 'Book Series',
 }
 
+/** `plural(3, 'item')` is "3 items". */
+export function plural(count: number, word: string, pluralWord = `${word}s`): string {
+    return `${count} ${count === 1 ? word : pluralWord}`
+}
+
 export function displayContentType(type: ContentType): string {
     return contentTypeLabels[type] ?? type
 }
 
-export const readingStatusOptions: { value: ReadingStatus; title: string }[] = [
-    { value: 'reading', title: 'Reading' },
-    { value: 'completed', title: 'Completed' },
-    { value: 'on_hold', title: 'On Hold' },
-    { value: 'dropped', title: 'Dropped' },
-    { value: 'plan_to_read', title: 'Plan to Read' },
-]
+export const readingStatusOptions: Option<ReadingStatus>[] = (
+    Object.entries(READING_STATUS_LABELS) as [ReadingStatus, string][]
+).map(([value, label]) => ({ value, label }))

@@ -1,20 +1,20 @@
 <template>
-    <VProgressLinear
-        v-if="progress"
-        :model-value="progress.fraction * 100"
-        height="18"
-        color="primary"
-        bg-color="black"
-        bg-opacity="0.6"
-    >
-        <span class="text-xs font-medium text-white text-shadow-md/40">
-            {{ progress.label }}
-        </span>
-    </VProgressLinear>
+    <div v-if="progress" class="flex flex-col gap-1.5">
+        <div class="flex justify-between gap-2 text-[13px]" aria-hidden="true">
+            <span>Progress</span>
+            <span class="text-fg-muted">{{ progress.label }}</span>
+        </div>
+        <AProgressBar
+            :value="progress.fraction"
+            label="Reading progress"
+            :value-text="progress.label"
+        />
+    </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import AProgressBar from '@/ui/AProgressBar.vue'
 import type { Content } from '@/utils/api/types'
 import { contentProgress } from '@/utils/contentProgress'
 

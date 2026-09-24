@@ -1,0 +1,70 @@
+/*
+ * Colors for AButton and AIconButton, per variant × tone (`standard` is the icon button's `text`).
+ * Sets `--btn-bg`, `--btn-fg` and `--btn-border`; geometry stays in the components. Every selector
+ * has the specificity of one class, so the components' scoped rules (enabled pressed state) win.
+ * `.pressed` is AIconButton's toggle state; only its disabled background lives here.
+ */
+@layer ui {
+    .a-btn-palette {
+        --btn-bg: transparent;
+        --btn-fg: var(--color-primary);
+        --btn-border: transparent;
+    }
+
+    .a-btn-palette:where(.tone-neutral) {
+        --btn-fg: var(--color-fg);
+    }
+
+    .a-btn-palette:where(.tone-danger) {
+        --btn-fg: var(--color-error);
+    }
+
+    .a-btn-palette:where(.variant-outlined) {
+        --btn-border: var(--color-outline);
+    }
+
+    .a-btn-palette:where(.variant-filled) {
+        --btn-bg: var(--color-primary);
+        --btn-fg: var(--color-on-primary);
+    }
+
+    .a-btn-palette:where(.variant-filled.tone-neutral) {
+        --btn-bg: var(--color-inverse);
+        --btn-fg: var(--color-on-inverse);
+    }
+
+    .a-btn-palette:where(.variant-filled.tone-danger) {
+        --btn-bg: var(--color-error);
+        --btn-fg: var(--color-on-error);
+    }
+
+    .a-btn-palette:where(.variant-tonal) {
+        --btn-bg: var(--color-secondary-container);
+        --btn-fg: var(--color-on-secondary-container);
+    }
+
+    .a-btn-palette:where(.variant-tonal.tone-neutral) {
+        --btn-bg: var(--color-surface-4);
+        --btn-fg: var(--color-fg);
+    }
+
+    .a-btn-palette:where(.variant-tonal.tone-danger) {
+        --btn-bg: var(--color-error-container);
+        --btn-fg: var(--color-on-error-container);
+    }
+
+    .a-btn-palette:where(:disabled, [aria-disabled='true']) {
+        --btn-fg: color-mix(in oklch, var(--color-fg) 38%, transparent);
+    }
+
+    .a-btn-palette:where(.variant-outlined):where(:disabled, [aria-disabled='true']) {
+        --btn-border: color-mix(in oklch, var(--color-fg) 12%, transparent);
+    }
+
+    .a-btn-palette:where(.variant-filled, .variant-tonal, .pressed):where(
+            :disabled,
+            [aria-disabled='true']
+        ) {
+        --btn-bg: color-mix(in oklch, var(--color-fg) 12%, transparent);
+    }
+}

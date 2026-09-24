@@ -1,7 +1,9 @@
 import { onMounted, onUnmounted } from 'vue'
+import { keysOwnedElsewhere, navDrawerOpen } from '@/ui/overlay'
 import { getScrollParent, getViewportHeight } from '@/utils/css'
 import { getLayoutTop } from '@/utils/misc'
-import { getClickZone, shouldIgnoreKeys } from '../useClickZones'
+import { isDrawerToggle } from '../shortcuts'
+import { getClickZone } from '../useClickZones'
 import { useReaderStore } from './useComicDisplayStore'
 
 const scrollParent = () => getScrollParent(document.getElementById('longstrip-container')!)
@@ -70,7 +72,13 @@ export function useReaderControls() {
     }
 
     function handleKeydown(e: KeyboardEvent) {
-        if (shouldIgnoreKeys()) return
+        if (keysOwnedElsewhere(e)) return
+        if (isDrawerToggle(e)) {
+            // Under an open main-nav drawer it would open unseen.
+            if (!navDrawerOpen.value) reader.sidebarOpen = !reader.sidebarOpen
+            e.preventDefault()
+            return
+        }
 
         switch (e.key) {
             case 'ArrowLeft':

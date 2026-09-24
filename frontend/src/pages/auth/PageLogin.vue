@@ -1,65 +1,54 @@
 <template>
-    <VContainer>
-        <VRow justify="center">
-            <VCol cols="12" sm="8" md="4">
-                <VCard>
-                    <VCardTitle class="text-h5">Login</VCardTitle>
-                    <VCardText>
-                        <VAlert v-if="error" type="error" variant="tonal" class="mb-4">
-                            {{ error }}
-                        </VAlert>
+    <AuthCard title="Login">
+        <div class="flex flex-col gap-4 pt-2">
+            <AAlert v-if="error" tone="danger">{{ error }}</AAlert>
 
-                        <VBtn
-                            v-if="info?.oidc_enabled"
-                            block
-                            color="primary"
-                            variant="tonal"
-                            prepend-icon="mdi-shield-account"
-                            @click="startSso"
-                        >
-                            {{ info.oidc_button_label || 'Sign in with SSO' }}
-                        </VBtn>
+            <AButton
+                v-if="info?.oidc_enabled"
+                block
+                variant="tonal"
+                :leading-icon="IconShieldAccount"
+                @click="startSso"
+            >
+                {{ info.oidc_button_label || 'Sign in with SSO' }}
+            </AButton>
 
-                        <div
-                            v-if="info?.oidc_enabled && passwordLogin"
-                            class="my-4 flex items-center gap-3"
-                        >
-                            <VDivider class="grow" />
-                            <span class="text-xs opacity-60">or</span>
-                            <VDivider class="grow" />
-                        </div>
+            <div
+                v-if="info?.oidc_enabled && passwordLogin"
+                class="text-fg-muted flex items-center gap-3 text-xs"
+            >
+                <ADivider class="grow" />
+                or
+                <ADivider class="grow" />
+            </div>
 
-                        <VForm v-if="passwordLogin" @submit="onSubmit" class="space-y-4!">
-                            <AInput :input="getInputProps('username')" label="Username" autofocus />
-                            <AInput
-                                :input="getInputProps('password')"
-                                label="Password"
-                                type="password"
-                            />
-                            <AQueryError :mutation="mutation" />
-                            <VBtn
-                                type="submit"
-                                color="primary"
-                                block
-                                :loading="mutation.isPending.value"
-                                class="mt-4"
-                            >
-                                Login
-                            </VBtn>
-                        </VForm>
+            <form v-if="passwordLogin" novalidate class="flex flex-col gap-4" @submit="onSubmit">
+                <ATextField
+                    v-bind="field('username')"
+                    label="Username"
+                    autocomplete="username"
+                    autofocus
+                />
+                <ATextField
+                    v-bind="field('password')"
+                    label="Password"
+                    type="password"
+                    autocomplete="current-password"
+                />
+                <QueryError :mutation="mutation" />
+                <AButton type="submit" block size="lg" :loading="mutation.isPending.value">
+                    Login
+                </AButton>
+            </form>
 
-                        <VAlert v-else-if="info && !info.oidc_enabled" type="info" variant="tonal">
-                            No sign-in method is enabled. Ask an administrator.
-                        </VAlert>
-                    </VCardText>
-                    <VCardActions v-if="passwordLogin && info?.registration_enabled">
-                        <VSpacer />
-                        <RouterLink to="/auth/register">Don't have an account?</RouterLink>
-                    </VCardActions>
-                </VCard>
-            </VCol>
-        </VRow>
-    </VContainer>
+            <AAlert v-else-if="info && !info.oidc_enabled" tone="info">
+                No sign-in method is enabled. Ask an administrator.
+            </AAlert>
+        </div>
+        <template v-if="passwordLogin && info?.registration_enabled" #footer>
+            <AButton variant="text" to="/auth/register">Don't have an account?</AButton>
+        </template>
+    </AuthCard>
 </template>
 
 <script setup lang="ts">
@@ -68,13 +57,18 @@ import { useHead } from '@unhead/vue'
 import { computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { z } from 'zod'
-import AInput from '@/components/AInput.vue'
-import AQueryError from '@/components/AQueryError.vue'
+import QueryError from '@/components/QueryError.vue'
+import AAlert from '@/ui/AAlert.vue'
+import AButton from '@/ui/AButton.vue'
+import ADivider from '@/ui/ADivider.vue'
+import ATextField from '@/ui/ATextField.vue'
+import { IconShieldAccount } from '@/ui/icons'
 import { authApi } from '@/utils/api/auth'
 import { miscApi } from '@/utils/api/misc'
 import { clearSignedOut, isSignedOut, OIDC_LOGIN_URL, shouldAutoRedirect } from '@/utils/api/oidc'
 import { usersApi } from '@/utils/api/users'
 import { useForm } from '@/utils/forms'
+import AuthCard from './AuthCard.vue'
 
 useHead({
     title: 'Login',
@@ -108,11 +102,11 @@ watch(
 )
 
 const schema = z.object({
-    username: z.string().min(1),
-    password: z.string().min(1),
+    username: z.string().min(1, 'Enter your username'),
+    password: z.string().min(1, 'Enter your password'),
 })
 
-const { getInputProps, onSubmit, mutation } = useForm({
+const { field, onSubmit, mutation } = useForm({
     schema,
     initialValues: {
         username: '',

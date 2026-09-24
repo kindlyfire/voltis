@@ -698,7 +698,12 @@ func (cr *ContentRoutes) updateMetadataOverride(c echo.Context) error {
 	err = editMetadataRaw(ctx, cr.pool, content.ID, content.LibraryID, func(mr *metaraw.MetadataRaw) bool {
 		var overrides models.Metadata
 		_ = json.Unmarshal(req.Data, &overrides)
-		mr.Overrides = &metaraw.RawContainer[models.Metadata]{Raw: overrides}
+		// Every field is omitempty: "{}" means no overrides, so drop the layer rather than store it empty.
+		if b, _ := json.Marshal(overrides); string(b) == "{}" {
+			mr.Overrides = nil
+		} else {
+			mr.Overrides = &metaraw.RawContainer[models.Metadata]{Raw: overrides}
+		}
 		return true
 	})
 	if err != nil {

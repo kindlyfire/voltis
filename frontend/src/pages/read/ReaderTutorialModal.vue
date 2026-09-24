@@ -1,72 +1,79 @@
 <template>
-    <VDialog :model-value="open" @update:model-value="v => !v && close()" max-width="480">
-        <VCard>
-            <VCardTitle>{{ title }}</VCardTitle>
-            <VCardText>
-                <div class="mx-auto mb-3 w-full max-w-64">
-                    <!-- A frame border and separate interior dividers: an outline
-                    or per-zone borders collide with the clipped rounded corners. -->
-                    <div class="zone-frame relative aspect-3/4 overflow-hidden rounded-lg">
-                        <div
-                            v-for="zone in zones"
-                            :key="zone.icon"
-                            class="absolute flex items-center justify-center"
-                            :class="zone.tint"
-                            :style="{ inset: zone.inset }"
-                        >
-                            <VIcon :icon="zone.icon" size="small" />
-                        </div>
-                        <div
-                            v-for="(top, i) in [band, mid]"
-                            :key="`h${i}`"
-                            class="divider-h absolute right-0 left-0"
-                            :style="{ top }"
-                        />
-                        <div
-                            v-for="(left, i) in [firstCol, secondCol]"
-                            :key="`v${i}`"
-                            class="divider-v absolute"
-                            :style="{ left, top: band, bottom: band }"
-                        />
-                    </div>
+    <ADialog :open="open" :title="title" @update:open="v => !v && close()">
+        <div class="mx-auto mb-3 w-full max-w-64">
+            <!-- A frame border and separate interior dividers: an outline
+            or per-zone borders collide with the clipped rounded corners. -->
+            <div class="zone-frame relative aspect-3/4 overflow-hidden rounded-lg">
+                <div
+                    v-for="zone in zones"
+                    :key="zone.inset"
+                    class="absolute flex items-center justify-center"
+                    :class="zone.tint"
+                    :style="{ inset: zone.inset }"
+                >
+                    <AIcon :icon="zone.icon" class="text-xl" />
                 </div>
+                <div
+                    v-for="(top, i) in [band, mid]"
+                    :key="`h${i}`"
+                    class="divider-h absolute right-0 left-0"
+                    :style="{ top }"
+                />
+                <div
+                    v-for="(left, i) in [firstCol, secondCol]"
+                    :key="`v${i}`"
+                    class="divider-v absolute"
+                    :style="{ left, top: band, bottom: band }"
+                />
+            </div>
+        </div>
 
-                <div class="mb-4 flex justify-center gap-4 text-xs opacity-75">
-                    <span class="flex items-center gap-1"
-                        ><i class="prev inline-block size-2.5 rounded-[3px]" />Previous</span
-                    >
-                    <span class="flex items-center gap-1"
-                        ><i class="menu inline-block size-2.5 rounded-[3px]" />Menu</span
-                    >
-                    <span class="flex items-center gap-1"
-                        ><i class="next inline-block size-2.5 rounded-[3px]" />Next</span
-                    >
-                </div>
+        <div class="text-fg-muted mb-4 flex justify-center gap-4 text-xs">
+            <span class="flex items-center gap-1"
+                ><i class="prev inline-block size-2.5 rounded-[3px]" />Previous</span
+            >
+            <span class="flex items-center gap-1"
+                ><i class="menu inline-block size-2.5 rounded-[3px]" />Menu</span
+            >
+            <span class="flex items-center gap-1"
+                ><i class="next inline-block size-2.5 rounded-[3px]" />Next</span
+            >
+        </div>
 
-                <p v-for="line in lines" :key="line" class="mb-2 text-sm last:mb-0">{{ line }}</p>
+        <p v-for="line in lines" :key="line" class="mb-2 text-sm last:mb-0">{{ line }}</p>
 
-                <div v-if="!coarse" class="mt-4 text-sm opacity-60">
-                    <div class="mb-1">Keyboard shortcuts</div>
-                    <div
-                        v-for="[keys, action] in shortcuts"
-                        :key="keys"
-                        class="flex justify-between gap-4 text-xs!"
-                    >
-                        <span class="shrink-0">{{ action }}</span>
-                        <span class="text-right font-mono">{{ keys }}</span>
-                    </div>
-                </div>
-            </VCardText>
-            <VCardActions class="justify-end">
-                <VBtn color="primary" variant="flat" @click="close()">Got it</VBtn>
-            </VCardActions>
-        </VCard>
-    </VDialog>
+        <div v-if="!coarse" class="mt-4 text-sm">
+            <ReaderHeading>Keyboard shortcuts</ReaderHeading>
+            <div
+                v-for="[keys, action] in shortcuts"
+                :key="keys"
+                class="flex justify-between gap-4 py-0.5 text-xs"
+            >
+                <span class="shrink-0">{{ action }}</span>
+                <span class="text-fg-muted text-right font-mono">{{ keys }}</span>
+            </div>
+        </div>
+
+        <template #actions>
+            <AButton autofocus @click="close()">Got it</AButton>
+        </template>
+    </ADialog>
 </template>
 
 <script setup lang="ts">
 import { useMediaQuery } from '@vueuse/core'
 import { computed } from 'vue'
+import AButton from '@/ui/AButton.vue'
+import ADialog from '@/ui/ADialog.vue'
+import AIcon from '@/ui/AIcon.vue'
+import {
+    IconChevronDown,
+    IconChevronLeft,
+    IconChevronRight,
+    IconChevronUp,
+    IconMenu,
+} from '@/ui/icons'
+import ReaderHeading from './ReaderHeading.vue'
 import { BOOK_SHORTCUTS, COMIC_SHORTCUTS, type ReaderKind } from './shortcuts'
 import { HEIGHT_ZONE } from './useClickZones'
 
@@ -88,11 +95,11 @@ const firstCol = pct(100 / 3)
 const secondCol = pct(200 / 3)
 
 const zones = [
-    { icon: 'mdi-chevron-up', tint: 'prev', inset: `0 0 ${mid} 0` },
-    { icon: 'mdi-chevron-left', tint: 'prev', inset: `${band} ${secondCol} ${band} 0` },
-    { icon: 'mdi-menu', tint: 'menu', inset: `${band} ${firstCol} ${band} ${firstCol}` },
-    { icon: 'mdi-chevron-right', tint: 'next', inset: `${band} 0 ${band} ${secondCol}` },
-    { icon: 'mdi-chevron-down', tint: 'next', inset: `${mid} 0 0 0` },
+    { icon: IconChevronUp, tint: 'prev', inset: `0 0 ${mid} 0` },
+    { icon: IconChevronLeft, tint: 'prev', inset: `${band} ${secondCol} ${band} 0` },
+    { icon: IconMenu, tint: 'menu', inset: `${band} ${firstCol} ${band} ${firstCol}` },
+    { icon: IconChevronRight, tint: 'next', inset: `${band} 0 ${band} ${secondCol}` },
+    { icon: IconChevronDown, tint: 'next', inset: `${mid} 0 0 0` },
 ]
 
 const title = computed(() =>
@@ -127,11 +134,11 @@ export function showReaderTutorial(kind: ReaderKind): Promise<void> {
 
 <style scoped>
 .zone-frame {
-    border: 1px solid rgba(var(--v-theme-on-surface), 0.2);
+    border: 1px solid var(--color-outline);
 }
 .divider-h,
 .divider-v {
-    border-color: rgba(var(--v-theme-on-surface), 0.15);
+    border-color: var(--color-outline);
     border-style: dashed;
     border-width: 0;
 }
@@ -142,12 +149,12 @@ export function showReaderTutorial(kind: ReaderKind): Promise<void> {
     border-left-width: 1px;
 }
 .prev {
-    background: rgba(var(--v-theme-primary), 0.12);
+    background: color-mix(in oklch, var(--color-primary) 14%, transparent);
 }
 .next {
-    background: rgba(var(--v-theme-primary), 0.28);
+    background: color-mix(in oklch, var(--color-primary) 32%, transparent);
 }
 .menu {
-    background: rgba(var(--v-theme-secondary), 0.25);
+    background: color-mix(in oklch, var(--color-fg-muted) 22%, transparent);
 }
 </style>

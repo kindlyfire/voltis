@@ -106,6 +106,10 @@ const router = createRouter({
             name: 'oidc-complete',
             component: PageOidcComplete,
         },
+        // The kit gallery, the living spec of `src/ui` (dev only, no login needed).
+        ...(import.meta.env.DEV
+            ? [{ path: '/_kit', name: 'kit', component: () => import('./pages/_kit/KitPage.vue') }]
+            : []),
     ],
 })
 

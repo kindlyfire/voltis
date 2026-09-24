@@ -24,14 +24,9 @@ vi.mock('@/utils/ws', () => ({
     ws: { connect: () => {}, send: () => {}, on: () => () => {} },
 }))
 
-const pass = { template: '<div><slot /></div>' }
 const stubs = {
-    VMenu: { template: '<div><slot name="activator" :props="{}" /><slot /></div>' },
-    VCard: pass,
-    VCardText: pass,
-    VBtn: { template: '<button><slot /></button>' },
-    VIcon: { template: '<i />' },
-    VProgressLinear: { template: '<div />' },
+    APopover: { template: '<div><slot name="trigger" /><slot /></div>', emits: ['update:open'] },
+    AIconButton: true,
 }
 
 function task(id: string, status: TaskStatusValue): TaskSnapshot {
@@ -104,7 +99,7 @@ describe('ScanIndicator dismissal', () => {
 
         const wrapper = open()
         await nextTick()
-        wrapper.findComponent(stubs.VMenu).vm.$emit('update:modelValue', true)
+        wrapper.findComponent(stubs.APopover).vm.$emit('update:open', true)
         await nextTick()
 
         await vi.advanceTimersByTimeAsync(10_000)
@@ -113,7 +108,7 @@ describe('ScanIndicator dismissal', () => {
         store.accept(task('t_2', 1))
         await nextTick()
 
-        wrapper.findComponent(stubs.VMenu).vm.$emit('update:modelValue', false)
+        wrapper.findComponent(stubs.APopover).vm.$emit('update:open', false)
         await nextTick()
 
         expect(store.dismissed.has('t_1')).toBe(true)

@@ -1,184 +1,191 @@
 <template>
-    <VApp>
-        <VAppBar
-            :flat="store.navbarHidden.value"
-            :style="store.navbarHidden.value && { transform: 'translateY(-64px)' }"
-        >
-            <VAppBarNavIcon @click="store.setSidebarOpen(!store.sidebarOpen.value)" />
-            <VAppBarTitle style="flex: 0 1 auto" class="mr-6! hidden! md:flex!">
-                <RouterLink to="/">Voltis</RouterLink>
-            </VAppBarTitle>
-            <VBtn icon="mdi-home" variant="text" to="/" class="md:hidden!" exact />
-            <ScanIndicator />
-            <SearchBox class="ms-2 me-2 grow md:grow-0" />
-            <VSpacer class="hidden! md:flex!" />
-        </VAppBar>
-        <VNavigationDrawer
-            :model-value="store.sidebarOpen.value"
-            :permanent="!store.sidebarTemporary.value"
-            :temporary="store.sidebarTemporary.value"
-            @update:model-value="val => store.setSidebarOpen(val)"
-            :style="{
-                top: '0',
-                height: '100vh',
-            }"
-        >
-            <div class="ms-5! flex h-16 items-center">
-                <VAppBarTitle>
-                    <RouterLink to="/">Voltis</RouterLink>
-                </VAppBarTitle>
-            </div>
-            <VDivider class="mx-2" />
+    <a href="#main" class="skip-link" @click.prevent="skipToMain">Skip to content</a>
 
-            <VList v-if="isSettings" nav>
-                <VListItem prepend-icon="mdi-arrow-left" @click="router.push('/')">
-                    <VListItemTitle>Back</VListItemTitle>
-                </VListItem>
-                <VDivider class="my-2" />
-                <VListItem to="/settings/interface" prepend-icon="mdi-monitor">
-                    <VListItemTitle>Interface</VListItemTitle>
-                </VListItem>
-                <VListItem to="/settings/account" prepend-icon="mdi-account">
-                    <VListItemTitle>Account</VListItemTitle>
-                </VListItem>
-                <VListItem
-                    v-if="hasBrokenRefs || route.path === '/settings/broken-refs'"
-                    to="/settings/broken-refs"
-                    prepend-icon="mdi-link-off"
-                >
-                    <VListItemTitle>Broken Refs</VListItemTitle>
-                </VListItem>
-                <template v-if="isAdmin">
-                    <VDivider class="my-2" />
-                    <VListItem to="/settings/general" prepend-icon="mdi-tune">
-                        <VListItemTitle>General</VListItemTitle>
-                    </VListItem>
-                    <VListItem to="/settings/users" prepend-icon="mdi-account-group">
-                        <VListItemTitle>Users</VListItemTitle>
-                    </VListItem>
-                    <VListItem to="/settings/libraries" prepend-icon="mdi-bookshelf">
-                        <VListItemTitle>Libraries</VListItemTitle>
-                    </VListItem>
-                    <VListItem to="/settings/tasks" prepend-icon="mdi-clipboard-list">
-                        <VListItemTitle>Tasks</VListItemTitle>
-                    </VListItem>
-                </template>
-            </VList>
-            <VList v-else nav>
-                <VListItem to="/" exact prepend-icon="mdi-home">
-                    <VListItemTitle>Home</VListItemTitle>
-                </VListItem>
-                <VListItem to="/lists" exact prepend-icon="mdi-format-list-bulleted">
-                    <VListItemTitle>Lists</VListItemTitle>
-                </VListItem>
-                <VDivider class="my-2" />
-                <Libraries />
-                <VDivider class="my-2" />
-                <VListItem to="/settings/interface" prepend-icon="mdi-cog">
-                    <VListItemTitle>Settings</VListItemTitle>
-                </VListItem>
-            </VList>
-            <template #append>
-                <VDivider class="mx-2" />
-                <VList nav>
-                    <div class="flex items-center gap-2">
-                        <div class="grow">
-                            <VMenu location="top" class="grow">
-                                <template #activator="{ props }">
-                                    <VListItem v-bind="props" prepend-icon="mdi-account">
-                                        <VListItemTitle>{{
-                                            qMe.data.value?.username || 'Loading...'
-                                        }}</VListItemTitle>
-                                    </VListItem>
-                                </template>
-                                <VList>
-                                    <VListItem
-                                        v-if="canLogout"
-                                        @click="logout"
-                                        :disabled="mLogout.isPending.value"
-                                    >
-                                        <VListItemTitle>Logout</VListItemTitle>
-                                    </VListItem>
-                                </VList>
-                            </VMenu>
-                        </div>
-                        <VBtn
-                            ref="themeBtnRef"
-                            variant="text"
-                            size="small"
-                            :icon="
-                                store.theme === 'light' ? 'mdi-weather-sunny' : 'mdi-weather-night'
-                            "
-                            title="Toggle theme (Shift+click or long press to reset to system)"
-                        />
-                    </div>
-                </VList>
-                <div class="ff-browser-chrome-spacer"></div>
-            </template>
-        </VNavigationDrawer>
-        <VMain :style="store.navbarTemporary ? { '--v-layout-top': '0px' } : {}">
-            <RouterView />
-        </VMain>
+    <aside v-if="store.sidebarPersistent" id="sidebar" class="sidebar" aria-label="Sidebar">
+        <!-- Header height, so the toggle doesn't move when it swaps into the header. -->
+        <div class="mb-3.5 flex h-(--header-height) flex-none items-center gap-2.5 px-0.5">
+            <AIconButton
+                id="sidebar-toggle"
+                :icon="IconMenu"
+                label="Hide sidebar"
+                aria-expanded="true"
+                aria-controls="sidebar"
+                @click="toggleSidebar"
+            />
+            <RouterLink to="/" class="wordmark a-focus rounded-md">Voltis</RouterLink>
+        </div>
+        <SidebarNav />
+    </aside>
+
+    <header
+        class="header"
+        :class="{ 'is-hidden': store.navbarHidden.value, 'has-menu': !store.sidebarPersistent }"
+    >
+        <template v-if="!store.sidebarPersistent">
+            <AIconButton
+                id="sidebar-toggle"
+                :icon="IconMenu"
+                :label="store.sidebarTemporary.value ? 'Menu' : 'Show sidebar'"
+                :aria-expanded="store.sidebarOpen"
+                @click="toggleSidebar"
+            />
+            <RouterLink to="/" class="wordmark a-focus -ml-1 rounded-md">Voltis</RouterLink>
+        </template>
+        <SearchBox class="nav:max-w-[560px] flex-1" />
+        <ScanIndicator />
+    </header>
+
+    <main id="main" tabindex="-1" class="main outline-none">
+        <RouterView />
+    </main>
+
+    <ADrawer
+        v-if="store.sidebarTemporary.value"
+        :open="store.sidebarOpen"
+        nav
+        title="Navigation"
+        width="var(--sidebar-width)"
+        @update:open="store.setSidebarOpen"
+    >
+        <div class="flex flex-1 flex-col px-3 pt-2 pb-3.5">
+            <SidebarNav />
+        </div>
+    </ADrawer>
+
+    <Teleport to="#overlays">
         <ModalContainer />
-    </VApp>
+    </Teleport>
+    <AToastRegion />
 </template>
 
 <script setup lang="ts">
-import { onLongPress, useEventListener, useThrottleFn } from '@vueuse/core'
-import { computed, ref } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
-import { contentApi } from '@/utils/api/content'
-import { usersApi } from '@/utils/api/users'
+import { nextTick, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import ADrawer from '@/ui/ADrawer.vue'
+import AIconButton from '@/ui/AIconButton.vue'
+import AToastRegion from '@/ui/AToastRegion.vue'
+import { IconMenu } from '@/ui/icons'
 import { ModalContainer } from '@/utils/modals'
-import Libraries from './Libraries.vue'
 import ScanIndicator from './ScanIndicator.vue'
 import SearchBox from './SearchBox.vue'
+import SidebarNav from './SidebarNav.vue'
 import { useLayoutStore } from './useLayoutStore'
-import { useLogout } from './useLogout'
 
 const store = useLayoutStore()
-
-const router = useRouter()
 const route = useRoute()
-const isSettings = computed(() => route.path.startsWith('/settings'))
-const qMe = usersApi.useMe()
-const { canLogout, logout, mutation: mLogout } = useLogout()
 
-const isAdmin = computed(() => qMe.data.value?.permissions.includes('ADMIN'))
-const qBrokenRefs = contentApi.useBrokenRefsSummary({ enabled: () => isSettings.value })
-const hasBrokenRefs = computed(() => (qBrokenRefs.data.value?.length ?? 0) > 0)
-
-/** We out here overcomplicating things to the bone. It's nice, though. */
-const themeBtnRef = ref<HTMLElement | null>(null)
-let longPressTriggered = false
-onLongPress(
-    themeBtnRef,
-    () => {
-        longPressTriggered = true
-        store.resetTheme()
-    },
-    { delay: 500 }
+// The temporary drawer closes on navigation (the reader drawers don't).
+watch(
+    () => route.fullPath,
+    () => store.closeDrawer()
 )
-useEventListener(document.body, 'pointerup', () => {
-    setTimeout(() => (longPressTriggered = false), 0)
-})
-const handleThemeClick = useThrottleFn((e: MouseEvent) => {
-    if (longPressTriggered) return
-    e.shiftKey ? store.resetTheme() : store.toggleTheme()
-}, 10)
-useEventListener(themeBtnRef, 'click', handleThemeClick)
+
+function skipToMain() {
+    document.getElementById('main')?.focus()
+}
+
+// Hiding or showing the persistent sidebar swaps its toggle between the sidebar and the header
+// (only one exists at a time): keep focus on it.
+async function toggleSidebar() {
+    const persistent = !store.sidebarTemporary.value
+    store.setSidebarOpen(!store.sidebarOpen)
+    if (!persistent) return
+    await nextTick()
+    document.getElementById('sidebar-toggle')?.focus()
+}
 </script>
 
 <style scoped>
-.ff-browser-chrome-spacer {
-    display: none;
-}
+@layer ui {
+    .skip-link {
+        position: fixed;
+        top: 8px;
+        left: 8px;
+        z-index: calc(var(--z-header) + 1);
+        padding: 10px 16px;
+        border-radius: var(--radius-field);
+        background: var(--color-inverse);
+        color: var(--color-on-inverse);
+        font-size: 14px;
+        font-weight: 600;
+        outline: 2px solid var(--color-inverse-primary);
+        outline-offset: 2px;
 
-@supports (-moz-appearance: none) {
-    @media (hover: none) {
-        .ff-browser-chrome-spacer {
-            display: block;
-            height: calc(100lvh - 100dvh);
+        &:not(:focus) {
+            clip-path: inset(50%);
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            overflow: hidden;
+            white-space: nowrap;
+        }
+    }
+
+    .sidebar {
+        position: fixed;
+        inset: 0 auto 0 0;
+        z-index: var(--z-sidebar);
+        display: flex;
+        flex-direction: column;
+        width: var(--sidebar-width);
+        height: 100dvh;
+        overflow-y: auto;
+        padding: 0 12px 14px;
+        padding-left: calc(12px + env(safe-area-inset-left));
+        background: var(--color-sidebar);
+        box-shadow: inset -1px 0 0 var(--color-outline-variant);
+    }
+
+    .wordmark {
+        flex: none;
+        font-family: var(--font-display);
+        font-size: 23px;
+        font-weight: 600;
+        line-height: 1.2;
+    }
+
+    /* Scroll-hide slides it away but keeps `--layout-top`; the reader's temporary chrome sets
+     * that to 0. */
+    .header {
+        position: fixed;
+        top: 0;
+        right: 0;
+        left: var(--layout-left);
+        z-index: var(--z-header);
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        height: var(--header-height);
+        padding: 0 40px;
+        background: var(--color-bg);
+        transition: transform var(--duration-medium) var(--ease-standard);
+
+        /* Keyboard focus brings it back. */
+        &.is-hidden:not(:has(:focus-visible)) {
+            transform: translateY(-100%);
+        }
+
+        /* The menu button lines up with the sidebar's. */
+        &.has-menu {
+            padding-left: 14px;
+        }
+    }
+
+    .main {
+        display: block;
+        min-height: 100dvh;
+        padding-top: var(--layout-top);
+        padding-left: var(--layout-left);
+    }
+
+    @media (width < 60rem) {
+        .header {
+            gap: 8px;
+
+            &,
+            &.has-menu {
+                padding: 0 8px 0 4px;
+            }
         }
     }
 }

@@ -29,17 +29,7 @@ const snapshotMock = vi.mocked(tasksApi.snapshot)
 const logsMock = vi.mocked(tasksApi.logs)
 const scanMock = vi.fn()
 
-const pass = { template: '<div><slot /></div>' }
-const stubs = {
-    VDialog: pass,
-    VCard: pass,
-    VCardTitle: pass,
-    VCardText: pass,
-    VCheckbox: { template: '<div />' },
-    VProgressCircular: { template: '<div />' },
-    VProgressLinear: { template: '<div />' },
-    VBtn: { template: '<button><slot /></button>' },
-}
+const stubs = { ADialog: { template: '<div><slot /><slot name="actions" /></div>' } }
 
 function task(over: Partial<TaskSnapshot> = {}): TaskSnapshot {
     return {
@@ -78,7 +68,11 @@ beforeEach(() => {
     snapshotMock.mockResolvedValue([])
     scanMock.mockResolvedValue({ task_ids: ['t_1'] })
     vi.mocked(librariesApi.useList).mockReturnValue({ data: ref([]) } as any)
-    vi.mocked(librariesApi.useScan).mockReturnValue({ mutateAsync: scanMock } as any)
+    vi.mocked(librariesApi.useScan).mockReturnValue({
+        mutateAsync: scanMock,
+        isPending: ref(false),
+        isError: ref(false),
+    } as any)
 })
 
 afterEach(() => {

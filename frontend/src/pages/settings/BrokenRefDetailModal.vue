@@ -1,24 +1,20 @@
 <template>
-    <VDialog :model-value="open" @update:model-value="v => !v && close()" max-width="600">
-        <VCard>
-            <VCardTitle>Reference Detail</VCardTitle>
-            <VCardText>
-                <code>
-                    <pre class="bg-surface-variant overflow-auto rounded p-2 font-mono!">{{
-                        formatted
-                    }}</pre>
-                </code>
-            </VCardText>
-            <VCardActions>
-                <VSpacer />
-                <VBtn variant="text" @click="close()">Close</VBtn>
-            </VCardActions>
-        </VCard>
-    </VDialog>
+    <ADialog :open="open" title="Reference detail" size="lg" @update:open="v => !v && close()">
+        <pre
+            class="bg-surface-2 rounded-field max-h-[60dvh] overflow-auto p-3 text-xs leading-snug wrap-break-word whitespace-pre-wrap"
+            tabindex="0"
+            aria-label="Reference data"
+            >{{ formatted }}</pre>
+        <template #actions>
+            <AButton variant="text" tone="neutral" autofocus @click="close()">Close</AButton>
+        </template>
+    </ADialog>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import AButton from '@/ui/AButton.vue'
+import ADialog from '@/ui/ADialog.vue'
 import type { BrokenUserToContent } from '@/utils/api/types'
 
 const props = defineProps<{

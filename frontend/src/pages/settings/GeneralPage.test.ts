@@ -4,6 +4,7 @@ import { enableAutoUnmount, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick, ref } from 'vue'
 import GeneralPage from '@/pages/settings/GeneralPage.vue'
+import ASpinner from '@/ui/ASpinner.vue'
 import type { ProxyAuthStatus, Setting } from '@/utils/api/types'
 
 const settings = ref<Setting[] | undefined>(undefined)
@@ -29,22 +30,9 @@ vi.mock('@/utils/api/settings', async () => {
     }
 })
 
-const pass = { template: '<div><slot /></div>' }
 const stubs = {
-    VContainer: pass,
-    VCard: pass,
-    VCardTitle: pass,
-    VCardText: pass,
-    VAlert: pass,
-    VDivider: { template: '<hr />' },
-    VTable: pass,
-    VProgressCircular: { template: '<div class="loading" />' },
-    VForm: { template: '<form><slot /></form>' },
-    VBtn: { template: '<button><slot /></button>' },
-    VTextField: { template: '<input />' },
-    AInput: { props: ['input'], template: '<input />' },
-    AQueryError: { template: '<div />' },
-    ASwitch: { props: ['modelValue', 'label'], template: '<input type="checkbox" />' },
+    QueryError: { template: '<div />' },
+    ATooltip: { template: '<slot />' },
 }
 
 function setting(key: string, value: Setting['value'], extra: Partial<Setting> = {}): Setting {
@@ -80,7 +68,7 @@ describe('GeneralPage', () => {
 
     it('does not offer the form before the settings load', () => {
         const wrapper = render()
-        expect(wrapper.find('.loading').exists()).toBe(true)
+        expect(wrapper.findComponent(ASpinner).exists()).toBe(true)
         expect(wrapper.find('form').exists()).toBe(false)
     })
 
@@ -88,7 +76,7 @@ describe('GeneralPage', () => {
         settingsError.value = true
         const wrapper = render()
         expect(wrapper.find('form').exists()).toBe(false)
-        expect(wrapper.find('.loading').exists()).toBe(false)
+        expect(wrapper.findComponent(ASpinner).exists()).toBe(false)
     })
 
     it('saves the loaded values and leaves the stored secret alone', async () => {

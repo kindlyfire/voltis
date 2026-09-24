@@ -1,43 +1,33 @@
 <template>
-    <VDialog :model-value="open" @update:model-value="v => !v && close()" max-width="500">
-        <VCard>
-            <VCardTitle>Edit Notes</VCardTitle>
-            <VCardText>
-                <VForm @submit="form.onSubmit" class="space-y-4!">
-                    <div v-if="title" class="text-sm opacity-60">
-                        {{ title }}
-                    </div>
-
-                    <AInput
-                        :input="form.getInputProps('notes')"
-                        label="Notes"
-                        type="textarea"
-                        auto-grow
-                        rows="4"
-                    />
-
-                    <AQueryError :mutation="form.mutation" />
-
-                    <div class="flex gap-2">
-                        <VBtn
-                            type="submit"
-                            color="primary"
-                            :loading="form.mutation.isPending.value"
-                        >
-                            Save
-                        </VBtn>
-                        <VBtn variant="text" @click="close()">Cancel</VBtn>
-                    </div>
-                </VForm>
-            </VCardText>
-        </VCard>
-    </VDialog>
+    <ADialog :open="open" title="Edit notes" :description="title" @update:open="v => !v && close()">
+        <form :id="formId" novalidate class="flex flex-col gap-4" @submit="form.onSubmit">
+            <ATextField
+                multiline
+                v-bind="form.field('notes')"
+                label="Notes"
+                auto-grow
+                :rows="4"
+                autofocus
+            />
+            <QueryError :mutation="form.mutation" />
+        </form>
+        <template #actions>
+            <AButton variant="text" tone="neutral" @click="close()">Cancel</AButton>
+            <AButton type="submit" :form="formId" :loading="form.mutation.isPending.value">
+                Save
+            </AButton>
+        </template>
+    </ADialog>
 </template>
 
 <script setup lang="ts">
+import { useId } from 'vue'
 import { z } from 'zod'
-import AInput from '@/components/AInput.vue'
-import AQueryError from '@/components/AQueryError.vue'
+import QueryError from '@/components/QueryError.vue'
+import AButton from '@/ui/AButton.vue'
+import ADialog from '@/ui/ADialog.vue'
+import ATextField from '@/ui/ATextField.vue'
+import { useToast } from '@/ui/useToast'
 import { customListsApi } from '@/utils/api/custom-lists'
 import { useForm } from '@/utils/forms'
 
@@ -51,6 +41,8 @@ const props = defineProps<{
 }>()
 
 const updateEntry = customListsApi.useUpdateEntry()
+const toast = useToast()
+const formId = useId()
 
 const form = useForm({
     schema: z.object({
@@ -65,6 +57,7 @@ const form = useForm({
             entryId: props.entryId,
             notes: values.notes.trim() ? values.notes : null,
         })
+        toast.show({ message: 'Notes saved' })
         props.close()
     },
 })

@@ -1,0 +1,58 @@
+/*
+ * Shared interaction states for kit components. `a-state` adds the hover/pressed state layer
+ * (a `currentColor` overlay), `a-focus` the focus-visible ring.
+ */
+@layer ui {
+    .a-state {
+        position: relative;
+        isolation: isolate;
+    }
+
+    .a-state::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        z-index: -1;
+        border-radius: inherit;
+        background: currentColor;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity var(--duration-short) var(--ease-standard);
+    }
+
+    .a-state:not(:disabled, [aria-disabled='true']):hover::before {
+        opacity: 0.08;
+    }
+
+    .a-state:not(:disabled, [aria-disabled='true']):active::before {
+        opacity: 0.12;
+    }
+
+    .a-focus:focus-visible {
+        outline: 2px solid var(--color-primary);
+        outline-offset: 2px;
+    }
+
+    .a-focus:focus:not(:focus-visible) {
+        outline: none;
+    }
+
+    /* Popups: menus, selects, popovers. */
+    @keyframes a-menu-in {
+        from {
+            opacity: 0;
+            transform: scale(0.96);
+        }
+    }
+}
+
+@layer base {
+    @media (prefers-reduced-motion: reduce) {
+        *,
+        ::before,
+        ::after {
+            transition-duration: 0.01ms !important;
+            scroll-behavior: auto !important;
+        }
+    }
+}

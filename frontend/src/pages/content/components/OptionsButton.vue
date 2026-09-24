@@ -1,50 +1,52 @@
 <template>
-    <VMenu :offset="6">
-        <template #activator="{ props: menuProps }">
-            <VBtn
-                variant="tonal"
-                v-bind="menuProps"
-                size="large"
-                class="aspect-square! h-12! min-w-auto!"
-            >
-                <VIcon>mdi-dots-vertical</VIcon>
-            </VBtn>
+    <AMenu align="end">
+        <template #trigger>
+            <AIconButton :icon="IconDotsVertical" label="More options" variant="tonal" />
         </template>
-        <VList>
-            <VListItem
-                prepend-icon="mdi-download"
-                title="Download"
-                @click="showDownloadModal(props.contentId)"
-            />
-            <VListItem
-                prepend-icon="mdi-format-list-bulleted"
-                title="Add to list"
-                @click="showListsModal(props.contentId)"
-            />
-            <VListItem
-                v-if="isAdmin"
-                prepend-icon="mdi-pencil"
-                title="Edit metadata"
-                @click="showEditMetadataModal(props.contentId)"
-            />
-            <VListItem
-                v-if="isAdmin"
-                prepend-icon="mdi-magnify-scan"
-                title="Scan"
-                @click="showScanModal({ contentIds: [props.contentId] })"
-            />
-            <VListItem
-                prepend-icon="mdi-book-sync"
-                title="Update progress"
-                @click="showUpdateProgressModal(props.contentId)"
-            />
-        </VList>
-    </VMenu>
+        <AMenuItem :leading-icon="IconDownload" @select="showDownloadModal(props.contentId)">
+            Download
+        </AMenuItem>
+        <AMenuItem :leading-icon="IconPlaylistAdd" @select="showListsModal(props.contentId)">
+            Add to list
+        </AMenuItem>
+        <AMenuItem
+            v-if="isSeries"
+            :leading-icon="IconBookSync"
+            @select="showUpdateProgressModal(props.contentId)"
+        >
+            Update progress
+        </AMenuItem>
+        <template v-if="isAdmin">
+            <AMenuSeparator />
+            <AMenuItem :leading-icon="IconPencil" @select="showEditMetadataModal(props.contentId)">
+                Edit metadata
+            </AMenuItem>
+            <AMenuItem
+                :leading-icon="IconMagnifyScan"
+                @select="showScanModal({ contentIds: [props.contentId] })"
+            >
+                Scan
+            </AMenuItem>
+        </template>
+    </AMenu>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import { showScanModal } from '@/pages/settings/ScanModal.vue'
+import AIconButton from '@/ui/AIconButton.vue'
+import AMenu from '@/ui/AMenu.vue'
+import AMenuItem from '@/ui/AMenuItem.vue'
+import AMenuSeparator from '@/ui/AMenuSeparator.vue'
+import {
+    IconBookSync,
+    IconDotsVertical,
+    IconDownload,
+    IconMagnifyScan,
+    IconPencil,
+    IconPlaylistAdd,
+} from '@/ui/icons'
+import { contentApi } from '@/utils/api/content'
 import { usersApi } from '@/utils/api/users'
 import { showDownloadModal } from './DownloadModal.vue'
 import { showEditMetadataModal } from './EditMetadataModal.vue'
@@ -57,4 +59,7 @@ const props = defineProps<{
 
 const qMe = usersApi.useMe()
 const isAdmin = computed(() => qMe.data.value?.permissions.includes('ADMIN'))
+// Progress updates act on a series' children.
+const qContent = contentApi.useGet(() => props.contentId)
+const isSeries = computed(() => qContent.data.value?.type.includes('series'))
 </script>

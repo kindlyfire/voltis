@@ -3,10 +3,8 @@ import { describe, expect, it } from 'vitest'
 import type { BookStructure } from '@/utils/api/types'
 import BookContents from './BookContents.vue'
 
-const pass = { template: '<div><slot /></div>' }
 const stubs = {
-    VList: pass,
-    VListItem: {
+    ANavItem: {
         props: ['to', 'active', 'disabled'],
         computed: {
             href(): string {
@@ -15,9 +13,8 @@ const stubs = {
             },
         },
         template: `<a :data-to="href" :data-active="String(!!active)"
-            :data-disabled="String(!!disabled)"><slot name="prepend" /><slot /></a>`,
+            :data-disabled="String(!!disabled)"><slot name="prefix" /><slot /></a>`,
     },
-    VListItemTitle: { template: '<span><slot /></span>' },
 }
 
 const NESTED: BookStructure = {
@@ -73,6 +70,7 @@ describe('BookContents', () => {
         expect(wrapper.text()).toContain('no usable table of contents')
         expect(wrapper.text()).toContain('Book sections')
         expect(wrapper.findAll('a')).toHaveLength(2)
+        expect(wrapper.findAll('a')[1]!.text()).toBe('2 File B')
     })
 
     it('takes the fallback override when targets failed to resolve', () => {

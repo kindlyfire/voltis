@@ -1,12 +1,12 @@
-import { useDebounceFn, useScroll } from '@vueuse/core'
+import { useDebounceFn, useMediaQuery, useScroll } from '@vueuse/core'
 import { acceptHMRUpdate, defineStore } from 'pinia'
 import { computed, onBeforeMount, onUnmounted, ref, watch } from 'vue'
-import { useDisplay, useTheme } from 'vuetify'
 import { useLocalStorage } from '@/utils/localStorage'
 import { createOverridableValue, useSystemTheme } from '@/utils/misc'
 
 export const useLayoutStore = defineStore('layout', () => {
-    const { mdAndUp } = useDisplay(undefined, 'composables')
+    /** Matches `--breakpoint-nav` (60rem). */
+    const mdAndUp = useMediaQuery('(min-width: 960px)')
 
     // Navbar stuff
     const navbarScrollHide = {
@@ -41,27 +41,56 @@ export const useLayoutStore = defineStore('layout', () => {
         )
     })
 
-    /** sidebarTemporary has the default state (true on mobile), and an override
-     * (reader pages make the sidebar temporary). temporary = uses an overlay
-     * instead of taking up space in the layout */
+    // The space the header reserves: scroll-hide keeps it, reader-temporary chrome gives it up.
+    // Published on :root for CSS and `getLayoutTop()`.
+    watch(
+        navbarTemporary,
+        temporary => {
+            document.documentElement.style.setProperty('--layout-top', temporary ? '0px' : '')
+        },
+        { immediate: true }
+    )
+
+    /** Temporary: the sidebar is a drawer over the page instead of a column beside it. True on
+     * mobile, and forced by the reader pages. */
     const sidebarTemporary = createOverridableValue(
         () => !mdAndUp.value,
         ['comicReader', 'bookReader']
     )
 
-    /** sidebarOpen has the default state (hidden on mobile), and an override
-     * (clicking the sidebar icon should show it) */
-    const sidebarOpen = createOverridableValue(() => mdAndUp.value, ['manual'])
-    function setSidebarOpen(state: boolean) {
-        console.log('setSidebarOpen', state)
-        sidebarOpen.setLayer(
-            'manual',
-            state === sidebarOpen.initialValue.value ? undefined : state!
-        )
+    /** The persistent sidebar's collapse button hides it; the choice persists. */
+    const { value: sidebarCollapsed } = useLocalStorage<boolean>(
+        'sidebar-collapsed',
+        found => found === true
+    )
+    /** The temporary drawer starts closed whenever the sidebar becomes temporary. */
+    const drawerOpen = ref(false)
+    watch(sidebarTemporary.value, () => (drawerOpen.value = false))
+
+    const sidebarOpen = computed(() =>
+        sidebarTemporary.value.value ? drawerOpen.value : !sidebarCollapsed.value
+    )
+    function setSidebarOpen(open: boolean) {
+        if (sidebarTemporary.value.value) drawerOpen.value = open
+        else sidebarCollapsed.value = !open
     }
 
+    /** The sidebar is shown as a column beside the page. */
+    const sidebarPersistent = computed(() => !sidebarTemporary.value.value && sidebarOpen.value)
+
+    // The column the persistent sidebar takes, next to `--layout-top`.
+    watch(
+        sidebarPersistent,
+        persistent => {
+            document.documentElement.style.setProperty(
+                '--layout-left',
+                persistent ? 'var(--sidebar-width)' : ''
+            )
+        },
+        { immediate: true }
+    )
+
     // Theme
-    const vuetifyTheme = useTheme()
     const systemTheme = useSystemTheme()
     const { value: themePreference } = useLocalStorage<'light' | 'dark' | null>(
         'theme-preference',
@@ -77,7 +106,6 @@ export const useLayoutStore = defineStore('layout', () => {
     watch(
         () => effectiveTheme.value,
         theme => {
-            vuetifyTheme.change(theme)
             document.documentElement.classList.toggle('dark', theme === 'dark')
         },
         { immediate: true }
@@ -98,6 +126,8 @@ export const useLayoutStore = defineStore('layout', () => {
         sidebarOpen,
         setSidebarOpen,
         sidebarTemporary,
+        sidebarPersistent,
+        closeDrawer: () => (drawerOpen.value = false),
 
         // Theme
         theme: effectiveTheme,

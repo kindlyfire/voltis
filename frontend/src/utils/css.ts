@@ -14,7 +14,8 @@ export function getScrollParent(element: HTMLElement): HTMLElement | null {
 
         parent = parent.parentElement
     }
-    return null
+    // The page itself scrolls without any `overflow` style on <html>.
+    return document.scrollingElement as HTMLElement | null
 }
 
 export function getViewportHeight(unit = 'lvh') {

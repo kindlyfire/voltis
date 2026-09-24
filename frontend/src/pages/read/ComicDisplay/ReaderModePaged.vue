@@ -2,16 +2,21 @@
     <div class="reader-paged flex items-center justify-center">
         <template v-if="loader">
             <div v-if="loader.error" class="flex flex-col items-center gap-2">
-                <div class="text-error">{{ loader.error }}</div>
-                <VBtn @click.stop="loader.load()">Retry</VBtn>
+                <div class="text-(--color-error)">{{ loader.error }}</div>
+                <AButton variant="tonal" @click.stop="loader.load()">Retry</AButton>
             </div>
             <div
                 v-else-if="loader.loading || !loader.blobUrl"
                 class="flex items-center justify-center"
             >
-                <VProgressCircular indeterminate size="64" />
+                <ASpinner size="lg" />
             </div>
-            <img v-else :src="loader.blobUrl" class="reader-paged__image" />
+            <img
+                v-else
+                :src="loader.blobUrl"
+                :alt="`Page ${reader.state!.page + 1}`"
+                class="reader-paged__image"
+            />
         </template>
     </div>
 </template>
@@ -19,6 +24,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useLayoutStore } from '@/pages/_layout/useLayoutStore'
+import AButton from '@/ui/AButton.vue'
+import ASpinner from '@/ui/ASpinner.vue'
 import { useReaderStore } from './useComicDisplayStore'
 
 const reader = useReaderStore()

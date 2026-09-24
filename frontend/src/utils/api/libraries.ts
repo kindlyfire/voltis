@@ -27,9 +27,8 @@ export const librariesApi = {
         const queryClient = useQueryClient()
         return useMutation({
             mutationFn: async (id: string) => apiFetch(`/libraries/${id}`, { method: 'DELETE' }),
-            onSuccess: () => {
-                queryClient.invalidateQueries({ queryKey: ['libraries'] })
-            },
+            // Resolves once the list no longer has the row, so the dialog can hand focus back.
+            onSuccess: () => queryClient.invalidateQueries({ queryKey: ['libraries'] }),
         })
     },
 

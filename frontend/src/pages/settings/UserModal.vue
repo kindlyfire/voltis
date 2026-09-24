@@ -1,95 +1,110 @@
 <template>
-    <VDialog :model-value="open" @update:model-value="v => !v && close()" max-width="500">
-        <VCard>
-            <VCardTitle>{{ isNew ? 'Create User' : 'Edit User' }}</VCardTitle>
-            <VCardText>
-                <VForm @submit="form.onSubmit" class="space-y-4!">
-                    <AInput :input="form.getInputProps('username')" label="Username" />
-                    <AInput :input="form.getInputProps('email')" label="Email" type="email" />
-                    <AInput
-                        :input="form.getInputProps('password')"
-                        :label="
-                            isNew
-                                ? 'Password (optional, leave blank for an SSO-only account)'
-                                : 'New Password (leave blank to keep current)'
-                        "
-                        type="password"
-                    />
-                    <VCheckbox
-                        :model-value="form.values.value.isAdmin"
-                        @update:model-value="form.setValue('isAdmin', $event || false)"
-                        label="Admin"
-                        hide-details
-                    />
-                    <AQueryError :mutation="form.mutation" />
-                    <div class="flex gap-2">
-                        <VBtn
-                            type="submit"
-                            color="primary"
-                            :loading="form.mutation.isPending.value"
-                        >
-                            {{ isNew ? 'Create' : 'Update' }}
-                        </VBtn>
-                        <VBtn variant="text" @click="close()"> Cancel </VBtn>
-                        <VSpacer />
-                        <VBtn
-                            v-if="!isNew"
-                            color="error"
-                            variant="text"
-                            :loading="deleteUser.isPending.value"
-                            @click="handleDelete"
-                        >
-                            Delete
-                        </VBtn>
-                    </div>
-                </VForm>
+    <ADialog
+        :open="open"
+        :title="isNew ? 'Create user' : 'Edit user'"
+        @update:open="v => !v && close()"
+    >
+        <div class="flex flex-col gap-5">
+            <form :id="formId" novalidate class="flex flex-col gap-3" @submit="form.onSubmit">
+                <ATextField
+                    v-bind="form.field('username')"
+                    label="Username"
+                    autocomplete="off"
+                    autofocus
+                />
+                <ATextField
+                    v-bind="form.field('email')"
+                    label="Email"
+                    type="email"
+                    autocomplete="off"
+                />
+                <ATextField
+                    v-bind="form.field('password')"
+                    :label="isNew ? 'Password' : 'New password'"
+                    :hint="
+                        isNew
+                            ? 'Optional. Leave it blank for an SSO-only account.'
+                            : 'Leave it blank to keep the current password.'
+                    "
+                    type="password"
+                    autocomplete="new-password"
+                />
+                <ACheckbox v-bind="form.field('isAdmin')" label="Admin" />
+                <QueryError :mutation="form.mutation" />
+                <QueryError :mutation="deleteUser" />
+            </form>
 
-                <template v-if="!isNew">
-                    <VDivider class="my-4" />
-                    <IdentitiesCard :user-id="userId" flat />
-                    <VForm @submit="linkForm.onSubmit" class="mt-2 space-y-2!">
-                        <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                            <VSelect
+            <template v-if="!isNew">
+                <IdentitiesCard :user-id="userId" compact>
+                    <form novalidate class="flex flex-col gap-3" @submit="linkForm.onSubmit">
+                        <div class="grid grid-cols-1 items-start gap-2 sm:grid-cols-3">
+                            <ASelect
                                 :model-value="linkForm.values.value.provider"
-                                @update:model-value="linkForm.setValue('provider', $event)"
-                                :items="['oidc', 'proxy']"
+                                :options="providerOptions"
                                 label="Provider"
-                                density="compact"
-                                hide-details
+                                size="sm"
+                                @update:model-value="v => v && linkForm.setValue('provider', v)"
                             />
-                            <AInput
-                                :input="linkForm.getInputProps('issuer')"
+                            <ATextField
+                                v-bind="linkForm.field('issuer')"
                                 label="Issuer"
-                                density="compact"
+                                size="sm"
                                 :disabled="linkForm.values.value.provider === 'proxy'"
                             />
-                            <AInput
-                                :input="linkForm.getInputProps('subject')"
+                            <ATextField
+                                v-bind="linkForm.field('subject')"
                                 label="Subject"
-                                density="compact"
+                                size="sm"
                             />
                         </div>
-                        <AQueryError :mutation="linkForm.mutation" />
-                        <VBtn
-                            type="submit"
-                            variant="tonal"
-                            size="small"
-                            :loading="linkForm.mutation.isPending.value"
-                        >
-                            Link identity
-                        </VBtn>
-                    </VForm>
-                </template>
-            </VCardText>
-        </VCard>
-    </VDialog>
+                        <QueryError :mutation="linkForm.mutation" />
+                        <div>
+                            <AButton
+                                type="submit"
+                                variant="tonal"
+                                size="sm"
+                                :leading-icon="IconLink"
+                                :loading="linkForm.mutation.isPending.value"
+                            >
+                                Link identity
+                            </AButton>
+                        </div>
+                    </form>
+                </IdentitiesCard>
+            </template>
+        </div>
+
+        <template #actions>
+            <AButton
+                v-if="!isNew"
+                variant="text"
+                tone="danger"
+                class="mr-auto"
+                :loading="deleteUser.isPending.value"
+                @click="handleDelete"
+            >
+                Delete
+            </AButton>
+            <AButton variant="text" tone="neutral" @click="close()">Cancel</AButton>
+            <AButton type="submit" :form="formId" :loading="form.mutation.isPending.value">
+                {{ isNew ? 'Create' : 'Save' }}
+            </AButton>
+        </template>
+    </ADialog>
 </template>
 
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, useId, watch } from 'vue'
 import { z } from 'zod'
-import AInput from '@/components/AInput.vue'
-import AQueryError from '@/components/AQueryError.vue'
+import { showConfirmModal } from '@/components/ConfirmModal.vue'
+import QueryError from '@/components/QueryError.vue'
+import AButton from '@/ui/AButton.vue'
+import ACheckbox from '@/ui/ACheckbox.vue'
+import ADialog from '@/ui/ADialog.vue'
+import ASelect from '@/ui/ASelect.vue'
+import ATextField from '@/ui/ATextField.vue'
+import { IconLink } from '@/ui/icons'
+import { useToast } from '@/ui/useToast'
 import { usersApi } from '@/utils/api/users'
 import { useForm } from '@/utils/forms'
 import IdentitiesCard from './IdentitiesCard.vue'
@@ -106,23 +121,18 @@ const user = computed(() => users.data?.value?.find(u => u.id === props.userId))
 const upsert = usersApi.useUpsert()
 const deleteUser = usersApi.useDelete()
 const linkIdentity = usersApi.useLinkIdentity(() => props.userId)
+const formId = useId()
+const toast = useToast()
+const providerOptions = [
+    { value: 'oidc', label: 'SSO' },
+    { value: 'proxy', label: 'Proxy' },
+] as const
 
 const form = useForm({
     schema: z.object({
-        username: z.string().min(3),
+        username: z.string().min(3, 'Use at least 3 characters'),
         email: z.string(),
-        password: z
-            .string()
-            .optional()
-            .superRefine((val, ctx) => {
-                if (val && val.length < 8) {
-                    ctx.issues.push({
-                        code: 'custom',
-                        message: 'Password must be at least 8 characters long',
-                        input: val,
-                    })
-                }
-            }),
+        password: z.string().refine(v => !v || v.length >= 8, 'Use at least 8 characters'),
         isAdmin: z.boolean(),
     }),
     initialValues: {
@@ -139,6 +149,7 @@ const form = useForm({
             password: values.password || undefined,
             permissions: values.isAdmin ? ['ADMIN'] : [],
         })
+        toast.show({ message: isNew.value ? `Created ${values.username}` : 'User saved' })
         props.close()
     },
 })
@@ -147,7 +158,7 @@ const linkForm = useForm({
     schema: z.object({
         provider: z.enum(['oidc', 'proxy']),
         issuer: z.string(),
-        subject: z.string().min(1),
+        subject: z.string().trim().min(1, 'Subject is required'),
     }),
     initialValues: { provider: 'oidc' as 'oidc' | 'proxy', issuer: '', subject: '' },
     onSubmit: async values => {
@@ -157,6 +168,7 @@ const linkForm = useForm({
             subject: values.subject,
         })
         linkForm.reset()
+        toast.show({ message: `Linked ${values.subject}` })
     },
 })
 
@@ -177,16 +189,25 @@ watch(
 
 async function handleDelete() {
     if (isNew.value) return
+    const name = user.value?.username ?? 'this user'
+    const confirmed = await showConfirmModal({
+        title: 'Delete user?',
+        message: `${name} and their reading data, lists and sessions will be deleted.`,
+        confirmText: 'Delete',
+        tone: 'danger',
+    })
+    if (!confirmed) return
     await deleteUser.mutateAsync(props.userId)
+    toast.show({ message: `Deleted ${name}` })
     props.close()
 }
 </script>
 
 <script lang="ts">
-import { Modals } from '@/utils/modals'
+import { Modals, type ShowOptions } from '@/utils/modals'
 import Self from './UserModal.vue'
 
-export function showUserModal(userId: string): Promise<void> {
-    return Modals.show(Self, { userId })
+export function showUserModal(userId: string, options?: ShowOptions): Promise<void> {
+    return Modals.show(Self, { userId }, options)
 }
 </script>

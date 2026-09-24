@@ -1,0 +1,69 @@
+/*
+ * The popup list shared by ASelect and ACombobox. Unscoped: the parts are rendered by Reka
+ * primitives in a portal, not by either component's template, so they carry no scope attribute.
+ */
+@layer ui {
+    .a-listbox {
+        z-index: var(--z-popover);
+        max-width: min(420px, calc(100vw - 16px));
+        max-height: min(
+            360px,
+            var(
+                --reka-select-content-available-height,
+                var(--reka-combobox-content-available-height)
+            )
+        );
+        overflow-y: auto;
+        padding: 6px;
+        border-radius: var(--radius-menu);
+        background: var(--color-raised);
+        color: var(--color-fg);
+        box-shadow: var(--shadow-overlay);
+
+        &[data-state='open'] {
+            animation: a-menu-in var(--duration-short) var(--ease-standard);
+        }
+    }
+
+    .a-option {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 44px;
+        padding: 0 14px;
+        border-radius: var(--radius-menu-item);
+        font-size: 14px;
+        cursor: pointer;
+        outline: none;
+        user-select: none;
+
+        &[data-highlighted] {
+            background: var(--color-surface-3);
+        }
+
+        &[data-state='checked'] {
+            color: var(--color-primary);
+            font-weight: 600;
+        }
+
+        &[data-disabled] {
+            cursor: not-allowed;
+            color: color-mix(in oklch, var(--color-fg) 38%, transparent);
+        }
+    }
+
+    .a-option__icon {
+        font-size: 20px;
+        color: var(--color-fg-muted);
+    }
+
+    .a-option__text {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .a-option__check {
+        display: flex;
+        font-size: 18px;
+    }
+}

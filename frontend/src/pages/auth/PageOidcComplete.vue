@@ -1,85 +1,71 @@
 <template>
-    <VContainer>
-        <VRow justify="center">
-            <VCol cols="12" sm="8" md="5">
-                <VCard v-if="qPending.isLoading.value">
-                    <VCardText class="flex justify-center py-8">
-                        <VProgressCircular indeterminate />
-                    </VCardText>
-                </VCard>
+    <AuthCard
+        :title="qPending.isLoading.value || pending ? 'Finish signing in' : 'Nothing to finish'"
+        :loading="qPending.isLoading.value"
+    >
+        <template v-if="pending">
+            <div v-if="showConfirm" class="flex flex-col gap-4">
+                <p class="text-fg-muted text-sm leading-normal">
+                    An account named <strong class="text-fg">{{ pending.match_username }}</strong>
+                    already exists. Enter its password to link it to your provider account, or
+                    choose a different username.
+                </p>
+                <form novalidate class="flex flex-col gap-4" @submit="confirmForm.onSubmit">
+                    <ATextField
+                        v-bind="confirmForm.field('password')"
+                        label="Password"
+                        type="password"
+                        autocomplete="current-password"
+                        autofocus
+                    />
+                    <QueryError :mutation="confirmForm.mutation" />
+                    <div class="flex flex-wrap justify-end gap-2">
+                        <AButton variant="text" tone="neutral" @click="declined = true">
+                            Not my account
+                        </AButton>
+                        <AButton type="submit" :loading="confirmForm.mutation.isPending.value">
+                            Link account
+                        </AButton>
+                    </div>
+                </form>
+            </div>
 
-                <VCard v-else-if="pending">
-                    <VCardTitle class="text-h5">Finish signing in</VCardTitle>
+            <div v-else class="flex flex-col gap-4">
+                <p class="text-fg-muted text-sm leading-normal">
+                    Pick a username for your new account.
+                </p>
+                <form novalidate class="flex flex-col gap-4" @submit="usernameForm.onSubmit">
+                    <ATextField
+                        v-bind="usernameForm.field('username')"
+                        label="Username"
+                        autocomplete="username"
+                        autofocus
+                    />
+                    <QueryError :mutation="usernameForm.mutation" />
+                    <div class="flex flex-wrap justify-end gap-2">
+                        <AButton
+                            v-if="pending.needs === 'confirm'"
+                            variant="text"
+                            tone="neutral"
+                            @click="declined = false"
+                        >
+                            Back
+                        </AButton>
+                        <AButton type="submit" :loading="usernameForm.mutation.isPending.value">
+                            Create account
+                        </AButton>
+                    </div>
+                </form>
+            </div>
+        </template>
 
-                    <VCardText v-if="showConfirm">
-                        <p class="mb-4">
-                            An account named <strong>{{ pending.match_username }}</strong> already
-                            exists. Enter its password to link it to your provider account, or
-                            choose a different username.
-                        </p>
-                        <VForm @submit="confirmForm.onSubmit" class="space-y-4!">
-                            <AInput
-                                :input="confirmForm.getInputProps('password')"
-                                label="Password"
-                                type="password"
-                                autofocus
-                            />
-                            <AQueryError :mutation="confirmForm.mutation" />
-                            <div class="flex gap-2">
-                                <VBtn
-                                    type="submit"
-                                    color="primary"
-                                    :loading="confirmForm.mutation.isPending.value"
-                                >
-                                    Link account
-                                </VBtn>
-                                <VBtn variant="text" @click="declined = true">Not my account</VBtn>
-                            </div>
-                        </VForm>
-                    </VCardText>
-
-                    <VCardText v-else>
-                        <p class="mb-4">Pick a username for your new account.</p>
-                        <VForm @submit="usernameForm.onSubmit" class="space-y-4!">
-                            <AInput
-                                :input="usernameForm.getInputProps('username')"
-                                label="Username"
-                                autofocus
-                            />
-                            <AQueryError :mutation="usernameForm.mutation" />
-                            <div class="flex gap-2">
-                                <VBtn
-                                    type="submit"
-                                    color="primary"
-                                    :loading="usernameForm.mutation.isPending.value"
-                                >
-                                    Create account
-                                </VBtn>
-                                <VBtn
-                                    v-if="pending.needs === 'confirm'"
-                                    variant="text"
-                                    @click="declined = false"
-                                >
-                                    Back
-                                </VBtn>
-                            </div>
-                        </VForm>
-                    </VCardText>
-                </VCard>
-
-                <VCard v-else>
-                    <VCardTitle class="text-h5">Nothing to finish</VCardTitle>
-                    <VCardText>
-                        This sign-in is no longer waiting. Start again from the login page.
-                    </VCardText>
-                    <VCardActions>
-                        <VSpacer />
-                        <VBtn color="primary" to="/auth/login?local=1">Back to login</VBtn>
-                    </VCardActions>
-                </VCard>
-            </VCol>
-        </VRow>
-    </VContainer>
+        <p v-else class="text-fg-muted text-sm leading-normal">
+            This sign-in is no longer waiting. Start again from the login page.
+        </p>
+        <template v-if="!qPending.isLoading.value && !pending" #footer>
+            <AButton to="/auth/login?local=1">Back to login</AButton>
+        </template>
+    </AuthCard>
 </template>
 
 <script setup lang="ts">
@@ -88,10 +74,12 @@ import { useHead } from '@unhead/vue'
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { z } from 'zod'
-import AInput from '@/components/AInput.vue'
-import AQueryError from '@/components/AQueryError.vue'
+import QueryError from '@/components/QueryError.vue'
+import AButton from '@/ui/AButton.vue'
+import ATextField from '@/ui/ATextField.vue'
 import { oidcApi } from '@/utils/api/oidc'
 import { useForm } from '@/utils/forms'
+import AuthCard from './AuthCard.vue'
 
 useHead({ title: 'Finish signing in' })
 
@@ -111,7 +99,7 @@ async function signedIn() {
 }
 
 const confirmForm = useForm({
-    schema: z.object({ password: z.string().min(1) }),
+    schema: z.object({ password: z.string().min(1, 'Enter your password') }),
     initialValues: { password: '' },
     onSubmit: async values => {
         await confirm.mutateAsync(values.password)
@@ -120,7 +108,7 @@ const confirmForm = useForm({
 })
 
 const usernameForm = useForm({
-    schema: z.object({ username: z.string().min(2) }),
+    schema: z.object({ username: z.string().min(2, 'Use at least 2 characters') }),
     initialValues: { username: '' },
     onSubmit: async values => {
         await chooseUsername.mutateAsync(values.username)

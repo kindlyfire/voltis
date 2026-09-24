@@ -1,22 +1,22 @@
 <template>
-    <VSelect
+    <ASelect
         :model-value="currentStatus"
-        :items="readingStatusOptions"
-        :loading="qContent.isLoading.value || mUpdateUserData.isPending.value"
-        :placeholder="'Set status'"
-        density="comfortable"
-        variant="solo"
-        hide-details
+        :options="readingStatusOptions"
+        label="Reading status"
+        placeholder="Set status"
+        size="sm"
         clearable
+        :loading="qContent.isLoading.value || mUpdateUserData.isPending.value"
         @update:model-value="updateStatus"
-        class="grow! sm:max-w-60"
     />
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import ASelect from '@/ui/ASelect.vue'
+import { useToast } from '@/ui/useToast'
 import { contentApi } from '@/utils/api/content'
-import type { ReadingStatus } from '@/utils/api/types'
+import { READING_STATUS_LABELS, type ReadingStatus } from '@/utils/api/types'
 import { readingStatusOptions } from '@/utils/misc'
 
 const props = defineProps<{
@@ -28,10 +28,20 @@ const content = qContent.data
 
 const currentStatus = computed(() => content.value?.user_data?.status ?? null)
 const mUpdateUserData = contentApi.useUpdateUserData()
+const toast = useToast()
 
 async function updateStatus(status: ReadingStatus | null) {
     if (!content.value) return
-    await mUpdateUserData.mutateAsync({ contentId: content.value.id, status })
-    await qContent.refetch()
+    try {
+        await mUpdateUserData.mutateAsync({ contentId: content.value.id, status })
+    } catch {
+        toast.show({ message: 'Could not update the reading status', tone: 'danger' })
+        return
+    }
+    toast.show({
+        message: status
+            ? `Marked as ${READING_STATUS_LABELS[status]}`
+            : 'Cleared the reading status',
+    })
 }
 </script>

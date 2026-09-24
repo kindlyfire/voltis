@@ -6,37 +6,37 @@
         @click="controls.handleClick"
     >
         <div class="flex flex-1 flex-col">
-            <VAlert
+            <AAlert
                 v-if="session?.notice"
-                type="info"
-                variant="tonal"
-                density="compact"
-                closable
+                dismissible
                 class="m-4"
                 @click.stop
-                @click:close="session.dismissNotice()"
+                @dismiss="session.dismissNotice()"
             >
                 {{ session.notice }}
-            </VAlert>
+            </AAlert>
 
             <div v-if="!session || session.loading" class="flex justify-center py-8">
-                <VProgressCircular indeterminate />
+                <ASpinner />
             </div>
-            <VAlert v-else-if="session.error" type="error" variant="tonal" class="m-4">
+            <AAlert v-else-if="session.error" tone="danger" class="m-4">
                 {{ session.error }}
-            </VAlert>
+            </AAlert>
 
             <template v-if="session">
                 <div v-if="ready && session.standalone" class="flex justify-center p-4">
-                    <VBtn variant="tonal" @click.stop="leaveStandalone">
-                        <VIcon start>mdi-arrow-left</VIcon>
+                    <AButton
+                        variant="tonal"
+                        :leading-icon="IconArrowLeft"
+                        @click.stop="leaveStandalone"
+                    >
                         Back to reading
-                    </VBtn>
+                    </AButton>
                 </div>
                 <div v-else-if="ready && session.prevPage" class="flex justify-center p-4">
-                    <VBtn variant="tonal" @click.stop="turn($event, -1)">
+                    <AButton variant="tonal" @click.stop="turn($event, -1)">
                         Previous: {{ session.prevPage.title }}
-                    </VBtn>
+                    </AButton>
                 </div>
 
                 <!-- Keyed: preserved through this book's loading and errors,
@@ -44,12 +44,12 @@
                 <div ref="host" :key="session.contentId" class="flex-1" />
 
                 <template v-if="ready && !session.standalone">
-                    <VDivider />
+                    <ADivider />
                     <div class="flex justify-center p-4">
-                        <VBtn v-if="session.nextPage" color="primary" @click.stop="turn($event, 1)">
+                        <AButton v-if="session.nextPage" @click.stop="turn($event, 1)">
                             Next: {{ session.nextPage.title }}
-                        </VBtn>
-                        <span v-else class="text-sm opacity-60">End of book</span>
+                        </AButton>
+                        <span v-else class="text-fg-muted text-sm">End of book</span>
                     </div>
                     <div ref="sentinel" class="h-px" />
                 </template>
@@ -59,16 +59,21 @@
 
     <BookReaderDrawer :content-id="contentId" />
 
-    <VProgressLinear
-        :model-value="session?.percent ?? 0"
+    <AProgressBar
+        :value="(session?.percent ?? 0) / 100"
+        label="Reading progress"
         class="reader-progress"
-        height="3"
-        color="primary"
     />
 </template>
 
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
+import AAlert from '@/ui/AAlert.vue'
+import AButton from '@/ui/AButton.vue'
+import ADivider from '@/ui/ADivider.vue'
+import AProgressBar from '@/ui/AProgressBar.vue'
+import ASpinner from '@/ui/ASpinner.vue'
+import { IconArrowLeft } from '@/ui/icons'
 import { useReaderTutorial } from '../useReaderTutorial'
 import BookReaderDrawer from './BookReaderDrawer.vue'
 import { FONT_STACKS, type BookFont } from './bookSettings'
@@ -149,16 +154,25 @@ onUnmounted(() => {
 
 <style scoped>
 .book-reader {
-    min-height: calc(100dvh - var(--v-layout-top, 0px));
+    min-height: calc(100dvh - var(--layout-top, 0px));
+}
+
+/* Each mounted slice's shadow host (see `mountTree`). */
+.book-reader :deep(.book-page) {
+    display: block;
+    box-sizing: border-box;
+    max-width: var(--reader-max-width, calc(45em + 4rem));
+    margin: 0 auto;
+    padding: 2rem;
 }
 
 .reader-progress {
     position: fixed;
-    bottom: 0 !important;
-    top: auto !important;
+    bottom: 0;
     left: 0;
     right: 0;
-    z-index: 10000;
+    z-index: var(--z-reader-progress);
+    border-radius: 0;
     pointer-events: none;
 }
 </style>

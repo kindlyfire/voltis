@@ -1,5 +1,5 @@
 import { useMutation } from '@tanstack/vue-query'
-import { computed, reactive, toRef } from 'vue'
+import { computed, nextTick, reactive, toRef } from 'vue'
 import { z } from 'zod'
 import { getByPath, setByPath, type Path, type PathValue } from './dot-path-value'
 
@@ -43,31 +43,29 @@ export function useForm<TSchema extends z.ZodTypeAny, TMutationReturn>(
             .concat(newErrors ?? [])
     }
 
-    function getInputProps<T extends Path<z.input<TSchema>>>(name: T) {
-        const errors = computed(() => state.errors.filter(error => error.path.join('.') === name))
-        const isTouched = computed(() => state.touched.has(name))
-        const isDirty = computed(() => {
-            const current = getByPath(state.values as any, name)
-            const initial = getByPath(initialValues as any, name)
-            return !isEqual(current, initial)
-        })
+    function errorsFor(path: string): string[] | undefined {
+        const messages = state.errors.filter(e => e.path.join('.') === path).map(e => e.message)
+        return messages.length ? messages : undefined
+    }
 
-        return reactive({
-            modelValue: computed(() => getByPath(state.values as any, name)),
-            'onUpdate:modelValue': (value: any) => {
+    /**
+     * Props for a kit form control: `<ATextField v-bind="form.field('email')" label="Email" />`.
+     * An update marks the field touched and revalidates it if it has errors; blur validates
+     * touched fields. Call it in the template, so it reads the current state on each render.
+     */
+    function field<T extends Path<z.input<TSchema>>>(name: T) {
+        return {
+            modelValue: getByPath(state.values as any, name) as PathValue<z.input<TSchema>, T>,
+            'onUpdate:modelValue': (value: PathValue<z.input<TSchema>, T>) => {
                 state.touched.add(name)
-                setByPath(state.values as any, name, value)
-                if (errors.value.length) validatePath(name)
+                setByPath(state.values as any, name, value as any)
+                if (errorsFor(name)) validatePath(name)
             },
             onBlur: () => {
-                if (state.touched.has(name)) {
-                    validatePath(name)
-                }
+                if (state.touched.has(name)) validatePath(name)
             },
-            errors,
-            isTouched,
-            isDirty,
-        })
+            error: errorsFor(name),
+        }
     }
 
     function onSubmit(e?: Event) {
@@ -79,6 +77,13 @@ export function useForm<TSchema extends z.ZodTypeAny, TMutationReturn>(
         if (!result.success) {
             console.log('Form errors:', result.error.issues)
             state.errors = result.error.issues
+            // Take the user to the first problem.
+            const form = e?.target instanceof HTMLFormElement ? e.target : null
+            if (form) {
+                void nextTick(() =>
+                    form.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus()
+                )
+            }
             return
         }
         mutation.mutate(result.data)
@@ -139,7 +144,7 @@ export function useForm<TSchema extends z.ZodTypeAny, TMutationReturn>(
         isDirty,
         setValues,
         setValue,
-        getInputProps,
+        field,
         onSubmit,
         reset,
         resetField,

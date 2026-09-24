@@ -21,7 +21,7 @@ export interface ScanRow {
     status: number
     indeterminate: boolean
     value: number
-    color: string | undefined
+    tone: 'primary' | 'success' | 'danger'
     detail: string
 }
 
@@ -36,13 +36,13 @@ export function scanRow(task: TaskSnapshot): ScanRow {
         status: task.status,
         indeterminate: false,
         value: 0,
-        color: undefined,
+        tone: 'primary',
         detail: '',
     }
 
     if (isTerminal(task)) {
         row.value = 100
-        row.color = task.status === TaskStatus.COMPLETED ? 'success' : 'error'
+        row.tone = task.status === TaskStatus.COMPLETED ? 'success' : 'danger'
         row.detail =
             task.status === TaskStatus.COMPLETED
                 ? counts(task.output)

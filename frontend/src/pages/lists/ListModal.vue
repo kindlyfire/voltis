@@ -1,57 +1,56 @@
 <template>
-    <VDialog :model-value="open" @update:model-value="v => !v && close()" max-width="500">
-        <VCard>
-            <VCardTitle>{{ isNew ? 'Create List' : 'Edit List' }}</VCardTitle>
-            <VCardText>
-                <VForm @submit="form.onSubmit" class="space-y-4!">
-                    <AInput :input="form.getInputProps('name')" label="Name" autofocus />
-                    <AInput
-                        :input="form.getInputProps('description')"
-                        label="Description"
-                        type="textarea"
-                        auto-grow
-                    />
-                    <VSelect
-                        :model-value="form.values.value.visibility"
-                        @update:model-value="form.setValue('visibility', $event)"
-                        label="Visibility"
-                        :items="visibilityOptions"
-                        hide-details
-                    />
-
-                    <AQueryError :mutation="form.mutation" />
-
-                    <div class="flex gap-2">
-                        <VBtn
-                            type="submit"
-                            color="primary"
-                            :loading="form.mutation.isPending.value"
-                        >
-                            {{ isNew ? 'Create' : 'Update' }}
-                        </VBtn>
-                        <VBtn variant="text" @click="close()">Cancel</VBtn>
-                        <VSpacer />
-                        <VBtn
-                            v-if="!isNew"
-                            color="error"
-                            variant="text"
-                            :loading="deleteList.isPending.value"
-                            @click="handleDelete"
-                        >
-                            Delete
-                        </VBtn>
-                    </div>
-                </VForm>
-            </VCardText>
-        </VCard>
-    </VDialog>
+    <ADialog
+        :open="open"
+        :title="isNew ? 'Create list' : 'Edit list'"
+        @update:open="v => !v && close()"
+    >
+        <form :id="formId" novalidate class="flex flex-col gap-4" @submit="form.onSubmit">
+            <ATextField v-bind="form.field('name')" label="Name" autofocus />
+            <ATextField
+                multiline
+                v-bind="form.field('description')"
+                label="Description"
+                auto-grow
+            />
+            <ASelect
+                :model-value="form.values.value.visibility"
+                :options="visibilityOptions"
+                label="Visibility"
+                @update:model-value="v => v && form.setValue('visibility', v)"
+            />
+            <QueryError :mutation="form.mutation" />
+            <QueryError :mutation="deleteList" />
+        </form>
+        <template #actions>
+            <AButton
+                v-if="!isNew"
+                variant="text"
+                tone="danger"
+                class="mr-auto"
+                :loading="deleteList.isPending.value"
+                @click="handleDelete"
+            >
+                Delete
+            </AButton>
+            <AButton variant="text" tone="neutral" @click="close()">Cancel</AButton>
+            <AButton type="submit" :form="formId" :loading="form.mutation.isPending.value">
+                {{ isNew ? 'Create' : 'Save' }}
+            </AButton>
+        </template>
+    </ADialog>
 </template>
 
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, useId, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { z } from 'zod'
-import AInput from '@/components/AInput.vue'
-import AQueryError from '@/components/AQueryError.vue'
+import { showConfirmModal } from '@/components/ConfirmModal.vue'
+import QueryError from '@/components/QueryError.vue'
+import AButton from '@/ui/AButton.vue'
+import ADialog from '@/ui/ADialog.vue'
+import ASelect from '@/ui/ASelect.vue'
+import ATextField from '@/ui/ATextField.vue'
+import { useToast } from '@/ui/useToast'
 import { customListsApi } from '@/utils/api/custom-lists'
 import { useForm } from '@/utils/forms'
 
@@ -63,10 +62,14 @@ const props = defineProps<{
 
 const isNew = computed(() => props.listId === 'new')
 const visibilityOptions = [
-    { title: 'Public', value: 'public' },
-    { title: 'Private', value: 'private' },
-    { title: 'Unlisted', value: 'unlisted' },
-]
+    { label: 'Public', value: 'public' },
+    { label: 'Private', value: 'private' },
+    { label: 'Unlisted', value: 'unlisted' },
+] as const
+const formId = useId()
+const toast = useToast()
+const route = useRoute()
+const router = useRouter()
 
 const list = customListsApi.useGet(() => (isNew.value ? null : props.listId), {
     enabled: computed(() => !isNew.value),
@@ -89,8 +92,10 @@ const form = useForm({
     onSubmit: async values => {
         if (isNew.value) {
             await createList.mutateAsync(values)
+            toast.show({ message: `Created ${values.name}` })
         } else {
             await updateList.mutateAsync({ id: props.listId, ...values })
+            toast.show({ message: 'List saved' })
         }
         props.close()
     },
@@ -112,8 +117,18 @@ watch(
 
 async function handleDelete() {
     if (isNew.value) return
+    const name = list.data.value?.name ?? 'this list'
+    const confirmed = await showConfirmModal({
+        title: 'Delete list?',
+        message: `${name} and its entries will be deleted. The series and books stay in your libraries.`,
+        confirmText: 'Delete',
+        tone: 'danger',
+    })
+    if (!confirmed) return
     await deleteList.mutateAsync(props.listId)
+    toast.show({ message: `Deleted ${name}` })
     props.close()
+    if (route.params.id === props.listId) router.push('/lists')
 }
 </script>
 

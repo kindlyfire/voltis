@@ -145,9 +145,8 @@ export const usersApi = {
         const queryClient = useQueryClient()
         return useMutation({
             mutationFn: async (id: string) => apiFetch(`/users/${id}`, { method: 'DELETE' }),
-            onSuccess: () => {
-                queryClient.invalidateQueries({ queryKey: ['users'] })
-            },
+            // Resolves once the list no longer has the row, so the dialog can hand focus back.
+            onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
         })
     },
 }

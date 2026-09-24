@@ -1,34 +1,39 @@
 <template>
-    <VDialog :model-value="open" @update:model-value="v => !v && close()" max-width="400">
-        <VCard>
-            <VCardTitle>Download</VCardTitle>
-            <VCardText>
-                <div v-if="qDownloadInfo.isLoading.value">Loading...</div>
-                <AQueryError :query="qDownloadInfo" />
-                <div v-if="qDownloadInfo.data.value">
-                    <span v-if="qDownloadInfo.data.value.file_count === 1">
-                        Estimate: {{ formatBytes(qDownloadInfo.data.value.total_size) }}
-                    </span>
-                    <span v-else>
-                        Estimate: {{ qDownloadInfo.data.value.file_count }} files for a total of
-                        {{ formatBytes(qDownloadInfo.data.value.total_size) }}
-                    </span>
-                </div>
-            </VCardText>
-
-            <VCardActions>
-                <VSpacer />
-                <VBtn variant="text" @click="close()">Cancel</VBtn>
-                <VBtn color="primary" :disabled="!qDownloadInfo.data.value" @click="startDownload">
-                    Download
-                </VBtn>
-            </VCardActions>
-        </VCard>
-    </VDialog>
+    <ADialog :open="open" title="Download" size="sm" @update:open="v => !v && close()">
+        <div class="flex flex-col gap-4">
+            <div v-if="qDownloadInfo.isLoading.value" class="flex justify-center py-4">
+                <ASpinner label="Estimating size" />
+            </div>
+            <QueryError :query="qDownloadInfo" />
+            <p v-if="qDownloadInfo.data.value" class="text-fg-muted">
+                <template v-if="qDownloadInfo.data.value.file_count === 1">
+                    Estimate: {{ formatBytes(qDownloadInfo.data.value.total_size) }}
+                </template>
+                <template v-else>
+                    Estimate: {{ qDownloadInfo.data.value.file_count }} files for a total of
+                    {{ formatBytes(qDownloadInfo.data.value.total_size) }}
+                </template>
+            </p>
+        </div>
+        <template #actions>
+            <AButton variant="text" tone="neutral" @click="close()">Cancel</AButton>
+            <AButton
+                :leading-icon="IconDownload"
+                :disabled="!qDownloadInfo.data.value"
+                @click="startDownload"
+            >
+                Download
+            </AButton>
+        </template>
+    </ADialog>
 </template>
 
 <script setup lang="ts">
-import AQueryError from '@/components/AQueryError.vue'
+import QueryError from '@/components/QueryError.vue'
+import AButton from '@/ui/AButton.vue'
+import ADialog from '@/ui/ADialog.vue'
+import ASpinner from '@/ui/ASpinner.vue'
+import { IconDownload } from '@/ui/icons'
 import { contentApi } from '@/utils/api/content'
 import { API_URL } from '@/utils/fetch'
 import { formatBytes } from '@/utils/format'

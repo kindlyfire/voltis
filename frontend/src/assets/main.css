@@ -1,6 +1,11 @@
-@layer vuetify-core, vuetify-components, vuetify-overrides, vuetify-utilities, vuetify-final, theme, base, components, utilities;
+@layer theme, base, ui, utilities;
+@import 'tailwindcss/preflight.css' layer(base);
 @import 'tailwindcss/theme.css' layer(theme);
 @import 'tailwindcss/utilities.css' layer(utilities);
+@import '../ui/tokens.css';
+@import '../ui/states.css';
+@import '../ui/buttonPalette.css';
+@import '../ui/listbox.css';
 
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -8,17 +13,46 @@
     --breakpoint-3xl: 120rem;
 }
 
+/* Page gutters (the design's 12px top, 16/40px sides, 96px bottom); widths stay at call sites. */
+@utility page-frame {
+    padding: calc(var(--spacing) * 3) calc(var(--spacing) * 4) calc(var(--spacing) * 24);
+
+    @variant nav {
+        padding-inline: calc(var(--spacing) * 10);
+    }
+}
+
+/* A settings page: a column of cards. `box-content`, so a `max-w-*` excludes the gutters. */
+@utility settings-page {
+    @apply page-frame box-content flex flex-col gap-4;
+}
+
 @layer base {
-    .text-h5 {
-        margin-top: 0;
-        margin-bottom: 0;
-        font-size: 1.5rem;
+    /*
+     * `html` overflow stays `visible`: otherwise the `overflow: hidden` Reka puts on body while an
+     * overlay is open makes body the scroll container. No `scrollbar-gutter` either: Reka's scroll
+     * lock pads body by the scrollbar width, which a reserved gutter would double.
+     */
+    html {
+        color-scheme: light;
+        background: var(--color-bg);
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
     }
 
-    .text-h6 {
-        margin-top: 0;
-        margin-bottom: 0;
-        font-size: 1.3rem;
+    html.dark {
+        color-scheme: dark;
+    }
+
+    body {
+        font-family: var(--font-sans);
+        color: var(--color-fg);
+        background: var(--color-bg);
+        touch-action: manipulation;
+    }
+
+    :where(button, [role='button']):not(:disabled, [aria-disabled='true']) {
+        cursor: pointer;
     }
 
     a {

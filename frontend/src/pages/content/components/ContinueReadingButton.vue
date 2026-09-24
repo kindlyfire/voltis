@@ -1,23 +1,7 @@
 <template>
-    <VBtn
-        size="large"
-        class="h-12!"
-        :class="class"
-        variant="tonal"
-        :disabled="readingStatus == null"
-        @click="onClick"
-    >
-        <template
-            v-if="
-                readingStatus == null ||
-                readingStatus === 'all-completed' ||
-                readingStatus == 'starting'
-            "
-        >
-            Start Reading
-        </template>
-        <template v-else>Continue Reading</template>
-    </VBtn>
+    <AButton :leading-icon="IconBookOpen" :loading="readingStatus == null" @click="onClick">
+        {{ resume ? 'Continue reading' : 'Start reading' }}
+    </AButton>
 </template>
 
 <script setup lang="ts">
@@ -25,12 +9,13 @@ import { useKeyModifier } from '@vueuse/core'
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { isBookLocator } from '@/pages/read/BookDisplay/bookEntry'
+import AButton from '@/ui/AButton.vue'
+import { IconBookOpen } from '@/ui/icons'
 import { contentApi } from '@/utils/api/content'
 import { showResetReadingModal } from './ResetReadingModal.vue'
 
 const props = defineProps<{
     contentId: string
-    class?: string
 }>()
 
 const router = useRouter()
@@ -65,6 +50,8 @@ const readingStatus = computed(() => {
         return started ? 'resume' : 'starting'
     }
 })
+
+const resume = computed(() => readingStatus.value === 'resume')
 
 const ctrlModifier = useKeyModifier('Control')
 

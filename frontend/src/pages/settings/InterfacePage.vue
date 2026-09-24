@@ -1,69 +1,71 @@
 <template>
-    <VContainer>
-        <h1 class="mb-6 text-4xl">Interface</h1>
+    <div class="settings-page max-w-[780px]">
+        <APageHeader title="Interface" class="mb-1.5" />
 
-        <VCard>
-            <VCardTitle>Library Visibility</VCardTitle>
-            <VCardText>
-                <div v-if="!qLibraries.data?.value?.length" class="opacity-60">
-                    No libraries found.
-                </div>
-                <div v-else class="flex flex-col gap-4">
-                    <div
-                        v-for="library in qLibraries.data.value"
-                        :key="library.id"
-                        class="flex flex-wrap items-center gap-4"
-                    >
-                        <span class="text-base" style="min-width: 120px">
-                            {{ library.name }}
-                        </span>
-                        <VBtnToggle
-                            :model-value="getVisibility(library.id)"
-                            @update:model-value="v => setVisibility(library.id, v)"
-                            mandatory
-                            density="compact"
-                            divided
-                            variant="outlined"
-                        >
-                            <VBtn value="show">Show</VBtn>
-                            <VBtn value="overflow">Overflow</VBtn>
-                            <VBtn value="hide">Hide</VBtn>
-                        </VBtnToggle>
-                    </div>
-                </div>
-                <AQueryError :mutation="mutation" />
-                <VBtn
-                    color="primary"
-                    class="mt-6"
-                    :loading="mutation.isPending.value"
-                    @click="save"
+        <ACard title="Library visibility">
+            <QueryError :query="qLibraries" />
+            <div v-if="qLibraries.isLoading.value" class="flex justify-center py-6">
+                <ASpinner />
+            </div>
+            <p v-else-if="qLibraries.isSuccess.value && !libraries.length" class="text-fg-muted">
+                No libraries yet.
+            </p>
+            <div
+                v-for="library in libraries"
+                :key="library.id"
+                class="flex min-h-14 items-center justify-between gap-x-4 gap-y-2 max-sm:flex-col max-sm:items-start max-sm:py-1"
+            >
+                <span class="flex min-w-0 items-center gap-3 text-[15px]">
+                    <AIcon :icon="IconBookshelf" :size="22" class="text-fg-muted" />
+                    {{ library.name }}
+                </span>
+                <ASegmented
+                    :model-value="getVisibility(library.id)"
+                    :options="visibilityOptions"
+                    :label="`${library.name} visibility`"
+                    @update:model-value="v => setVisibility(library.id, v)"
+                />
+            </div>
+            <QueryError :mutation="mutation" />
+            <template #actions>
+                <AButton :loading="mutation.isPending.value" @click="save">Save</AButton>
+            </template>
+        </ACard>
+
+        <ACard title="Reader">
+            <div class="flex flex-wrap gap-3">
+                <AButton
+                    variant="tonal"
+                    :leading-icon="IconAutoStories"
+                    @click="showReaderTutorial('comic')"
                 >
-                    Save
-                </VBtn>
-            </VCardText>
-        </VCard>
-
-        <VCard class="mt-6">
-            <VCardTitle>Reader</VCardTitle>
-            <VCardText>
-                <div class="flex flex-wrap gap-4">
-                    <VBtn variant="tonal" @click="showReaderTutorial('comic')">
-                        Show comic tutorial
-                    </VBtn>
-                    <VBtn variant="tonal" @click="showReaderTutorial('book')">
-                        Show book tutorial
-                    </VBtn>
-                </div>
-            </VCardText>
-        </VCard>
-    </VContainer>
+                    Show comic tutorial
+                </AButton>
+                <AButton
+                    variant="tonal"
+                    :leading-icon="IconBookOpen"
+                    @click="showReaderTutorial('book')"
+                >
+                    Show book tutorial
+                </AButton>
+            </div>
+        </ACard>
+    </div>
 </template>
 
 <script setup lang="ts">
 import { useHead } from '@unhead/vue'
-import { ref, watch } from 'vue'
-import AQueryError from '@/components/AQueryError.vue'
+import { computed, ref, watch } from 'vue'
+import QueryError from '@/components/QueryError.vue'
 import { showReaderTutorial } from '@/pages/read/ReaderTutorialModal.vue'
+import AButton from '@/ui/AButton.vue'
+import ACard from '@/ui/ACard.vue'
+import AIcon from '@/ui/AIcon.vue'
+import APageHeader from '@/ui/APageHeader.vue'
+import ASegmented from '@/ui/ASegmented.vue'
+import ASpinner from '@/ui/ASpinner.vue'
+import { IconAutoStories, IconBookOpen, IconBookshelf } from '@/ui/icons'
+import { useToast } from '@/ui/useToast'
 import { librariesApi } from '@/utils/api/libraries'
 import type { LibraryPreference, PreferencesPatch } from '@/utils/api/types'
 import { usersApi } from '@/utils/api/users'
@@ -74,6 +76,15 @@ useHead({ title: 'Interface' })
 const qMe = usersApi.useMe()
 const qLibraries = librariesApi.useList()
 const mutation = usersApi.usePatchPreferences()
+const libraries = computed(() => qLibraries.data.value ?? [])
+const toast = useToast()
+
+type Visibility = NonNullable<LibraryPreference['visibility']>
+const visibilityOptions = [
+    { value: 'show', label: 'Show' },
+    { value: 'overflow', label: 'Overflow' },
+    { value: 'hide', label: 'Hide' },
+] as const
 
 const libraryPrefs = ref<Record<string, LibraryPreference>>({})
 
@@ -87,11 +98,11 @@ watch(
     { immediate: true }
 )
 
-function getVisibility(libraryId: string): string {
+function getVisibility(libraryId: string): Visibility {
     return libraryPrefs.value[libraryId]?.visibility ?? 'show'
 }
 
-function setVisibility(libraryId: string, value: string) {
+function setVisibility(libraryId: string, value: Visibility) {
     if (value === 'show') {
         if (libraryPrefs.value[libraryId]) {
             delete libraryPrefs.value[libraryId].visibility
@@ -103,7 +114,7 @@ function setVisibility(libraryId: string, value: string) {
         if (!libraryPrefs.value[libraryId]) {
             libraryPrefs.value[libraryId] = {}
         }
-        libraryPrefs.value[libraryId].visibility = value as LibraryPreference['visibility']
+        libraryPrefs.value[libraryId].visibility = value
     }
 }
 
@@ -123,5 +134,6 @@ async function save() {
     }
 
     await mutation.mutateAsync({ libraries })
+    toast.show({ message: 'Saved library visibility' })
 }
 </script>

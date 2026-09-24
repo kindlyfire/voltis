@@ -1,203 +1,226 @@
 <template>
-    <VDialog :model-value="open" @update:model-value="v => !v && close()" max-width="700">
-        <VCard>
-            <VCardTitle>Edit metadata</VCardTitle>
-            <VCardText class="space-y-4!">
-                <AQueryError :query="qLayers" />
+    <ADialog :open="open" title="Edit metadata" size="lg" @update:open="v => !v && close()">
+        <div class="flex flex-col gap-5">
+            <QueryError :query="qLayers" />
 
-                <div v-if="qLayers.isLoading.value" class="py-10 text-center">
-                    <VProgressCircular indeterminate />
+            <div v-if="qLayers.isLoading.value" class="flex justify-center py-10">
+                <ASpinner />
+            </div>
+
+            <template v-else-if="qLayers.isSuccess.value && localLayers">
+                <div class="flex flex-wrap items-center gap-2">
+                    <ASelect
+                        ref="viewSelect"
+                        v-model="selectedView"
+                        :options="viewOptions"
+                        label="Source"
+                        class="w-48"
+                    />
+                    <AButton
+                        v-if="selectedViewLayer && selectedViewLayer.source !== 'overrides'"
+                        variant="tonal"
+                        :leading-icon="IconCodeJson"
+                        @click="showRawDialog = true"
+                    >
+                        Raw data
+                    </AButton>
+                    <AButton
+                        v-if="selectedView === 'mangabaka'"
+                        variant="tonal"
+                        tone="danger"
+                        :leading-icon="IconLinkOff"
+                        :loading="mUnlink.isPending.value"
+                        @click="mUnlink.mutate()"
+                    >
+                        Unlink
+                    </AButton>
                 </div>
 
-                <template v-else-if="qLayers.isSuccess.value && localLayers">
-                    <div class="flex items-center gap-2">
-                        <VSelect
-                            v-model="selectedView"
-                            :items="viewOptions"
-                            item-title="title"
-                            item-value="value"
-                            density="compact"
-                            variant="outlined"
-                            hide-details
+                <dl v-if="fieldsWithValues.length" class="flex flex-col">
+                    <div
+                        v-for="field in fieldsWithValues"
+                        :key="field.key"
+                        class="border-outline-variant flex items-start gap-x-4 border-t py-1.5 pl-1 max-sm:flex-wrap"
+                    >
+                        <dt class="flex min-h-8 w-40 shrink-0 flex-wrap items-center gap-1.5">
+                            {{ field.label }}
+                            <AChip
+                                v-if="
+                                    selectedView === 'merged' &&
+                                    currentView.sources[field.key] !== undefined
+                                "
+                                size="sm"
+                                :tone="
+                                    currentView.sources[field.key] === 'overrides'
+                                        ? 'primary'
+                                        : 'neutral'
+                                "
+                            >
+                                {{ sourceLabel(currentView.sources[field.key]!) }}
+                            </AChip>
+                        </dt>
+                        <dd
+                            class="text-fg-muted min-w-0 flex-1 py-1.5 [overflow-wrap:anywhere] whitespace-pre-wrap max-sm:order-last max-sm:basis-full max-sm:pt-0"
+                        >
+                            {{ formatValue(currentView.values[field.key]) }}
+                        </dd>
+                        <AIconButton
+                            v-if="isEditable"
+                            :icon="IconPencil"
+                            :id="`${editIdPrefix}-${field.key}`"
+                            :label="`Edit ${field.label}`"
+                            size="sm"
+                            class="max-sm:ml-auto"
+                            @click="openFieldEditor(field.key)"
                         />
-                        <VBtn
-                            v-if="selectedViewLayer && selectedViewLayer.source !== 'overrides'"
-                            variant="tonal"
-                            @click="showRawDialog = true"
-                            class="h-10!"
-                        >
-                            Raw
-                        </VBtn>
-                        <VBtn
-                            v-if="selectedView === 'mangabaka'"
-                            variant="tonal"
-                            color="error"
-                            :loading="mUnlink.isPending.value"
-                            @click="mUnlink.mutate()"
-                            class="h-10!"
-                        >
-                            Unlink
-                        </VBtn>
                     </div>
+                </dl>
+                <p v-else class="text-fg-muted">No metadata from this source.</p>
 
-                    <div class="metadata-fields">
-                        <template v-for="field in fieldsWithValues" :key="field.key">
-                            <div class="metadata-field flex items-center gap-2 py-1">
-                                <div
-                                    class="field-label flex items-center text-xs text-current/60"
-                                    :class="{ 'field-label--editable': isEditable }"
-                                    @click="isEditable && openFieldEditor(field.key)"
-                                >
-                                    {{ field.label }}
-                                    <VChip
-                                        v-if="
-                                            selectedView === 'merged' &&
-                                            currentView.sources[field.key] !== undefined
-                                        "
-                                        size="x-small"
-                                        variant="tonal"
-                                        :color="
-                                            currentView.sources[field.key] === 'overrides'
-                                                ? 'primary'
-                                                : undefined
-                                        "
-                                        class="ml-1"
-                                    >
-                                        {{ sourceLabel(currentView.sources[field.key]!) }}
-                                    </VChip>
-                                </div>
-                                <div class="field-value min-w-0 grow break-words">
-                                    <span class="text-sm">
-                                        {{ formatValue(currentView.values[field.key]) }}
-                                    </span>
-                                </div>
-                            </div>
-                        </template>
-                    </div>
-
-                    <div v-if="isEditable && fieldsWithoutValues.length" class="mt-2">
-                        <span class="text-xs opacity-60">Add:</span>
-                        <div class="mt-1 flex flex-wrap gap-1">
-                            <VChip
-                                v-for="field in fieldsWithoutValues"
-                                :key="field.key"
-                                size="small"
-                                class="cursor-pointer"
-                                @click="openFieldEditor(field.key)"
-                            >
-                                {{ field.label }}
-                            </VChip>
-                        </div>
-                    </div>
-
-                    <div v-if="isEditable && isSeriesType" class="mt-2">
-                        <span class="text-xs opacity-60">Link Source:</span>
-                        <div class="mt-1 flex flex-wrap gap-1">
-                            <VChip
-                                size="small"
-                                class="cursor-pointer"
-                                :color="hasMangabakaLayer ? 'primary' : undefined"
-                                @click="onMangaBakaChipClick()"
-                            >
-                                MangaBaka
-                            </VChip>
-                        </div>
-                    </div>
-                </template>
-
-                <AQueryError :mutation="mSave" />
-            </VCardText>
-            <VCardActions>
-                <VSpacer />
-                <VBtn variant="text" @click="close()">Close</VBtn>
-                <VBtn
-                    v-if="isEditable && isDirty"
-                    color="primary"
-                    :loading="mSave.isPending.value"
-                    @click="mSave.mutate()"
+                <section
+                    v-if="isEditable && fieldsWithoutValues.length"
+                    class="flex flex-col gap-2"
                 >
-                    Save
-                </VBtn>
-            </VCardActions>
-        </VCard>
-    </VDialog>
+                    <h3 class="text-fg-muted text-xs font-semibold tracking-wide">Add a field</h3>
+                    <div class="flex flex-wrap gap-1.5">
+                        <AChip
+                            v-for="field in fieldsWithoutValues"
+                            :key="field.key"
+                            variant="outlined"
+                            size="sm"
+                            :leading-icon="IconPlus"
+                            @click="openFieldEditor(field.key)"
+                        >
+                            {{ field.label }}
+                        </AChip>
+                    </div>
+                </section>
 
-    <!-- Field edit sub-dialog -->
-    <VDialog
-        :model-value="editingField != null"
-        @update:model-value="v => !v && (editingField = null)"
-        max-width="500"
-    >
-        <VCard v-if="editingFieldDef">
-            <VCardTitle>Edit {{ editingFieldDef.label }}</VCardTitle>
-            <VCardText>
-                <VTextarea
+                <section v-if="isEditable && isSeriesType" class="flex flex-col gap-2">
+                    <h3 class="text-fg-muted text-xs font-semibold tracking-wide">Link a source</h3>
+                    <div class="flex flex-wrap gap-1.5">
+                        <AChip
+                            :variant="hasMangabakaLayer ? 'tonal' : 'outlined'"
+                            :tone="hasMangabakaLayer ? 'primary' : 'neutral'"
+                            size="sm"
+                            :leading-icon="hasMangabakaLayer ? IconCheck : IconLink"
+                            @click="onMangaBakaChipClick()"
+                        >
+                            MangaBaka
+                            <span class="sr-only">
+                                {{ hasMangabakaLayer ? '(linked, show its data)' : '(search)' }}
+                            </span>
+                        </AChip>
+                    </div>
+                </section>
+            </template>
+
+            <QueryError :mutation="mSave" />
+            <QueryError :mutation="mUnlink" />
+        </div>
+
+        <template #actions>
+            <AButton variant="text" tone="neutral" @click="close()">Close</AButton>
+            <AButton
+                v-if="isEditable"
+                :disabled="!isDirty"
+                focusable-when-disabled
+                :loading="mSave.isPending.value"
+                @click="mSave.mutate()"
+            >
+                Save
+            </AButton>
+        </template>
+
+        <!-- Nested here so they stack on this dialog and return focus to it. -->
+        <ADialog
+            v-model:open="fieldDialogOpen"
+            :title="`Edit ${editingFieldDef?.label ?? ''}`"
+            size="md"
+        >
+            <template v-if="editingFieldDef">
+                <ATextField
                     v-if="editingFieldDef.type === 'text'"
                     v-model="editValue"
-                    variant="outlined"
-                    hide-details
-                    rows="3"
+                    :label="editingFieldDef.label"
+                    :hint="
+                        editingFieldDef.key === 'staff' ? 'One per line: Name (role)' : undefined
+                    "
+                    multiline
                     auto-grow
                     autofocus
                 />
-                <VTextField
+                <ATextField
                     v-else
                     v-model="editValue"
-                    :type="editingFieldDef.type === 'number' ? 'number' : 'text'"
-                    variant="outlined"
-                    hide-details
+                    :label="editingFieldDef.label"
+                    :inputmode="editingFieldDef.type === 'number' ? 'decimal' : undefined"
+                    :error="editError"
                     autofocus
-                    @keydown.enter="confirmFieldEdit()"
+                    @keydown.enter="onEditorEnter"
                 />
-            </VCardText>
-            <VCardActions>
-                <VBtn
-                    v-if="hasOverride(editingFieldDef.key)"
+            </template>
+            <template #actions>
+                <AButton
+                    v-if="editingFieldDef && hasOverride(editingFieldDef.key)"
                     variant="text"
-                    color="error"
+                    tone="danger"
+                    class="mr-auto"
                     @click="removeOverride()"
                 >
                     Remove override
-                </VBtn>
-                <VSpacer />
-                <VBtn variant="text" @click="editingField = null">Cancel</VBtn>
-                <VBtn color="primary" variant="flat" @click="confirmFieldEdit()">OK</VBtn>
-            </VCardActions>
-        </VCard>
-    </VDialog>
+                </AButton>
+                <AButton variant="text" tone="neutral" @click="fieldDialogOpen = false">
+                    Cancel
+                </AButton>
+                <AButton @click="confirmFieldEdit()">OK</AButton>
+            </template>
+        </ADialog>
 
-    <!-- Raw data sub-dialog -->
-    <VDialog v-model="showRawDialog" max-width="1000">
-        <VCard v-if="selectedViewLayer">
-            <VCardTitle>Raw data — {{ sourceLabel(selectedViewLayer.source) }}</VCardTitle>
-            <VCardText>
-                <div class="flex flex-col gap-4 lg:flex-row">
-                    <div class="flex-1">
-                        <div class="mb-1 text-xs opacity-60">Normalized Data</div>
-                        <pre class="raw-json">{{
-                            JSON.stringify(selectedViewLayer.data, null, 2)
-                        }}</pre>
-                    </div>
-                    <div v-if="Object.keys(selectedViewLayer.raw).length" class="flex-1">
-                        <div class="mb-1 text-xs opacity-60">Raw Response</div>
-                        <pre class="raw-json">{{
-                            JSON.stringify(selectedViewLayer.raw, null, 2)
-                        }}</pre>
-                    </div>
-                </div>
-            </VCardText>
-            <VCardActions>
-                <VSpacer />
-                <VBtn variant="text" @click="showRawDialog = false">Close</VBtn>
-            </VCardActions>
-        </VCard>
-    </VDialog>
+        <ADialog
+            v-model:open="showRawDialog"
+            :title="`Raw data: ${selectedViewLayer ? sourceLabel(selectedViewLayer.source) : ''}`"
+            size="xl"
+        >
+            <div v-if="selectedViewLayer" class="flex flex-col gap-4 lg:flex-row">
+                <section class="flex min-w-0 flex-1 flex-col gap-1">
+                    <h3 class="text-fg-muted text-xs font-semibold tracking-wide">
+                        Normalized data
+                    </h3>
+                    <pre class="raw-json">{{
+                        JSON.stringify(selectedViewLayer.data, null, 2)
+                    }}</pre>
+                </section>
+                <section
+                    v-if="Object.keys(selectedViewLayer.raw).length"
+                    class="flex min-w-0 flex-1 flex-col gap-1"
+                >
+                    <h3 class="text-fg-muted text-xs font-semibold tracking-wide">Raw response</h3>
+                    <pre class="raw-json">{{ JSON.stringify(selectedViewLayer.raw, null, 2) }}</pre>
+                </section>
+            </div>
+            <template #actions>
+                <AButton variant="text" tone="neutral" @click="showRawDialog = false">
+                    Close
+                </AButton>
+            </template>
+        </ADialog>
+    </ADialog>
 </template>
 
 <script setup lang="ts">
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
-import { computed, ref, watch } from 'vue'
-import AQueryError from '@/components/AQueryError.vue'
+import { computed, nextTick, ref, useId, useTemplateRef, watch } from 'vue'
+import QueryError from '@/components/QueryError.vue'
+import AButton from '@/ui/AButton.vue'
+import AChip from '@/ui/AChip.vue'
+import ADialog from '@/ui/ADialog.vue'
+import AIconButton from '@/ui/AIconButton.vue'
+import ASelect from '@/ui/ASelect.vue'
+import ASpinner from '@/ui/ASpinner.vue'
+import ATextField from '@/ui/ATextField.vue'
+import { IconCheck, IconCodeJson, IconLink, IconLinkOff, IconPencil, IconPlus } from '@/ui/icons'
+import { useToast } from '@/ui/useToast'
 import { contentApi } from '@/utils/api/content'
 import { metadataSourcesApi } from '@/utils/api/metadata-sources'
 import type { ContentMetadata, MetadataLayersResponse } from '@/utils/api/types'
@@ -209,6 +232,8 @@ const props = defineProps<{
 }>()
 
 const queryClient = useQueryClient()
+const toast = useToast()
+const viewSelect = useTemplateRef('viewSelect')
 const qContent = contentApi.useGet(() => props.contentId)
 const qLayers = contentApi.useMetadataLayers(() => props.contentId)
 
@@ -259,22 +284,30 @@ const metadataFields: FieldDef[] = [
 const localLayers = ref<MetadataLayersResponse | null>(null)
 const serverSnapshot = ref<string>('')
 const selectedView = ref<string>('merged')
+/** Kept after the field dialog closes, so its content stays put while it animates out. */
 const editingField = ref<keyof ContentMetadata | null>(null)
+const fieldDialogOpen = ref(false)
 const editValue = ref<string>('')
 const showRawDialog = ref(false)
 
+/** Takes the server's layers. `keepEdits` keeps unsaved override edits (a MangaBaka link refresh). */
+function applyLayers(response: MetadataLayersResponse, keepEdits: boolean) {
+    const data = jsonClone(response)
+    if (!data.layers.some(l => l.source === 'overrides')) {
+        data.layers.push({ source: 'overrides', data: {}, raw: {} })
+    }
+    const serverOverrides = data.layers.find(l => l.source === 'overrides')!
+    const localOverrides = localLayers.value?.layers.find(l => l.source === 'overrides')
+    if (keepEdits && localOverrides && overridesKey(localOverrides.data) !== serverSnapshot.value) {
+        data.layers[data.layers.indexOf(serverOverrides)] = localOverrides
+    }
+    serverSnapshot.value = overridesKey(serverOverrides.data)
+    localLayers.value = data
+}
+
 watch(
     () => qLayers.data?.value,
-    data => {
-        if (!data) return
-        data = jsonClone(data)
-        if (!data.layers.some(l => l.source === 'overrides')) {
-            data.layers.push({ source: 'overrides', data: {}, raw: {} })
-        }
-        localLayers.value = jsonClone(data)
-        const serverOverrides = data.layers.find(l => l.source === 'overrides')
-        serverSnapshot.value = JSON.stringify(serverOverrides?.data ?? {})
-    },
+    data => data && applyLayers(data, true),
     { immediate: true }
 )
 
@@ -305,13 +338,13 @@ const currentView = computed(() => {
 
 const viewOptions = computed(() => {
     const layers = localLayers.value?.layers ?? []
-    const options = [{ title: 'Merged', value: 'merged' }]
+    const options = [{ label: 'Merged', value: 'merged' }]
     for (const layer of layers) {
         if (layer.source !== 'overrides' && !Object.keys(layer.data).length) continue
-        options.push({ title: sourceLabel(layer.source), value: layer.source })
+        options.push({ label: sourceLabel(layer.source), value: layer.source })
     }
     if (!options.some(o => o.value === 'overrides')) {
-        options.push({ title: sourceLabel('overrides'), value: 'overrides' })
+        options.push({ label: sourceLabel('overrides'), value: 'overrides' })
     }
     return options
 })
@@ -325,9 +358,7 @@ const isEditable = computed(
     () => selectedView.value === 'merged' || selectedView.value === 'overrides'
 )
 
-const isDirty = computed(
-    () => JSON.stringify(overridesLayer.value?.data ?? {}) !== serverSnapshot.value
-)
+const isDirty = computed(() => overridesKey(overridesLayer.value?.data) !== serverSnapshot.value)
 
 const isSeriesType = computed(() => {
     const t = qContent.data?.value?.type
@@ -341,9 +372,12 @@ const hasMangabakaLayer = computed(() => {
     return data != null && typeof data === 'object' && Object.keys(data).length > 0
 })
 
-function onMangaBakaChipClick() {
+async function onMangaBakaChipClick() {
     if (hasMangabakaLayer.value) {
         selectedView.value = 'mangabaka'
+        // The chip is gone in this view: keep focus in the dialog.
+        await nextTick()
+        viewSelect.value?.focus()
     } else {
         showSearchMangaBakaModal(props.contentId)
     }
@@ -351,8 +385,12 @@ function onMangaBakaChipClick() {
 
 const mUnlink = useMutation({
     mutationFn: () => metadataSourcesApi.unlink(props.contentId, 'mangabaka'),
-    onSuccess() {
+    async onSuccess() {
         selectedView.value = 'merged'
+        toast.show({ message: 'Unlinked MangaBaka' })
+        // The Unlink button is gone: keep focus in the dialog.
+        await nextTick()
+        viewSelect.value?.focus()
         queryClient.invalidateQueries({ queryKey: ['content', 'metadata-layers', props.contentId] })
         queryClient.invalidateQueries({ queryKey: ['content', props.contentId] })
     },
@@ -389,23 +427,59 @@ function hasOverride(key: keyof ContentMetadata): boolean {
     return val != null
 }
 
+const editIdPrefix = useId()
+/** The pre-filled value, so confirming it unchanged doesn't create an override. */
+let initialEditValue = ''
+
+const editError = computed(() =>
+    editingFieldDef.value?.type === 'number' &&
+    editValue.value.trim() !== '' &&
+    !Number.isInteger(Number(editValue.value))
+        ? 'Enter a whole number'
+        : undefined
+)
+
 function openFieldEditor(key: keyof ContentMetadata) {
     editingField.value = key
-    const val = (overridesLayer.value?.data as any)?.[key]
+    fieldDialogOpen.value = true
+    // The override if there is one, else the value shown in this view.
+    const val = (overridesLayer.value?.data as any)?.[key] ?? currentView.value.values[key]
     if (key === 'staff' && Array.isArray(val)) {
         // One entry per line: "name (role)"
         editValue.value = val.map((e: any) => `${e.name} (${e.role})`).join('\n')
     } else {
         editValue.value = val != null ? formatValue(val) : ''
     }
+    initialEditValue = editValue.value
+}
+
+// The editor's opener (a chip, or a row that loses its value) can be gone once it closes.
+async function closeFieldEditor(key: keyof ContentMetadata) {
+    fieldDialogOpen.value = false
+    await nextTick()
+    const button = document.getElementById(`${editIdPrefix}-${key}`)
+    if (button) button.focus()
+    else viewSelect.value?.focus()
 }
 
 const staffLineRe = /^(.+?)\s*\(([^)]+)\)\s*$/
 
+// Not while an IME composition is open. `preventDefault`: otherwise the Enter's keypress activates
+// the Edit button focus returns to.
+function onEditorEnter(e: KeyboardEvent) {
+    if (e.isComposing || e.keyCode === 229) return
+    e.preventDefault()
+    confirmFieldEdit()
+}
+
 function confirmFieldEdit() {
-    if (!editingField.value || !overridesLayer.value) return
+    if (!fieldDialogOpen.value || !editingField.value || !overridesLayer.value) return
+    if (editError.value) return
+    const key = editingField.value
     const data = overridesLayer.value.data as Record<string, any>
-    if (editValue.value === '') {
+    if (editValue.value === initialEditValue && !hasOverride(key)) {
+        // Unchanged: nothing to override.
+    } else if (editValue.value === '') {
         delete data[editingField.value]
     } else if (editingField.value === 'staff') {
         // Parse "name (role)" lines
@@ -425,35 +499,58 @@ function confirmFieldEdit() {
     } else {
         data[editingField.value] = editValue.value
     }
-    editingField.value = null
+    closeFieldEditor(key)
 }
 
 function removeOverride() {
     if (!editingField.value || !overridesLayer.value) return
     delete (overridesLayer.value.data as Record<string, any>)[editingField.value]
-    editingField.value = null
+    closeFieldEditor(editingField.value)
+}
+
+/** The overrides as the server stores them (numbers parsed, empty values dropped). */
+function overridesPayload(raw: ContentMetadata | undefined): Record<string, any> {
+    const payload: Record<string, any> = {}
+    for (const field of metadataFields) {
+        const val = (raw as any)?.[field.key]
+        if (val == null || val === '') continue
+        if (field.key === 'staff') {
+            // Already stored as parsed array in the override layer
+            if (Array.isArray(val) && val.length > 0) payload[field.key] = val
+        } else if (field.type === 'number') {
+            const num = Number(val)
+            if (!isNaN(num)) payload[field.key] = num
+        } else {
+            payload[field.key] = val
+        }
+    }
+    return payload
+}
+
+/** Compares overrides by what would be saved, ignoring key order (jsonb reorders keys). */
+function overridesKey(raw: ContentMetadata | undefined): string {
+    const sortKeys = (v: unknown): unknown =>
+        Array.isArray(v)
+            ? v.map(sortKeys)
+            : v && typeof v === 'object'
+              ? Object.fromEntries(
+                    Object.keys(v)
+                        .sort()
+                        .map(k => [k, sortKeys((v as any)[k])])
+                )
+              : v
+    return JSON.stringify(sortKeys(overridesPayload(raw)))
 }
 
 const mSave = useMutation({
-    mutationFn: async () => {
-        const raw = overridesLayer.value?.data ?? {}
-        const payload: Record<string, any> = {}
-        for (const field of metadataFields) {
-            const val = (raw as any)[field.key]
-            if (val == null || val === '') continue
-            if (field.key === 'staff') {
-                // Already stored as parsed array in the override layer
-                if (Array.isArray(val) && val.length > 0) payload[field.key] = val
-            } else if (field.type === 'number') {
-                const num = Number(val)
-                if (!isNaN(num)) payload[field.key] = num
-            } else {
-                payload[field.key] = val
-            }
-        }
-        return contentApi.updateMetadataOverride(props.contentId, payload as ContentMetadata)
-    },
-    onSuccess() {
+    mutationFn: () =>
+        contentApi.updateMetadataOverride(
+            props.contentId,
+            overridesPayload(overridesLayer.value?.data) as ContentMetadata
+        ),
+    onSuccess(response) {
+        applyLayers(response, false)
+        toast.show({ message: 'Saved the metadata' })
         queryClient.invalidateQueries({ queryKey: ['content', 'metadata-layers', props.contentId] })
         queryClient.invalidateQueries({ queryKey: ['content', props.contentId] })
     },
@@ -472,29 +569,17 @@ export function showEditMetadataModal(contentId: string): Promise<void> {
 </script>
 
 <style scoped>
-.field-label {
-    min-width: 140px;
-    flex-shrink: 0;
-}
-
-.field-label--editable {
-    cursor: pointer;
-    border-radius: 4px;
-}
-
-.field-label--editable:hover {
-    text-decoration: underline;
-}
-
-.raw-json {
-    font-size: 0.75rem;
-    line-height: 1.4;
-    background: rgba(var(--v-theme-on-surface), 0.05);
-    border-radius: 4px;
-    padding: 12px;
-    overflow: auto;
-    max-height: 500px;
-    white-space: pre-wrap;
-    word-break: break-word;
+@layer ui {
+    .raw-json {
+        max-height: 60dvh;
+        overflow: auto;
+        padding: 12px;
+        border-radius: var(--radius-field);
+        background: var(--color-surface-2);
+        font-size: 12px;
+        line-height: 1.4;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
 }
 </style>
