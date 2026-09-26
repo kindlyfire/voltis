@@ -62,6 +62,10 @@ beforeEach(async () => {
     vi.mocked(contentApi.bookStructure).mockResolvedValue(STRUCTURE)
     vi.mocked(contentApi.updateUserData).mockResolvedValue({ progress: {} } as UserToContent)
     window.scrollTo = vi.fn() as unknown as typeof window.scrollTo
+    Object.defineProperty(Range.prototype, 'getBoundingClientRect', {
+        value: () => ({ top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 }),
+        configurable: true,
+    })
 })
 
 function render() {

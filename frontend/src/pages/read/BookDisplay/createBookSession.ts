@@ -26,11 +26,12 @@ import {
     type PageSlice,
 } from './buildPages'
 import {
-    elementAtTextOffset,
     pathOfNode,
     pruneToRange,
     textOffsetAtPath,
     textOffsetOfNode,
+    textOffsetOfPoint,
+    textPointAtOffset,
 } from './documentRange'
 import {
     childNodesOf,
@@ -42,6 +43,7 @@ import {
     parentOf,
     previousOf,
     tagOf,
+    textWalkerFor,
 } from './domSafe'
 import {
     fetchBookResource,
@@ -56,7 +58,7 @@ const SETTLE_TIMEOUT = 2000
 const SCROLL_MARGIN = 8
 const CAPTURE_DEBOUNCE = 250
 const PERSIST_DEBOUNCE = 1000
-const RESIZE_DEBOUNCE = 200
+const REFLOW_DEBOUNCE = 200
 const HISTORY_STAMP_INTERVAL = 500
 const ANCHOR_SEARCH_LIMIT = 500
 
@@ -126,12 +128,16 @@ interface MountedSlice {
     startOffset: number
 }
 
+function isEmpty(rect: DOMRect) {
+    return rect.width === 0 && rect.height === 0
+}
+
 function firstVisibleBlock(root: Element, top: number): Element | null {
     let best: Element | null = null
     const visit = (el: Element) => {
         for (const child of childrenOf(el)) {
             const rect = child.getBoundingClientRect()
-            if (rect.width === 0 && rect.height === 0) continue
+            if (isEmpty(rect)) continue
             if (rect.bottom <= top) continue
             if (BLOCK_TAGS.has(tagOf(child))) best = child
             visit(child)
@@ -140,6 +146,109 @@ function firstVisibleBlock(root: Element, top: number): Element | null {
     }
     visit(root)
     return best
+}
+
+function glyphRect(range: Range, node: Text, index: number): DOMRect | null {
+    if (/\s/.test(node.data[index]!)) return null
+    range.setStart(node, index)
+    range.setEnd(node, index + 1)
+    const rect = range.getBoundingClientRect()
+    return isEmpty(rect) ? null : rect
+}
+
+/** The first usable character of `node` whose glyph `accept`s; whitespace and
+ * hidden characters are stepped over to the next usable one. */
+function firstGlyph(
+    range: Range,
+    node: Text,
+    accept: (rect: DOMRect) => boolean
+): { index: number; rect: DOMRect } | null {
+    let lo = 0
+    let hi = node.data.length
+    let found: { index: number; rect: DOMRect } | null = null
+    while (lo < hi) {
+        const mid = (lo + hi) >> 1
+        let index = mid
+        let rect: DOMRect | null = null
+        for (; index < hi; index++) if ((rect = glyphRect(range, node, index))) break
+        if (!rect) hi = mid
+        else if (accept(rect)) {
+            found = { index, rect }
+            hi = mid
+        } else lo = index + 1
+    }
+    return found
+}
+
+interface Capture {
+    slice: MountedSlice
+    el: Element
+    offset: number
+}
+
+function* textNodesFrom(slices: MountedSlice[], block: Element) {
+    for (let i = 0; i < slices.length; i++) {
+        const walker = textWalkerFor(slices[i]!.root)
+        if (i === 0) walker.currentNode = block
+        let node: Node | null
+        while ((node = walker.nextNode())) yield { slice: slices[i]!, node: node as Text }
+    }
+}
+
+function blockOf(el: Element, root: Element): Element {
+    for (let node: Node | null = el; node && node !== root; node = parentOf(node)) {
+        if (node.nodeType === Node.ELEMENT_NODE && BLOCK_TAGS.has(tagOf(node as Element))) {
+            return node as Element
+        }
+    }
+    return el
+}
+
+function blockStart(slice: MountedSlice, el: Element): Capture {
+    return { slice, el, offset: textOffsetOfNode(slice.root, el) }
+}
+
+/** Glyph boxes sit inside line boxes, so after a restore the previous block's
+ * bottom can still be below `top`: the search continues into later blocks and
+ * slices rather than stopping at `block`. Vertical text falls back to the
+ * start of its block. */
+function scanGlyphs(
+    slices: MountedSlice[],
+    block: Element,
+    top: number,
+    bottom: number,
+    accept: (rect: DOMRect) => boolean
+): Capture | null {
+    const range = new Range()
+    for (const { slice, node } of textNodesFrom(slices, block)) {
+        range.selectNodeContents(node)
+        const rect = range.getBoundingClientRect()
+        if (isEmpty(rect) || rect.bottom <= top) continue
+        if (rect.top >= bottom) return null
+        const parent = node.parentElement!
+        if (getComputedStyle(parent).writingMode !== 'horizontal-tb') {
+            return blockStart(slice, blockOf(parent, slice.root))
+        }
+        const glyph = firstGlyph(range, node, accept)
+        if (!glyph) continue
+        if (glyph.rect.top >= bottom) return null
+        return { slice, el: parent, offset: textOffsetOfPoint(slice.root, node, glyph.index) }
+    }
+    return null
+}
+
+/** Captures against the line a restore aligns to, so a taller glyph on the
+ * line above can't be taken for this one; the 1px absorbs scroll rounding. */
+function firstVisiblePoint(
+    slices: MountedSlice[],
+    block: Element,
+    top: number,
+    bottom: number
+): Capture | null {
+    return (
+        scanGlyphs(slices, block, top, bottom, rect => rect.top >= top + SCROLL_MARGIN - 1) ??
+        scanGlyphs(slices, block, top, bottom, rect => rect.bottom > top)
+    )
 }
 
 /** The nearest authored id at or before `el` in document order, used to
@@ -203,7 +312,12 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
     let inputSincePage = false
     let captureEnabled = false
     let currentEntryKey = entryKey(entry)
-    let resizeLocator: BookLocator | null = null
+    /** Kept after its restore until the reader scrolls: recapturing would take
+     * the start of the line the passage now sits mid-way along, drifting back a
+     * line per layout change. */
+    let reflowLocator: BookLocator | null = null
+    /** Scrolls from native anchoring during a reflow aren't the reader's. */
+    let reflowing = false
     let pendingEntry: BookEntry | null = null
     let lastStamp = 0
     let stampTimer: ReturnType<typeof setTimeout> | null = null
@@ -229,6 +343,7 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
      * page until a replacement arrives. */
     function cancelPending(): number {
         restoreCancelled = false
+        reflowLocator = null
         clearStampTimer()
         return ++navToken
     }
@@ -455,9 +570,9 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
         scrollWindowTo(document.documentElement.scrollHeight)
     }
 
-    function scrollToElement(el: Element) {
+    function scrollToTarget(target: Element | Range) {
         scrollWindowTo(
-            window.scrollY + el.getBoundingClientRect().top - getLayoutTop() - SCROLL_MARGIN
+            window.scrollY + target.getBoundingClientRect().top - getLayoutTop() - SCROLL_MARGIN
         )
     }
 
@@ -528,13 +643,19 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
         await Promise.race([Promise.all(jobs), delay(SETTLE_TIMEOUT)])
     }
 
-    function locateInMounted(locator: BookLocator): Element | null {
+    /** A single-character Range, never a collapsed one: at a line wrap Chrome
+     * reports a collapsed Range at the end of the previous line. */
+    function locateInMounted(locator: BookLocator): Element | Range | null {
         for (const slice of mounted) {
             if (slice.slice.href !== locator.href) continue
             const relative = locator.textOffset - slice.startOffset
             if (relative < 0) continue
-            const el = elementAtTextOffset(slice.root, relative)
-            if (el) return el
+            const point = textPointAtOffset(slice.root, relative)
+            if (!point) continue
+            const range = new Range()
+            return glyphRect(range, point.node, point.index)
+                ? range
+                : blockOf(point.node.parentElement!, slice.root)
         }
         if (!locator.anchorId) return null
         for (const slice of mounted) {
@@ -610,10 +731,10 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
             if (target.atEnd) {
                 scrollToEnd()
             } else {
-                const el =
+                const place =
                     (target.anchor ? locateAnchor(target.anchor) : null) ??
                     (target.locator ? locateInMounted(target.locator) : null)
-                if (el) scrollToElement(el)
+                if (place) scrollToTarget(place)
                 else if (target.anchor) state.notice = 'That link points somewhere unavailable.'
             }
         }
@@ -658,22 +779,27 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
         })
         scrollWindowTo(0)
         const el = fragment ? locateAnchor({ href, fragment }) : null
-        if (el) scrollToElement(el)
+        if (el) scrollToTarget(el)
         settleTransition(token)
         return true
     }
 
     function captureLocator(): BookLocator | null {
         if (state.standalone) return null
+        if (reflowLocator) return reflowLocator
         const top = getLayoutTop()
-        for (const slice of mounted) {
-            const el = firstVisibleBlock(slice.root, top)
-            if (!el) continue
+        for (let i = 0; i < mounted.length; i++) {
+            const slice = mounted[i]!
+            const block = firstVisibleBlock(slice.root, top)
+            if (!block) continue
+            const found =
+                firstVisiblePoint(mounted.slice(i), block, top, window.innerHeight) ??
+                blockStart(slice, block)
             return {
                 version: 1,
-                href: slice.slice.href,
-                textOffset: slice.startOffset + textOffsetOfNode(slice.root, el),
-                anchorId: precedingAnchorId(el, slice.root),
+                href: found.slice.slice.href,
+                textOffset: found.slice.startOffset + found.offset,
+                anchorId: precedingAnchorId(found.el, found.slice.root),
             }
         }
         return null
@@ -799,7 +925,8 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
     function onScroll() {
         if (programmaticScrolls > 0) return
         if (state.restoring) restoreCancelled = true
-        if (!captureEnabled) return
+        if (!captureEnabled || reflowing) return
+        reflowLocator = null
         void captureSoon()
         checkCompletion()
     }
@@ -820,27 +947,31 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
         flushProgress(true)
     }
 
-    const onResizeEnd = useDebounceFn(() => {
-        const locator = resizeLocator
-        resizeLocator = null
-        if (disposed || !locator || state.restoring) return
-        const el = locateInMounted(locator)
-        if (el) scrollToElement(el)
-    }, RESIZE_DEBOUNCE)
+    const onReflowEnd = useDebounceFn(() => {
+        reflowing = false
+        if (disposed || !reflowLocator || state.restoring) return
+        const target = locateInMounted(reflowLocator)
+        if (target) scrollToTarget(target)
+        captureNow()
+    }, REFLOW_DEBOUNCE)
 
-    function onResize() {
+    /** Restores the passage after a layout change of our own. Window resizes
+     * are left to native scroll anchoring: a height-only one (the mobile
+     * address bar) doesn't reflow, and restoring on it would jerk the page. */
+    function reflow() {
         if (!captureEnabled) return
-        resizeLocator ??= captureLocator()
-        void onResizeEnd()
+        reflowing = true
+        reflowLocator ??= captureLocator()
+        void onReflowEnd()
     }
 
     /** The user stylesheet is rebuilt in place: a remount would lose the
-     * reading position. `onResize` runs first so the passage is captured
+     * reading position. `reflow` runs first so the passage is captured
      * against the old layout, whoever else asks for a reflow after this. */
     function setPublisherFonts(value: boolean) {
         if (publisherFonts === value) return
         publisherFonts = value
-        onResize()
+        reflow()
         for (const slice of mounted) updateUserStyles(slice.holder, publisherFonts)
     }
 
@@ -889,7 +1020,7 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
         if (found && !state.standalone) {
             const el = locateAnchor({ href, fragment })
             if (el) {
-                scrollToElement(el)
+                scrollToTarget(el)
                 settleTransition(token)
                 return
             }
@@ -912,10 +1043,10 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
             currentEntryKey
         ) {
             if (page === state.pageIndex && mounted.length && !state.standalone) {
-                const el =
+                const target =
                     (anchor ? locateAnchor(anchor) : null) ??
                     locateInMounted(positionLocator(position))
-                if (el) scrollToElement(el)
+                if (target) scrollToTarget(target)
                 settleTransition(token)
             } else {
                 await navigateTo(
@@ -937,7 +1068,6 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
 
     const inputEvents = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const
     window.addEventListener('scroll', onScroll, { passive: true })
-    window.addEventListener('resize', onResize)
     window.addEventListener('pagehide', onPageHide)
     document.addEventListener('visibilitychange', onVisibility)
     for (const name of inputEvents) window.addEventListener(name, onInput, { passive: true })
@@ -979,9 +1109,7 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
         snapshotPassage,
         setPublisherFonts,
 
-        /** Restores the passage after a layout change of our own, the way a
-         * window resize does. */
-        reflow: onResize,
+        reflow,
 
         goToPage(index: number, atEnd = false) {
             const target = state.pages[index]?.target
@@ -1008,7 +1136,6 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
             navToken++
             controller.abort()
             window.removeEventListener('scroll', onScroll)
-            window.removeEventListener('resize', onResize)
             window.removeEventListener('pagehide', onPageHide)
             document.removeEventListener('visibilitychange', onVisibility)
             for (const name of inputEvents) window.removeEventListener(name, onInput)
@@ -1017,8 +1144,8 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
             flushProgress(true, false)
             captureEnabled = false
             captureSoon.cancel()
-            onResizeEnd.cancel()
-            resizeLocator = null
+            onReflowEnd.cancel()
+            reflowLocator = null
             return writeChain
         },
     })

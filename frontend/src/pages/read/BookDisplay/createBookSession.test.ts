@@ -111,6 +111,22 @@ const BLOCK_HEIGHT = 100
 
 const SLICE_HEIGHT = 1000
 
+/** Text runs in 20px lines of `charsPerLine` characters from each block's
+ * top, with the glyph box inset inside its line box and no block margins.
+ * Leading and repeated whitespace collapses, `[hidden]` content and zero-width
+ * spaces have no box at all, and `<sub>` glyphs sit `SUB_DROP` lower. */
+const LINE_HEIGHT = 20
+const CHARS_PER_LINE = 10
+const GLYPH_INSET = 6
+const GLYPH_HEIGHT = 8
+const SUB_DROP = 14
+let charsPerLine = CHARS_PER_LINE
+
+/** Where a restore puts the first glyph of `line` in the block at `blockTop`. */
+function restoredAt(blockTop: number, line = 0) {
+    return blockTop + line * LINE_HEIGHT + GLYPH_INSET - 8
+}
+
 function topOf(el: Element): number {
     const body = el.closest('body')
     if (!body) return 0
@@ -125,6 +141,7 @@ function topOf(el: Element): number {
 }
 
 function rectFor(el: Element): DOMRect {
+    if (el.closest('[hidden]')) return EMPTY
     const top = topOf(el) - scrollY
     return {
         top,
@@ -137,6 +154,82 @@ function rectFor(el: Element): DOMRect {
         y: top,
         toJSON: () => ({}),
     } as DOMRect
+}
+
+const EMPTY = {
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    width: 0,
+    height: 0,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+} as DOMRect
+
+function textNodes(root: Node): Text[] {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+    const out: Text[] = []
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) out.push(node as Text)
+    return out
+}
+
+function glyphRect(text: Text, index: number): DOMRect {
+    const parent = text.parentElement
+    const body = parent?.closest('body')
+    if (!parent || !body || parent === body) return EMPTY
+    const block = Array.from(body.children).find(child => child.contains(parent))!
+    let visible = 0
+    let previous = ''
+    for (const node of textNodes(block)) {
+        const hidden = !!node.parentElement!.closest('[hidden]')
+        const drop = node.parentElement!.closest('sub') ? SUB_DROP : 0
+        for (let i = 0; i < node.data.length; i++) {
+            const ch = node.data[i]!
+            const shown =
+                !hidden && ch !== '\u200b' && !(/\s/.test(ch) && (!previous || /\s/.test(previous)))
+            if (node === text && i === index) {
+                if (!shown) return EMPTY
+                const top =
+                    topOf(block) -
+                    scrollY +
+                    Math.floor(visible / charsPerLine) * LINE_HEIGHT +
+                    GLYPH_INSET +
+                    drop
+                const left = (visible % charsPerLine) * 10
+                return {
+                    ...EMPTY,
+                    top,
+                    bottom: top + GLYPH_HEIGHT,
+                    left,
+                    right: left + 10,
+                    width: 10,
+                    height: GLYPH_HEIGHT,
+                    x: left,
+                    y: top,
+                }
+            }
+            if (shown) {
+                visible++
+                previous = ch
+            }
+        }
+    }
+    return EMPTY
+}
+
+function rangeRect(range: Range): DOMRect {
+    const text = range.startContainer as Text
+    const rects = []
+    for (let i = range.startOffset; i < range.endOffset; i++) {
+        const rect = glyphRect(text, i)
+        if (rect.width || rect.height) rects.push(rect)
+    }
+    if (!rects.length) return EMPTY
+    const top = Math.min(...rects.map(rect => rect.top))
+    const bottom = Math.max(...rects.map(rect => rect.bottom))
+    return { ...EMPTY, top, bottom, right: 100, width: 100, height: bottom - top, y: top }
 }
 
 function scrollTo(y: number) {
@@ -181,8 +274,16 @@ function writes() {
     return vi.mocked(contentApi.updateUserData).mock.calls
 }
 
+const computedStyle = window.getComputedStyle
+
 beforeEach(() => {
     scrollY = 0
+    charsPerLine = CHARS_PER_LINE
+    Object.defineProperty(window, 'innerHeight', { value: 768, configurable: true })
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((el, pseudo) => {
+        const style = computedStyle(el, pseudo)
+        return style.writingMode ? style : Object.assign(style, { writingMode: 'horizontal-tb' })
+    })
     vi.mocked(contentApi.get).mockResolvedValue(content({ current_page: 7 }))
     vi.mocked(contentApi.bookStructure).mockResolvedValue(STRUCTURE)
     vi.mocked(contentApi.bookDocument).mockImplementation(async (_id, href) => {
@@ -199,6 +300,12 @@ beforeEach(() => {
         this: Element
     ) {
         return rectFor(this)
+    })
+    Object.defineProperty(Range.prototype, 'getBoundingClientRect', {
+        value(this: Range) {
+            return rangeRect(this)
+        },
+        configurable: true,
     })
 })
 
@@ -475,14 +582,14 @@ describe('stale books without word counts', () => {
         })
         const { session } = start()
         await flush()
-        expect(session.percent).toBe(0)
+        const initial = session.percent
 
         scrollTo(150)
         await flush()
         await session.dispose()
 
         const percent = writes().at(-1)![1].progress!.progress_percent!
-        expect(percent).toBeGreaterThan(0)
+        expect(percent).toBeGreaterThan(initial)
         expect(percent).toBeLessThanOrEqual(100)
     })
 })
@@ -560,7 +667,7 @@ describe('standalone documents', () => {
         await flush()
         expect(session.standalone).toBeNull()
         expect(session.pageIndex).toBe(0)
-        expect(scrollY).toBe(BLOCK_HEIGHT - 8)
+        expect(scrollY).toBe(restoredAt(2 * BLOCK_HEIGHT))
         await session.dispose()
     })
 
@@ -655,7 +762,7 @@ describe('history', () => {
 
         // Read on at the destination, then leave and come back both ways.
         await vi.advanceTimersByTimeAsync(50)
-        scrollTo(100)
+        scrollTo(restoredAt(BLOCK_HEIGHT))
         await vi.advanceTimersByTimeAsync(600)
         expect(nav.entries[1]!.locator?.anchorId).toBe('p3')
 
@@ -663,13 +770,13 @@ describe('history', () => {
         await vi.advanceTimersByTimeAsync(300)
         await flush()
         expect(session.pageIndex).toBe(0)
-        expect(scrollY).toBe(BLOCK_HEIGHT - 8)
+        expect(scrollY).toBe(restoredAt(2 * BLOCK_HEIGHT))
 
         nav.go(1)
         await vi.advanceTimersByTimeAsync(300)
         await flush()
         expect(session.pageIndex).toBe(2)
-        expect(scrollY).toBe(BLOCK_HEIGHT - 8)
+        expect(scrollY).toBe(restoredAt(BLOCK_HEIGHT))
         await session.dispose()
     })
 })
@@ -753,23 +860,303 @@ describe('paging backwards', () => {
     })
 })
 
-describe('resize', () => {
-    it('recaptures and repositions without a correction loop', async () => {
-        vi.useFakeTimers()
-        const { session } = start()
-        await vi.advanceTimersByTimeAsync(0)
-        await flush()
+/** Five paragraphs of exactly five lines each, the third indented and the
+ * fourth opening with hidden text. */
+const PARA = 'abcdefghi '.repeat(5)
+const LONG_BODY = `
+    <p id="l0">${PARA}</p>
+    <p id="l1">${PARA}</p>
+    <p id="l2">
+        ${PARA}</p>
+    <p id="l3"><span hidden="">PAGEBREAK</span>${PARA}</p>
+    <p id="l4">${PARA}</p>`
+
+function withBook(body: string, locator?: Omit<BookLocator, 'version' | 'href'>) {
+    vi.mocked(contentApi.bookStructure).mockResolvedValue({
+        spine: [{ href: 'long.xhtml', title: 'Long', linear: true, words: 50 }],
+        toc: [{ id: 'l', title: 'Long', depth: 0, href: 'long.xhtml', fragment: '' }],
+    })
+    vi.mocked(contentApi.bookDocument).mockResolvedValue(`<html><body>${body}</body></html>`)
+    if (locator) {
+        vi.mocked(contentApi.get).mockResolvedValue(
+            content({ book: { version: 1, href: 'long.xhtml', ...locator } })
+        )
+    }
+}
+
+async function startTimed() {
+    vi.useFakeTimers()
+    const started = start()
+    await vi.advanceTimersByTimeAsync(50)
+    await flush()
+    return started
+}
+
+/** Each round rescrolls in place, so the next reflow captures afresh instead
+ * of reusing its anchor. */
+async function expectStableReflows(session: BookSession, y: number) {
+    for (let i = 0; i < 3; i++) {
+        session.reflow()
+        await vi.advanceTimersByTimeAsync(300)
+        expect(scrollY).toBe(y)
+        scrollTo(scrollY)
+        await vi.advanceTimersByTimeAsync(300)
+    }
+}
+
+describe('reflow', () => {
+    it('restores the passage captured before the layout change', async () => {
+        const { session } = await startTimed()
         scrollTo(150)
         await vi.advanceTimersByTimeAsync(300)
         const before = session.percent
 
-        window.dispatchEvent(new Event('resize'))
+        session.reflow()
         scrollY = 0
         await vi.advanceTimersByTimeAsync(300)
 
-        expect(scrollY).toBe(BLOCK_HEIGHT - 8)
+        expect(scrollY).toBe(restoredAt(2 * BLOCK_HEIGHT))
         expect(session.percent).toBe(before)
         await session.dispose()
+    })
+
+    it('leaves window resizes to native scroll anchoring', async () => {
+        const { session } = await startTimed()
+        scrollTo(150)
+        await vi.advanceTimersByTimeAsync(300)
+
+        window.dispatchEvent(new Event('resize'))
+        await vi.advanceTimersByTimeAsync(300)
+
+        expect(scrollY).toBe(150)
+        await session.dispose()
+    })
+
+    it('recaptures a mid-paragraph line where it was restored', async () => {
+        withBook(LONG_BODY)
+        const { session } = await startTimed()
+        scrollTo(restoredAt(BLOCK_HEIGHT, 2) - 5)
+        await vi.advanceTimersByTimeAsync(300)
+        await expectStableReflows(session, restoredAt(BLOCK_HEIGHT, 2))
+        await session.dispose()
+    })
+
+    it('does not drift into a block whose last line straddles the top', async () => {
+        withBook(LONG_BODY)
+        const { session } = await startTimed()
+        scrollTo(2 * BLOCK_HEIGHT - 10)
+        await vi.advanceTimersByTimeAsync(300)
+        await expectStableReflows(session, restoredAt(2 * BLOCK_HEIGHT))
+        await session.dispose()
+    })
+
+    it('does not drift onto lower glyphs of the line above', async () => {
+        const line = 'abcd<sub>e</sub>fghi '.repeat(5)
+        withBook(`<p id="s0">${line}</p> <p id="s1">${line}</p>`)
+        const { session } = await startTimed()
+        scrollTo(restoredAt(BLOCK_HEIGHT, 2))
+        await vi.advanceTimersByTimeAsync(300)
+        await expectStableReflows(session, restoredAt(BLOCK_HEIGHT, 2))
+        await session.dispose()
+    })
+
+    it('reuses its anchor, now mid-line, across layout changes until the reader scrolls', async () => {
+        withBook(LONG_BODY)
+        const { session, nav } = await startTimed()
+        scrollTo(restoredAt(BLOCK_HEIGHT, 2) - 5)
+        await vi.advanceTimersByTimeAsync(600)
+        const anchor = 50 + 2 * CHARS_PER_LINE
+        expect(nav.historyLocator()?.textOffset).toBe(anchor)
+
+        session.reflow()
+        charsPerLine = 7
+        scrollTo(scrollY - 3)
+        await vi.advanceTimersByTimeAsync(600)
+        expect(scrollY).toBe(restoredAt(BLOCK_HEIGHT, 2))
+        expect(nav.historyLocator()?.textOffset).toBe(anchor)
+
+        session.reflow()
+        charsPerLine = 6
+        await vi.advanceTimersByTimeAsync(600)
+        expect(scrollY).toBe(restoredAt(BLOCK_HEIGHT, 3))
+        expect(nav.historyLocator()?.textOffset).toBe(anchor)
+
+        scrollTo(scrollY + 1)
+        await vi.advanceTimersByTimeAsync(600)
+        expect(nav.historyLocator()?.textOffset).toBe(50 + 3 * 6)
+        await session.dispose()
+    })
+})
+
+describe('reflow anchor lifetime', () => {
+    const P2 = 'chapter one textmore of chapter oneto the old anchorfootnoteTwo'.length
+    const THIRD_BLOCK = 'chapter one text'.length + 'more of chapter one'.length
+
+    async function reflowed() {
+        const started = await startTimed()
+        scrollTo(150)
+        await vi.advanceTimersByTimeAsync(600)
+        started.session.reflow()
+        await vi.advanceTimersByTimeAsync(600)
+        expect(started.nav.historyLocator()?.textOffset).toBe(THIRD_BLOCK)
+        return started
+    }
+
+    it('is dropped by a same-page link', async () => {
+        const { session, host, nav } = await reflowed()
+        ;(bodyOf(host).querySelector('[data-book-frag="p1b"]') as HTMLElement).click()
+        await vi.advanceTimersByTimeAsync(600)
+
+        expect(scrollY).toBe(BLOCK_HEIGHT - 8)
+        expect(nav.historyLocator()).toMatchObject({
+            textOffset: 'chapter one text'.length,
+            anchorId: 'p1b',
+        })
+        await session.dispose()
+    })
+
+    it('is dropped by a navigation', async () => {
+        const { session, nav } = await reflowed()
+        session.goToPage(1)
+        await vi.advanceTimersByTimeAsync(600)
+        expect(session.pageIndex).toBe(1)
+        expect(nav.historyLocator()).toMatchObject({ textOffset: P2, anchorId: 'p2' })
+
+        nav.go(-1)
+        await vi.advanceTimersByTimeAsync(600)
+        nav.go(1)
+        await vi.advanceTimersByTimeAsync(600)
+        expect(session.pageIndex).toBe(1)
+        expect(scrollY).toBe(restoredAt(BLOCK_HEIGHT))
+        await session.dispose()
+    })
+})
+
+describe('character positions', () => {
+    it('takes the straddling line when no glyph top is inside the viewport', async () => {
+        Object.defineProperty(window, 'innerHeight', { value: 20, configurable: true })
+        withBook(LONG_BODY)
+        const { session } = start()
+        await flush()
+        scrollTo(restoredAt(BLOCK_HEIGHT, 2) + 5)
+        await flush()
+        await session.dispose()
+
+        expect(writes().at(-1)![1].progress!.book).toMatchObject({
+            textOffset: 50 + 2 * CHARS_PER_LINE,
+            anchorId: 'l1',
+        })
+    })
+
+    it('takes the start of a textless block filling the viewport', async () => {
+        Object.defineProperty(window, 'innerHeight', { value: 20, configurable: true })
+        withBook(`<p>${PARA}</p> <div id="blank"></div> <p>${PARA}</p>`)
+        const { session } = start()
+        await flush()
+        scrollTo(BLOCK_HEIGHT)
+        await flush()
+        await session.dispose()
+
+        expect(writes().at(-1)![1].progress!.book).toMatchObject({
+            textOffset: 50,
+            anchorId: 'blank',
+        })
+    })
+
+    it('captures the first visible line, not the start of its block', async () => {
+        withBook(LONG_BODY)
+        const { session } = start()
+        await flush()
+        scrollTo(restoredAt(BLOCK_HEIGHT, 2) - 5)
+        await flush()
+        await session.dispose()
+
+        expect(writes().at(-1)![1].progress!.book).toMatchObject({
+            textOffset: 50 + 2 * CHARS_PER_LINE,
+            anchorId: 'l1',
+        })
+    })
+
+    it('never captures collapsed indentation or hidden text', async () => {
+        withBook(LONG_BODY)
+        const { session, nav } = await startTimed()
+
+        scrollTo(restoredAt(2 * BLOCK_HEIGHT))
+        await vi.advanceTimersByTimeAsync(600)
+        expect(nav.historyLocator()?.textOffset).toBe(101)
+
+        scrollTo(restoredAt(3 * BLOCK_HEIGHT))
+        await vi.advanceTimersByTimeAsync(600)
+        expect(nav.historyLocator()?.textOffset).toBe(151 + 'PAGEBREAK'.length)
+        await session.dispose()
+    })
+
+    it('skips a laid-out space and a boxless character opening a line', async () => {
+        withBook(`
+            <p>${PARA}</p>
+            <p>abcdefghij klmnopqrs</p>
+            <p>abcdefghijklmno${'\u200b'}pqrstuvwxyzabcd</p>`)
+        const { session, nav } = await startTimed()
+
+        scrollTo(restoredAt(BLOCK_HEIGHT, 1))
+        await vi.advanceTimersByTimeAsync(600)
+        expect(nav.historyLocator()?.textOffset).toBe(50 + 11)
+
+        scrollTo(restoredAt(2 * BLOCK_HEIGHT, 1))
+        await vi.advanceTimersByTimeAsync(600)
+        expect(nav.historyLocator()?.textOffset).toBe(70 + 10)
+        await session.dispose()
+    })
+
+    it('restores an old block-start locator to the block first glyph', async () => {
+        withBook(LONG_BODY, { textOffset: 100, anchorId: 'l2' })
+        const { session } = start()
+        await flush()
+        expect(scrollY).toBe(restoredAt(2 * BLOCK_HEIGHT))
+        await session.dispose()
+    })
+
+    it('restores a locator into hidden text to the start of its block', async () => {
+        withBook(LONG_BODY, { textOffset: 151, anchorId: 'l3' })
+        const { session } = start()
+        await flush()
+        expect(scrollY).toBe(3 * BLOCK_HEIGHT - 8)
+        await session.dispose()
+    })
+
+    it('resumes a mid-paragraph locator on its own line', async () => {
+        withBook(LONG_BODY, { textOffset: 50 + 3 * CHARS_PER_LINE, anchorId: 'l1' })
+        const { session } = start()
+        await flush()
+        expect(scrollY).toBe(restoredAt(BLOCK_HEIGHT, 3))
+        await session.dispose()
+    })
+
+    it('falls back to the block start of vertical text past a straddling slice end', async () => {
+        vi.mocked(contentApi.bookStructure).mockResolvedValue({
+            spine: [
+                { href: 'a.xhtml', title: 'A', linear: true, words: 10 },
+                { href: 'b.xhtml', title: 'B', linear: true, words: 10 },
+            ],
+            toc: [{ id: 'c1', title: 'One', depth: 0, href: 'a.xhtml', fragment: '' }],
+        })
+        vi.mocked(contentApi.bookDocument).mockImplementation(async (_id, href) =>
+            href === 'a.xhtml'
+                ? `<html><body>${`<p>${PARA}</p>`.repeat(10)}</body></html>`
+                : `<html><body><p id="v" style="writing-mode: vertical-rl">
+                    ${PARA}</p></body></html>`
+        )
+        const { session } = start()
+        await flush()
+        scrollTo(SLICE_HEIGHT - 10)
+        await flush()
+        await session.dispose()
+
+        expect(writes().at(-1)![1].progress!.book).toMatchObject({
+            href: 'b.xhtml',
+            textOffset: 0,
+            anchorId: 'v',
+        })
     })
 })
 
@@ -926,7 +1313,7 @@ describe('disposal', () => {
         await flush()
 
         scrollTo(150)
-        window.dispatchEvent(new Event('resize'))
+        session.reflow()
         await session.dispose()
 
         const stamped = JSON.stringify(nav.entries)

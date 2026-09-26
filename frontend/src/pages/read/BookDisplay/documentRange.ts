@@ -133,19 +133,50 @@ export function textOffsetAtPath(root: Node, path: NodePath | null): number {
     return node ? textOffsetOfNode(root, node) : 0
 }
 
-/** The element holding the text at `offset`, or null when the offset falls
- * outside the document — a stale locator must fall back to its anchor rather
- * than silently land on the last paragraph. */
-export function elementAtTextOffset(root: Node, offset: number): Element | null {
+export interface TextPoint {
+    node: Text
+    index: number
+}
+
+/** Collapses the prefix itself: `contribution` counts a whitespace-only prefix
+ * as 0, which breaks the round trip for `"\n  Hello"`. */
+export function textOffsetOfPoint(root: Node, node: Text, index: number): number {
+    return textOffsetOfNode(root, node) + node.data.slice(0, index).replace(/\s+/g, ' ').length
+}
+
+function rawIndex(data: string, collapsed: number): number {
+    let count = 0
+    for (let i = 0; i < data.length; i++) {
+        if (count === collapsed) return i
+        if (!/\s/.test(data[i]!) || !/\s/.test(data[i + 1] ?? '')) count++
+    }
+    return data.length
+}
+
+/** The first non-whitespace character at or after `offset`: block-start
+ * offsets often land on indentation, which has no rect of its own. Null when
+ * the offset falls outside the document, so a stale locator falls back to its
+ * anchor rather than silently landing on the last paragraph. */
+export function textPointAtOffset(root: Node, offset: number): TextPoint | null {
     if (offset < 0) return null
     const walker = textWalkerFor(root)
     let total = 0
+    let found = false
     let text: Node | null
     while ((text = walker.nextNode())) {
-        const length = contribution((text as Text).data)
-        if (length === 0) continue
-        if (offset < total + length) return (text as Text).parentElement
-        total += length
+        const data = (text as Text).data
+        let from = 0
+        if (!found) {
+            const length = contribution(data)
+            if (offset >= total + length) {
+                total += length
+                continue
+            }
+            found = true
+            from = rawIndex(data, offset - total)
+        }
+        const index = data.slice(from).search(/\S/)
+        if (index !== -1) return { node: text as Text, index: from + index }
     }
     return null
 }
