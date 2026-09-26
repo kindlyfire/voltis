@@ -15,6 +15,7 @@ var AppVersion = "dev"
 
 type Config struct {
 	DatabaseURL  string
+	Host         string
 	Port         string
 	CacheDir     string
 	CORS         string
@@ -47,6 +48,7 @@ func Load() Config {
 
 	c := Config{
 		DatabaseURL: appendSSLDisable(envOr("APP_DATABASE_URL", "")),
+		Host:        envOr("APP_HOST", ""),
 		Port:        envOr("APP_PORT", "8080"),
 		CacheDir:    envOr("APP_CACHE_DIR", "/tmp/voltis_cache"),
 		CORS:        envOr("APP_CORS", ""),

@@ -118,6 +118,41 @@ export interface Library {
     settings: LibrarySettings
 }
 
+export interface FsMount {
+    path: string
+    fstype?: string
+    /** The mount point didn't answer in time, which is typical of a dead network mount. */
+    timed_out?: boolean
+}
+
+export interface FsRoots {
+    mounts: FsMount[]
+    mounts_error?: string
+}
+
+export interface FolderEntry {
+    name: string
+    /** Not resolved: a symlinked folder keeps the link's path. */
+    path: string
+    symlink: boolean
+}
+
+export interface FolderListing {
+    /** Absolute and free of symlinks. */
+    path: string
+    parent: string | null
+    entries: FolderEntry[]
+    truncated: boolean
+}
+
+export interface ResolvedPath {
+    input: string
+    path: string | null
+    /** Set when the input no longer exists and `path` is its nearest existing ancestor. */
+    fallback_from?: string
+    error?: string
+}
+
 export interface LibraryUpsert {
     id?: string
     name: string

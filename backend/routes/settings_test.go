@@ -98,13 +98,7 @@ func TestSettingsRequireAdminAndJSON(t *testing.T) {
 	pool := newTestPool(t)
 	admin := newAdminClient(t, pool)
 
-	admin.Post("/api/users/new", map[string]any{
-		"username": "member", "password": "memberpass123", "permissions": []string{},
-	}).Assert(t, 200)
-	member := admin.newSession(t)
-	member.Post("/api/auth/login", map[string]any{
-		"username": "member", "password": "memberpass123",
-	}).Assert(t, 200)
+	member, _ := newMemberClient(t, admin)
 
 	member.Get("/api/settings").Assert(t, 403)
 	member.Post("/api/settings", map[string]any{settings.AuthRegistrationEnabled: true}).Assert(t, 403)

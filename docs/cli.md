@@ -19,6 +19,7 @@ docker compose exec app sh
 | Variable                   | Default             | Description                                                                               |
 | -------------------------- | ------------------- | ----------------------------------------------------------------------------------------- |
 | `APP_DATABASE_URL`         | _(required)_        | PostgreSQL connection URL                                                                 |
+| `APP_HOST`                 | _(empty)_           | HTTP server listen address; empty listens on all interfaces                               |
 | `APP_PORT`                 | `8080`              | HTTP server port                                                                          |
 | `APP_CACHE_DIR`            | `/tmp/voltis_cache` | Directory for cached cover images                                                         |
 | `APP_REGISTRATION_ENABLED` | `false`             | Allow open user registration. If no accounts exist, one user will be allowed to register¹ |

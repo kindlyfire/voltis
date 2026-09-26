@@ -1,29 +1,13 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { defineComponent, h } from 'vue'
-import ADialog from '@/ui/ADialog.vue'
 import { hasOpenModal, ModalContainer, Modals } from './modals'
-
-const Dialog = defineComponent({
-    props: ['open', 'close'],
-    setup: props => () =>
-        h(ADialog, { open: props.open, title: 'Test', 'onUpdate:open': () => props.close() }, () =>
-            h('button', 'Inside')
-        ),
-})
+import { addOverlays, settle, TestDialog as Dialog } from './modalTesting'
 
 function opener() {
     const button = document.createElement('button')
     document.body.append(button)
     button.focus()
     return button
-}
-
-// Reka's focus scope hands focus back in a timeout after the content unmounts.
-async function settle() {
-    await flushPromises()
-    await vi.runAllTimersAsync()
-    await flushPromises()
 }
 
 function render() {
@@ -34,9 +18,7 @@ function render() {
 
 beforeEach(() => {
     vi.useFakeTimers()
-    const overlays = document.createElement('div')
-    overlays.id = 'overlays'
-    document.body.append(overlays)
+    addOverlays()
 })
 
 afterEach(() => {

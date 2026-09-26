@@ -1,14 +1,13 @@
 import { mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { nextTick } from 'vue'
+import { addOverlays } from '@/utils/modalTesting'
 import ASelect from './ASelect.vue'
 
 const props = { modelValue: 'a', options: ['a', 'b'], label: 'Status', clearable: true }
 const global = { stubs: { ATooltip: { template: '<slot />' } } }
 
-beforeEach(() => {
-    document.body.innerHTML = '<div id="overlays"></div>'
-})
+beforeEach(addOverlays)
 afterEach(() => {
     document.body.innerHTML = ''
 })

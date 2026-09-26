@@ -128,6 +128,21 @@ func newAdminClient(t *testing.T, pool *pgxpool.Pool) *testClient {
 	return c
 }
 
+// newMemberClient creates a user named "member" and returns a client logged in as them, and their id.
+func newMemberClient(t *testing.T, admin *testClient, perms ...string) (*testClient, string) {
+	t.Helper()
+	// Non-nil, so it encodes as [] rather than null.
+	perms = append([]string{}, perms...)
+	user := admin.Post("/api/users/new", map[string]any{
+		"username": "member", "password": "memberpass123", "permissions": perms,
+	}).Assert(t, 200).JSON()
+	member := admin.newSession(t)
+	member.Post("/api/auth/login", map[string]any{
+		"username": "member", "password": "memberpass123",
+	}).Assert(t, 200)
+	return member, s(user["id"])
+}
+
 func (c *testClient) url() *url.URL {
 	u, _ := url.Parse(c.server.URL)
 	return u

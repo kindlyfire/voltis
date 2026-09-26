@@ -71,6 +71,7 @@ func Register(e *echo.Echo, pool *pgxpool.Pool, st *settings.Store, proxy config
 	(&CustomListRoutes{pool: pool}).Register(api.Group("/custom-lists"))
 	(&TaskRoutes{pool: pool, manager: manager}).Register(api.Group("/tasks"))
 	(&MetadataSourceRoutes{pool: pool, mangabaka: sources.NewMangaBaka()}).Register(api.Group("/metadata-sources"))
+	(&FsRoutes{}).Register(api.Group("/fs"))
 
 	e.GET("/api/ws", wsHandler(res))
 

@@ -58,6 +58,8 @@ type Common = FieldProps & {
     loading?: boolean
     size?: 'sm' | 'md'
     autofocus?: boolean
+    /** Colors the hint, for a caution about the current value. */
+    hintTone?: 'warning'
 }
 // The model follows the input mode: a string for text, a number (null when empty) for `type="number"`.
 // The handler types only type the call sites; updates go through `emit`, which also handles `.once`
@@ -83,11 +85,24 @@ const props = defineProps<Common & (TextModel | NumberModel)>()
 const control = useTemplateRef<HTMLInputElement | HTMLTextAreaElement>('control')
 
 const fieldProps = computed(() => {
-    const { label, hideLabel, hint, error, disabled, readonly, id, suffix, loading, size } = props
+    const {
+        label,
+        hideLabel,
+        hint,
+        hintTone,
+        error,
+        disabled,
+        readonly,
+        id,
+        suffix,
+        loading,
+        size,
+    } = props
     return {
         label,
         hideLabel,
         hint,
+        hintTone,
         error,
         disabled,
         readonly,

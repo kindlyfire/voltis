@@ -1,9 +1,11 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 
@@ -202,6 +204,6 @@ func runServer(ctx context.Context) error {
 
 	routes.Register(e, pool, store, cfg.ProxyAuth)
 
-	slog.Info("starting server", "url", "http://localhost:"+cfg.Port)
-	return e.Start(":" + cfg.Port)
+	slog.Info("starting server", "url", "http://"+net.JoinHostPort(cmp.Or(cfg.Host, "localhost"), cfg.Port))
+	return e.Start(net.JoinHostPort(cfg.Host, cfg.Port))
 }

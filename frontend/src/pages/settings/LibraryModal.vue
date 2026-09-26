@@ -28,32 +28,46 @@
                 <div
                     v-for="(source, index) in form.values.value.sources"
                     :key="index"
-                    class="flex items-center gap-1"
+                    class="flex items-start gap-1"
                 >
                     <ATextField
                         :model-value="source.path_uri"
                         :label="`Source ${index + 1}`"
                         placeholder="/path/to/folder"
                         size="sm"
+                        :hint="sourceHint(index)"
+                        hint-tone="warning"
                         class="flex-1"
                         @update:model-value="(v: string) => updateSource(index, v)"
                     />
-                    <AIconButton
-                        :icon="IconClose"
-                        :label="`Remove source ${index + 1}`"
-                        size="sm"
-                        @click="removeSource(index)"
-                    />
+                    <!-- Centred on the 40px field box, not on the box plus its hint. -->
+                    <div class="flex h-10 items-center gap-1">
+                        <AIconButton
+                            :icon="IconFolderOpen"
+                            :label="`Browse for source ${index + 1}`"
+                            size="sm"
+                            @click="browseSource(index)"
+                        />
+                        <AIconButton
+                            :icon="IconClose"
+                            :label="`Remove source ${index + 1}`"
+                            size="sm"
+                            @click="removeSource(index)"
+                        />
+                    </div>
                 </div>
-                <div>
+                <div class="flex flex-wrap gap-2">
                     <AButton
                         ref="addSourceButton"
                         variant="tonal"
                         size="sm"
-                        :leading-icon="IconPlus"
-                        @click="addSource"
+                        :leading-icon="IconFolderOpen"
+                        @click="browseSources"
                     >
-                        Add source
+                        Browse folders…
+                    </AButton>
+                    <AButton variant="text" size="sm" :leading-icon="IconPlus" @click="addSource">
+                        Add path manually
                     </AButton>
                 </div>
             </fieldset>
@@ -80,6 +94,7 @@
 </template>
 
 <script setup lang="ts">
+import { refDebounced } from '@vueuse/core'
 import { computed, nextTick, useId, useTemplateRef, watch } from 'vue'
 import { z } from 'zod'
 import { showConfirmModal } from '@/components/ConfirmModal.vue'
@@ -89,10 +104,12 @@ import ADialog from '@/ui/ADialog.vue'
 import AIconButton from '@/ui/AIconButton.vue'
 import ASelect from '@/ui/ASelect.vue'
 import ATextField from '@/ui/ATextField.vue'
-import { IconClose, IconPlus } from '@/ui/icons'
+import { IconClose, IconFolderOpen, IconPlus } from '@/ui/icons'
 import { useToast } from '@/ui/useToast'
 import { librariesApi } from '@/utils/api/libraries'
 import { useForm } from '@/utils/forms'
+import { showFolderPicker } from './FolderPickerModal.vue'
+import { useSourceOverlaps } from './useSourceOverlaps'
 
 const props = defineProps<{
     open: boolean
@@ -187,10 +204,49 @@ function updateSource(index: number, value: string) {
     form.setValue('sources', sources)
 }
 
+const sourcePaths = computed(() => form.values.value.sources.map(s => s.path_uri.trim()))
+const otherPaths = (except?: number) => sourcePaths.value.filter((p, i) => p && i !== except)
+const excludeLibraryId = isNew.value ? undefined : props.libraryId
+const overlaps = useSourceOverlaps(excludeLibraryId)
+const settledPaths = refDebounced(sourcePaths, 400)
+watch(settledPaths, paths => overlaps.resolve(paths), { immediate: true })
+
+async function browseSource(index: number) {
+    const paths = await showFolderPicker({
+        initialPath: sourcePaths.value[index] || undefined,
+        excludeLibraryId,
+        otherSourcePaths: otherPaths(index),
+    })
+    if (paths?.[0]) updateSource(index, paths[0])
+}
+
+async function browseSources() {
+    const paths = await showFolderPicker({
+        multiple: true,
+        excludeLibraryId,
+        otherSourcePaths: otherPaths(),
+    })
+    if (!paths) return
+    const added = paths.filter(p => !sourcePaths.value.includes(p))
+    form.setValue('sources', [...form.values.value.sources, ...added.map(p => ({ path_uri: p }))])
+}
+
+function sourceHint(index: number) {
+    const path = sourcePaths.value[index]
+    if (!path) return undefined
+    const others = sourcePaths.value.flatMap((p, i) =>
+        p && i !== index ? [{ path: p, label: `Source ${i + 1}` }] : []
+    )
+    return overlaps.rawWarning(path, others)?.long
+}
+
+// Once per modal: a background refetch (a scan finishing, say) must not clobber unsaved edits.
+let initialised = false
 watch(
     () => library.value,
     l => {
-        if (l && !isNew.value) {
+        if (l && !isNew.value && !initialised) {
+            initialised = true
             form.setValues({
                 name: l.name,
                 type: l.type,

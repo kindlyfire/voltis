@@ -98,17 +98,8 @@ func adminAndMember(t *testing.T, perms []string) (*testClient, *testClient, str
 	t.Helper()
 	pool := newTestPool(t)
 	admin := newAdminClient(t, pool)
-
-	user := admin.Post("/api/users/new", map[string]any{
-		"username": "member", "password": "memberpass123", "permissions": perms,
-	}).Assert(t, 200).JSON()
-
-	member := admin.newSession(t)
-	member.Post("/api/auth/login", map[string]any{
-		"username": "member", "password": "memberpass123",
-	}).Assert(t, 200)
-
-	return admin, member, s(user["id"])
+	member, id := newMemberClient(t, admin, perms...)
+	return admin, member, id
 }
 
 func TestSocketRevocationOnDemotion(t *testing.T) {

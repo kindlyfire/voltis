@@ -298,13 +298,7 @@ func TestIdentityAuthorization(t *testing.T) {
 	victimID := s(victim["id"])
 	stolen := seedIdentity(t, admin, victimID, "sub-1")
 
-	member := admin.newSession(t)
-	admin.Post("/api/users/new", map[string]any{
-		"username": "member", "password": "memberpass123", "permissions": []string{},
-	}).Assert(t, 200)
-	member.Post("/api/auth/login", map[string]any{
-		"username": "member", "password": "memberpass123",
-	}).Assert(t, 200)
+	member, _ := newMemberClient(t, admin)
 
 	// Someone else's identity is not theirs to unlink, even by id.
 	member.Delete("/api/users/me/identities/"+stolen).Assert(t, 404)
