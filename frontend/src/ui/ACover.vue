@@ -21,6 +21,9 @@
         </div>
         <div v-if="$slots.topLeft" class="a-cover__corner top-left"><slot name="topLeft" /></div>
         <div v-if="$slots.topRight" class="a-cover__corner top-right"><slot name="topRight" /></div>
+        <div v-if="$slots.bottomRight" class="a-cover__corner bottom-right">
+            <slot name="bottomRight" />
+        </div>
         <AProgressBar
             v-if="progress != null"
             class="a-cover__progress"
@@ -104,16 +107,24 @@ watch(
 
     .a-cover__corner {
         position: absolute;
-        top: 8px;
         display: flex;
         gap: 4px;
 
         &.top-left {
+            top: 8px;
             left: 8px;
         }
 
         &.top-right {
+            top: 8px;
             right: 8px;
+        }
+
+        &.bottom-right {
+            right: 8px;
+            bottom: 8px;
+            left: 8px;
+            justify-content: flex-end;
         }
     }
 

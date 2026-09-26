@@ -15,6 +15,7 @@ import (
 
 	"voltis/db"
 	"voltis/lib/epub"
+	"voltis/lib/fp"
 	"voltis/lib/sources"
 	"voltis/models"
 	"voltis/models/metaraw"
@@ -161,7 +162,7 @@ func TestFlushHydratesOnlyTheRowsTheFlushTouches(t *testing.T) {
 
 	r.reload()
 	r.place(comicResult("/lib/S/ch2.cbz", "ch2", "S", "/lib/S"))
-	rec, counts, err := r.recordCommit(false)
+	rec, counts, _, err := r.recordCommit(false)
 	if err != nil || counts.Added != 1 {
 		t.Fatalf("commit = %+v, %v", counts, err)
 	}
@@ -626,7 +627,7 @@ func TestFlushFailedFinalRollsBackScannedAt(t *testing.T) {
 
 	r := newScanRun(t, pool, lib, &ComicsScanner{})
 	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
-	if _, _, err := r.recordCommit(true); err == nil {
+	if _, _, _, err := r.recordCommit(true); err == nil {
 		t.Fatal("expected the final flush to fail")
 	}
 
@@ -1123,4 +1124,182 @@ func TestFlushLeavesSwappingURIsKeepTheirRefs(t *testing.T) {
 		"comic/C": "comic/B", "comic/C/ch2": "comic/B/ch2",
 		"comic/A/ch1": "comic/B/ch1",
 	})
+}
+
+func withCover(r Result) Result {
+	r.Item.CoverSuffix = new("001.jpg")
+	return r
+}
+
+func recentByID(recent []RecentEntry) map[string]RecentEntry {
+	byID := map[string]RecentEntry{}
+	for _, e := range recent {
+		byID[e.ID] = e
+	}
+	return byID
+}
+
+func TestFlushRecentCountsAddUpToTheTotals(t *testing.T) {
+	r := newTestScan(t, "comics")
+	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
+	r.place(comicResult("/lib/S/ch2.cbz", "ch2", "S", "/lib/S"))
+	r.place(comicResult("/lib/solo.cbz", "solo", "", ""))
+	r.commit(false)
+	seriesS, solo := r.w.byURI["comic/S"], r.w.keys[Key{"", "solo"}]
+
+	r.reload()
+	r.w.gone[r.w.keys[Key{seriesS, "ch2"}]] = true
+	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
+	r.place(comicResult("/lib/S/ch3.cbz", "ch3", "S", "/lib/S"))
+	r.place(comicResult("/lib/T/ch1.cbz", "ch1", "T", "/lib/T"))
+	r.place(comicResult("/lib/other.cbz", "other", "", ""))
+	r.w.gone[solo] = true
+	counts, recent := r.commitRecent(true)
+
+	if counts != (Counts{Added: 3, Updated: 1, Removed: 2}) {
+		t.Fatalf("counts = %+v", counts)
+	}
+	var sum Counts
+	for _, e := range recent {
+		sum.add(e.Counts)
+	}
+	if sum != counts {
+		t.Fatalf("entries sum to %+v, want %+v: %+v", sum, counts, recent)
+	}
+	byID := recentByID(recent)
+	if got := byID[seriesS]; got.Counts != (Counts{Added: 1, Updated: 1, Removed: 1}) || got.Title != "S" || got.Deleted {
+		t.Fatalf("series S = %+v", got)
+	}
+	// Deletes are stamped at take, after every placement.
+	got := fp.Map(recent[2:], func(e RecentEntry) string { return e.ID })
+	if want := []string{r.w.keys[Key{"", "other"}], r.w.byURI["comic/T"]}; !slices.Equal(got, want) {
+		t.Fatalf("recent = %+v, want the deletes, then the newest placement first", recent)
+	}
+}
+
+func TestFlushRecentCountsAReclaimedIDAsUpdated(t *testing.T) {
+	r := newTestScan(t, "comics")
+	r.place(comicResult("/lib/Foo.cbz", "Foo", "", ""))
+	r.commit(false)
+	id := r.w.keys[Key{"", "Foo"}]
+
+	r.reload()
+	r.w.gone[id] = true
+	r.place(comicResult("/lib/moved/Foo.cbz", "Foo", "", ""))
+	counts, recent := r.commitRecent(false)
+
+	if counts != (Counts{Updated: 1}) {
+		t.Fatalf("counts = %+v, want the reclaimed row counted as updated", counts)
+	}
+	if len(recent) != 1 || recent[0].ID != id || recent[0].Counts != (Counts{Updated: 1}) {
+		t.Fatalf("recent = %+v", recent)
+	}
+}
+
+func TestFlushRecentStandaloneDeleteKeepsItsTitle(t *testing.T) {
+	r := newTestScan(t, "comics")
+	r.place(withCover(withMeta(comicResult("/lib/solo.cbz", "solo", "", ""), models.Metadata{Title: "Solo Title"})))
+	r.commit(false)
+	solo := r.w.keys[Key{"", "solo"}]
+
+	r.reload()
+	r.w.gone[solo] = true
+	_, recent := r.commitRecent(true)
+
+	want := RecentEntry{ID: solo, Title: "Solo Title", Counts: Counts{Removed: 1}, Deleted: true}
+	if len(recent) != 1 || recent[0] != want {
+		t.Fatalf("recent = %+v, want %+v", recent, want)
+	}
+}
+
+func TestFlushRecentDeleteKeepsItsTitleWhenALeafTakesItsURI(t *testing.T) {
+	r := newTestScan(t, "comics")
+	r.place(withMeta(comicResult("/lib/Foo.cbz", "Foo", "", ""), models.Metadata{Title: "Original"}))
+	r.place(withMeta(comicResult("/lib/S/Foo.cbz", "Foo", "S", "/lib/S"), models.Metadata{Title: "Replacement"}))
+	r.commit(false)
+	original := r.w.keys[Key{"", "Foo"}]
+	survivor := r.w.keys[Key{r.w.byURI["comic/S"], "Foo"}]
+
+	r.reload()
+	r.w.gone[original] = true
+	r.place(withMeta(comicResult("/lib/S/Foo.cbz", "Foo", "", ""), models.Metadata{Title: "Replacement"}))
+	_, recent := r.commitRecent(false)
+
+	if got := readMeta(t, r.pool, r.lib, "comic/Foo").File.Raw.Title; got != "Replacement" {
+		t.Fatalf("comic/Foo title = %q, want the survivor's metadata there", got)
+	}
+	byID := recentByID(recent)
+	if got := byID[original]; got.Title != "Original" || !got.Deleted || got.Removed != 1 {
+		t.Fatalf("deleted entry = %+v, want its own title", got)
+	}
+	if got := byID[survivor]; got.Title != "Replacement" || got.Updated != 1 {
+		t.Fatalf("survivor entry = %+v", got)
+	}
+}
+
+func TestFlushRecentMarksADeletedSeries(t *testing.T) {
+	r := newTestScan(t, "comics")
+	r.place(withCover(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S")))
+	r.place(withCover(comicResult("/lib/S/ch2.cbz", "ch2", "S", "/lib/S")))
+	r.commit(false)
+	seriesS := r.w.byURI["comic/S"]
+	if readContent(t, r.pool, seriesS).CoverURI == nil {
+		t.Fatal("series must start with a cover")
+	}
+
+	r.reload()
+	r.w.gone[r.w.keys[Key{seriesS, "ch1"}]] = true
+	r.w.gone[r.w.keys[Key{seriesS, "ch2"}]] = true
+	_, recent := r.commitRecent(true)
+
+	want := RecentEntry{ID: seriesS, Title: "S", Counts: Counts{Removed: 2}, Deleted: true}
+	if len(recent) != 1 || recent[0] != want {
+		t.Fatalf("recent = %+v, want %+v", recent, want)
+	}
+}
+
+func TestFlushRecentSkipsRenamesAndInvalidation(t *testing.T) {
+	r := newTestScan(t, "comics")
+	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
+	r.place(comicResult("/lib/T/ch1.cbz", "ch1", "T", "/lib/T"))
+	r.commit(false)
+	seriesS := r.w.byURI["comic/S"]
+
+	r.reload()
+	s := r.w.set(seriesS)
+	s.OldURI, s.Ref.URI, s.Ref.URIPart = s.Ref.URI, "comic/S2", "S2"
+	r.place(Result{File: fsFile("/lib/T/ch1.cbz", baseTime, 10)})
+	counts, recent := r.commitRecent(false)
+
+	assertCatalog(t, r.pool, r.lib, []string{"comic/S2", "comic/S2/ch1", "comic/T", "comic/T/ch1"})
+	if counts != (Counts{}) || len(recent) != 0 {
+		t.Fatalf("counts = %+v, recent = %+v, want neither a rename nor an invalidation counted", counts, recent)
+	}
+}
+
+func TestFlushRecentKeepsTheNewestEntries(t *testing.T) {
+	r := newTestScan(t, "comics")
+	var want []string
+	for i := range RecentCap + 2 {
+		part := fmt.Sprintf("item%d", i)
+		r.place(withCover(comicResult("/lib/"+part+".cbz", part, "", "")))
+		want = append(want, r.w.keys[Key{"", part}])
+	}
+	slices.Reverse(want)
+	counts, recent := r.commitRecent(false)
+
+	if counts != (Counts{Added: RecentCap + 2}) {
+		t.Fatalf("counts = %+v, want every entry summed, not only the kept ones", counts)
+	}
+
+	got := make([]string, len(recent))
+	for i, e := range recent {
+		got[i] = e.ID
+		if !e.HasCover || e.FileMtime == nil || e.Counts != (Counts{Added: 1}) {
+			t.Fatalf("entry = %+v", e)
+		}
+	}
+	if !slices.Equal(got, want[:RecentCap]) {
+		t.Fatalf("recent = %v, want %v", got, want[:RecentCap])
+	}
 }

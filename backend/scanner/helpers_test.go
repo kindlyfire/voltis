@@ -264,23 +264,30 @@ func (r *scanRun) place(results ...Result) {
 
 func (r *scanRun) commit(final bool) Counts {
 	r.t.Helper()
-	_, counts, err := r.recordCommit(final)
-	if err != nil {
-		r.t.Fatalf("commit: %v", err)
-	}
+	counts, _ := r.commitRecent(final)
 	return counts
 }
 
-func (r *scanRun) recordCommit(final bool) (*recordingTx, Counts, error) {
+func (r *scanRun) commitRecent(final bool) (Counts, []RecentEntry) {
+	r.t.Helper()
+	_, counts, recent, err := r.recordCommit(final)
+	if err != nil {
+		r.t.Fatalf("commit: %v", err)
+	}
+	return counts, recent
+}
+
+func (r *scanRun) recordCommit(final bool) (*recordingTx, Counts, []RecentEntry, error) {
 	r.t.Helper()
 	f := r.w.take(final)
 	rec := &recordingTx{}
 	var counts Counts
+	var recent []RecentEntry
 	err := db.WithTx(context.Background(), r.pool, func(tx pgx.Tx) error {
 		rec.Tx = tx
 		var txErr error
-		counts, txErr = commit(context.Background(), rec, r.fs, r.lib, f, time.Now().UTC())
+		counts, recent, txErr = commit(context.Background(), rec, r.fs, r.lib, f, time.Now().UTC())
 		return txErr
 	})
-	return rec, counts, err
+	return rec, counts, recent, err
 }

@@ -1,7 +1,13 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { effectScope, nextTick } from 'vue'
-import { invalidateCatalog, type ScanRow, scanRow, useScanStore, useScanSync } from '@/stores/scans'
+import {
+    invalidateCatalog,
+    type ScanLead,
+    scanRow,
+    useScanStore,
+    useScanSync,
+} from '@/stores/scans'
 import { tasksApi } from '@/utils/api/tasks'
 import type { ScanProgress, TaskLogs, TaskSnapshot } from '@/utils/api/types'
 import { usersApi } from '@/utils/api/users'
@@ -107,48 +113,82 @@ describe('shared store', () => {
 })
 
 describe('scanRow', () => {
+    const output = { added: 5, updated: 1, removed: 2, failed: 0, unchanged: 9, duration: 1 }
+    const saved = { added: 3, updated: 2, removed: 1 }
+
     it.each([
         {
-            name: 'never divides by a zero total',
-            over: { progress: { ...progress, total: 0, processed: 0 } },
-            want: { value: 100, detail: '0 / 0' },
+            name: 'reports queued tasks',
+            over: { status: 0, progress: null },
+            want: { state: 'queued' },
+        },
+        {
+            name: 'reports a running task without progress as queued',
+            over: { progress: null },
+            want: { state: 'queued' },
         },
         {
             name: 'shows found counts while walking',
             over: { progress: { ...progress, phase: 'walking', found: 21 } },
-            want: { indeterminate: true, detail: 'Looking for files, 21 found' },
+            want: { state: 'walking', found: 21 },
         },
         {
-            name: 'shows saved counts while saving',
-            over: {
-                progress: {
-                    ...progress,
-                    phase: 'saving',
-                    saved: { added: 3, updated: 2, removed: 1 },
-                },
-            },
-            want: { detail: '3 added, 2 updated, 1 removed' },
+            name: 'shows processed and total files while parsing',
+            over: {},
+            want: { state: 'parsing', processed: 1, total: 4 },
+        },
+        {
+            name: 'reports saving',
+            over: { progress: { ...progress, phase: 'saving', saved } },
+            want: { state: 'saving' },
+        },
+        {
+            name: 'counts a finished run that is not terminal yet from its saved progress',
+            over: { progress: { ...progress, phase: 'done', saved } },
+            want: { state: 'done', outcome: 'completed', counts: saved },
         },
         {
             name: 'uses the terminal output counts',
-            over: {
-                status: 2,
-                progress: null,
-                output: { added: 5, updated: 1, removed: 2, failed: 0, unchanged: 9, duration: 1 },
-            },
-            want: { detail: '5 added, 1 updated, 2 removed', tone: 'success' },
+            over: { status: 2, progress: { ...progress, saved }, output },
+            want: { state: 'done', outcome: 'completed', counts: output },
         },
         {
-            name: 'reports queued tasks',
-            over: { status: 0, progress: null },
-            want: { detail: 'Queued' },
+            name: 'keeps the counts a failed scan committed',
+            over: { status: 3, progress: { ...progress, saved } },
+            want: { state: 'done', outcome: 'failed', counts: saved },
         },
-    ] as { name: string; over: Partial<TaskSnapshot>; want: Partial<ScanRow> }[])(
+        {
+            name: 'reports a cancelled scan',
+            over: { status: 4, progress: null },
+            want: {
+                state: 'done',
+                outcome: 'cancelled',
+                counts: { added: 0, updated: 0, removed: 0 },
+            },
+        },
+    ] as { name: string; over: Partial<TaskSnapshot>; want: ScanLead }[])(
         '$name',
         ({ over, want }) => {
-            expect(scanRow(task(over))).toMatchObject(want)
+            expect(scanRow(task(over)).lead).toEqual(want)
         }
     )
+
+    it('passes the recent entries through', () => {
+        const recent = [
+            {
+                id: 'c_1',
+                title: 'S',
+                has_cover: true,
+                file_mtime: '2026-09-18T08:00:00Z',
+                added: 1,
+                updated: 0,
+                removed: 0,
+                deleted: false,
+            },
+        ]
+        expect(scanRow(task({ progress: { ...progress, recent } })).recent).toEqual(recent)
+        expect(scanRow(task({ progress: null })).recent).toEqual([])
+    })
 })
 
 describe('accept', () => {
@@ -175,7 +215,9 @@ describe('accept', () => {
 
         expect(snapshotMock).toHaveBeenCalledWith(['t_1'])
         expect(store.tasks['t_1']!.status).toBe(2)
-        expect(scanRow(store.tasks['t_1']!).detail).toBe('2 added, 0 updated, 0 removed')
+        expect(scanRow(store.tasks['t_1']!).lead).toMatchObject({
+            counts: { added: 2, updated: 0 },
+        })
     })
 
     it('keeps the socket snapshot when a slower POST reconcile returns an older row', async () => {

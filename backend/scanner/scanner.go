@@ -67,6 +67,24 @@ type Counts struct {
 	Removed int `json:"removed"`
 }
 
+func (c *Counts) add(o Counts) {
+	c.Added += o.Added
+	c.Updated += o.Updated
+	c.Removed += o.Removed
+}
+
+const RecentCap = 6
+
+// RecentEntry is a series, or a standalone item, changed by a committed flush.
+type RecentEntry struct {
+	ID        string     `json:"id"`
+	Title     string     `json:"title"`
+	HasCover  bool       `json:"has_cover"`
+	FileMtime *time.Time `json:"file_mtime"`
+	Counts
+	Deleted bool `json:"deleted"`
+}
+
 type Progress struct {
 	Phase     string `json:"phase"`
 	Found     int    `json:"found"`
@@ -76,6 +94,8 @@ type Progress struct {
 	Failed    int    `json:"failed"`
 	Saved     Counts `json:"saved"`
 	CommitSeq int    `json:"commit_seq"`
+	// Newest first; saved() replaces the slice, since publish shares it with the marshalling goroutine.
+	Recent []RecentEntry `json:"recent,omitempty"`
 }
 
 type CatalogChanged struct {

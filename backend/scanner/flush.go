@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -34,11 +35,12 @@ const contentUpsert = `
 func commitLoop(ctx context.Context, pool *pgxpool.Pool, s FileScanner, libraryID string, in <-chan flush, out chan<- committed) {
 	for f := range in {
 		var counts Counts
+		var recent []RecentEntry
 		var err error
 		for range 3 {
 			err = db.WithTx(ctx, pool, func(tx pgx.Tx) error {
 				var txErr error
-				counts, txErr = commit(ctx, tx, s, libraryID, f, time.Now().UTC())
+				counts, recent, txErr = commit(ctx, tx, s, libraryID, f, time.Now().UTC())
 				return txErr
 			})
 			if err == nil || ctx.Err() != nil || !retryable(err) {
@@ -46,10 +48,10 @@ func commitLoop(ctx context.Context, pool *pgxpool.Pool, s FileScanner, libraryI
 			}
 		}
 		if err != nil {
-			counts = Counts{}
+			counts, recent = Counts{}, nil
 		}
 		select {
-		case out <- committed{seq: f.seq, counts: counts, err: err}:
+		case out <- committed{seq: f.seq, counts: counts, recent: recent, err: err}:
 		case <-ctx.Done():
 			return
 		}
@@ -64,14 +66,32 @@ func retryable(err error) bool {
 	return ok && slices.Contains([]string{"40001", "40P01", "23505"}, pgErr.Code)
 }
 
-func commit(ctx context.Context, tx pgx.Tx, s FileScanner, libraryID string, f flush, now time.Time) (Counts, error) {
-	var counts Counts
+// recentTally accumulates what a flush did to one entry: a series, or a standalone item.
+type recentTally struct {
+	RecentEntry
+	uri, uriPart string
+	tick         int
+}
+
+func commit(ctx context.Context, tx pgx.Tx, s FileScanner, libraryID string, f flush, now time.Time) (Counts, []RecentEntry, error) {
 	if err := db.LockMetadata(ctx, tx, libraryID); err != nil {
-		return counts, err
+		return Counts{}, nil, err
+	}
+
+	tallies := map[string]*recentTally{}
+	tally := func(id, uri, uriPart string, tick int) *recentTally {
+		t, ok := tallies[id]
+		if !ok {
+			t = &recentTally{RecentEntry: RecentEntry{ID: id}, uri: uri, uriPart: uriPart}
+			tallies[id] = t
+		}
+		t.tick = max(t.tick, tick)
+		return t
 	}
 
 	setIDs := slices.Sorted(maps.Keys(f.sets))
 	var ids, seriesIDs, invalid, deletes []string
+	deleteTick := map[string]int{}
 	for _, id := range setIDs {
 		set := f.sets[id]
 		if set.Ref.ID != "" {
@@ -82,7 +102,10 @@ func commit(ctx context.Context, tx pgx.Tx, s FileScanner, libraryID string, f f
 			ids = append(ids, w.id)
 		}
 		invalid = append(invalid, set.Invalid...)
-		deletes = append(deletes, set.Deletes...)
+		for _, d := range set.Deletes {
+			deletes = append(deletes, d.id)
+			deleteTick[d.id] = d.tick
+		}
 	}
 
 	cur := map[string]models.Content{}
@@ -99,7 +122,7 @@ func commit(ctx context.Context, tx pgx.Tx, s FileScanner, libraryID string, f f
 			return nil
 		})
 	if err != nil {
-		return counts, err
+		return Counts{}, nil, err
 	}
 
 	dropped := map[string]bool{}
@@ -129,28 +152,52 @@ func commit(ctx context.Context, tx pgx.Tx, s FileScanner, libraryID string, f f
 				return nil
 			})
 		if err != nil {
-			return counts, err
+			return Counts{}, nil, err
 		}
 	}
 
 	if len(deletes) > 0 {
-		tag, err := tx.Exec(ctx, "DELETE FROM content WHERE library_id = $1 AND id = ANY($2::text[])", libraryID, deletes)
+		var id, uri, part, title string
+		var parentID *string
+		// The title is read now: a leaf moving into a deleted item's URI later in the flush takes
+		// its metadata.
+		err := query(ctx, tx, `
+			WITH d AS (
+				DELETE FROM content WHERE library_id = $1 AND id = ANY($2::text[])
+				RETURNING id, parent_id, uri, uri_part
+			)
+			SELECT d.id, d.parent_id, d.uri, d.uri_part, COALESCE(NULLIF(m.data->>'title', ''), d.uri_part)
+			FROM d LEFT JOIN content_metadata m ON m.library_id = $1 AND m.uri = d.uri
+		`, []any{libraryID, deletes}, []any{&id, &parentID, &uri, &part, &title}, func() error {
+			if parentID == nil {
+				t := tally(id, uri, part, deleteTick[id])
+				t.Removed++
+				t.Deleted = true
+				t.Title = title
+			} else {
+				var ref SeriesRef
+				if set, ok := f.sets[*parentID]; ok {
+					ref = set.Ref
+				}
+				tally(*parentID, ref.URI, ref.URIPart, deleteTick[id]).Removed++
+			}
+			return nil
+		})
 		if err != nil {
-			return counts, err
+			return Counts{}, nil, err
 		}
-		counts.Removed += int(tag.RowsAffected())
 	}
 
 	steps, err := orderSteps(f, key)
 	if err != nil {
-		return counts, err
+		return Counts{}, nil, err
 	}
 
 	var metaWrites []metaWrite
 	for _, st := range steps {
 		if st.write == nil {
 			if err := identityStep(ctx, tx, libraryID, st.set, now); err != nil {
-				return counts, err
+				return Counts{}, nil, err
 			}
 			continue
 		}
@@ -170,17 +217,24 @@ func commit(ctx context.Context, tx pgx.Tx, s FileScanner, libraryID string, f f
 			}
 		}
 		if err := upsertContent(ctx, tx, leafRow(st.write.id, libraryID, uri, *item, parentID, old, now)); err != nil {
-			return counts, err
+			return Counts{}, nil, err
 		}
-		if st.write.added {
-			counts.Added++
+		// Only the row tells an add from a moved file reclaiming a deleted item's ID.
+		var t *recentTally
+		if parentID != nil {
+			t = tally(*parentID, st.set.Ref.URI, st.set.Ref.URIPart, st.write.tick)
 		} else {
-			counts.Updated++
+			t = tally(st.write.id, uri, item.URIPart, st.write.tick)
+		}
+		if old != nil {
+			t.Updated++
+		} else {
+			t.Added++
 		}
 		metaWrites = append(metaWrites, metaWrite{uri: uri, file: item.MetaRaw})
 	}
 	if err := applyRenames(ctx, tx, libraryID, moves); err != nil {
-		return counts, err
+		return Counts{}, nil, err
 	}
 
 	for _, id := range setIDs {
@@ -195,7 +249,7 @@ func commit(ctx context.Context, tx pgx.Tx, s FileScanner, libraryID string, f f
 		_, err := tx.Exec(ctx, "UPDATE content SET uri_part = $2, file_uri = $3, updated_at = $4 WHERE id = $1",
 			id, set.Ref.URIPart, set.Ref.FileURI, now)
 		if err != nil {
-			return counts, err
+			return Counts{}, nil, err
 		}
 	}
 
@@ -203,35 +257,80 @@ func commit(ctx context.Context, tx pgx.Tx, s FileScanner, libraryID string, f f
 		_, err := tx.Exec(ctx, "UPDATE content SET valid = false, updated_at = $2 WHERE library_id = $1 AND id = ANY($3::text[])",
 			libraryID, now, invalid)
 		if err != nil {
-			return counts, err
+			return Counts{}, nil, err
 		}
 	}
 
 	if err := writeMetadata(ctx, tx, libraryID, now, metaWrites); err != nil {
-		return counts, err
+		return Counts{}, nil, err
 	}
 
 	if err := commitSeries(ctx, tx, s, libraryID, now, f.sets, seriesIDs, dropped); err != nil {
-		return counts, err
+		return Counts{}, nil, err
 	}
 
 	if f.final {
 		if !f.keep {
-			_, err := tx.Exec(ctx, `
+			var id string
+			err := query(ctx, tx, `
 				DELETE FROM content p
 				WHERE p.library_id = $1 AND p.type IN ('comic_series', 'book_series')
 				  AND NOT EXISTS (SELECT 1 FROM content c WHERE c.parent_id = p.id)
-			`, libraryID)
+				RETURNING p.id
+			`, []any{libraryID}, []any{&id}, func() error {
+				if t, ok := tallies[id]; ok {
+					t.Deleted = true
+				}
+				return nil
+			})
 			if err != nil {
-				return counts, err
+				return Counts{}, nil, err
 			}
 		}
 		if _, err := tx.Exec(ctx, "UPDATE libraries SET scanned_at = $1 WHERE id = $2", now, libraryID); err != nil {
-			return counts, err
+			return Counts{}, nil, err
 		}
 	}
 
-	return counts, nil
+	return recentEntries(ctx, tx, libraryID, tallies)
+}
+
+// recentEntries sums every entry's counts and details the newest entries. A deleted row is joined
+// to its metadata by its last URI, since metadata outlives the row.
+func recentEntries(ctx context.Context, tx pgx.Tx, libraryID string, tallies map[string]*recentTally) (Counts, []RecentEntry, error) {
+	var counts Counts
+	for _, t := range tallies {
+		counts.add(t.Counts)
+	}
+	top := slices.SortedFunc(maps.Values(tallies), func(a, b *recentTally) int {
+		return cmp.Or(cmp.Compare(b.tick, a.tick), cmp.Compare(a.ID, b.ID))
+	})
+	top = top[:min(len(top), RecentCap)]
+	if len(top) == 0 {
+		return counts, nil, nil
+	}
+
+	ids := fp.Map(top, func(t *recentTally) string { return t.ID })
+	uris := fp.Map(top, func(t *recentTally) string { return t.uri })
+	parts := fp.Map(top, func(t *recentTally) string { return t.uriPart })
+	var id, title string
+	var hasCover bool
+	var mtime *time.Time
+	err := query(ctx, tx, `
+		SELECT r.id, COALESCE(NULLIF(m.data->>'title', ''), c.uri_part, r.uri_part),
+		       c.cover_uri IS NOT NULL, c.file_mtime
+		FROM unnest($2::text[], $3::text[], $4::text[]) AS r(id, uri, uri_part)
+		LEFT JOIN content c ON c.library_id = $1 AND c.id = r.id
+		LEFT JOIN content_metadata m ON m.library_id = $1 AND m.uri = COALESCE(c.uri, r.uri)
+	`, []any{libraryID, ids, uris, parts}, []any{&id, &title, &hasCover, &mtime}, func() error {
+		t := tallies[id]
+		t.Title, t.HasCover, t.FileMtime = cmp.Or(t.Title, title), hasCover, mtime
+		return nil
+	})
+	if err != nil {
+		return Counts{}, nil, err
+	}
+	return counts, fp.Map(top, func(t *recentTally) RecentEntry { return t.RecentEntry }), nil
 }
 
 func commitSeries(ctx context.Context, tx pgx.Tx, s FileScanner, libraryID string, now time.Time,

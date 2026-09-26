@@ -21,10 +21,11 @@ import (
 type committed struct {
 	seq    int
 	counts Counts
+	recent []RecentEntry
 	err    error
 }
 
-var FlushSpacing = 5 * time.Second
+var FlushSpacing = 2 * time.Second
 
 type writer struct {
 	in       ScanInput
@@ -50,6 +51,7 @@ type writer struct {
 	sets     map[string]*SeriesChanges
 	prog     Progress
 	seq      int
+	tick     int
 	last     time.Time
 }
 
@@ -315,6 +317,7 @@ func (w *writer) place(r Result) {
 	s := w.set(parent)
 
 	var id string
+	w.tick++
 	switch {
 	case occ == "" || occ == own:
 		id = cmp.Or(own, models.MakeContentID())
@@ -324,7 +327,7 @@ func (w *writer) place(r Result) {
 	case w.gone[occ]:
 		id = own
 		delete(w.gone, occ)
-		s.Deletes = append(s.Deletes, occ)
+		s.Deletes = append(s.Deletes, deletion{occ, w.tick})
 	default:
 		w.prog.Failed++
 		slog.Warn("[scanner] URI conflict, skipping", "path", r.File.Path, "uri_part", r.Item.URIPart, "parent_id", parent)
@@ -345,7 +348,7 @@ func (w *writer) place(r Result) {
 		}
 	}
 	w.keys[k] = id
-	s.Writes = append(s.Writes, write{id: id, item: r.Item, added: own == ""})
+	s.Writes = append(s.Writes, write{id: id, item: r.Item, tick: w.tick})
 }
 
 func (w *writer) resolveSeries(p *ParsedSeries) (string, bool) {
@@ -541,7 +544,8 @@ func (w *writer) take(final bool) flush {
 	if final && w.trust {
 		for _, id := range slices.Sorted(maps.Keys(w.gone)) {
 			s := w.set(deref(w.byID[id].ParentID))
-			s.Deletes = append(s.Deletes, id)
+			w.tick++
+			s.Deletes = append(s.Deletes, deletion{id, w.tick})
 		}
 	}
 
@@ -558,13 +562,27 @@ func (w *writer) take(final bool) flush {
 }
 
 func (w *writer) saved(c committed) {
-	w.prog.Saved.Added += c.counts.Added
-	w.prog.Saved.Updated += c.counts.Updated
-	w.prog.Saved.Removed += c.counts.Removed
+	w.prog.Saved.add(c.counts)
+	w.prog.Recent = mergeRecent(c.recent, w.prog.Recent)
 	w.prog.CommitSeq = c.seq
 	if w.notify != nil {
 		w.notify.CatalogChanged(CatalogChanged{LibraryID: w.in.LibraryID, TaskID: w.taskID(), CommitSeq: c.seq})
 	}
+}
+
+// mergeRecent returns a new ring, newest first, where an ID seen again sums its counts at its newest place.
+func mergeRecent(fresh, old []RecentEntry) []RecentEntry {
+	out := make([]RecentEntry, 0, RecentCap)
+	at := map[string]int{}
+	for _, e := range slices.Concat(fresh, old) {
+		if i, ok := at[e.ID]; ok {
+			out[i].add(e.Counts)
+		} else if len(out) < RecentCap {
+			at[e.ID] = len(out)
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 func (w *writer) publish() {

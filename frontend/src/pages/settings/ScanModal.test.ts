@@ -1,12 +1,12 @@
-import { mount } from '@vue/test-utils'
+import { type DOMWrapper, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import ScanModal from '@/pages/settings/ScanModal.vue'
 import { useScanStore } from '@/stores/scans'
 import { librariesApi } from '@/utils/api/libraries'
 import { tasksApi } from '@/utils/api/tasks'
-import type { TaskSnapshot } from '@/utils/api/types'
+import type { ScanProgress, ScanRecent, TaskSnapshot } from '@/utils/api/types'
 
 vi.mock('@/utils/api/tasks', () => ({
     tasksApi: { snapshot: vi.fn(), logs: vi.fn() },
@@ -44,6 +44,38 @@ function task(over: Partial<TaskSnapshot> = {}): TaskSnapshot {
         updated_at: '2026-09-18T08:00:01Z',
         ...over,
     }
+}
+
+function recent(over: Partial<ScanRecent>): ScanRecent {
+    return {
+        id: 'c_1',
+        title: 'Series',
+        has_cover: true,
+        file_mtime: '2026-09-18T08:00:00Z',
+        added: 0,
+        updated: 0,
+        removed: 0,
+        deleted: false,
+        ...over,
+    }
+}
+
+const parsing: ScanProgress = {
+    phase: 'parsing',
+    found: 10,
+    total: 8,
+    processed: 3,
+    unchanged: 2,
+    failed: 0,
+    saved: { added: 3, updated: 1, removed: 2 },
+    commit_seq: 1,
+}
+
+// Each chip as its visible symbol and its screen reader label.
+function chips(card: DOMWrapper<Element>): string[][] {
+    return card
+        .findAll('.a-chip')
+        .map(c => [c.find('[aria-hidden="true"]').text(), c.find('.sr-only').text()])
 }
 
 function open() {
@@ -133,5 +165,115 @@ describe('ScanModal', () => {
 
         wrapper.unmount()
         expect(vi.getTimerCount()).toBe(0)
+    })
+
+    it('shows the lead card and the recent covers, newest first', async () => {
+        const store = useScanStore()
+        store.accept(
+            task({
+                progress: {
+                    ...parsing,
+                    recent: [
+                        recent({ id: 'c_2', title: 'Fresh', added: 3, updated: 1 }),
+                        recent({
+                            id: 'c_1',
+                            title: 'Gone',
+                            has_cover: false,
+                            removed: 2,
+                            deleted: true,
+                        }),
+                    ],
+                },
+            })
+        )
+
+        const wrapper = open()
+        await startScan(wrapper)
+
+        const cards = wrapper.findAll('.scan-strip > li')
+        expect(cards).toHaveLength(3)
+        expect(cards[0]!.text()).toContain('5 files left')
+        expect(cards[0]!.find('[role="progressbar"]').attributes('aria-valuenow')).toBe('38')
+
+        expect(cards[1]!.find('img').attributes('src')).toMatch(
+            /\/files\/cover\/c_2\?v=2026-09-18T08:00:00Z$/
+        )
+        expect(cards[1]!.text()).toContain('Fresh')
+        expect(chips(cards[1]!)).toEqual([
+            ['+3', '3 added'],
+            ['~1', '1 updated'],
+        ])
+
+        expect(cards[2]!.find('img').exists()).toBe(false)
+        expect(cards[2]!.find('.a-cover__placeholder').exists()).toBe(true)
+        expect(cards[2]!.text()).toContain('Gone')
+        expect(chips(cards[2]!)).toEqual([['−2', '2 removed']])
+        wrapper.unmount()
+    })
+
+    it('shows the counts a failed scan committed on its lead card', async () => {
+        const store = useScanStore()
+        store.accept(task({ status: 3, progress: parsing }))
+
+        const wrapper = open()
+        await startScan(wrapper)
+
+        const lead = wrapper.find('.scan-strip > li')
+        expect(lead.text()).toContain('Failed')
+        expect(chips(lead)).toEqual([
+            ['+3', '3 added'],
+            ['~1', '1 updated'],
+            ['−2', '2 removed'],
+        ])
+        wrapper.unmount()
+    })
+
+    it('shows every count on a completed lead card, zeros included', async () => {
+        const store = useScanStore()
+        store.accept(
+            task({
+                status: 2,
+                progress: parsing,
+                output: { added: 0, updated: 4, removed: 0, failed: 0, unchanged: 3, duration: 1 },
+            })
+        )
+
+        const wrapper = open()
+        await startScan(wrapper)
+
+        const lead = wrapper.find('.scan-strip > li')
+        expect(lead.text()).toContain('Done')
+        expect(chips(lead)).toEqual([
+            ['+0', '0 added'],
+            ['~4', '4 updated'],
+            ['−0', '0 removed'],
+        ])
+        wrapper.unmount()
+    })
+
+    it('follows the log only while it is scrolled to the end', async () => {
+        const store = useScanStore()
+        store.accept(task())
+        store.logs['t_1'] = { text: 'one\n', len: 4 }
+
+        const wrapper = open()
+        await startScan(wrapper)
+        const pre = wrapper.find('pre').element
+        // Ten pixels per character, so the height follows the rendered text.
+        Object.defineProperty(pre, 'scrollHeight', { get: () => pre.textContent!.length * 10 })
+        Object.defineProperty(pre, 'clientHeight', { value: 20 })
+        pre.scrollTop = 10
+
+        store.logs['t_1'] = { text: 'one\ntwo\n', len: 8 }
+        await nextTick()
+        await nextTick()
+        expect(pre.scrollTop).toBe(70)
+
+        pre.scrollTop = 0
+        store.logs['t_1'] = { text: 'one\ntwo\nthree\n', len: 14 }
+        await nextTick()
+        await nextTick()
+        expect(pre.scrollTop).toBe(0)
+        wrapper.unmount()
     })
 })

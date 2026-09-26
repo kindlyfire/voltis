@@ -60,9 +60,14 @@ func (d *dirPick) pick() *string {
 }
 
 type write struct {
-	id    string
-	item  *ParsedItem
-	added bool
+	id   string
+	item *ParsedItem
+	tick int
+}
+
+type deletion struct {
+	id   string
+	tick int
 }
 
 type SeriesChanges struct {
@@ -71,7 +76,7 @@ type SeriesChanges struct {
 	New     bool
 	Writes  []write
 	Invalid []string
-	Deletes []string
+	Deletes []deletion
 }
 
 type flush struct {

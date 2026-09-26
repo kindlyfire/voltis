@@ -988,6 +988,14 @@
                             <template #topRight><ABadge label="12 unread">12</ABadge></template>
                         </ACover>
                     </KitDemo>
+                    <KitDemo label="bottom-right chips" stack>
+                        <ACover :src="coverSrc(61, 'Vinland Saga')" alt="">
+                            <template #bottomRight>
+                                <AChip size="sm" tone="success">+3</AChip>
+                                <AChip size="sm" tone="info">~1</AChip>
+                            </template>
+                        </ACover>
+                    </KitDemo>
                     <KitDemo label="loading (skeleton)" stack>
                         <div class="rounded-cover aspect-2/3 overflow-hidden">
                             <ASkeleton class="h-full" />

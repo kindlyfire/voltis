@@ -1,5 +1,5 @@
 <template>
-    <ADialog :open="open" :title="title" @update:open="v => !v && close()">
+    <ADialog :open="open" :title="title" size="lg" @update:open="v => !v && close()">
         <ACheckbox
             v-if="!scanning"
             v-model="forceScan"
@@ -20,38 +20,18 @@
         </div>
 
         <div v-else class="flex flex-col gap-3">
-            <ul class="flex flex-col gap-3">
-                <li
-                    v-for="row in rows"
-                    :key="row.id"
-                    class="border-outline-variant flex flex-col gap-2 rounded-xl border p-3"
-                >
-                    <div class="flex items-center gap-2 text-sm font-semibold">
-                        <span class="min-w-0 truncate">{{ getLibraryName(row.libraryId) }}</span>
-                        <AIcon
-                            v-if="row.status >= TaskStatus.COMPLETED"
-                            :icon="
-                                row.status === TaskStatus.COMPLETED ? IconCheck : IconAlertCircle
-                            "
-                            :label="row.status === TaskStatus.COMPLETED ? 'Done' : 'Failed'"
-                            :class="row.tone === 'success' ? 'text-success' : 'text-error'"
-                            class="text-lg"
-                        />
-                    </div>
-                    <AProgressBar
-                        v-if="row.status !== TaskStatus.PENDING"
-                        :value="row.value / 100"
-                        :indeterminate="row.indeterminate"
-                        :tone="row.tone"
-                        :label="`Scan of ${getLibraryName(row.libraryId)}`"
-                        :thickness="6"
-                    />
-                    <div class="text-fg-muted text-xs">{{ row.detail }}</div>
+            <ul class="flex flex-col gap-4">
+                <li v-for="row in rows" :key="row.id" class="flex flex-col gap-2">
+                    <h3 class="truncate text-sm font-semibold">
+                        {{ getLibraryName(row.libraryId) }}
+                    </h3>
+                    <ScanStrip :row="row" :label="`Scan of ${getLibraryName(row.libraryId)}`" />
                 </li>
             </ul>
 
             <pre
                 v-if="logText"
+                ref="log"
                 class="bg-surface-2 rounded-field max-h-40 overflow-auto p-3 text-xs leading-snug wrap-break-word whitespace-pre-wrap"
                 tabindex="0"
                 aria-label="Scan log"
@@ -77,13 +57,10 @@ import { scanRow, useScanStore } from '@/stores/scans'
 import AButton from '@/ui/AButton.vue'
 import ACheckbox from '@/ui/ACheckbox.vue'
 import ADialog from '@/ui/ADialog.vue'
-import AIcon from '@/ui/AIcon.vue'
-import AProgressBar from '@/ui/AProgressBar.vue'
 import ASpinner from '@/ui/ASpinner.vue'
-import { IconAlertCircle, IconCheck } from '@/ui/icons'
 import { librariesApi } from '@/utils/api/libraries'
-import { TaskStatus } from '@/utils/api/types'
 import { usersApi } from '@/utils/api/users'
+import ScanStrip from './ScanStrip.vue'
 
 const props = defineProps<{
     open: boolean
@@ -103,6 +80,7 @@ const scanning = ref(false)
 const taskIds = ref<string[]>([])
 
 const closeButton = useTemplateRef<{ $el: HTMLElement }>('closeButton')
+const log = useTemplateRef<HTMLElement>('log')
 
 const isContentScan = computed(() => !!props.contentIds?.length)
 
@@ -120,6 +98,14 @@ const logText = computed(() =>
         .join('\n')
         .trimEnd()
 )
+
+// Follows new lines only while the log is scrolled to its end, measured before the DOM update.
+watch(logText, async () => {
+    const el = log.value
+    const follow = !el || el.scrollHeight - el.scrollTop - el.clientHeight < 8
+    await nextTick()
+    if (follow && log.value) log.value.scrollTop = log.value.scrollHeight
+})
 
 function pumpLogs(): void {
     if (!props.open) return

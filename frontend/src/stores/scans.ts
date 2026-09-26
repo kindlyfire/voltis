@@ -2,7 +2,13 @@ import { useThrottleFn } from '@vueuse/core'
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import { tasksApi } from '@/utils/api/tasks'
-import { TaskStatus, type ScanResult, type TaskSnapshot } from '@/utils/api/types'
+import {
+    TaskStatus,
+    type ScanProgress,
+    type ScanRecent,
+    type ScanResult,
+    type TaskSnapshot,
+} from '@/utils/api/types'
 import { usersApi } from '@/utils/api/users'
 import { queryClient } from '@/utils/misc'
 import { ws } from '@/utils/ws'
@@ -11,69 +17,60 @@ export function isTerminal(task: TaskSnapshot): boolean {
     return task.status >= TaskStatus.COMPLETED
 }
 
-function hasOutput(output: TaskSnapshot['output']): boolean {
+function hasOutput(output: TaskSnapshot['output']): output is ScanResult {
     return !!output && Object.keys(output).length > 0
 }
+
+export type ScanCounts = ScanProgress['saved']
+
+export type ScanLead =
+    | { state: 'queued' }
+    | { state: 'walking'; found: number }
+    | { state: 'parsing'; processed: number; total: number }
+    | { state: 'saving' }
+    | { state: 'done'; outcome: 'completed' | 'failed' | 'cancelled'; counts: ScanCounts }
 
 export interface ScanRow {
     id: string
     libraryId: string
-    status: number
-    indeterminate: boolean
-    value: number
-    tone: 'primary' | 'success' | 'danger'
-    detail: string
+    lead: ScanLead
+    recent: ScanRecent[]
 }
 
-function counts(c: Partial<ScanResult>): string {
-    return `${c.added ?? 0} added, ${c.updated ?? 0} updated, ${c.removed ?? 0} removed`
+const noCounts: ScanCounts = { added: 0, updated: 0, removed: 0 }
+
+function scanLead(task: TaskSnapshot): ScanLead {
+    const progress = task.progress
+    // A failed or cancelled scan still keeps what its earlier flushes committed.
+    const saved = progress?.saved ?? noCounts
+    if (isTerminal(task)) {
+        if (task.status === TaskStatus.COMPLETED) {
+            const counts = hasOutput(task.output) ? task.output : saved
+            return { state: 'done', outcome: 'completed', counts }
+        }
+        const outcome = task.status === TaskStatus.CANCELLED ? 'cancelled' : 'failed'
+        return { state: 'done', outcome, counts: saved }
+    }
+    if (task.status === TaskStatus.PENDING || !progress) return { state: 'queued' }
+    switch (progress.phase) {
+        case 'walking':
+            return { state: 'walking', found: progress.found }
+        case 'parsing':
+            return { state: 'parsing', processed: progress.processed, total: progress.total }
+        case 'saving':
+            return { state: 'saving' }
+        case 'done':
+            return { state: 'done', outcome: 'completed', counts: saved }
+    }
 }
 
 export function scanRow(task: TaskSnapshot): ScanRow {
-    const row: ScanRow = {
+    return {
         id: task.id,
         libraryId: task.input?.library_id ?? '',
-        status: task.status,
-        indeterminate: false,
-        value: 0,
-        tone: 'primary',
-        detail: '',
+        lead: scanLead(task),
+        recent: task.progress?.recent ?? [],
     }
-
-    if (isTerminal(task)) {
-        row.value = 100
-        row.tone = task.status === TaskStatus.COMPLETED ? 'success' : 'danger'
-        row.detail =
-            task.status === TaskStatus.COMPLETED
-                ? counts(task.output)
-                : task.status === TaskStatus.CANCELLED
-                  ? 'Cancelled'
-                  : 'Failed'
-        return row
-    }
-
-    const progress = task.progress
-    if (task.status === TaskStatus.PENDING || !progress) {
-        row.indeterminate = task.status !== TaskStatus.PENDING
-        row.detail = 'Queued'
-        return row
-    }
-
-    if (progress.phase === 'walking') {
-        row.indeterminate = true
-        row.detail = `Looking for files, ${progress.found} found`
-        return row
-    }
-
-    if (progress.phase === 'parsing') {
-        row.value = progress.total > 0 ? (progress.processed / progress.total) * 100 : 100
-        row.detail = `${progress.processed} / ${progress.total}`
-        return row
-    }
-
-    row.value = 100
-    row.detail = counts(progress.saved)
-    return row
 }
 
 function instant(ts: string): [number, number] {

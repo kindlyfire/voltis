@@ -16,22 +16,28 @@
                 <div class="flex items-center gap-2 text-sm font-semibold">
                     <span class="min-w-0 truncate">{{ getLibraryName(row.libraryId) }}</span>
                     <AIcon
-                        v-if="row.status >= TaskStatus.COMPLETED"
-                        :icon="row.status === TaskStatus.COMPLETED ? IconCheck : IconAlertCircle"
-                        :label="row.status === TaskStatus.COMPLETED ? 'Done' : 'Failed'"
-                        :class="row.tone === 'success' ? 'text-success' : 'text-error'"
+                        v-if="row.lead.state === 'done'"
+                        :icon="row.lead.outcome === 'completed' ? IconCheck : IconAlertCircle"
+                        :label="row.lead.outcome === 'completed' ? 'Done' : 'Failed'"
+                        :class="row.lead.outcome === 'completed' ? 'text-success' : 'text-error'"
                         class="text-lg"
                     />
                 </div>
                 <AProgressBar
-                    v-if="row.status !== TaskStatus.PENDING"
-                    :value="row.value / 100"
-                    :indeterminate="row.indeterminate"
-                    :tone="row.tone"
+                    v-if="row.lead.state !== 'queued'"
+                    :value="bar(row.lead)"
+                    :indeterminate="row.lead.state === 'walking' || row.lead.state === 'saving'"
+                    :tone="
+                        row.lead.state !== 'done'
+                            ? 'primary'
+                            : row.lead.outcome === 'completed'
+                              ? 'success'
+                              : 'danger'
+                    "
                     :label="`Scan of ${getLibraryName(row.libraryId)}`"
                     :thickness="6"
                 />
-                <div class="text-fg-muted text-xs">{{ row.detail }}</div>
+                <div class="text-fg-muted text-xs">{{ detail(row.lead) }}</div>
             </li>
         </ul>
     </APopover>
@@ -39,14 +45,13 @@
 
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
-import { isTerminal, scanRow, useScanStore } from '@/stores/scans'
+import { isTerminal, type ScanLead, scanRow, useScanStore } from '@/stores/scans'
 import AIcon from '@/ui/AIcon.vue'
 import AIconButton from '@/ui/AIconButton.vue'
 import APopover from '@/ui/APopover.vue'
 import AProgressBar from '@/ui/AProgressBar.vue'
 import { IconAlertCircle, IconCheck, IconSync } from '@/ui/icons'
 import { librariesApi } from '@/utils/api/libraries'
-import { TaskStatus } from '@/utils/api/types'
 import { usersApi } from '@/utils/api/users'
 
 const store = useScanStore()
@@ -65,6 +70,31 @@ const visible = computed(() => isAdmin.value && rows.value.length > 0)
 
 function getLibraryName(id: string): string {
     return libraries.data?.value?.find(l => l.id === id)?.name ?? id
+}
+
+function bar(lead: ScanLead): number {
+    if (lead.state !== 'parsing') return 1
+    return lead.total > 0 ? lead.processed / lead.total : 1
+}
+
+function detail(lead: ScanLead): string {
+    switch (lead.state) {
+        case 'queued':
+            return 'Queued'
+        case 'walking':
+            return `Looking for files, ${lead.found} found`
+        case 'parsing':
+            return `${lead.processed} / ${lead.total}`
+        case 'saving':
+            return 'Saving'
+        case 'done': {
+            if (lead.outcome !== 'completed') {
+                return lead.outcome === 'cancelled' ? 'Cancelled' : 'Failed'
+            }
+            const c = lead.counts
+            return `${c.added} added, ${c.updated} updated, ${c.removed} removed`
+        }
+    }
 }
 
 const DISMISS_DELAY = 10000

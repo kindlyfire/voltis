@@ -433,6 +433,20 @@ export interface ScanProgress {
     failed: number
     saved: { added: number; updated: number; removed: number }
     commit_seq: number
+    /** Newest first. */
+    recent?: ScanRecent[]
+}
+
+/** A series, or a standalone item, changed by the scan. */
+export interface ScanRecent {
+    id: string
+    title: string
+    has_cover: boolean
+    file_mtime: string | null
+    added: number
+    updated: number
+    removed: number
+    deleted: boolean
 }
 
 export interface ScanResult {

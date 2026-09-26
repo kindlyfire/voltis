@@ -45,7 +45,7 @@ func TestMetadataScanRaceEditBeforeRename(t *testing.T) {
 	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S_2019", "/lib/S"))
 	flushed := make(chan error, 1)
 	go func() {
-		_, _, err := r.recordCommit(false)
+		_, _, _, err := r.recordCommit(false)
 		flushed <- err
 	}()
 

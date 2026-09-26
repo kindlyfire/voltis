@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"voltis/lib/epub"
+	"voltis/lib/fp"
 )
 
 func leafFP(id, path, part, parent string) Fingerprint {
@@ -53,6 +54,10 @@ func comicResult(path, part, series, dir string) Result {
 	return Result{File: item.File, Item: item}
 }
 
+func deleteIDs(s *SeriesChanges) []string {
+	return fp.Map(s.Deletes, func(d deletion) string { return d.id })
+}
+
 func writeIDs(s *SeriesChanges) []string {
 	ids := make([]string, len(s.Writes))
 	for i, w := range s.Writes {
@@ -69,13 +74,13 @@ func TestWriterPlacesOwnIDAndReclaims(t *testing.T) {
 
 	w.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
 	set := w.sets["p1"]
-	if !slices.Equal(writeIDs(set), []string{"l1"}) || set.Writes[0].added {
+	if !slices.Equal(writeIDs(set), []string{"l1"}) {
 		t.Fatalf("own id: writes = %+v", set.Writes)
 	}
 
 	w.gone["l2"] = true
 	w.place(comicResult("/lib/S/ch2 (new).cbz", "ch2", "S", "/lib/S"))
-	if !slices.Equal(writeIDs(set), []string{"l1", "l2"}) || !set.Writes[1].added {
+	if !slices.Equal(writeIDs(set), []string{"l1", "l2"}) {
 		t.Fatalf("reclaim: writes = %+v", set.Writes)
 	}
 	if w.gone["l2"] {
@@ -96,10 +101,10 @@ func TestWriterReclaimKeepsOwnID(t *testing.T) {
 	w.place(comicResult("/lib/S/ch2.cbz", "ch1", "S", "/lib/S"))
 
 	set := w.sets["p1"]
-	if !slices.Equal(writeIDs(set), []string{"l2"}) || set.Writes[0].added {
+	if !slices.Equal(writeIDs(set), []string{"l2"}) {
 		t.Fatalf("writes = %+v", set.Writes)
 	}
-	if !slices.Equal(set.Deletes, []string{"l1"}) {
+	if !slices.Equal(deleteIDs(set), []string{"l1"}) {
 		t.Fatalf("deletes = %v, want [l1]", set.Deletes)
 	}
 	if w.gone["l1"] {
@@ -251,7 +256,7 @@ func TestWriterNewSeries(t *testing.T) {
 	if !set.New || set.Ref.URI != "comic/S" || set.Ref.Type != "comic_series" {
 		t.Fatalf("set = %+v", set)
 	}
-	if !set.Writes[0].added || w.keys[Key{"", "S"}] != id {
+	if w.keys[Key{"", "S"}] != id {
 		t.Fatalf("writes = %+v keys = %v", set.Writes, w.keys)
 	}
 }
@@ -323,10 +328,10 @@ func TestWriterTakeMovesGoneIntoDeletes(t *testing.T) {
 	if final.gone != nil || final.seq != 2 || !final.final {
 		t.Fatalf("final flush = %+v", final)
 	}
-	if !slices.Equal(final.sets["p1"].Deletes, []string{"l1"}) {
+	if !slices.Equal(deleteIDs(final.sets["p1"]), []string{"l1"}) {
 		t.Fatalf("series deletes = %v", final.sets["p1"].Deletes)
 	}
-	if !slices.Equal(final.sets[""].Deletes, []string{"l2"}) {
+	if !slices.Equal(deleteIDs(final.sets[""]), []string{"l2"}) {
 		t.Fatalf("standalone deletes = %v", final.sets[""].Deletes)
 	}
 	if w.gone != nil {
@@ -559,8 +564,8 @@ func TestWriterRunCancellationDuringFinalCommit(t *testing.T) {
 }
 
 func TestWriterRunSpacesIntermediateFlushesOnly(t *testing.T) {
-	if FlushSpacing != 5*time.Second {
-		t.Fatalf("FlushSpacing = %v, want 5s by default", FlushSpacing)
+	if FlushSpacing != 2*time.Second {
+		t.Fatalf("FlushSpacing = %v, want 2s by default", FlushSpacing)
 	}
 	spacing := fastFlushes(t)
 
@@ -869,5 +874,64 @@ func TestNormKey(t *testing.T) {
 	}
 	if normKey("Foo 1") == normKey("Foo 2") || normKey("☆ - ☆") != "" {
 		t.Error("normKey must keep digits and drop everything but letters and digits")
+	}
+}
+
+func TestWriterSavedMergesTheRecentRing(t *testing.T) {
+	entry := func(id string, added int) RecentEntry {
+		return RecentEntry{ID: id, Title: id, Counts: Counts{Added: added}}
+	}
+	w := testWriter(nil, nil)
+	w.saved(committed{seq: 1, recent: []RecentEntry{entry("b", 1), entry("a", 2)}})
+	held := w.prog.Recent
+
+	w.saved(committed{seq: 2, recent: []RecentEntry{
+		entry("c", 1), entry("a", 3), entry("d", 1), entry("e", 1), entry("f", 1),
+	}})
+
+	got := fp.Map(w.prog.Recent, func(e RecentEntry) string { return e.ID })
+	if want := []string{"c", "a", "d", "e", "f", "b"}; !slices.Equal(got, want) {
+		t.Fatalf("ring = %v, want %v", got, want)
+	}
+	if a := w.prog.Recent[1]; a.Added != 5 {
+		t.Fatalf("a = %+v, want its counts summed", a)
+	}
+	if held[1].Added != 2 {
+		t.Fatalf("published ring = %+v, want it left untouched", held)
+	}
+
+	w.saved(committed{seq: 3, recent: []RecentEntry{entry("g", 1)}})
+	got = fp.Map(w.prog.Recent, func(e RecentEntry) string { return e.ID })
+	if want := []string{"g", "c", "a", "d", "e", "f"}; !slices.Equal(got, want) {
+		t.Fatalf("ring = %v, want %v capped at %d", got, want, RecentCap)
+	}
+}
+
+func TestWriterTicksOrderWritesAndDeletes(t *testing.T) {
+	w := testWriter(
+		[]Fingerprint{
+			leafFP("l1", "/lib/A/ch1.cbz", "ch1", "p1"),
+			leafFP("l2", "/lib/x.cbz", "x", ""),
+			leafFP("l3", "/lib/y.cbz", "y", ""),
+		},
+		[]SeriesRef{seriesRefOf("p1", "A", "/lib/A")},
+	)
+	w.place(comicResult("/lib/B/ch1.cbz", "ch1", "B", "/lib/B"))
+	w.place(comicResult("/lib/solo.cbz", "solo", "", ""))
+	w.place(comicResult("/lib/B/ch2.cbz", "ch2", "B", "/lib/B"))
+	w.mark([]string{"l1", "l2", "l3"})
+	f := w.take(true)
+
+	series, standalone := f.sets[w.byURI["comic/B"]], f.sets[""]
+	ticks := []int{series.Writes[0].tick, standalone.Writes[0].tick, series.Writes[1].tick}
+	for _, id := range []string{"l1", "l2", "l3"} {
+		for _, d := range slices.Concat(f.sets["p1"].Deletes, standalone.Deletes) {
+			if d.id == id {
+				ticks = append(ticks, d.tick)
+			}
+		}
+	}
+	if len(ticks) != 6 || !slices.IsSorted(ticks) || len(slices.Compact(slices.Clone(ticks))) != 6 {
+		t.Fatalf("ticks = %v, want distinct ticks in placement order, then one per delete", ticks)
 	}
 }
