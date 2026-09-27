@@ -8,7 +8,7 @@ export interface FlowPosition {
     path: NodePath
 }
 
-export interface PageSlice {
+export interface ChapterSlice {
     href: string
     spineIndex: number
     start: NodePath | null
@@ -21,14 +21,14 @@ export interface TocTarget {
     fragment: string
 }
 
-export interface BookPage {
+export interface BookChapter {
     index: number
     title: string
-    /** The authored target, which page 1 may sit below. */
+    /** The authored target, which chapter 1 may sit below. */
     target: { href: string; fragment: string }
     start: FlowPosition
     end: FlowPosition | null
-    slices: PageSlice[]
+    slices: ChapterSlice[]
 }
 
 const NUDGE_TAGS = new Set(['table', 'ul', 'ol', 'dl', 'figure'])
@@ -122,8 +122,8 @@ function sliceRange(
     structure: BookStructure,
     start: FlowPosition,
     end: FlowPosition | null
-): PageSlice[] {
-    const slices: PageSlice[] = []
+): ChapterSlice[] {
+    const slices: ChapterSlice[] = []
     const last = end ? end.spineIndex : structure.spine.length - 1
     for (let i = start.spineIndex; i <= last; i++) {
         const item = structure.spine[i]!
@@ -140,7 +140,10 @@ function sliceRange(
     return slices
 }
 
-export function buildPages(structure: BookStructure, docs: Map<string, Document>): BookPage[] {
+export function buildChapters(
+    structure: BookStructure,
+    docs: Map<string, Document>
+): BookChapter[] {
     const firstLinear = structure.spine.findIndex(item => item.linear)
     if (firstLinear === -1) return []
 
@@ -179,14 +182,14 @@ export function buildPages(structure: BookStructure, docs: Map<string, Document>
     })
 }
 
-export function pageIndexForPosition(pages: BookPage[], position: FlowPosition): number {
-    for (let i = pages.length - 1; i >= 0; i--) {
-        if (comparePositions(pages[i]!.start, position) <= 0) return i
+export function chapterIndexForPosition(chapters: BookChapter[], position: FlowPosition): number {
+    for (let i = chapters.length - 1; i >= 0; i--) {
+        if (comparePositions(chapters[i]!.start, position) <= 0) return i
     }
-    return pages.length ? 0 : -1
+    return chapters.length ? 0 : -1
 }
 
-export function sliceTextRange(doc: Document, slice: PageSlice) {
+export function sliceTextRange(doc: Document, slice: ChapterSlice) {
     const body = docBody(doc)!
     return {
         start: textOffsetAtPath(body, slice.start),
@@ -194,20 +197,20 @@ export function sliceTextRange(doc: Document, slice: PageSlice) {
     }
 }
 
-/** Every page whose slice of `href` covers `textOffset`. A textless slice has
- * an empty interval, so more than one page can qualify. */
-export function pagesContainingOffset(
-    pages: BookPage[],
+/** Every chapter whose slice of `href` covers `textOffset`. A textless slice has
+ * an empty interval, so more than one chapter can qualify. */
+export function chaptersContainingOffset(
+    chapters: BookChapter[],
     href: string,
     textOffset: number,
     doc: Document | null
 ): number[] {
-    const candidates = pages.filter(page => page.slices.some(slice => slice.href === href))
+    const candidates = chapters.filter(chapter => chapter.slices.some(slice => slice.href === href))
     if (!candidates.length) return []
     if (candidates.length === 1 || !doc) return [candidates[0]!.index]
 
-    const covering = candidates.filter(page =>
-        page.slices.some(slice => {
+    const covering = candidates.filter(chapter =>
+        chapter.slices.some(slice => {
             if (slice.href !== href) return false
             const range = sliceTextRange(doc, slice)
             if (range.start === range.end) return textOffset === range.start
@@ -215,15 +218,15 @@ export function pagesContainingOffset(
         })
     )
     return (covering.length ? covering : [candidates[candidates.length - 1]!]).map(
-        page => page.index
+        chapter => chapter.index
     )
 }
 
-/** Which page each TOC entry belongs to, exact where the entry's document is
+/** Which chapter each TOC entry belongs to, exact where the entry's document is
  * already prepared and document-level otherwise. */
-export function mapEntriesToPages(
+export function mapEntriesToChapters(
     structure: BookStructure,
-    pages: BookPage[],
+    chapters: BookChapter[],
     docs: Map<string, Document>
 ): Map<string, number> {
     const map = new Map<string, number>()
@@ -233,7 +236,7 @@ export function mapEntriesToPages(
             resolveFlowPosition(structure, docs, entry.href, entry.fragment) ??
             resolveFlowPosition(structure, docs, entry.href, '')
         if (!position) continue
-        const index = pageIndexForPosition(pages, position)
+        const index = chapterIndexForPosition(chapters, position)
         if (index !== -1) map.set(entry.id, index)
     }
     return map

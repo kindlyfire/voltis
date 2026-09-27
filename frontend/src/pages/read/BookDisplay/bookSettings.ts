@@ -28,6 +28,19 @@ export const FONT_OPTIONS = [
     { value: 'dyslexic', label: 'OpenDyslexic' },
 ] as const satisfies readonly Option<FontChoice>[]
 
+export const MODE_OPTIONS = [
+    { value: 'paged', label: 'Pages' },
+    { value: 'scroll', label: 'Scroll' },
+] as const satisfies readonly Option<string>[]
+
+export const SPREAD_OPTIONS = [
+    { value: '1', label: '1' },
+    { value: '2', label: '2' },
+    { value: 'auto', label: 'Auto' },
+] as const satisfies readonly Option<string>[]
+
+export type BookSpread = (typeof SPREAD_OPTIONS)[number]['value']
+
 /** Per field, so one stale or out-of-range value can't discard the rest. */
 export const zBookSettings = z.object({
     /** rem */
@@ -36,6 +49,9 @@ export const zBookSettings = z.object({
     lineHeight: z.number().min(1.1).max(2.5).catch(1.8),
     /** em, so the measure follows the font size */
     width: z.number().min(20).max(80).catch(45),
+    mode: z.enum(MODE_OPTIONS.map(option => option.value)).catch('paged'),
+    /** Pages per screen */
+    spread: z.enum(SPREAD_OPTIONS.map(option => option.value)).catch('1'),
 })
 
 export type BookSettings = z.infer<typeof zBookSettings>

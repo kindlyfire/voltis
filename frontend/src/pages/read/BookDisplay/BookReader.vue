@@ -1,30 +1,35 @@
 <template>
     <div
         class="book-reader flex flex-col"
+        :class="{ 'is-paged': paged }"
         :style="readerVars"
         @pointerdown="controls.handlePointerDown"
+        @mousedown="controls.handleMouseDown"
         @click="controls.handleClick"
+        @wheel.passive="controls.handleWheel"
+        @touchstart.passive="controls.handleTouchStart"
+        @touchend.passive="controls.handleTouchEnd"
     >
-        <div class="flex flex-1 flex-col">
-            <AAlert
-                v-if="session?.notice"
-                dismissible
-                class="m-4"
-                @click.stop
-                @dismiss="session.dismissNotice()"
-            >
-                {{ session.notice }}
-            </AAlert>
+        <AAlert
+            v-if="session?.notice"
+            dismissible
+            class="book-notice m-4"
+            @click.stop
+            @dismiss="session.dismissNotice()"
+        >
+            {{ session.notice }}
+        </AAlert>
 
-            <div v-if="!session || session.loading" class="flex justify-center py-8">
-                <ASpinner />
-            </div>
-            <AAlert v-else-if="session.error" tone="danger" class="m-4">
-                {{ session.error }}
-            </AAlert>
+        <div v-if="!session || session.loading" class="flex justify-center py-8">
+            <ASpinner />
+        </div>
+        <AAlert v-else-if="session.error" tone="danger" class="m-4">
+            {{ session.error }}
+        </AAlert>
 
-            <template v-if="session">
-                <div v-if="ready && session.standalone" class="flex justify-center p-4">
+        <template v-if="session">
+            <template v-if="ready && !paged">
+                <div v-if="session.standalone" class="flex justify-center p-4">
                     <AButton
                         variant="tonal"
                         :leading-icon="IconArrowLeft"
@@ -33,41 +38,93 @@
                         Back to reading
                     </AButton>
                 </div>
-                <div v-else-if="ready && session.prevPage" class="flex justify-center p-4">
-                    <AButton variant="tonal" @click.stop="turn($event, -1)">
-                        Previous: {{ session.prevPage.title }}
+                <div v-else-if="session.prevChapter" class="flex justify-center p-4">
+                    <AButton variant="tonal" @click.stop="goChapter($event, -1)">
+                        Previous: {{ session.prevChapter.title }}
                     </AButton>
                 </div>
-
-                <!-- Keyed: preserved through this book's loading and errors,
-                replaced when the book itself changes. -->
-                <div ref="host" :key="session.contentId" class="flex-1" />
-
-                <template v-if="ready && !session.standalone">
-                    <ADivider />
-                    <div class="flex justify-center p-4">
-                        <AButton v-if="session.nextPage" @click.stop="turn($event, 1)">
-                            Next: {{ session.nextPage.title }}
-                        </AButton>
-                        <span v-else class="text-fg-muted text-sm">End of book</span>
-                    </div>
-                    <div ref="sentinel" class="h-px" />
-                </template>
             </template>
-        </div>
+
+            <!-- Keyed: preserved through this book's loading and errors,
+            replaced when the book itself changes. Both layouts share the host,
+            so switching never remounts the slices. -->
+            <div :key="session.contentId" class="book-viewport relative flex-1">
+                <div ref="host" class="book-host" :inert="paged && session.atBookEnd" />
+                <BookEndScreen
+                    v-if="paged && session.atBookEnd"
+                    :content-id="contentId"
+                    :next="nextVolume"
+                    @open="openVolume"
+                    @leave="session.snapshotPassage()"
+                    @blur="nextPageButton?.focus()"
+                />
+            </div>
+
+            <template v-if="ready && !session.standalone && !paged">
+                <ADivider />
+                <div class="flex justify-center p-4">
+                    <AButton v-if="session.nextChapter" @click.stop="goChapter($event, 1)">
+                        Next: {{ session.nextChapter.title }}
+                    </AButton>
+                    <div v-else class="flex flex-col items-center gap-3">
+                        <span class="text-fg-muted text-sm">End of book</span>
+                        <AButton v-if="nextVolume" @click.stop="openVolume(nextVolume.id)">
+                            Next: {{ nextVolume.title }}
+                        </AButton>
+                    </div>
+                </div>
+                <div ref="sentinel" class="h-px" />
+            </template>
+
+            <div
+                v-if="paged"
+                class="book-footer text-fg-muted flex h-10 shrink-0 items-center justify-center gap-4 text-sm"
+            >
+                <button
+                    type="button"
+                    class="page-button sr-only focus-visible:not-sr-only"
+                    @click.stop="turnPage($event, 'prev')"
+                >
+                    Previous page
+                </button>
+                <AButton
+                    v-if="ready && session.standalone"
+                    variant="text"
+                    size="sm"
+                    :leading-icon="IconArrowLeft"
+                    @click.stop="leaveStandalone"
+                >
+                    Back to reading
+                </AButton>
+                <span v-else-if="counter" aria-live="polite">
+                    Page {{ counter.index + 1 }} / {{ counter.count }}
+                </span>
+                <button
+                    ref="nextPageButton"
+                    type="button"
+                    class="page-button sr-only focus-visible:not-sr-only"
+                    @click.stop="turnPage($event, 'next')"
+                >
+                    Next page
+                </button>
+            </div>
+        </template>
     </div>
 
     <BookReaderDrawer :content-id="contentId" />
 
     <AProgressBar
-        :value="(session?.percent ?? 0) / 100"
-        label="Reading progress"
+        v-if="session?.layoutMode === 'scroll' && session.firstChapterMounted"
+        :value="chapterProgress"
+        label="Chapter progress"
         class="reader-progress"
     />
 </template>
 
 <script setup lang="ts">
+import { useStyleTag } from '@vueuse/core'
 import { computed, onUnmounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import AAlert from '@/ui/AAlert.vue'
 import AButton from '@/ui/AButton.vue'
 import ADivider from '@/ui/ADivider.vue'
@@ -75,23 +132,45 @@ import AProgressBar from '@/ui/AProgressBar.vue'
 import ASpinner from '@/ui/ASpinner.vue'
 import { IconArrowLeft } from '@/ui/icons'
 import { useReaderTutorial } from '../useReaderTutorial'
+import BookEndScreen from './BookEndScreen.vue'
 import BookReaderDrawer from './BookReaderDrawer.vue'
 import { FONT_STACKS, type BookFont } from './bookSettings'
+import { PAGED_CSS } from './pagedCss'
 import { useBookControls } from './useBookControls'
 import { useBookDisplayStore } from './useBookDisplayStore'
+import { useChapterScrollProgress } from './useChapterScrollProgress'
+import { useNextVolume } from './useNextVolume'
 
 defineProps<{ contentId: string }>()
 
 const store = useBookDisplayStore()
 const session = computed(() => store.session)
 const ready = computed(() => !!session.value && !session.value.loading && !session.value.error)
+const paged = computed(() => session.value?.layoutMode === 'paged')
 const host = ref<HTMLDivElement>()
 const sentinel = ref<HTMLDivElement>()
+const nextPageButton = ref<HTMLButtonElement>()
 const controls = useBookControls()
+const router = useRouter()
+const chapterProgress = useChapterScrollProgress(host)
+const nextVolume = useNextVolume(
+    () => session.value?.content ?? null,
+    () => ready.value && !!session.value?.chapters.length && !session.value.nextChapter
+)
+
+// Global: the paged rules reach the `<html>` element and the slice hosts.
+useStyleTag(PAGED_CSS, { id: 'book-paged-css' })
+
+const counter = computed(() => {
+    const current = session.value
+    if (!ready.value || !current?.firstChapterMounted || current.atBookEnd) return null
+    return current.screen
+})
 
 useReaderTutorial(
     'book',
-    computed(() => ready.value && !!session.value?.firstPageMounted)
+    computed(() => ready.value && !!session.value?.firstChapterMounted),
+    () => session.value?.layoutMode
 )
 
 const publisherFonts = computed(() => store.settings.fontFamily === 'publisher')
@@ -104,14 +183,27 @@ const readerVars = computed(() => ({
         : FONT_STACKS[store.settings.fontFamily as BookFont],
     '--reader-line-height': `${store.settings.lineHeight}`,
     '--reader-max-width': `calc(${store.settings.width}em + 4rem)`,
+    '--reader-width': `${store.settings.width}`,
 }))
 
 /** Blurred: the button survives the route change with focus, where the next
  * Space would re-activate it instead of scrolling. */
-function turn(event: MouseEvent, delta: number) {
+function goChapter(event: MouseEvent, delta: number) {
     ;(event.currentTarget as HTMLElement).blur()
     const current = session.value
-    current?.goToPage(current.pageIndex + delta)
+    current?.goToChapter(current.chapterIndex + delta)
+}
+
+/** Blurred for the same reason, unless it was reached by keyboard. */
+function turnPage(event: MouseEvent, direction: 'next' | 'prev') {
+    if (event.detail) (event.currentTarget as HTMLElement).blur()
+    session.value?.turn(direction)
+}
+
+/** The next session resumes from that book's own saved position; disposing
+ * this one flushes its completion. */
+function openVolume(id: string) {
+    void router.push({ name: 'read-content', params: { id } })
 }
 
 function leaveStandalone(event: MouseEvent) {
@@ -130,24 +222,17 @@ watch(
     { immediate: true, flush: 'post' }
 )
 
-// A session mounts its slices with whatever the setting is when it builds them.
+// No pull-to-refresh or horizontal back swipe over the pages.
 watch(
-    [session, publisherFonts],
-    ([current, publisher]) => {
-        current?.setPublisherFonts(publisher)
+    paged,
+    value => {
+        document.documentElement.classList.toggle('book-paged', value)
     },
     { immediate: true }
 )
 
-watch(
-    () => store.settings,
-    () => {
-        session.value?.reflow()
-    },
-    { deep: true }
-)
-
 onUnmounted(() => {
+    document.documentElement.classList.remove('book-paged')
     session.value?.setElements({ host: null, sentinel: null })
 })
 </script>
@@ -158,12 +243,27 @@ onUnmounted(() => {
 }
 
 /* Each mounted slice's shadow host (see `mountTree`). */
-.book-reader :deep(.book-page) {
+.book-reader :deep(.book-slice) {
     display: block;
     box-sizing: border-box;
     max-width: var(--reader-max-width, calc(45em + 4rem));
     margin: 0 auto;
     padding: 2rem;
+}
+
+/* Over the page, never shrinking it. */
+.book-reader.is-paged .book-notice {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1;
+}
+
+.page-button:focus-visible {
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    outline: 2px solid var(--color-primary);
 }
 
 .reader-progress {
@@ -174,5 +274,10 @@ onUnmounted(() => {
     z-index: var(--z-reader-progress);
     border-radius: 0;
     pointer-events: none;
+}
+
+/* Scrolling drives it continuously; easing would only make it lag. */
+.reader-progress :deep(.a-progress__fill) {
+    transition: none;
 }
 </style>

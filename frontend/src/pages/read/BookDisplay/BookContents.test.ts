@@ -48,8 +48,8 @@ describe('BookContents', () => {
         expect(items[0]!.attributes('data-to')).toBe('')
     })
 
-    it('highlights the active page and its aliases', () => {
-        const wrapper = render({ entryPages: { c1: 0, c1a: 0, c2: 1 }, activePage: 0 })
+    it('highlights the active chapter and its aliases', () => {
+        const wrapper = render({ entryChapters: { c1: 0, c1a: 0, c2: 1 }, activeChapter: 0 })
         const active = wrapper.findAll('a').map(item => item.attributes('data-active'))
         expect(active).toEqual(['false', 'true', 'true', 'false'])
     })

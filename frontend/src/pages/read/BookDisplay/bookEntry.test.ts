@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SpineItem } from '@/utils/api/types'
-import { chooseEntryPage, isBookLocator, parseBookEntry } from './bookEntry'
+import { chooseEntryChapter, isBookLocator, parseBookEntry } from './bookEntry'
 import { flowWeights, progressPercent } from './bookProgress'
 
 describe('entry parsing', () => {
@@ -19,12 +19,12 @@ describe('entry parsing', () => {
 })
 
 describe('entry precedence', () => {
-    it('lets the locator win on the same page and the URL win on another', () => {
-        expect(chooseEntryPage(2, 2)).toEqual({ pageIndex: 2, useLocator: true })
-        expect(chooseEntryPage(2, 5)).toEqual({ pageIndex: 2, useLocator: false })
-        expect(chooseEntryPage(null, 5)).toEqual({ pageIndex: 5, useLocator: true })
-        expect(chooseEntryPage(3, null)).toEqual({ pageIndex: 3, useLocator: false })
-        expect(chooseEntryPage(null, null)).toEqual({ pageIndex: 0, useLocator: false })
+    it('lets the locator win on the same chapter and the URL win on another', () => {
+        expect(chooseEntryChapter(2, 2)).toEqual({ chapterIndex: 2, useLocator: true })
+        expect(chooseEntryChapter(2, 5)).toEqual({ chapterIndex: 2, useLocator: false })
+        expect(chooseEntryChapter(null, 5)).toEqual({ chapterIndex: 5, useLocator: true })
+        expect(chooseEntryChapter(3, null)).toEqual({ chapterIndex: 3, useLocator: false })
+        expect(chooseEntryChapter(null, null)).toEqual({ chapterIndex: 0, useLocator: false })
     })
 })
 

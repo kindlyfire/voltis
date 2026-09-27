@@ -1,26 +1,28 @@
 import { onMounted, onUnmounted } from 'vue'
 import { keysOwnedElsewhere, navDrawerOpen } from '@/ui/overlay'
 import { getLayoutTop } from '@/utils/misc'
+import { hasOpenModal } from '@/utils/modals'
 import { isDrawerToggle } from '../shortcuts'
 import { getClickZone } from '../useClickZones'
-import { hasAttr } from './domSafe'
+import { hasAttr, shadowSelection } from './domSafe'
+import { createSwipe } from './swipe'
 import { useBookDisplayStore } from './useBookDisplayStore'
+import { createWheelTurns } from './wheelTurns'
 
 const PAGE_FACTOR = 0.85
 const EDGE_MARGIN = 20
 const DRAG_SLOP = 8
 
-/** Chrome keeps selections made inside a shadow root out of the window's own,
- * so the tree the click came from is asked as well. */
-function selectedText(event: MouseEvent): string {
+/** The window's selection, else that of the tree the event came from. */
+function selectedText(event: Event): string {
     const text = window.getSelection()?.toString() ?? ''
     if (text) return text
-    const root = event
-        .composedPath()
-        .find((node): node is ShadowRoot => node instanceof ShadowRoot) as
-        | (ShadowRoot & { getSelection?: () => Selection | null })
-        | undefined
-    return root?.getSelection?.()?.toString() ?? ''
+    const root = event.composedPath().find(node => node instanceof ShadowRoot)
+    return root ? (shadowSelection(root as ShadowRoot)?.toString() ?? '') : ''
+}
+
+export function isZoomed() {
+    return (window.visualViewport?.scale ?? 1) > 1
 }
 
 /** A tap is only a tap when the click means nothing else. */
@@ -61,6 +63,19 @@ export function createTapGuard() {
 export function useBookControls() {
     const store = useBookDisplayStore()
     const guard = createTapGuard()
+    let clickMoved = false
+    const wheelTurns = createWheelTurns()
+    const swipe = createSwipe<TouchEvent>({
+        hasSelection: e => !!selectedText(e),
+        isZoomed,
+    })
+
+    /** Wheel and swipe turn pages only over the pages themselves. */
+    function pagedSession() {
+        const session = store.session
+        if (session?.layoutMode !== 'paged' || store.sidebarOpen || hasOpenModal.value) return null
+        return session
+    }
 
     function atTop() {
         return window.scrollY <= EDGE_MARGIN
@@ -76,24 +91,28 @@ export function useBookControls() {
     function handleMove(direction: 'next' | 'prev') {
         const session = store.session
         if (!session) return
+        if (session.layoutMode === 'paged') {
+            session.turn(direction)
+            return
+        }
         if (direction === 'next' ? atBottom() : atTop()) {
-            // Backwards out of a page lands at the bottom of the one before,
+            // Backwards out of a chapter lands at the bottom of the one before,
             // so paging back doesn't skip it.
-            goToPage(direction === 'next' ? 1 : -1, direction === 'prev')
+            goToChapter(direction === 'next' ? 1 : -1, direction === 'prev')
             return
         }
         const step = (window.innerHeight - getLayoutTop()) * PAGE_FACTOR
         window.scrollBy({ top: direction === 'next' ? step : -step, behavior: 'smooth' })
     }
 
-    function goToPage(delta: number, atEnd = false) {
+    function goToChapter(delta: number, atEnd = false) {
         const session = store.session
         if (!session) return
         if (session.standalone) {
             void session.closeStandalone()
             return
         }
-        session.goToPage(session.pageIndex + delta, atEnd)
+        session.goToChapter(session.chapterIndex + delta, atEnd)
     }
 
     function handleKeydown(e: KeyboardEvent) {
@@ -126,10 +145,10 @@ export function useBookControls() {
                 handleMove(e.shiftKey ? 'prev' : 'next')
                 break
             case ',':
-                goToPage(-1)
+                goToChapter(-1)
                 break
             case '.':
-                goToPage(1)
+                goToChapter(1)
                 break
             default:
                 return
@@ -147,11 +166,34 @@ export function useBookControls() {
 
     return {
         handlePointerDown: guard.down,
+        /** A quick click after a turn is another turn, not a double-click that
+         * selects the word now under the pointer, which the guard would refuse. */
+        handleMouseDown(e: MouseEvent) {
+            if (e.detail > 1 && clickMoved) e.preventDefault()
+        },
         handleClick(e: MouseEvent) {
+            clickMoved = false
             if (!guard.allows(e)) return
             const zone = getClickZone(e)
             if (zone === 'menu') store.sidebarOpen = true
-            else handleMove(zone)
+            // Zoomed in, a tap is more likely panning than turning.
+            else if (!isZoomed() || store.session?.layoutMode !== 'paged') {
+                handleMove(zone)
+                clickMoved = true
+            }
+        },
+        handleWheel(e: WheelEvent) {
+            const session = pagedSession()
+            const direction = session && wheelTurns(e)
+            if (direction) session.turn(direction)
+        },
+        handleTouchStart(e: TouchEvent) {
+            if (pagedSession()) swipe.start(e)
+        },
+        handleTouchEnd(e: TouchEvent) {
+            const session = pagedSession()
+            const direction = session && swipe.end(e, window.innerWidth)
+            if (direction) session.turn(direction)
         },
     }
 }

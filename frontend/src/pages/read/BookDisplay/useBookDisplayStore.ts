@@ -19,7 +19,7 @@ function anchorQuery(target: BookAnchor) {
 export function createBookNav(router: Router, contentId: string): BookNav {
     return {
         push(target) {
-            router.push({ query: anchorQuery(target) })
+            return router.push({ query: anchorQuery(target) })
         },
         replace(target) {
             router.replace({ query: anchorQuery(target) })
@@ -30,6 +30,17 @@ export function createBookNav(router: Router, contentId: string): BookNav {
                 ''
             )
         },
+        beforeLeave(callback) {
+            return router.beforeEach((_to, from) => {
+                // Back and Forward have already moved the entry: stamping now
+                // would write onto the destination. `current` is vue-router's
+                // own HTML5 history state (not public API); without it this
+                // never stamps and the history locator lags by up to 500 ms.
+                if ((history.state as Record<string, any> | null)?.current === from.fullPath) {
+                    callback()
+                }
+            })
+        },
         historyLocator() {
             const saved = (history.state as Record<string, any> | null)?.bookLocator
             if (!saved || saved.contentId !== contentId) return null
@@ -38,11 +49,16 @@ export function createBookNav(router: Router, contentId: string): BookNav {
     }
 }
 
+export type DrawerTab = 'contents' | 'settings'
+
 export const useBookDisplayStore = defineStore('book-display', () => {
     const router = useRouter()
     const sidebarOpen = ref(false)
     const session: Ref<BookSession | null> = ref(null)
     const settings = useBookSettings()
+    /** The drawer's open tab and each tab's scroll, kept while reading. */
+    const drawerTab = ref<DrawerTab>('contents')
+    const drawerScroll = ref<Partial<Record<DrawerTab, number>>>({})
 
     function setContent(contentId: string, entry: BookEntry) {
         if (session.value?.contentId === contentId) {
@@ -50,17 +66,25 @@ export const useBookDisplayStore = defineStore('book-display', () => {
             return
         }
         session.value?.dispose()
-        session.value = createBookSession(contentId, entry, createBookNav(router, contentId))
+        drawerScroll.value = {}
+        session.value = createBookSession(
+            contentId,
+            entry,
+            createBookNav(router, contentId),
+            settings
+        )
     }
 
     function dispose() {
         sidebarOpen.value = false
+        drawerTab.value = 'contents'
+        drawerScroll.value = {}
         const current = session.value
         session.value = null
         return current?.dispose()
     }
 
-    return { session, sidebarOpen, settings, setContent, dispose }
+    return { session, sidebarOpen, drawerTab, drawerScroll, settings, setContent, dispose }
 })
 
 if (import.meta.hot) {

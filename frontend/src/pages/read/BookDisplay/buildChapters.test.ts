@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import type { BookStructure, SpineItem, TocEntry } from '@/utils/api/types'
 import {
-    buildPages,
+    buildChapters,
     hasUsableToc,
-    mapEntriesToPages,
-    pagesContainingOffset,
-    pageIndexForPosition,
+    mapEntriesToChapters,
+    chaptersContainingOffset,
+    chapterIndexForPosition,
     resolveFlowPosition,
     topLevelTargets,
-    type BookPage,
-} from './buildPages'
+    type BookChapter,
+} from './buildChapters'
 import { pruneToRange } from './documentRange'
 
 interface Fixture {
@@ -80,9 +80,9 @@ function flowLeaves({ structure, docs }: Fixture): string[] {
         .flatMap(item => leaves(docs.get(item.href)!.body))
 }
 
-function pageLeaves({ docs }: Fixture, pages: BookPage[]): string[] {
-    return pages.flatMap(page =>
-        page.slices.flatMap(slice => {
+function pageLeaves({ docs }: Fixture, chapters: BookChapter[]): string[] {
+    return chapters.flatMap(chapter =>
+        chapter.slices.flatMap(slice => {
             const body = docs.get(slice.href)!.body.cloneNode(true) as HTMLElement
             pruneToRange(body, slice.start, slice.end)
             return leaves(body)
@@ -101,10 +101,10 @@ function flowText({ structure, docs }: Fixture): string {
         .join('')
 }
 
-function pageText({ docs }: Fixture, pages: BookPage[]): string {
-    return pages
-        .flatMap(page =>
-            page.slices.map(slice => {
+function pageText({ docs }: Fixture, chapters: BookChapter[]): string {
+    return chapters
+        .flatMap(chapter =>
+            chapter.slices.map(slice => {
                 const body = docs.get(slice.href)!.body.cloneNode(true) as HTMLElement
                 pruneToRange(body, slice.start, slice.end)
                 return body.textContent ?? ''
@@ -113,17 +113,17 @@ function pageText({ docs }: Fixture, pages: BookPage[]): string {
         .join('')
 }
 
-function pageWords(f: Fixture, pages: BookPage[]): string[] {
-    return words(pageText(f, pages))
+function pageWords(f: Fixture, chapters: BookChapter[]): string[] {
+    return words(pageText(f, chapters))
 }
 
-/** Pages must tile the linear flow: no gap, no overlap, no duplicate. */
-function expectExactTiling(f: Fixture, pages: BookPage[]) {
-    expect(pageText(f, pages)).toBe(flowText(f))
-    const rendered = pageLeaves(f, pages)
+/** Chapters must tile the linear flow: no gap, no overlap, no duplicate. */
+function expectExactTiling(f: Fixture, chapters: BookChapter[]) {
+    expect(pageText(f, chapters)).toBe(flowText(f))
+    const rendered = pageLeaves(f, chapters)
     expect(rendered).toEqual(flowLeaves(f))
     expect(new Set(rendered).size).toBe(rendered.length)
-    expect(pages.every(page => page.slices.length > 0)).toBe(true)
+    expect(chapters.every(chapter => chapter.slices.length > 0)).toBe(true)
 }
 
 const calibre = () =>
@@ -163,31 +163,31 @@ const oneFile = () =>
     )
 
 describe('range construction', () => {
-    it('merges Calibre splits and prepends front matter to page one', () => {
+    it('merges Calibre splits and prepends front matter to chapter one', () => {
         const f = calibre()
-        const pages = buildPages(f.structure, f.docs)
-        expect(pages.map(p => p.title)).toEqual(['Chapter One', 'Chapter Two'])
-        expect(pages[0]!.start).toEqual({ spineIndex: 0, path: [] })
-        expect(pages[0]!.slices.map(s => s.href)).toEqual([
+        const chapters = buildChapters(f.structure, f.docs)
+        expect(chapters.map(p => p.title)).toEqual(['Chapter One', 'Chapter Two'])
+        expect(chapters[0]!.start).toEqual({ spineIndex: 0, path: [] })
+        expect(chapters[0]!.slices.map(s => s.href)).toEqual([
             'part0001.html',
             'part0002.html',
             'part0003.html',
         ])
-        expect(pages[1]!.slices.map(s => s.href)).toEqual(['part0004.html'])
-        expectExactTiling(f, pages)
+        expect(chapters[1]!.slices.map(s => s.href)).toEqual(['part0004.html'])
+        expectExactTiling(f, chapters)
     })
 
     it('splits a one-file book into real chapters', () => {
         const f = oneFile()
-        const pages = buildPages(f.structure, f.docs)
-        expect(pages).toHaveLength(3)
-        expect(pageWords(f, [pages[0]!])).toEqual(['front', 'matter', 'One', 'alpha'])
-        expect(pageWords(f, [pages[1]!])).toEqual(['Two', 'beta'])
-        expect(pageWords(f, [pages[2]!])).toEqual(['Three', 'gamma'])
-        expectExactTiling(f, pages)
+        const chapters = buildChapters(f.structure, f.docs)
+        expect(chapters).toHaveLength(3)
+        expect(pageWords(f, [chapters[0]!])).toEqual(['front', 'matter', 'One', 'alpha'])
+        expect(pageWords(f, [chapters[1]!])).toEqual(['Two', 'beta'])
+        expect(pageWords(f, [chapters[2]!])).toEqual(['Three', 'gamma'])
+        expectExactTiling(f, chapters)
     })
 
-    it('absorbs an image-only interstitial into the preceding page, whole', () => {
+    it('absorbs an image-only interstitial into the preceding chapter, whole', () => {
         const f = fixture(
             spine([{ href: 'ch1.xhtml' }, { href: 'plate.xhtml' }, { href: 'ch2.xhtml' }]),
             toc([
@@ -200,11 +200,11 @@ describe('range construction', () => {
                 'ch2.xhtml': '<p>two</p>',
             }
         )
-        const pages = buildPages(f.structure, f.docs)
-        expect(pages).toHaveLength(2)
-        expect(pages[0]!.slices.map(s => s.href)).toEqual(['ch1.xhtml', 'plate.xhtml'])
-        expect(pageLeaves(f, [pages[0]!]).filter(leaf => leaf.includes(':')).length).toBe(3)
-        expectExactTiling(f, pages)
+        const chapters = buildChapters(f.structure, f.docs)
+        expect(chapters).toHaveLength(2)
+        expect(chapters[0]!.slices.map(s => s.href)).toEqual(['ch1.xhtml', 'plate.xhtml'])
+        expect(pageLeaves(f, [chapters[0]!]).filter(leaf => leaf.includes(':')).length).toBe(3)
+        expectExactTiling(f, chapters)
     })
 
     it.each([
@@ -223,13 +223,13 @@ describe('range construction', () => {
             ]),
             { 'doc.xhtml': markup }
         )
-        const pages = buildPages(f.structure, f.docs)
-        expect(pages).toHaveLength(2)
+        const chapters = buildChapters(f.structure, f.docs)
+        expect(chapters).toHaveLength(2)
         const second = f.docs.get('doc.xhtml')!.body.cloneNode(true) as HTMLElement
-        pruneToRange(second, pages[1]!.slices[0]!.start, pages[1]!.slices[0]!.end)
+        pruneToRange(second, chapters[1]!.slices[0]!.start, chapters[1]!.slices[0]!.end)
         expect(second.querySelectorAll(child)).toHaveLength(2)
         expect(words(second.textContent)).toEqual(['a', 'b', 'after'])
-        expectExactTiling(f, pages)
+        expectExactTiling(f, chapters)
     })
 
     it('drops a broken fragment without losing its content', () => {
@@ -241,9 +241,9 @@ describe('range construction', () => {
             ]),
             { 'a.xhtml': '<p>one</p>', 'b.xhtml': '<p>two</p>' }
         )
-        const pages = buildPages(f.structure, f.docs)
-        expect(pages).toHaveLength(1)
-        expectExactTiling(f, pages)
+        const chapters = buildChapters(f.structure, f.docs)
+        expect(chapters).toHaveLength(1)
+        expectExactTiling(f, chapters)
     })
 
     it('keeps linear="no" and off-spine documents out of the flow', () => {
@@ -265,10 +265,10 @@ describe('range construction', () => {
                 'ch2.xhtml': '<p>two</p>',
             }
         )
-        const pages = buildPages(f.structure, f.docs)
-        expect(pages.map(p => p.title)).toEqual(['One', 'Two'])
-        expect(pages.flatMap(p => p.slices.map(s => s.href))).not.toContain('notes.xhtml')
-        expectExactTiling(f, pages)
+        const chapters = buildChapters(f.structure, f.docs)
+        expect(chapters.map(p => p.title)).toEqual(['One', 'Two'])
+        expect(chapters.flatMap(p => p.slices.map(s => s.href))).not.toContain('notes.xhtml')
+        expectExactTiling(f, chapters)
     })
 
     it('treats a grouping label as its first linked child and dedupes aliases', () => {
@@ -282,17 +282,17 @@ describe('range construction', () => {
             ]),
             { 'a.xhtml': '<p>one</p>', 'b.xhtml': '<p>two</p>' }
         )
-        const pages = buildPages(f.structure, f.docs)
-        expect(pages).toHaveLength(2)
-        expect(pages[0]!.title).toBe('Part One')
-        expect(mapEntriesToPages(f.structure, pages, f.docs)).toEqual(
+        const chapters = buildChapters(f.structure, f.docs)
+        expect(chapters).toHaveLength(2)
+        expect(chapters[0]!.title).toBe('Part One')
+        expect(mapEntriesToChapters(f.structure, chapters, f.docs)).toEqual(
             new Map([
                 ['c1', 0],
                 ['alias', 0],
                 ['c2', 1],
             ])
         )
-        expectExactTiling(f, pages)
+        expectExactTiling(f, chapters)
     })
 
     it('resolves legacy name anchors', () => {
@@ -304,33 +304,33 @@ describe('range construction', () => {
             ]),
             { 'a.xhtml': '<p>one</p> <a name="old"></a> <p>two</p>' }
         )
-        const pages = buildPages(f.structure, f.docs)
-        expect(pages).toHaveLength(2)
-        expectExactTiling(f, pages)
+        const chapters = buildChapters(f.structure, f.docs)
+        expect(chapters).toHaveLength(2)
+        expectExactTiling(f, chapters)
     })
 
-    it('has no pages when no target resolves', () => {
+    it('has no chapters when no target resolves', () => {
         const f = fixture(
             spine([{ href: 'a.xhtml' }]),
             toc([{ id: 'c1', title: 'One', href: 'a.xhtml', fragment: 'missing' }]),
             { 'a.xhtml': '<p>one</p>' }
         )
-        expect(buildPages(f.structure, f.docs)).toEqual([])
+        expect(buildChapters(f.structure, f.docs)).toEqual([])
         expect(hasUsableToc(f.structure)).toBe(true)
     })
 })
 
 describe('lookups', () => {
-    it('finds the page holding a position and an offset', () => {
+    it('finds the chapter holding a position and an offset', () => {
         const f = oneFile()
-        const pages = buildPages(f.structure, f.docs)
+        const chapters = buildChapters(f.structure, f.docs)
         const second = resolveFlowPosition(f.structure, f.docs, 'book.xhtml', 'c2')!
-        expect(pageIndexForPosition(pages, second)).toBe(1)
+        expect(chapterIndexForPosition(chapters, second)).toBe(1)
 
         const doc = f.docs.get('book.xhtml')!
-        expect(pagesContainingOffset(pages, 'book.xhtml', 0, doc)).toEqual([0])
+        expect(chaptersContainingOffset(chapters, 'book.xhtml', 0, doc)).toEqual([0])
         const total = doc.body.textContent!.replace(/\s+/g, ' ').length
-        expect(pagesContainingOffset(pages, 'book.xhtml', total, doc)).toEqual([2])
+        expect(chaptersContainingOffset(chapters, 'book.xhtml', total, doc)).toEqual([2])
     })
 
     it('reports whether the TOC is usable at all', () => {
@@ -353,7 +353,7 @@ describe('lookups', () => {
 })
 
 describe('equivalent and extreme boundaries', () => {
-    it('collapses a document-start target and its first-element target into one page', () => {
+    it('collapses a document-start target and its first-element target into one chapter', () => {
         const f = fixture(
             spine([{ href: 'a.xhtml' }, { href: 'b.xhtml' }]),
             toc([
@@ -366,11 +366,11 @@ describe('equivalent and extreme boundaries', () => {
                 'b.xhtml': '<p>second</p>',
             }
         )
-        const pages = buildPages(f.structure, f.docs)
-        expect(pages).toHaveLength(2)
-        expect(mapEntriesToPages(f.structure, pages, f.docs).get('start')).toBe(0)
-        expect(pageWords(f, [pages[0]!])).toEqual(['Start', 'body'])
-        expectExactTiling(f, pages)
+        const chapters = buildChapters(f.structure, f.docs)
+        expect(chapters).toHaveLength(2)
+        expect(mapEntriesToChapters(f.structure, chapters, f.docs).get('start')).toBe(0)
+        expect(pageWords(f, [chapters[0]!])).toEqual(['Start', 'body'])
+        expectExactTiling(f, chapters)
     })
 
     it('collapses two targets that nudge onto the same table', () => {
@@ -386,11 +386,11 @@ describe('equivalent and extreme boundaries', () => {
                     '<p>intro</p> <table><tbody><tr id="r1"><td>a</td></tr> <tr id="r2"><td>b</td></tr></tbody></table>',
             }
         )
-        const pages = buildPages(f.structure, f.docs)
-        expect(pages).toHaveLength(2)
-        const entries = mapEntriesToPages(f.structure, pages, f.docs)
+        const chapters = buildChapters(f.structure, f.docs)
+        expect(chapters).toHaveLength(2)
+        const entries = mapEntriesToChapters(f.structure, chapters, f.docs)
         expect([entries.get('r1'), entries.get('r2')]).toEqual([1, 1])
-        expectExactTiling(f, pages)
+        expectExactTiling(f, chapters)
     })
 
     it('handles targets on the very first and very last nodes', () => {
@@ -402,13 +402,13 @@ describe('equivalent and extreme boundaries', () => {
             ]),
             { 'a.xhtml': '<p id="first">one</p> <p>two</p> <p id="last">three</p>' }
         )
-        const pages = buildPages(f.structure, f.docs)
-        expect(pages).toHaveLength(2)
-        expect(pageWords(f, [pages[1]!])).toEqual(['three'])
-        expectExactTiling(f, pages)
+        const chapters = buildChapters(f.structure, f.docs)
+        expect(chapters).toHaveLength(2)
+        expect(pageWords(f, [chapters[1]!])).toEqual(['three'])
+        expectExactTiling(f, chapters)
     })
 
-    it('keeps the attributes of an ancestor that both pages share', () => {
+    it('keeps the attributes of an ancestor that both chapters share', () => {
         const f = fixture(
             spine([{ href: 'a.xhtml' }]),
             toc([
@@ -420,19 +420,19 @@ describe('equivalent and extreme boundaries', () => {
                     '<section class="chapter" lang="en"><p>one</p> <p id="c2">two</p></section>',
             }
         )
-        const pages = buildPages(f.structure, f.docs)
+        const chapters = buildChapters(f.structure, f.docs)
         const second = f.docs.get('a.xhtml')!.body.cloneNode(true) as HTMLElement
-        pruneToRange(second, pages[1]!.slices[0]!.start, pages[1]!.slices[0]!.end)
+        pruneToRange(second, chapters[1]!.slices[0]!.start, chapters[1]!.slices[0]!.end)
         const section = second.querySelector('section')!
         expect(section.getAttribute('class')).toBe('chapter')
         expect(section.getAttribute('lang')).toBe('en')
         expect(section.querySelectorAll('p')).toHaveLength(1)
-        expectExactTiling(f, pages)
+        expectExactTiling(f, chapters)
     })
 })
 
 describe('targets on the body element', () => {
-    it('gives a chapter whose target is its own body a page', () => {
+    it('gives a chapter whose target is its own body a chapter', () => {
         const f = fixture(
             spine([{ href: 'a.xhtml' }, { href: 'b.xhtml' }]),
             toc([
@@ -443,9 +443,9 @@ describe('targets on the body element', () => {
         )
         f.docs.get('b.xhtml')!.body.setAttribute('id', 'chapter')
 
-        const pages = buildPages(f.structure, f.docs)
-        expect(pages.map(page => page.title)).toEqual(['One', 'Two'])
-        expect(pages[1]!.slices.map(slice => slice.href)).toEqual(['b.xhtml'])
-        expectExactTiling(f, pages)
+        const chapters = buildChapters(f.structure, f.docs)
+        expect(chapters.map(chapter => chapter.title)).toEqual(['One', 'Two'])
+        expect(chapters[1]!.slices.map(slice => slice.href)).toEqual(['b.xhtml'])
+        expectExactTiling(f, chapters)
     })
 })

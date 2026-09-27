@@ -112,8 +112,10 @@ export const contentApi = {
     bookStructure: async (id: string, init?: RequestInit) =>
         apiFetch<BookStructure>(`/files/book-chapters/${id}`, init),
 
-    bookDocument: async (id: string, href: string, init?: RequestInit) => {
+    /** `version` (`fileVersion`) makes the response cacheable. */
+    bookDocument: async (id: string, href: string, version: string | null, init?: RequestInit) => {
         const params = new URLSearchParams({ href })
+        if (version) params.set('v', version)
         const res = await fetch(`${API_URL}/files/book-chapter/${id}?${params}`, {
             credentials: 'include',
             ...init,

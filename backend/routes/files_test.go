@@ -271,3 +271,18 @@ func TestProviderCover(t *testing.T) {
 	assertEq(t, getCover(200), immutable)
 	assertEq(t, getCoverAt(providerVersion, 200), "no-cache")
 }
+
+func TestBookFilesCacheOnlyWhenVersioned(t *testing.T) {
+	pool := newTestPool(t)
+	c := newAdminClient(t, pool)
+	id := newTestBook(t, pool, testEPUB(t, t.TempDir()), "{}")
+
+	for _, path := range []string{
+		"/api/files/book-chapter/" + id + "?href=OEBPS/text/ch1.xhtml",
+		"/api/files/book-resource/" + id + "?path=" + url.QueryEscape("OEBPS/images/pic a.jpg"),
+	} {
+		assertEq(t, c.Get(path).Assert(t, 200).Headers.Get("Cache-Control"), "")
+		assertEq(t, c.Get(path+"&v=1").Assert(t, 200).Headers.Get("Cache-Control"),
+			"private, max-age=31536000, immutable")
+	}
+}

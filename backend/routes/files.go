@@ -229,6 +229,7 @@ func (fr *FileRoutes) getBookChapter(c echo.Context) error {
 	}
 
 	c.Response().Header().Set("Content-Disposition", "attachment")
+	cacheIfVersioned(c)
 	return blobUntrusted(c, "application/xhtml+xml", []byte(chapterContent))
 }
 
@@ -266,7 +267,16 @@ func (fr *FileRoutes) getBookResource(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	cacheIfVersioned(c)
 	return blobUntrusted(c, mediaType, data)
+}
+
+// cacheIfVersioned lets the browser keep a response whose URL carries the
+// file's version (`v`), which changes whenever the file does.
+func cacheIfVersioned(c echo.Context) {
+	if c.QueryParam("v") != "" {
+		c.Response().Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	}
 }
 
 func blobUntrusted(c echo.Context, mediaType string, data []byte) error {

@@ -1,4 +1,5 @@
 import createDOMPurify, { type Config, type DOMPurify } from 'dompurify'
+import type { Content } from '@/utils/api/types'
 import { API_URL } from '@/utils/fetch'
 import { normalizedTextLength } from './documentRange'
 import {
@@ -15,7 +16,8 @@ import { isExternalRef, resolveEpubRef } from './epubPaths'
 
 export interface PrepareContext {
     contentId: string
-    mtime: string | null
+    /** The file's version (see `fileVersion`). */
+    version: string | null
     spineHrefs: Set<string>
     readerPath: string
     fetchText: (path: string, signal?: AbortSignal) => Promise<string>
@@ -44,6 +46,8 @@ const CSS_IMPORT_RE =
 /** A reference we refuse to rewrite must not survive: relative to the reader's
  * own origin it would become a credentialed request to our API. */
 const REJECTED_CSS_URL = 'url("about:invalid")'
+const PAGE_BREAK_RE =
+    /\b(?:page-)?break-(before|after)\s*:\s*(?:always|page|left|right|recto|verso)\b/gi
 
 let purifier: DOMPurify | null = null
 
@@ -52,15 +56,21 @@ function sanitizer(): DOMPurify {
     return purifier
 }
 
-function resourceUrl(contentId: string, mtime: string | null, path: string): string {
+/** Versions the book's URLs, which are cached as immutable. The scanner tells
+ * a changed file by its mtime or its size, so both are in it. */
+export function fileVersion(content: Content): string | null {
+    return content.file_mtime && `${content.file_mtime}-${content.file_size ?? ''}`
+}
+
+function resourceUrl(contentId: string, version: string | null, path: string): string {
     const params = new URLSearchParams({ path })
-    if (mtime) params.set('v', mtime)
+    if (version) params.set('v', version)
     return `${API_URL}/files/book-resource/${contentId}?${params}`
 }
 
-export function fetchBookResource(contentId: string, mtime: string | null) {
+export function fetchBookResource(contentId: string, version: string | null) {
     return async (path: string, signal?: AbortSignal) => {
-        const res = await fetch(resourceUrl(contentId, mtime, path), {
+        const res = await fetch(resourceUrl(contentId, version, path), {
             credentials: 'include',
             signal,
         })
@@ -84,7 +94,7 @@ function classifyRef(ctx: PrepareContext, base: string, ref: string): RefOutcome
     if (/^data:/i.test(trimmed) || trimmed.startsWith('#')) return { kind: 'keep' }
     const target = resolveEpubRef(base, trimmed)
     if (!target) return { kind: 'reject' }
-    const url = resourceUrl(ctx.contentId, ctx.mtime, target.href)
+    const url = resourceUrl(ctx.contentId, ctx.version, target.href)
     return {
         kind: 'rewrite',
         url: target.fragment ? `${url}#${encodeURIComponent(target.fragment)}` : url,
@@ -97,6 +107,12 @@ function rewriteCssUrls(css: string, base: string, ctx: PrepareContext): string 
         if (outcome.kind === 'keep') return match
         return outcome.kind === 'rewrite' ? `url("${outcome.url}")` : REJECTED_CSS_URL
     })
+}
+
+/** Multicol honours only column breaks, and only Chrome and Safari honour
+ * those; scroll mode ignores them. */
+function columnBreaks(css: string): string {
+    return css.replace(PAGE_BREAK_RE, (_, side: string) => `break-${side.toLowerCase()}: column`)
 }
 
 function mediaWrap(css: string, media: string | null): string {
@@ -191,7 +207,7 @@ async function rewriteCss(
         return `${PLACEHOLDER}${index}${PLACEHOLDER}`
     })
 
-    const rewritten = rewriteCssUrls(placeheld, base, ctx)
+    const rewritten = columnBreaks(rewriteCssUrls(placeheld, base, ctx))
     if (!imports.length) return rewritten
     const inlined = await Promise.all(imports)
     return rewritten.replace(PLACEHOLDER_RE, (_match, index: string) => inlined[Number(index)]!)
@@ -312,7 +328,12 @@ async function rewriteDocument(doc: Document, base: string, ctx: PrepareContext)
         else rewriteAttributes(el, tag, base, ctx)
 
         const inline = getAttr(el, 'style')
-        if (inline && /url\(/i.test(inline)) setAttr(el, 'style', rewriteCssUrls(inline, base, ctx))
+        if (inline) {
+            const rewritten = columnBreaks(
+                /url\(/i.test(inline) ? rewriteCssUrls(inline, base, ctx) : inline
+            )
+            if (rewritten !== inline) setAttr(el, 'style', rewritten)
+        }
     }
 
     await Promise.all(jobs)
@@ -324,7 +345,7 @@ const SANITIZE_CONFIG: Config = {
     ADD_ATTR: ['target', 'rel', 'href', 'name', 'srcset', 'sizes', 'media'],
     ALLOW_DATA_ATTR: false,
     WHOLE_DOCUMENT: true,
-    // Fragment resolution, page boundaries and internal links all hinge on
+    // Fragment resolution, chapter boundaries and internal links all hinge on
     // authored ids surviving, and SANITIZE_DOM drops every `id`/`name` that
     // collides with a document or form property. Forms are dropped instead
     // (HTMLFormElement's named properties override inherited members), and
@@ -356,8 +377,8 @@ export async function prepareDocument(
 
 /** Typography inherits from the host, not `body`: EPUB stylesheets are appended
  * after this one and routinely reset `body`. Nothing in a book can target `:host`.
- * The page frame (width, margin, padding) is `.book-page` in BookReader.vue: box
- * properties on `:host` lose to the page's own reset of every element. */
+ * The slice frame (width, margin, padding) is `.book-slice` in BookReader.vue: box
+ * properties on `:host` lose to the book's own reset of every element. */
 const READER_CSS = `
 :host {
     color-scheme: dark light;
@@ -385,16 +406,52 @@ const MONO = ':is(pre, code, kbd, samp, tt)'
 
 const USER_STYLE_MARK = 'data-reader-user'
 
+/** Columns a page tall: media fits a page, nothing spans or overflows the
+ * column, and a full-height cover can't spill a blank column after itself. */
+const PAGED_USER_CSS = `
+:host(.is-paged) :is(img, svg, video)${BEAT} {
+    max-height: var(--reader-page-height) !important;
+    max-width: 100% !important;
+    object-fit: contain !important;
+}
+:host(.is-paged) :is(html, body)${BEAT} {
+    height: auto !important;
+    min-height: 0 !important;
+    columns: auto !important;
+}
+:host(.is-paged) *${BEAT} {
+    column-span: none !important;
+}
+:host(.is-paged) ${TEXT}${BEAT}, :host(.is-paged) a${BEAT} {
+    overflow-wrap: anywhere !important;
+}
+:host(.is-paged) pre${BEAT} {
+    white-space: pre-wrap !important;
+}
+:host(.is-paged) table${BEAT} {
+    max-width: 100% !important;
+}
+:host(.is-paged) figure${BEAT} {
+    break-inside: avoid;
+}
+`
+
 /** Sits after the book's own sheets so the reader's font settings win. The
  * sizes are `inherit` rather than values: that keeps every element tied to the
- * one size on `:host` without flattening headings. */
+ * one size on `:host` without flattening headings. The theme owns the page
+ * color: in a shadow root a book's `body` background doesn't propagate to the
+ * canvas, it paints a box (one per column when paged). Its image stays, as it
+ * may be a cover. */
 function userCss(publisherFonts: boolean): string {
     let css = `
 ${TEXT}${BEAT} {
     font-size: inherit !important;
     line-height: inherit !important;
 }
-`
+:is(html, body)${BEAT} {
+    background-color: transparent !important;
+}
+${PAGED_USER_CSS}`
     if (!publisherFonts) {
         css += `
 ${BEAT} {
@@ -447,7 +504,7 @@ export function mountTree(
     publisherFonts = false
 ): Element {
     const shadow = host.shadowRoot ?? host.attachShadow({ mode: 'open' })
-    host.classList.add('book-page')
+    host.classList.add('book-slice')
     const base = document.createElement('style')
     base.textContent = READER_CSS
 

@@ -43,13 +43,13 @@
 import { computed, useId } from 'vue'
 import ANavItem from '@/ui/ANavItem.vue'
 import type { BookStructure } from '@/utils/api/types'
-import { hasUsableToc } from './buildPages'
+import { hasUsableToc } from './buildChapters'
 
 interface Props {
     contentId: string
     structure: BookStructure
-    entryPages?: Record<string, number>
-    activePage?: number | null
+    entryChapters?: Record<string, number>
+    activeChapter?: number | null
     activeHref?: string | null
     /** Forces the spine fallback even when the TOC looked usable, for when no
      * target actually resolved. Absent leaves the decision to the cheap check. */
@@ -76,6 +76,6 @@ function linkFor(href: string, fragment: string) {
 }
 
 function isActive(entryId: string) {
-    return props.activePage != null && props.entryPages?.[entryId] === props.activePage
+    return props.activeChapter != null && props.entryChapters?.[entryId] === props.activeChapter
 }
 </script>

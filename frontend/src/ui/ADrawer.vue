@@ -22,7 +22,9 @@
                 tabindex="-1"
             >
                 <h2 v-if="title" :id="titleId" class="sr-only">{{ title }}</h2>
-                <slot :title-id="titleId" />
+                <div class="a-drawer-body">
+                    <slot :title-id="titleId" />
+                </div>
             </div>
         </Transition>
     </Teleport>
@@ -97,6 +99,8 @@ useEventListener(document, 'keydown', (e: KeyboardEvent) => {
         z-index: var(--z-drawer-scrim);
         background: oklch(0 0 0 / 0.2);
         user-select: none;
+        /* iOS scrolls the page under a fixed element otherwise. */
+        touch-action: none;
         -webkit-tap-highlight-color: transparent;
     }
 
@@ -112,12 +116,21 @@ useEventListener(document, 'keydown', (e: KeyboardEvent) => {
         /* The header overlaps the drawer's top. */
         padding-top: var(--header-height);
         padding-bottom: env(safe-area-inset-bottom);
-        overflow-y: auto;
-        overscroll-behavior: contain;
         background: var(--color-sidebar);
         color: var(--color-fg);
         box-shadow: var(--shadow-overlay);
         outline: none;
+    }
+
+    /* Below the header, so its scrollbar is too. A column: content can fill it with `flex: 1`, or
+     * own its scrolling with a full-height column of its own. */
+    .a-drawer-body {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+        min-height: 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
     }
 
     .a-drawer-scrim.nav {
@@ -164,6 +177,28 @@ useEventListener(document, 'keydown', (e: KeyboardEvent) => {
     /* A tap during the fade-out reaches the page. */
     .a-drawer-scrim-leave-active {
         pointer-events: none;
+    }
+}
+</style>
+
+<style>
+@layer ui {
+    /* Page scroll lock, set in `overlay.ts`. */
+    html.drawer-lock {
+        overflow: hidden;
+
+        /* Undo Reka's scroll lock (a menu or dialog opened from a drawer): with `html` no longer
+         * `visible`, body's overflow would make it the scroll container, and its padding would
+         * double the reserved gutter. */
+        & body {
+            overflow: visible !important;
+            padding-right: 0 !important;
+            margin-right: 0 !important;
+        }
+    }
+
+    html.drawer-lock-gutter {
+        scrollbar-gutter: stable;
     }
 }
 </style>

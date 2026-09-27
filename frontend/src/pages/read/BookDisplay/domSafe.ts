@@ -66,3 +66,9 @@ export function findTarget(root: Node, fragment: string): Element | null {
     }
     return null
 }
+
+/** Chrome keeps a selection made inside a shadow root out of the window's own
+ * and exposes it on the root instead. */
+export function shadowSelection(root: ShadowRoot): Selection | null {
+    return (root as ShadowRoot & { getSelection?(): Selection | null }).getSelection?.() ?? null
+}

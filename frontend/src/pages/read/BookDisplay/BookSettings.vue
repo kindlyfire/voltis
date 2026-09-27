@@ -1,5 +1,21 @@
 <template>
     <div class="space-y-4">
+        <div>
+            <div class="text-fg-muted mb-2 text-sm" aria-hidden="true">Layout</div>
+            <ASegmented v-model="settings.mode" :options="MODE_OPTIONS" label="Layout" block />
+        </div>
+        <div v-if="settings.mode === 'paged'">
+            <div class="text-fg-muted mb-2 text-sm" aria-hidden="true">Pages per screen</div>
+            <ASegmented
+                v-model="settings.spread"
+                :options="SPREAD_OPTIONS"
+                label="Pages per screen"
+                block
+            />
+            <div v-if="autoSpread" class="text-fg-muted mt-1 text-xs">
+                Auto: {{ autoSpread === 2 ? 'two pages' : 'one page' }}
+            </div>
+        </div>
         <ASelect
             :model-value="settings.fontFamily"
             :options="FONT_OPTIONS"
@@ -36,10 +52,17 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
+import ASegmented from '@/ui/ASegmented.vue'
 import ASelect from '@/ui/ASelect.vue'
 import ASlider from '@/ui/ASlider.vue'
-import { FONT_OPTIONS } from './bookSettings'
+import { FONT_OPTIONS, MODE_OPTIONS, SPREAD_OPTIONS } from './bookSettings'
 import { useBookDisplayStore } from './useBookDisplayStore'
 
-const settings = useBookDisplayStore().settings
+const store = useBookDisplayStore()
+const settings = store.settings
+/** What auto comes to at the current width, once a paged chapter is shown. */
+const autoSpread = computed(() =>
+    settings.spread === 'auto' ? store.session?.screen?.spread : undefined
+)
 </script>

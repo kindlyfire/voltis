@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { resolveTargetElement } from './buildPages'
+import type { Content } from '@/utils/api/types'
+import { resolveTargetElement } from './buildChapters'
 import { docBody, findTarget } from './domSafe'
 import {
+    fileVersion,
     mountTree,
     prepareDocument,
     setReaderDark,
@@ -14,7 +16,7 @@ const SPINE = new Set(['OPS/text/ch1.xhtml', 'OPS/ch2.xhtml'])
 function ctx(resources: Record<string, string> = {}): PrepareContext {
     return {
         contentId: 'c_1',
-        mtime: '2026-01-01',
+        version: '2026-01-01',
         spineHrefs: SPINE,
         readerPath: '/r/c_1',
         fetchText: async path => {
@@ -319,6 +321,28 @@ describe('mounting', () => {
         expect(sheet).toContain('font-size: inherit !important')
     })
 
+    it("clears the book's html and body background color, not their image", async () => {
+        const html = `<html><head><style>
+            body { background: #fff url(../img/cover.jpg); margin: 2% }
+            pre { background: #eee }
+        </style></head><body><pre>code</pre></body></html>`
+        const prepared = await prepareDocument(html, BASE, ctx())
+        const host = document.createElement('div')
+        mountTree(host, prepared, docBody(prepared.doc)!.cloneNode(true) as Element)
+
+        const root = host.shadowRoot!
+        const user = new CSSStyleSheet()
+        user.replaceSync(Array.from(root.querySelectorAll('style')).at(-1)!.textContent!)
+        const clear = Array.from(user.cssRules as CSSRuleList)
+            .map(rule => rule as CSSStyleRule)
+            .find(rule => rule.style.getPropertyValue('background-color') === 'transparent')!
+        expect(clear.style.getPropertyPriority('background-color')).toBe('important')
+        expect(clear.style.getPropertyValue('background-image')).toBe('')
+        expect(root.querySelector('html')!.matches(clear.selectorText)).toBe(true)
+        expect(root.querySelector('body')!.matches(clear.selectorText)).toBe(true)
+        expect(root.querySelector('pre')!.matches(clear.selectorText)).toBe(false)
+    })
+
     it('shares one dark-mode sheet that neutralizes every book color', async () => {
         const html = `<html><head><style>
             pre, table { background: #eee }
@@ -403,5 +427,47 @@ describe('targets on the root element', () => {
         const body = docBody(prepared.doc)!
         expect(resolveTargetElement(prepared.doc, 'chapter')).toBe(body)
         expect(findTarget(body, 'p')).not.toBeNull()
+    })
+})
+
+describe('publisher page breaks', () => {
+    it('become column breaks in stylesheets, imports and inline styles', async () => {
+        const html = `<html><head>
+            <link rel="stylesheet" href="../book.css">
+            <style>h1 { page-break-before: always } .x { break-after: right }</style>
+        </head><body>
+            <h2 style="PAGE-BREAK-AFTER: always; color: red">t</h2>
+            <p style="break-inside: avoid">p</p>
+        </body></html>`
+        const prepared = await prepareDocument(
+            html,
+            BASE,
+            ctx({
+                'OPS/book.css': '@import "more.css"; .a { break-before: page }',
+                'OPS/more.css': '.b { page-break-after: left } .c { page-break-inside: avoid }',
+            })
+        )
+        const css = prepared.styles.join('\n')
+        expect(css).toContain('.a { break-before: column }')
+        expect(css).toContain('.b { break-after: column }')
+        expect(css).toContain('page-break-inside: avoid')
+        expect(css).toContain('h1 { break-before: column }')
+        expect(css).toContain('.x { break-after: column }')
+        const body = docBody(prepared.doc)!
+        expect(body.querySelector('h2')!.getAttribute('style')).toBe(
+            'break-after: column; color: red'
+        )
+        expect(body.querySelector('p')!.getAttribute('style')).toBe('break-inside: avoid')
+    })
+})
+
+describe('fileVersion', () => {
+    const version = (file_mtime: string | null, file_size: number | null) =>
+        fileVersion({ file_mtime, file_size } as Content)
+
+    it('changes with the mtime or the size, as the scanner tells files apart', () => {
+        expect(version('2026-01-01', 10)).not.toBe(version('2026-01-02', 10))
+        expect(version('2026-01-01', 10)).not.toBe(version('2026-01-01', 11))
+        expect(version(null, 10)).toBeNull()
     })
 })

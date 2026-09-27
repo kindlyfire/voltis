@@ -1,5 +1,16 @@
 import { useDebounceFn } from '@vueuse/core'
-import { computed, markRaw, reactive, toRefs } from 'vue'
+import {
+    computed,
+    markRaw,
+    nextTick,
+    reactive,
+    shallowReactive,
+    shallowRef,
+    toRefs,
+    watch,
+    type Ref,
+} from 'vue'
+import { isNavigationFailure, type NavigationFailure } from 'vue-router'
 import { contentApi } from '@/utils/api/content'
 import type {
     BookLocator,
@@ -8,80 +19,51 @@ import type {
     ReadingStatus,
     UserToContent,
 } from '@/utils/api/types'
-import { getLayoutTop, queryClient } from '@/utils/misc'
+import { queryClient } from '@/utils/misc'
 import { hasOpenModal } from '@/utils/modals'
-import { chooseEntryPage, entryKey, isBookLocator, type BookEntry } from './bookEntry'
+import { chooseEntryChapter, entryKey, isBookLocator, type BookEntry } from './bookEntry'
 import { flowWeights, progressPercent, type FlowWeights } from './bookProgress'
+import type { BookSettings } from './bookSettings'
 import {
     boundaryDocumentHrefs,
-    buildPages,
-    mapEntriesToPages,
-    pageIndexForPosition,
-    pagesContainingOffset,
+    buildChapters,
+    mapEntriesToChapters,
+    chapterIndexForPosition,
+    chaptersContainingOffset,
     resolveFlowPosition,
     resolveTargetElement,
     spineIndexOf,
-    type BookPage,
+    type BookChapter,
     type FlowPosition,
-    type PageSlice,
-} from './buildPages'
-import {
-    pathOfNode,
-    pruneToRange,
-    textOffsetAtPath,
-    textOffsetOfNode,
-    textOffsetOfPoint,
-    textPointAtOffset,
-} from './documentRange'
-import {
-    childNodesOf,
-    childrenOf,
-    docBody,
-    findTarget,
-    getAttr,
-    hasAttr,
-    parentOf,
-    previousOf,
-    tagOf,
-    textWalkerFor,
-} from './domSafe'
+    type ChapterSlice,
+} from './buildChapters'
+import { createChapterPrefetch } from './chapterPrefetch'
+import { pathOfNode, pruneToRange, textOffsetAtPath } from './documentRange'
+import { docBody, elementsUnder, findTarget, getAttr, hasAttr } from './domSafe'
 import {
     fetchBookResource,
+    fileVersion,
     mountTree,
     prepareDocument,
     updateUserStyles,
     type PrepareContext,
     type PreparedDocument,
 } from './prepareDocument'
+import {
+    createReadingLayout,
+    type Landing,
+    type LayoutKind,
+    type LayoutOptions,
+    type ReadingLayout,
+} from './readingLayout'
 
 const SETTLE_TIMEOUT = 2000
-const SCROLL_MARGIN = 8
 const CAPTURE_DEBOUNCE = 250
 const PERSIST_DEBOUNCE = 1000
-const REFLOW_DEBOUNCE = 200
 const HISTORY_STAMP_INTERVAL = 500
-const ANCHOR_SEARCH_LIMIT = 500
-
-const BLOCK_TAGS = new Set([
-    'p',
-    'div',
-    'section',
-    'article',
-    'blockquote',
-    'pre',
-    'figure',
-    'img',
-    'table',
-    'tr',
-    'td',
-    'li',
-    'h1',
-    'h2',
-    'h3',
-    'h4',
-    'h5',
-    'h6',
-])
+/** Content that shows without any text. */
+const VISIBLE_EMPTY = 'img, svg, video, picture, object, embed, hr, table, iframe'
+const LOAD_FAILED = 'That part of the book could not be loaded.'
 
 export interface BookAnchor {
     href: string
@@ -89,216 +71,103 @@ export interface BookAnchor {
 }
 
 export interface BookNav {
-    push(target: BookAnchor): void
+    push(target: BookAnchor): Promise<NavigationFailure | void | undefined>
     replace(target: BookAnchor): void
     /** Stores the reading position on the current history entry, so Back and
-     * Forward return to the passage rather than the page top. */
+     * Forward return to the passage rather than the chapter top. */
     saveLocator(locator: BookLocator): void
     historyLocator(): BookLocator | null
+    /** Runs before any router navigation moves off the current entry. */
+    beforeLeave(callback: () => void): () => void
 }
 
 export interface BookSessionValues {
     contentId: string
     content: Content | null
     structure: BookStructure | null
-    pages: BookPage[]
-    entryPages: Record<string, number>
-    pageIndex: number
-    standalone: { href: string; title: string } | null
+    chapters: BookChapter[]
+    entryChapters: Record<string, number>
+    chapterIndex: number
+    standalone: Standalone | null
     fallback: boolean
     loading: boolean
     error: string | null
     notice: string | null
-    restoring: boolean
     percent: number
-    /** Latched after content first mounts; `loading` can clear before the first
+    /** Latched when content first mounts; `loading` can clear before the first
      * chapter succeeds. */
-    firstPageMounted: boolean
+    firstChapterMounted: boolean
 }
 
-type Destination =
-    | { kind: 'page'; index: number }
-    | { kind: 'standalone'; href: string; title: string }
+/** A document outside the flow, and where closing it returns to. */
+interface Standalone {
+    href: string
+    title: string
+    returnTo: { chapterIndex: number; locator: BookLocator | null }
+}
+
+/** One navigation at a time: starting another supersedes it, and every await
+ * checks `activity.value === mine` before acting. */
+interface Navigation {
+    phase: 'resolving' | 'routing' | 'loading' | 'settling'
+    /** A routed navigation's entry, from its push until it commits. */
+    entry: string | null
+    /** Where it lands once settled; null after the reader moves meanwhile. */
+    landing: Landing | null
+}
+
+type Activity = Navigation | { phase: 'ready' | 'book-end' | 'disposed' }
 
 interface MountedSlice {
-    slice: PageSlice
+    slice: ChapterSlice
     prepared: PreparedDocument
     holder: HTMLElement
     root: Element
     startOffset: number
 }
 
-function isEmpty(rect: DOMRect) {
-    return rect.width === 0 && rect.height === 0
-}
-
-function firstVisibleBlock(root: Element, top: number): Element | null {
-    let best: Element | null = null
-    const visit = (el: Element) => {
-        for (const child of childrenOf(el)) {
-            const rect = child.getBoundingClientRect()
-            if (isEmpty(rect)) continue
-            if (rect.bottom <= top) continue
-            if (BLOCK_TAGS.has(tagOf(child))) best = child
-            visit(child)
-            return
-        }
-    }
-    visit(root)
-    return best
-}
-
-function glyphRect(range: Range, node: Text, index: number): DOMRect | null {
-    if (/\s/.test(node.data[index]!)) return null
-    range.setStart(node, index)
-    range.setEnd(node, index + 1)
-    const rect = range.getBoundingClientRect()
-    return isEmpty(rect) ? null : rect
-}
-
-/** The first usable character of `node` whose glyph `accept`s; whitespace and
- * hidden characters are stepped over to the next usable one. */
-function firstGlyph(
-    range: Range,
-    node: Text,
-    accept: (rect: DOMRect) => boolean
-): { index: number; rect: DOMRect } | null {
-    let lo = 0
-    let hi = node.data.length
-    let found: { index: number; rect: DOMRect } | null = null
-    while (lo < hi) {
-        const mid = (lo + hi) >> 1
-        let index = mid
-        let rect: DOMRect | null = null
-        for (; index < hi; index++) if ((rect = glyphRect(range, node, index))) break
-        if (!rect) hi = mid
-        else if (accept(rect)) {
-            found = { index, rect }
-            hi = mid
-        } else lo = index + 1
-    }
-    return found
-}
-
-interface Capture {
-    slice: MountedSlice
-    el: Element
-    offset: number
-}
-
-function* textNodesFrom(slices: MountedSlice[], block: Element) {
-    for (let i = 0; i < slices.length; i++) {
-        const walker = textWalkerFor(slices[i]!.root)
-        if (i === 0) walker.currentNode = block
-        let node: Node | null
-        while ((node = walker.nextNode())) yield { slice: slices[i]!, node: node as Text }
-    }
-}
-
-function blockOf(el: Element, root: Element): Element {
-    for (let node: Node | null = el; node && node !== root; node = parentOf(node)) {
-        if (node.nodeType === Node.ELEMENT_NODE && BLOCK_TAGS.has(tagOf(node as Element))) {
-            return node as Element
-        }
-    }
-    return el
-}
-
-function blockStart(slice: MountedSlice, el: Element): Capture {
-    return { slice, el, offset: textOffsetOfNode(slice.root, el) }
-}
-
-/** Glyph boxes sit inside line boxes, so after a restore the previous block's
- * bottom can still be below `top`: the search continues into later blocks and
- * slices rather than stopping at `block`. Vertical text falls back to the
- * start of its block. */
-function scanGlyphs(
-    slices: MountedSlice[],
-    block: Element,
-    top: number,
-    bottom: number,
-    accept: (rect: DOMRect) => boolean
-): Capture | null {
-    const range = new Range()
-    for (const { slice, node } of textNodesFrom(slices, block)) {
-        range.selectNodeContents(node)
-        const rect = range.getBoundingClientRect()
-        if (isEmpty(rect) || rect.bottom <= top) continue
-        if (rect.top >= bottom) return null
-        const parent = node.parentElement!
-        if (getComputedStyle(parent).writingMode !== 'horizontal-tb') {
-            return blockStart(slice, blockOf(parent, slice.root))
-        }
-        const glyph = firstGlyph(range, node, accept)
-        if (!glyph) continue
-        if (glyph.rect.top >= bottom) return null
-        return { slice, el: parent, offset: textOffsetOfPoint(slice.root, node, glyph.index) }
-    }
-    return null
-}
-
-/** Captures against the line a restore aligns to, so a taller glyph on the
- * line above can't be taken for this one; the 1px absorbs scroll rounding. */
-function firstVisiblePoint(
-    slices: MountedSlice[],
-    block: Element,
-    top: number,
-    bottom: number
-): Capture | null {
-    return (
-        scanGlyphs(slices, block, top, bottom, rect => rect.top >= top + SCROLL_MARGIN - 1) ??
-        scanGlyphs(slices, block, top, bottom, rect => rect.bottom > top)
-    )
-}
-
-/** The nearest authored id at or before `el` in document order, used to
- * recover a position when the document changed under a stored offset. */
-function precedingAnchorId(el: Element, root: Element): string | undefined {
-    let node: Node | null = el
-    for (let steps = 0; node && node !== root && steps < ANCHOR_SEARCH_LIMIT; steps++) {
-        if (node.nodeType === Node.ELEMENT_NODE) {
-            const id = getAttr(node as Element, 'id') ?? getAttr(node as Element, 'name')
-            if (id) return id
-        }
-        const previous = previousOf(node)
-        if (!previous) {
-            node = parentOf(node)
-            continue
-        }
-        node = previous
-        for (let last = childNodesOf(node).at(-1); last; last = childNodesOf(node).at(-1)) {
-            node = last
-        }
-    }
-    return undefined
-}
-
 function delay(ms: number) {
     return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-export function createBookSession(contentId: string, entry: BookEntry, nav: BookNav) {
+const BACKGROUND_IMAGE = /background(?:-image)?\s*:[^;}]*url\(/i
+
+/** Errs towards showing: a cover or plate can be a bare element with a CSS
+ * background image, which only styles can tell. */
+export function isEmptySlice(body: Element, styles: string[]) {
+    return (
+        !/\S/.test(body.textContent ?? '') &&
+        !body.querySelector(VISIBLE_EMPTY) &&
+        ![body, ...elementsUnder(body)].some(el =>
+            BACKGROUND_IMAGE.test(getAttr(el, 'style') ?? '')
+        ) &&
+        !styles.some(css => BACKGROUND_IMAGE.test(css))
+    )
+}
+
+export function createBookSession(
+    contentId: string,
+    entry: BookEntry,
+    nav: BookNav,
+    settingsRef: Ref<BookSettings>
+) {
+    const settings = () => settingsRef.value
     const state = reactive<BookSessionValues>({
         contentId,
         content: null,
         structure: null,
-        pages: [],
-        entryPages: {},
-        pageIndex: 0,
+        chapters: [],
+        entryChapters: {},
+        chapterIndex: 0,
         standalone: null,
         fallback: false,
         loading: true,
         error: null,
         notice: null,
-        restoring: false,
         percent: 0,
-        firstPageMounted: false,
+        firstChapterMounted: false,
     })
 
-    let disposed = false
-    let navToken = 0
-    let restoreCancelled = false
-    let programmaticScrolls = 0
     let host: HTMLElement | null = null
     let sentinel: HTMLElement | null = null
     let mounted: MountedSlice[] = []
@@ -309,60 +178,82 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
     let writeChain = Promise.resolve()
     let closing = false
     let completed = false
-    let inputSincePage = false
-    let captureEnabled = false
+    let inputSinceChapter = false
     let currentEntryKey = entryKey(entry)
-    /** Kept after its restore until the reader scrolls: recapturing would take
-     * the start of the line the passage now sits mid-way along, drifting back a
-     * line per layout change. */
-    let reflowLocator: BookLocator | null = null
-    /** Scrolls from native anchoring during a reflow aren't the reader's. */
-    let reflowing = false
-    let pendingEntry: BookEntry | null = null
     let lastStamp = 0
     let stampTimer: ReturnType<typeof setTimeout> | null = null
     let writeController: AbortController | null = null
-    let standaloneReturn: { pageIndex: number; locator: BookLocator | null } | null = null
-    let publisherFonts = false
-    /** The entry a backwards turn pushed, to be opened at its bottom. Keyed by
-     * entry, so a push that never arrives is cleared by the next route change
-     * instead of stranding the flag on a page index. */
-    let landingEnd: string | null = null
 
+    const activity = shallowRef<Activity>(
+        shallowReactive({ phase: 'loading', entry: null, landing: null })
+    )
+    const restoring = computed(
+        () => activity.value.phase === 'loading' || activity.value.phase === 'settling'
+    )
     const hostWaiters: Array<() => void> = []
     const controller = new AbortController()
     const trees = new Map<string, Promise<PreparedDocument>>()
     const prepared = new Map<string, PreparedDocument>()
     const docs = new Map<string, Document>()
+    const prefetch = createChapterPrefetch(prepare)
 
     function structure(): BookStructure {
         return state.structure!
     }
 
-    /** Unlike `begin`, leaves capture armed: the reader is still on a mounted
-     * page until a replacement arrives. */
-    function cancelPending(): number {
-        restoreCancelled = false
-        reflowLocator = null
+    function disposed() {
+        return activity.value.phase === 'disposed'
+    }
+
+    function isCurrent(mine: Navigation) {
+        return activity.value === mine
+    }
+
+    function start(phase: Navigation['phase'], landing: Landing | null = null): Navigation {
         clearStampTimer()
-        return ++navToken
+        const mine = shallowReactive<Navigation>({ phase, entry: null, landing })
+        if (!disposed()) activity.value = mine
+        return mine
     }
 
-    function begin(): number {
-        captureEnabled = false
-        return cancelPending()
+    /** Whatever is mounted now is what the reader has, whether this
+     * navigation put it there or not. */
+    function finish(mine: Navigation) {
+        if (!isCurrent(mine)) return
+        const ready = (activity.value = { phase: 'ready' })
+        captureNow()
+        if (!canCapture()) return
+        prefetch.schedule(
+            state.chapters[state.chapterIndex + 1] ?? null,
+            state.chapters[state.chapterIndex - 1] ?? null,
+            () => activity.value === ready
+        )
     }
 
-    function isCurrent(token: number) {
-        return !disposed && token === navToken
+    /** A route change on its way: a turn would push again, or stamp the old
+     * passage onto the new entry. */
+    function crossing() {
+        const current = activity.value
+        return (
+            current.phase === 'routing' || (current.phase === 'loading' && current.entry !== null)
+        )
+    }
+
+    /** While a flow chapter is shown and no destination is being put on
+     * screen, or the reader has taken over from one still settling. */
+    function canCapture() {
+        const current = activity.value
+        const shown = current.phase === 'settling' ? current.landing === null : !restoring.value
+        return shown && !disposed() && mounted.length > 0 && !state.standalone
     }
 
     function prepare(href: string): Promise<PreparedDocument> {
-        const key = `${href}@${state.content?.file_mtime ?? ''}`
+        const version = state.content && fileVersion(state.content)
+        const key = `${href}@${version ?? ''}`
         let job = trees.get(key)
         if (!job) {
             job = contentApi
-                .bookDocument(contentId, href, { signal: controller.signal })
+                .bookDocument(contentId, href, version, { signal: controller.signal })
                 .then(html => prepareDocument(html, href, ctx!))
                 .then(result => {
                     prepared.set(href, result)
@@ -370,6 +261,10 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
                     return result
                 })
             trees.set(key, job)
+            // A failure is not cached: the next navigation that needs it retries.
+            job.catch(() => {
+                if (trees.get(key) === job) trees.delete(key)
+            })
         }
         return job
     }
@@ -378,7 +273,7 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
         return prepared.get(href) ?? (await prepare(href).catch(() => null))
     }
 
-    function fallbackPages(source: BookStructure): BookPage[] {
+    function fallbackChapters(source: BookStructure): BookChapter[] {
         const linear = source.spine
             .map((item, index) => ({ item, index }))
             .filter(x => x.item.linear)
@@ -392,22 +287,23 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
         }))
     }
 
-    async function init() {
+    async function init(): Promise<boolean> {
         try {
             const [content, source] = await Promise.all([
                 contentApi.get(contentId, { signal: controller.signal }),
                 contentApi.bookStructure(contentId, { signal: controller.signal }),
             ])
-            if (disposed) return
+            if (disposed()) return false
 
             state.content = content
             userData = content.user_data ?? null
+            const version = fileVersion(content)
             ctx = {
                 contentId,
-                mtime: content.file_mtime,
+                version,
                 spineHrefs: new Set(source.spine.map(item => item.href)),
                 readerPath: `/r/${contentId}`,
-                fetchText: fetchBookResource(contentId, content.file_mtime),
+                fetchText: fetchBookResource(contentId, version),
                 signal: controller.signal,
             }
             state.structure = markRaw(source)
@@ -416,24 +312,26 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
             await Promise.all(
                 boundaryDocumentHrefs(source).map(href => prepare(href).catch(() => null))
             )
-            if (disposed) return
+            if (disposed()) return false
 
-            const pages = buildPages(source, docs)
-            state.fallback = pages.length === 0
-            state.pages = markRaw(pages.length ? pages : fallbackPages(source))
-            if (!state.pages.length) {
-                state.error = 'This book has no readable content.'
-                state.loading = false
-                return
-            }
-            state.entryPages = Object.fromEntries(mapEntriesToPages(source, state.pages, docs))
+            const chapters = buildChapters(source, docs)
+            state.fallback = chapters.length === 0
+            state.chapters = markRaw(chapters.length ? chapters : fallbackChapters(source))
             state.loading = false
-            await applyEntry(pendingEntry ?? entry, begin(), true)
+            if (!state.chapters.length) {
+                state.error = 'This book has no readable content.'
+                return false
+            }
+            state.entryChapters = Object.fromEntries(
+                mapEntriesToChapters(source, state.chapters, docs)
+            )
+            return true
         } catch (err) {
-            if (disposed) return
+            if (disposed()) return false
             console.error(err)
             state.error = err instanceof Error ? err.message : String(err)
             state.loading = false
+            return false
         }
     }
 
@@ -464,132 +362,108 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
         return isBookLocator(value) && spineIndexOf(structure(), value.href) !== -1 ? value : null
     }
 
-    async function pageForLocator(locator: BookLocator): Promise<number | null> {
+    async function chapterForLocator(locator: BookLocator): Promise<number | null> {
         const source = structure()
         const spineIndex = spineIndexOf(source, locator.href)
         if (spineIndex === -1 || !source.spine[spineIndex]!.linear) return null
         const doc = await preparedFor(locator.href)
         if (!doc) return null
 
-        const anchorPage = () => {
+        const anchorChapter = () => {
             const body = docBody(doc.doc)!
             const el = locator.anchorId ? findTarget(body, locator.anchorId) : null
             const path = el ? pathOfNode(body, el) : null
-            return path ? pageIndexForPosition(state.pages, { spineIndex, path }) : -1
+            return path ? chapterIndexForPosition(state.chapters, { spineIndex, path }) : -1
         }
 
         if (locator.textOffset > doc.textLength) {
-            const page = anchorPage()
-            return page === -1 ? null : page
+            const chapter = anchorChapter()
+            return chapter === -1 ? null : chapter
         }
 
         // Textless or equal-offset intervals can't be told apart by offset
         // alone, so the anchor decides between them.
-        const candidates = pagesContainingOffset(
-            state.pages,
+        const candidates = chaptersContainingOffset(
+            state.chapters,
             locator.href,
             locator.textOffset,
             doc.doc
         )
         if (!candidates.length) return null
         if (candidates.length > 1) {
-            const page = anchorPage()
-            if (candidates.includes(page)) return page
+            const chapter = anchorChapter()
+            if (candidates.includes(chapter)) return chapter
         }
         return candidates[0]!
     }
 
-    async function applyEntry(current: BookEntry, token: number, initial: boolean, atEnd = false) {
-        if (!isCurrent(token)) return
-        if (!state.pages.length) {
-            settleTransition(token)
-            return
-        }
+    /** The backend's saved passage applies until something is on screen. */
+    async function applyEntry(current: BookEntry, mine: Navigation) {
+        if (!(await booted)) return finish(mine)
+        if (!isCurrent(mine)) return
+        const initial = !mounted.length
         const source = structure()
 
         if (current.ch) {
             const index = spineIndexOf(source, current.ch)
             if (index === -1 || !source.spine[index]!.linear) {
-                const shown = await mountStandalone(current.ch, current.frag ?? '', token)
-                if (shown) return
-                if (!initial) {
-                    settleTransition(token)
-                    return
-                }
+                if (await openStandalone(current.ch, current.frag ?? '', mine)) return
+                if (!isCurrent(mine)) return
+                if (!initial) return finish(mine)
             }
         }
 
         const urlPosition = current.ch ? await positionFor(current.ch, current.frag ?? '') : null
-        if (!isCurrent(token)) return
-        const urlPage = urlPosition ? pageIndexForPosition(state.pages, urlPosition) : null
+        if (!isCurrent(mine)) return
+        const urlChapter = urlPosition ? chapterIndexForPosition(state.chapters, urlPosition) : null
 
         const locator = nav.historyLocator() ?? (initial ? savedLocator() : null)
-        const locatorPage = locator ? await pageForLocator(locator) : null
-        if (!isCurrent(token)) return
+        const locatorChapter = locator ? await chapterForLocator(locator) : null
+        if (!isCurrent(mine)) return
 
-        const choice = chooseEntryPage(urlPage, locatorPage)
+        const choice = chooseEntryChapter(urlChapter, locatorChapter)
         const anchor =
             !choice.useLocator && current.ch && current.frag
                 ? { href: current.ch, fragment: current.frag }
                 : null
-        await navigateTo(
-            choice.pageIndex,
-            {
-                locator: choice.useLocator
-                    ? locator
-                    : urlPosition
-                      ? positionLocator(urlPosition)
-                      : null,
-                anchor,
-                atEnd,
-            },
-            token
-        )
-        if (!isCurrent(token)) return
-        canonicalize(anchor)
+        const landing = mine.landing ?? {
+            locator: choice.useLocator ? locator : urlPosition && positionLocator(urlPosition),
+            anchor,
+        }
+        const landed = await navigateTo(choice.chapterIndex, landing, mine)
+        if (!isCurrent(mine)) return
+        // After a failure, back onto the chapter still shown, so a retry is a
+        // new route rather than a duplicate of this one.
+        canonicalize(landed ? anchor : null)
+        finish(mine)
     }
 
     function canonicalize(anchor: BookAnchor | null) {
-        const page = state.pages[state.pageIndex]
-        if (!page || state.standalone) return
-        const target = anchor ?? page.target
+        const chapter = state.chapters[state.chapterIndex]
+        if (!chapter || state.standalone) return
+        const target = anchor ?? chapter.target
         currentEntryKey = entryKey({ ch: target.href, frag: target.fragment || null })
         nav.replace(target)
-    }
-
-    function scrollWindowTo(top: number) {
-        if (disposed) return
-        programmaticScrolls++
-        window.scrollTo({ top: Math.max(0, top), behavior: 'instant' })
-        requestAnimationFrame(() => {
-            programmaticScrolls = Math.max(0, programmaticScrolls - 1)
-        })
-    }
-
-    function scrollToEnd() {
-        scrollWindowTo(document.documentElement.scrollHeight)
-    }
-
-    function scrollToTarget(target: Element | Range) {
-        scrollWindowTo(
-            window.scrollY + target.getBoundingClientRect().top - getLayoutTop() - SCROLL_MARGIN
-        )
     }
 
     /** Guarded at the point of entry as well as on disposal: the queue can
      * still be appended to after `dispose` has swept it. */
     function waitForHost(): Promise<void> {
-        if (host || disposed) return Promise.resolve()
+        if (host || disposed()) return Promise.resolve()
         return new Promise(resolve => {
             hostWaiters.push(resolve)
         })
     }
 
-    async function buildSlices(slices: PageSlice[], token: number): Promise<MountedSlice[] | null> {
+    async function buildSlices(
+        slices: ChapterSlice[],
+        mine: Navigation
+    ): Promise<MountedSlice[] | null> {
+        mine.phase = 'loading'
         const documents = await Promise.all(slices.map(slice => prepare(slice.href)))
-        if (!isCurrent(token)) return null
+        if (!isCurrent(mine)) return null
         await waitForHost()
-        if (!isCurrent(token) || !host) return null
+        if (!isCurrent(mine) || !host) return null
 
         return slices.map((slice, i) => {
             const source = documents[i]!
@@ -597,30 +471,70 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
             pruneToRange(body, slice.start, slice.end)
             const holder = document.createElement('div')
             holder.addEventListener('click', onClick)
+            // Paged mode hides it: an empty multicol still takes a column.
+            holder.classList.toggle('is-empty', isEmptySlice(body, source.styles))
+            holder.classList.toggle('is-paged', layout.value.kind === 'paged')
             return {
                 slice,
                 prepared: source,
                 holder,
-                root: mountTree(holder, source, body, publisherFonts),
+                root: mountTree(holder, source, body, settings().fontFamily === 'publisher'),
                 startOffset: textOffsetAtPath(docBody(source.doc)!, slice.start),
             }
         })
     }
 
-    /** Where the destination becomes observable. Nothing above writes reader
-     * state, so a cancelled navigation leaves none of it half-moved. */
-    function commit(next: MountedSlice[], destination: Destination) {
+    /** Vertical writing isn't paginated: such a chapter scrolls instead. */
+    function modeFor(preferred: LayoutKind): LayoutKind {
+        if (preferred === 'scroll') return preferred
+        const vertical = mounted.some(slice =>
+            [slice.root, slice.root.parentElement!].some(
+                el => getComputedStyle(el).writingMode !== 'horizontal-tb'
+            )
+        )
+        return vertical ? 'scroll' : preferred
+    }
+
+    /** A passage that isn't mounted lands at the start instead. */
+    function place(landing: Landing | null, provisional = false) {
+        const placed = layout.value.place(landing, provisional)
+        if (placed === false) layout.value.place('start', provisional)
+        return placed
+    }
+
+    /** Where the destination becomes observable. Nothing before it writes
+     * reader state, so a superseded navigation leaves none of it half-moved.
+     * Paged paints the right screen first; scroll mode waits at an end, not
+     * scrolling into a chapter whose images are still loading. */
+    async function land(
+        next: MountedSlice[],
+        destination: number | Standalone,
+        landing: Landing,
+        mine: Navigation
+    ) {
         host!.replaceChildren(...next.map(slice => slice.holder))
         mounted = next
-        inputSincePage = false
+        state.firstChapterMounted = true
+        inputSinceChapter = false
         lastStamp = 0
         state.error = null
-        if (destination.kind === 'page') {
-            state.pageIndex = destination.index
-            state.standalone = null
-            standaloneReturn = null
-        } else {
-            state.standalone = { href: destination.href, title: destination.title }
+        // Other notices can be about this very destination (a missing fragment).
+        if (state.notice === LOAD_FAILED) state.notice = null
+        if (typeof destination === 'number') state.chapterIndex = destination
+        // Raw: its locator goes into `history.state`, which can't clone a proxy.
+        state.standalone = typeof destination === 'number' ? null : markRaw(destination)
+        mine.phase = 'settling'
+        mine.landing = landing
+
+        const mode = modeFor(settings().mode)
+        if (mode === layout.value.kind) layout.value.attach(host, mounted)
+        else useLayout(mode, null)
+        place(landing, true)
+        await settle()
+        if (!isCurrent(mine)) return
+        const target = mine.landing
+        if (place(target) === false && typeof target === 'object' && target?.anchor) {
+            state.notice = 'That link points somewhere unavailable.'
         }
     }
 
@@ -643,166 +557,56 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
         await Promise.race([Promise.all(jobs), delay(SETTLE_TIMEOUT)])
     }
 
-    /** A single-character Range, never a collapsed one: at a line wrap Chrome
-     * reports a collapsed Range at the end of the previous line. */
-    function locateInMounted(locator: BookLocator): Element | Range | null {
-        for (const slice of mounted) {
-            if (slice.slice.href !== locator.href) continue
-            const relative = locator.textOffset - slice.startOffset
-            if (relative < 0) continue
-            const point = textPointAtOffset(slice.root, relative)
-            if (!point) continue
-            const range = new Range()
-            return glyphRect(range, point.node, point.index)
-                ? range
-                : blockOf(point.node.parentElement!, slice.root)
-        }
-        if (!locator.anchorId) return null
-        for (const slice of mounted) {
-            if (slice.slice.href !== locator.href) continue
-            const el = findTarget(slice.root, locator.anchorId)
-            if (el) return el
-        }
-        return null
-    }
-
-    function locateAnchor(anchor: BookAnchor): Element | null {
-        for (const slice of mounted) {
-            if (slice.slice.href !== anchor.href) continue
-            const el = findTarget(slice.root, anchor.fragment)
-            if (el) return el
-        }
-        return null
-    }
-
-    /** The single end of a navigation: whatever is mounted now is the page the
-     * reader has, whether this navigation put it there or not. */
-    function settleTransition(token: number) {
-        if (!isCurrent(token)) return
-        state.restoring = false
-        restoreCancelled = false
-        if (mounted.length > 0) state.firstPageMounted = true
-        captureEnabled = mounted.length > 0 && !state.standalone
-        captureNow()
-    }
-
-    async function navigateTo(
-        index: number,
-        target: { locator?: BookLocator | null; anchor?: BookAnchor | null; atEnd?: boolean },
-        token: number
-    ) {
-        const page = state.pages[index]
-        if (!isCurrent(token)) return
-        if (!page) {
-            settleTransition(token)
-            return
-        }
-        state.restoring = true
-        captureEnabled = false
+    /** Resolves whether the chapter was put on screen. */
+    async function navigateTo(index: number, landing: Landing, mine: Navigation) {
+        const chapter = state.chapters[index]
+        if (!chapter) return false
         const hadMounted = mounted.length > 0
-
         let next: MountedSlice[] | null = null
         try {
-            next = await buildSlices(page.slices, token)
+            next = await buildSlices(chapter.slices, mine)
         } catch (err) {
-            if (isCurrent(token)) {
+            if (isCurrent(mine)) {
                 console.error(err)
-                // A reader already on a page keeps it; only a failed first
+                // A reader already on a chapter keeps it; only a failed first
                 // load leaves nothing to show.
-                if (hadMounted) state.notice = 'That part of the book could not be loaded.'
+                if (hadMounted) state.notice = LOAD_FAILED
                 else state.error = err instanceof Error ? err.message : String(err)
             }
         }
-        if (!isCurrent(token)) return
-        if (!next) {
-            settleTransition(token)
-            return
-        }
-
-        commit(next, { kind: 'page', index })
-        // Already at the end before settling, so the reader doesn't spend the
-        // image and font wait sitting at the top of the page.
-        if (target.atEnd) scrollToEnd()
-        else scrollWindowTo(0)
-        await settle()
-        if (!isCurrent(token)) return
-
-        if (!restoreCancelled) {
-            if (target.atEnd) {
-                scrollToEnd()
-            } else {
-                const place =
-                    (target.anchor ? locateAnchor(target.anchor) : null) ??
-                    (target.locator ? locateInMounted(target.locator) : null)
-                if (place) scrollToTarget(place)
-                else if (target.anchor) state.notice = 'That link points somewhere unavailable.'
-            }
-        }
-
-        settleTransition(token)
+        if (!next || !isCurrent(mine)) return false
+        await land(next, index, landing, mine)
+        return true
     }
 
     /** Outside the flow, keeping the passage it was opened from for the way
-     * back. */
-    async function mountStandalone(
-        href: string,
-        fragment: string,
-        token: number
-    ): Promise<boolean> {
-        if (!isCurrent(token)) return false
-        if (!state.standalone) {
-            const passage = captureLocator() ?? pendingLocator
-            standaloneReturn = { pageIndex: state.pageIndex, locator: passage }
-            snapshotPassage()
+     * back. True once shown. */
+    async function openStandalone(href: string, fragment: string, mine: Navigation) {
+        const returnTo = state.standalone?.returnTo ?? {
+            chapterIndex: state.chapterIndex,
+            locator: captureLocator() ?? pendingLocator,
         }
+        if (!state.standalone) snapshotPassage()
         const source = structure()
         const index = spineIndexOf(source, href)
-        state.restoring = true
-        captureEnabled = false
-
-        let next: MountedSlice[] | null = null
-        try {
-            next = await buildSlices([{ href, spineIndex: index, start: null, end: null }], token)
-        } catch {
-            next = null
-        }
-        if (!isCurrent(token)) return false
+        const next = await buildSlices(
+            [{ href, spineIndex: index, start: null, end: null }],
+            mine
+        ).catch(() => null)
+        if (!isCurrent(mine)) return false
         if (!next) {
             state.notice = 'That part of the book is unavailable.'
             return false
         }
-
-        commit(next, {
-            kind: 'standalone',
-            href,
-            title: source.spine[index]?.title || href,
-        })
-        scrollWindowTo(0)
-        const el = fragment ? locateAnchor({ href, fragment }) : null
-        if (el) scrollToTarget(el)
-        settleTransition(token)
+        const title = source.spine[index]?.title || href
+        const landing = fragment ? { anchor: { href, fragment } } : 'start'
+        await land(next, { href, title, returnTo }, landing, mine)
+        finish(mine)
         return true
     }
 
     function captureLocator(): BookLocator | null {
-        if (state.standalone) return null
-        if (reflowLocator) return reflowLocator
-        const top = getLayoutTop()
-        for (let i = 0; i < mounted.length; i++) {
-            const slice = mounted[i]!
-            const block = firstVisibleBlock(slice.root, top)
-            if (!block) continue
-            const found =
-                firstVisiblePoint(mounted.slice(i), block, top, window.innerHeight) ??
-                blockStart(slice, block)
-            return {
-                version: 1,
-                href: found.slice.slice.href,
-                textOffset: found.slice.startOffset + found.offset,
-                anchorId: precedingAnchorId(found.el, found.slice.root),
-            }
-        }
-        return null
+        return state.standalone ? null : layout.value.capture()
     }
 
     function clearStampTimer() {
@@ -813,7 +617,7 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
     /** Rate-limited so scrolling can't flood `replaceState`, but with a
      * trailing stamp so the last position is never the one left out. */
     function stampLocator(locator: BookLocator, force = false) {
-        if (disposed) return
+        if (disposed()) return
         const now = Date.now()
         const waited = now - lastStamp
         if (force || waited >= HISTORY_STAMP_INTERVAL) {
@@ -829,9 +633,16 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
         }, HISTORY_STAMP_INTERVAL - waited)
     }
 
-    function snapshotPassage() {
+    /** Only while the entry still shows the mounted chapter: once a route
+     * change has begun, the pending passage belongs to the entry left behind. */
+    function stampNow() {
+        if (!canCapture()) return
         captureNow()
         if (pendingLocator) stampLocator(pendingLocator, true)
+    }
+
+    function snapshotPassage() {
+        stampNow()
         persist.flush()
     }
 
@@ -845,14 +656,12 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
     }
 
     function captureNow(stamp = true) {
-        if (!captureEnabled || state.standalone || !state.structure) return
-        const locator = captureLocator()
+        if (!canCapture() || !state.structure) return
+        const locator = layout.value.capture()
         if (locator) setLocator(locator, stamp)
     }
 
-    const captureSoon = useDebounceFn(() => {
-        if (!disposed) captureNow()
-    }, CAPTURE_DEBOUNCE)
+    const captureSoon = useDebounceFn(captureNow, CAPTURE_DEBOUNCE)
 
     function nextStatus(): ReadingStatus | undefined {
         if (userData?.status && userData.status !== 'reading') return undefined
@@ -914,19 +723,18 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
     }
 
     function checkCompletion() {
-        if (completed || state.standalone || !inputSincePage || !sentinel) return
-        if (state.pageIndex !== state.pages.length - 1) return
+        if (completed || state.standalone || !inputSinceChapter || !sentinel) return
+        if (state.chapterIndex !== state.chapters.length - 1) return
         const rect = sentinel.getBoundingClientRect()
         if (rect.bottom <= 0 || rect.top >= window.innerHeight) return
         completed = true
         void persist()
     }
 
-    function onScroll() {
-        if (programmaticScrolls > 0) return
-        if (state.restoring) restoreCancelled = true
-        if (!captureEnabled || reflowing) return
-        reflowLocator = null
+    function onUserMove() {
+        const current = activity.value
+        if (current.phase === 'settling') current.landing = null
+        if (!canCapture()) return
         void captureSoon()
         checkCompletion()
     }
@@ -934,8 +742,8 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
     function onInput() {
         // The input that dismisses a modal isn't reading: without this, it can
         // mark a short final chapter completed.
-        if (state.restoring || hasOpenModal.value) return
-        inputSincePage = true
+        if (restoring.value || hasOpenModal.value) return
+        inputSinceChapter = true
         checkCompletion()
     }
 
@@ -947,32 +755,10 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
         flushProgress(true)
     }
 
-    const onReflowEnd = useDebounceFn(() => {
-        reflowing = false
-        if (disposed || !reflowLocator || state.restoring) return
-        const target = locateInMounted(reflowLocator)
-        if (target) scrollToTarget(target)
-        captureNow()
-    }, REFLOW_DEBOUNCE)
-
-    /** Restores the passage after a layout change of our own. Window resizes
-     * are left to native scroll anchoring: a height-only one (the mobile
-     * address bar) doesn't reflow, and restoring on it would jerk the page. */
+    /** Restores the passage after a layout change of our own. A navigation
+     * places the reader itself once it settles. */
     function reflow() {
-        if (!captureEnabled) return
-        reflowing = true
-        reflowLocator ??= captureLocator()
-        void onReflowEnd()
-    }
-
-    /** The user stylesheet is rebuilt in place: a remount would lose the
-     * reading position. `reflow` runs first so the passage is captured
-     * against the old layout, whoever else asks for a reflow after this. */
-    function setPublisherFonts(value: boolean) {
-        if (publisherFonts === value) return
-        publisherFonts = value
-        reflow()
-        for (const slice of mounted) updateUserStyles(slice.holder, publisherFonts)
+        if (!restoring.value) layout.value.reflow()
     }
 
     function onClick(event: MouseEvent) {
@@ -996,156 +782,240 @@ export function createBookSession(contentId: string, entry: BookEntry, nav: Book
     }
 
     /** Routes through the target's own index: the same href can live on
-     * another page than the one the link sits on. */
+     * another chapter than the one the link sits on. */
     async function followLink(href: string, fragment: string) {
-        const token = cancelPending()
+        const mine = start('resolving')
         const source = structure()
         const index = spineIndexOf(source, href)
 
         if (index === -1 || !source.spine[index]!.linear) {
-            if (!(await mountStandalone(href, fragment, token))) settleTransition(token)
+            if (!(await openStandalone(href, fragment, mine))) finish(mine)
             return
         }
 
         const doc = await preparedFor(href)
-        if (!isCurrent(token)) return
+        if (!isCurrent(mine)) return
         if (!doc) {
             state.notice = 'That part of the book is missing.'
-            settleTransition(token)
-            return
+            return finish(mine)
         }
         const found = fragment ? !!resolveTargetElement(doc.doc, fragment) : false
         state.notice = fragment && !found ? 'That link points somewhere unavailable.' : null
 
-        if (found && !state.standalone) {
-            const el = locateAnchor({ href, fragment })
-            if (el) {
-                scrollToTarget(el)
-                settleTransition(token)
-                return
-            }
+        if (
+            found &&
+            !state.standalone &&
+            layout.value.place({ anchor: { href, fragment } }) === true
+        ) {
+            return finish(mine)
         }
 
         const position = await positionFor(href, found ? fragment : '')
-        if (!isCurrent(token)) return
-        const page = position ? pageIndexForPosition(state.pages, position) : -1
-        if (!position || page === -1) {
-            settleTransition(token)
-            return
-        }
+        if (!isCurrent(mine)) return
+        const chapter = position ? chapterIndexForPosition(state.chapters, position) : -1
+        if (!position || chapter === -1) return finish(mine)
 
         const anchor = found ? { href, fragment } : null
         const destination = anchor ?? { href, fragment: '' }
         // A link naming the entry we are already on gets no route change, so
         // this navigation has to finish the transition itself.
         if (
-            entryKey({ ch: destination.href, frag: destination.fragment || null }) ===
+            entryKey({ ch: destination.href, frag: destination.fragment || null }) !==
             currentEntryKey
         ) {
-            if (page === state.pageIndex && mounted.length && !state.standalone) {
-                const target =
-                    (anchor ? locateAnchor(anchor) : null) ??
-                    locateInMounted(positionLocator(position))
-                if (target) scrollToTarget(target)
-                settleTransition(token)
-            } else {
-                await navigateTo(
-                    page,
-                    { anchor, locator: anchor ? null : positionLocator(position) },
-                    token
-                )
-            }
-            return
+            return push(destination, mine)
         }
+        const landing = { anchor, locator: anchor ? null : positionLocator(position) }
+        if (chapter === state.chapterIndex && mounted.length && !state.standalone) {
+            layout.value.place(landing)
+        } else {
+            await navigateTo(chapter, landing, mine)
+        }
+        finish(mine)
+    }
 
+    /** Through the router, whose watcher calls `setEntry`: one history entry
+     * per destination. */
+    function push(target: BookAnchor, mine: Navigation) {
         snapshotPassage()
-        nav.push(destination)
+        mine.phase = 'routing'
+        mine.entry = entryKey({ ch: target.href, frag: target.fragment || null })
+        void nav.push(target).then(
+            failure => {
+                if (isNavigationFailure(failure)) finish(mine)
+            },
+            () => finish(mine)
+        )
     }
 
     function onPageHide() {
         flushProgress(true)
     }
 
+    function goToChapter(index: number, atEnd = false) {
+        const target = state.chapters[index]?.target
+        if (!target || crossing()) return
+        push(target, start('routing', atEnd ? 'end' : null))
+    }
+
+    async function closeStandalone() {
+        const back = state.standalone?.returnTo
+        const index = back?.chapterIndex ?? state.chapterIndex
+        const mine = start('loading')
+        await navigateTo(index, { locator: back?.locator }, mine)
+        if (!isCurrent(mine)) return
+        canonicalize(null)
+        finish(mine)
+    }
+
+    function endBook() {
+        // Supersedes a navigation still settling, which would canonicalize.
+        if (activity.value.phase === 'settling') canonicalize(null)
+        activity.value = { phase: 'book-end' }
+        if (completed) return
+        completed = true
+        void persist()
+    }
+
+    /** Paged: one screen on, crossing chapters at either end. The end of the
+     * book is one more screen, and turning onto it completes the book. */
+    function turn(direction: 'next' | 'prev') {
+        if (crossing() || !mounted.length) return
+        if (activity.value.phase === 'book-end') {
+            if (direction === 'prev') activity.value = { phase: 'ready' }
+            return
+        }
+        const result = layout.value.turn(direction)
+        if (result === 'unavailable') return
+        if (result === 'moved') return onUserMove()
+        if (state.standalone) void closeStandalone()
+        else if (result === 'start') {
+            if (state.chapterIndex > 0) goToChapter(state.chapterIndex - 1, true)
+        } else if (state.chapterIndex < state.chapters.length - 1) {
+            goToChapter(state.chapterIndex + 1)
+        } else {
+            endBook()
+        }
+    }
+
+    function setMode(preferred: LayoutKind) {
+        if (activity.value.phase === 'book-end') activity.value = { phase: 'ready' }
+        const mode = modeFor(preferred)
+        if (mode === layout.value.kind) return
+        useLayout(mode, layout.value.capture())
+        const current = activity.value
+        if (current.phase === 'settling' && current.landing) {
+            layout.value.place(current.landing, true)
+        }
+    }
+
+    /** The new layout opens at `seed`, and binds once Vue has rendered its CSS. */
+    function useLayout(mode: LayoutKind, seed: BookLocator | null) {
+        layout.value.dispose()
+        const next = createLayout(mode, seed)
+        layout.value = next
+        for (const slice of mounted) slice.holder.classList.toggle('is-paged', mode === 'paged')
+        void nextTick(() => {
+            if (layout.value === next) next.attach(host, mounted)
+        })
+    }
+
+    function createLayout(mode: LayoutKind, seed: BookLocator | null) {
+        return createReadingLayout(mode, { seed, spread: () => settings().spread, onUserMove })
+    }
+
     const inputEvents = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const
-    window.addEventListener('scroll', onScroll, { passive: true })
+    const layout = shallowRef<ReadingLayout>(createLayout(settings().mode, null))
+    /** `pre`: the passage is captured against the old layout, before the DOM
+     * changes under it. The user stylesheet is rebuilt in place, since a
+     * remount would lose the position. */
+    const stopSettings = watch(
+        () => ({ ...settings() }),
+        (next, prev) => {
+            if (next.mode !== prev.mode) setMode(next.mode)
+            else reflow()
+            const publisher = next.fontFamily === 'publisher'
+            if (publisher === (prev.fontFamily === 'publisher')) return
+            for (const slice of mounted) updateUserStyles(slice.holder, publisher)
+        },
+        { flush: 'pre' }
+    )
+    // The rate-limited stamp can lag a turn by half a second.
+    const removeLeaveGuard = nav.beforeLeave(stampNow)
     window.addEventListener('pagehide', onPageHide)
     document.addEventListener('visibilitychange', onVisibility)
     for (const name of inputEvents) window.addEventListener(name, onInput, { passive: true })
 
-    const page = computed(() => state.pages[state.pageIndex] ?? null)
+    const chapter = computed(() => state.chapters[state.chapterIndex] ?? null)
 
-    void init()
+    const booted = init()
+    void applyEntry(entry, activity.value as Navigation)
 
     return reactive({
         ...toRefs(state),
-        page,
-        nextPage: computed(() => state.pages[state.pageIndex + 1] ?? null),
-        prevPage: computed(() => state.pages[state.pageIndex - 1] ?? null),
-        title: computed(() => state.standalone?.title ?? page.value?.title ?? ''),
+        chapter,
+        nextChapter: computed(() => state.chapters[state.chapterIndex + 1] ?? null),
+        prevChapter: computed(() => state.chapters[state.chapterIndex - 1] ?? null),
+        title: computed(() => state.standalone?.title ?? chapter.value?.title ?? ''),
+        restoring,
+        /** The layout in effect, which a chapter can override (vertical writing). */
+        layoutMode: computed(() => layout.value.kind),
+        /** Paged: the screen shown and the screens in the chapter. */
+        screen: computed(() => layout.value.screen),
+        /** Paged: past the last screen of the book. */
+        atBookEnd: computed(() => activity.value.phase === 'book-end'),
 
         setElements(elements: { host: HTMLElement | null; sentinel: HTMLElement | null }) {
             host = elements.host
             sentinel = elements.sentinel
-            if (!host) return
-            if (mounted.length) host.replaceChildren(...mounted.map(slice => slice.holder))
-            while (hostWaiters.length) hostWaiters.pop()!()
+            if (host && mounted.some(slice => slice.holder.parentNode !== host)) {
+                host.replaceChildren(...mounted.map(slice => slice.holder))
+            }
+            layout.value.attach(host, mounted)
+            if (host) while (hostWaiters.length) hostWaiters.pop()!()
         },
 
         setEntry(next: BookEntry) {
-            if (entryKey(next) === currentEntryKey) return
-            currentEntryKey = entryKey(next)
-            const atEnd = landingEnd === currentEntryKey
-            landingEnd = null
+            const key = entryKey(next)
+            if (key === currentEntryKey) return
+            currentEntryKey = key
             // The history entry has already moved, so this passage belongs to
             // the one we are leaving and must not be stamped onto it.
             flushProgress(false, false)
-            if (!state.pages.length) {
-                pendingEntry = next
-                return
-            }
-            void applyEntry(next, begin(), false, atEnd)
+            clearStampTimer()
+            const current = activity.value
+            // A push of our own arrives here; it keeps its landing.
+            const mine =
+                current.phase === 'routing' && current.entry === key ? current : start('loading')
+            mine.phase = 'loading'
+            mine.entry = key
+            void applyEntry(next, mine)
         },
 
         snapshotPassage,
-        setPublisherFonts,
-
-        reflow,
-
-        goToPage(index: number, atEnd = false) {
-            const target = state.pages[index]?.target
-            if (!target) return
-            snapshotPassage()
-            cancelPending()
-            landingEnd = atEnd ? entryKey({ ch: target.href, frag: target.fragment || null }) : null
-            nav.push(target)
-        },
-
-        async closeStandalone() {
-            const token = begin()
-            const back = standaloneReturn
-            await navigateTo(back?.pageIndex ?? state.pageIndex, { locator: back?.locator }, token)
-            if (isCurrent(token)) canonicalize(null)
-        },
+        goToChapter,
+        closeStandalone,
+        turn,
 
         dismissNotice() {
             state.notice = null
         },
 
         dispose() {
-            disposed = true
-            navToken++
+            if (disposed()) return writeChain
+            clearStampTimer()
+            flushProgress(true, false)
+            activity.value = { phase: 'disposed' }
+            stopSettings()
             controller.abort()
-            window.removeEventListener('scroll', onScroll)
             window.removeEventListener('pagehide', onPageHide)
+            removeLeaveGuard()
             document.removeEventListener('visibilitychange', onVisibility)
             for (const name of inputEvents) window.removeEventListener(name, onInput)
             while (hostWaiters.length) hostWaiters.pop()!()
-            clearStampTimer()
-            flushProgress(true, false)
-            captureEnabled = false
             captureSoon.cancel()
-            onReflowEnd.cancel()
-            reflowLocator = null
+            prefetch.cancel()
+            layout.value.dispose()
             return writeChain
         },
     })

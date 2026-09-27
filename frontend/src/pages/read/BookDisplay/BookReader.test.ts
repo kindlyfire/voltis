@@ -18,13 +18,17 @@ vi.mock('@/utils/api/content', () => ({
 
 // Real, it would pull in Vue Query with no provider.
 vi.mock('../useReaderTutorial', () => ({ useReaderTutorial: vi.fn() }))
+vi.mock('./useNextVolume', async () => {
+    const { ref } = await import('vue')
+    return { useNextVolume: () => ref(null) }
+})
 
 const stubs = {
     AButton: { template: '<button><slot /></button>' },
     ADivider: { template: '<hr />' },
     ASpinner: { template: '<div class="loading" />' },
     AAlert: { template: '<div class="alert"><slot /></div>' },
-    AProgressBar: { template: '<div />' },
+    AProgressBar: { template: '<div class="progress" />' },
     BookReaderDrawer: true,
 }
 
@@ -43,6 +47,8 @@ let pinia: Pinia
 let router: Router
 
 beforeEach(async () => {
+    // Stamped by the last test's session, it would be restored by this one's.
+    history.replaceState(null, '')
     pinia = createPinia()
     setActivePinia(pinia)
     router = createRouter({
@@ -62,6 +68,13 @@ beforeEach(async () => {
     vi.mocked(contentApi.bookStructure).mockResolvedValue(STRUCTURE)
     vi.mocked(contentApi.updateUserData).mockResolvedValue({ progress: {} } as UserToContent)
     window.scrollTo = vi.fn() as unknown as typeof window.scrollTo
+    vi.stubGlobal(
+        'ResizeObserver',
+        class {
+            observe() {}
+            disconnect() {}
+        }
+    )
     Object.defineProperty(Range.prototype, 'getBoundingClientRect', {
         value: () => ({ top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 }),
         configurable: true,
@@ -76,10 +89,8 @@ function render() {
     })
 }
 
-// The host is the only element whose sole class is `flex-1`; the page wrapper
-// carries `flex flex-1 flex-col`.
 function hostOf(wrapper: ReturnType<typeof render>) {
-    return wrapper.find('[class="flex-1"]')
+    return wrapper.find('.book-host')
 }
 
 /** Each mounted slice lives in its own shadow root under the host. */
@@ -121,6 +132,7 @@ describe('BookReader host lifecycle', () => {
 
         const wrapper = render()
         const store = useBookDisplayStore(pinia)
+        store.settings.mode = 'scroll'
         store.setContent('c_1', { ch: null, frag: null })
         await settle()
 
@@ -134,9 +146,9 @@ describe('BookReader host lifecycle', () => {
 
         expect(store.session!.error).toBeNull()
         expect(store.session!.restoring).toBe(false)
-        expect(store.session!.pageIndex).toBe(1)
+        expect(store.session!.chapterIndex).toBe(1)
         expect(mountedText(wrapper)).toContain('second chapter')
-        // The sentinel comes back with the page chrome, so completion can work.
+        // The sentinel comes back with the chapter chrome, so completion can work.
         expect(wrapper.find('.h-px').exists()).toBe(true)
         expect(wrapper.text()).toContain('Previous: One')
         expect(wrapper.text()).toContain('End of book')
@@ -170,6 +182,7 @@ describe('BookReader across books', () => {
 
         const wrapper = render()
         const store = useBookDisplayStore(pinia)
+        store.settings.mode = 'scroll'
         store.setContent('c_a', { ch: null, frag: null })
         await settle()
         expect(mountedText(wrapper)).toContain('book a text')
@@ -185,6 +198,71 @@ describe('BookReader across books', () => {
         await settle()
         expect(store.session!.error).toBeTruthy()
         expect(mountedText(wrapper)).not.toContain('book a text')
+
+        wrapper.unmount()
+        await store.dispose()
+    })
+})
+
+describe('BookReader layouts', () => {
+    beforeEach(() => {
+        vi.mocked(contentApi.bookDocument).mockImplementation(
+            async (_id, href) => `<html><body><p>in ${href}</p></body></html>`
+        )
+    })
+
+    function key(name: string) {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: name }))
+    }
+
+    it('pages with a counter and no chapter buttons or progress bar', async () => {
+        const wrapper = render()
+        const store = useBookDisplayStore(pinia)
+        store.settings.mode = 'paged'
+        store.setContent('c_1', { ch: null, frag: null })
+        await settle()
+        const session = store.session!
+        expect(session.layoutMode).toBe('paged')
+        expect(wrapper.find('.book-reader').classes()).toContain('is-paged')
+        expect(wrapper.find('.book-footer').text()).toContain('Page 1 / 1')
+        expect(wrapper.text()).not.toContain('Next: Two')
+        expect(wrapper.find('.progress').exists()).toBe(false)
+        expect(wrapper.find('.h-px').exists()).toBe(false)
+
+        const turn = vi.spyOn(session, 'turn')
+        key('ArrowRight')
+        key('ArrowUp')
+        await wrapper.findAll('.page-button')[1]!.trigger('click')
+        expect(turn.mock.calls).toEqual([['next'], ['prev'], ['next']])
+        turn.mockRestore()
+
+        session.setEntry({ ch: 'b.xhtml', frag: null })
+        await settle()
+        session.turn('next')
+        await settle()
+        expect(session.atBookEnd).toBe(true)
+        expect(wrapper.text()).toContain('End of book')
+        expect(wrapper.find('.book-footer').text()).not.toContain('Page')
+
+        wrapper.unmount()
+        await store.dispose()
+    })
+
+    it('scrolls with chapter buttons and a chapter progress bar', async () => {
+        const wrapper = render()
+        const store = useBookDisplayStore(pinia)
+        store.settings.mode = 'scroll'
+        store.setContent('c_1', { ch: null, frag: null })
+        await settle()
+        const session = store.session!
+        expect(session.layoutMode).toBe('scroll')
+        expect(wrapper.find('.book-footer').exists()).toBe(false)
+        expect(wrapper.text()).toContain('Next: Two')
+        expect(wrapper.find('.progress').exists()).toBe(true)
+
+        const turn = vi.spyOn(session, 'turn')
+        key('ArrowDown')
+        expect(turn).not.toHaveBeenCalled()
 
         wrapper.unmount()
         await store.dispose()

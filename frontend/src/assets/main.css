@@ -32,6 +32,7 @@
      * `html` overflow stays `visible`: otherwise the `overflow: hidden` Reka puts on body while an
      * overlay is open makes body the scroll container. No `scrollbar-gutter` either: Reka's scroll
      * lock pads body by the scrollbar width, which a reserved gutter would double.
+     * (ADrawer's scroll lock is the exception: it sets both, and cancels Reka's padding and overflow.)
      */
     html {
         color-scheme: light;

@@ -73,14 +73,16 @@ import {
     IconChevronUp,
     IconMenu,
 } from '@/ui/icons'
+import type { LayoutKind } from './BookDisplay/readingLayout'
 import ReaderHeading from './ReaderHeading.vue'
-import { BOOK_SHORTCUTS, COMIC_SHORTCUTS, type ReaderKind } from './shortcuts'
+import { bookShortcuts, COMIC_SHORTCUTS, type ReaderKind } from './shortcuts'
 import { HEIGHT_ZONE } from './useClickZones'
 
 const props = defineProps<{
     open: boolean
     close: () => void
     kind: ReaderKind
+    bookMode?: LayoutKind
 }>()
 
 const coarse = useMediaQuery('(pointer: coarse)')
@@ -105,7 +107,9 @@ const zones = [
 const title = computed(() =>
     props.kind === 'comic' ? 'Comic reader tutorial' : 'Book reader tutorial'
 )
-const shortcuts = computed(() => (props.kind === 'comic' ? COMIC_SHORTCUTS : BOOK_SHORTCUTS))
+const shortcuts = computed(() =>
+    props.kind === 'comic' ? COMIC_SHORTCUTS : bookShortcuts(props.bookMode ?? 'paged')
+)
 
 const lines = computed(() => {
     const [action, gerund] = coarse.value ? ['Tap', 'tapping'] : ['Click', 'clicking']
@@ -116,8 +120,15 @@ const lines = computed(() => {
             menu,
         ]
     }
+    if (props.bookMode === 'scroll') {
+        return [
+            `${action} the previous and next zones to scroll. That can also be used to go to the next chapter at the end.`,
+            menu,
+        ]
+    }
     return [
-        `${action} the previous and next zones to scroll. That can also be used to go to the next chapter at the end.`,
+        `${action} the previous and next zones to turn pages. Turning past the last page continues into the next chapter.`,
+        coarse.value ? 'You can also swipe left or right.' : 'The mouse wheel also turns pages.',
         menu,
     ]
 })
@@ -127,8 +138,8 @@ const lines = computed(() => {
 import { Modals } from '@/utils/modals'
 import Self from './ReaderTutorialModal.vue'
 
-export function showReaderTutorial(kind: ReaderKind): Promise<void> {
-    return Modals.show(Self, { kind })
+export function showReaderTutorial(kind: ReaderKind, bookMode?: LayoutKind): Promise<void> {
+    return Modals.show(Self, { kind, bookMode })
 }
 </script>
 

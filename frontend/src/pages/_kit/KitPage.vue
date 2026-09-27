@@ -218,6 +218,41 @@
                 </KitGroup>
 
                 <KitGroup
+                    title="ATabs"
+                    description="Panels stay mounted and scroll on their own below the tab bar."
+                    :min="300"
+                >
+                    <KitDemo label="in a bounded column" stack>
+                        <div
+                            class="rounded-card border-outline-variant flex h-64 flex-col overflow-hidden border"
+                        >
+                            <ATabs v-model="kitTab" :options="KIT_TABS" label="Sections">
+                                <template #contents>
+                                    <ul class="p-4 text-sm">
+                                        <li v-for="c in CHAPTERS" :key="c.value" class="py-1">
+                                            {{ c.label }}
+                                        </li>
+                                    </ul>
+                                </template>
+                                <template #settings>
+                                    <div class="p-4">
+                                        <ASegmented
+                                            v-model="readerMode"
+                                            :options="READER_MODES"
+                                            label="Mode"
+                                            block
+                                        />
+                                    </div>
+                                </template>
+                                <template #about>
+                                    <p class="text-fg-muted p-4 text-sm">Nothing here.</p>
+                                </template>
+                            </ATabs>
+                        </div>
+                    </KitDemo>
+                </KitGroup>
+
+                <KitGroup
                     title="usePressAndHold"
                     description="Hold a button (pointer, Enter or Space) to repeat. A short press steps once."
                 >
@@ -1151,6 +1186,7 @@ import ASortHeader from '@/ui/ASortHeader.vue'
 import ASpinner from '@/ui/ASpinner.vue'
 import ASwitch from '@/ui/ASwitch.vue'
 import ATable from '@/ui/ATable.vue'
+import ATabs from '@/ui/ATabs.vue'
 import ATextField from '@/ui/ATextField.vue'
 import AToastRegion from '@/ui/AToastRegion.vue'
 import ATooltip from '@/ui/ATooltip.vue'
@@ -1270,6 +1306,11 @@ const READER_MODES = [
     { value: 'longstrip', label: 'Longstrip' },
     { value: 'auto', label: 'Auto' },
 ] as const
+const KIT_TABS = [
+    { value: 'contents', label: 'Contents' },
+    { value: 'settings', label: 'Settings' },
+    { value: 'about', label: 'About' },
+]
 const STATUS = [
     { value: 'reading', label: 'Reading', icon: IconBookOpen },
     { value: 'completed', label: 'Completed' },
@@ -1325,6 +1366,7 @@ const noValue = ref<string | null>(null)
 const visibility = ref<string>('show')
 const countMode = ref<string>('unread')
 const readerMode = ref<string>('auto')
+const kitTab = ref('contents')
 const columns = ref(6)
 const minusHold = usePressAndHold(() => columns.value > 1 && columns.value--)
 const plusHold = usePressAndHold(() => columns.value < 20 && columns.value++)

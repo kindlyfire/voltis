@@ -19,15 +19,15 @@ export function entryKey(entry: BookEntry): string {
     return `${entry.ch ?? ''}#${entry.frag ?? ''}`
 }
 
-/** Same page → the locator wins (resume mid-page); different page → the URL
+/** Same chapter → the locator wins (resume mid-page); different chapter → the URL
  * wins (deliberate deep link); neither → flow start. */
-export function chooseEntryPage(urlPage: number | null, locatorPage: number | null) {
-    if (urlPage != null && locatorPage != null) {
-        return { pageIndex: urlPage, useLocator: urlPage === locatorPage }
+export function chooseEntryChapter(urlChapter: number | null, locatorChapter: number | null) {
+    if (urlChapter != null && locatorChapter != null) {
+        return { chapterIndex: urlChapter, useLocator: urlChapter === locatorChapter }
     }
-    if (urlPage != null) return { pageIndex: urlPage, useLocator: false }
-    if (locatorPage != null) return { pageIndex: locatorPage, useLocator: true }
-    return { pageIndex: 0, useLocator: false }
+    if (urlChapter != null) return { chapterIndex: urlChapter, useLocator: false }
+    if (locatorChapter != null) return { chapterIndex: locatorChapter, useLocator: true }
+    return { chapterIndex: 0, useLocator: false }
 }
 
 export function isBookLocator(value: unknown): value is BookLocator {

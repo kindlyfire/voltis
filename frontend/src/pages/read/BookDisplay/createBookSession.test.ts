@@ -1,14 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Router } from 'vue-router'
+import { nextTick, reactive, ref } from 'vue'
+import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import { contentApi } from '@/utils/api/content'
 import type { BookLocator, BookStructure, Content, UserToContent } from '@/utils/api/types'
-import type { BookEntry } from './bookEntry'
-import {
-    createBookSession,
-    type BookAnchor,
-    type BookNav,
-    type BookSession,
-} from './createBookSession'
+import { parseBookEntry, type BookEntry } from './bookEntry'
+import { zBookSettings, type BookSettings } from './bookSettings'
+import { createBookSession, isEmptySlice, type BookSession } from './createBookSession'
+import { FakeNav } from './fakeNav'
 import { createBookNav } from './useBookDisplayStore'
 
 vi.mock('@/utils/api/content', () => ({
@@ -52,56 +50,11 @@ function content(progress: Record<string, unknown> = {}, status = 'reading'): Co
     return {
         id: 'c_1',
         file_mtime: '2026-01-01',
+        file_size: 1234,
         title: 'A Book',
         type: 'book',
         user_data: { starred: false, status, notes: null, rating: null, progress } as UserToContent,
     } as unknown as Content
-}
-
-/** A router and a history stack, so Back/Forward and canonicalization are
- * exercised the way the store wires them. */
-class FakeNav implements BookNav {
-    entries: Array<{ target: BookAnchor; locator: BookLocator | null }> = []
-    index = -1
-    session: BookSession | null = null
-
-    push(target: BookAnchor) {
-        this.entries.splice(this.index + 1)
-        this.entries.push({ target, locator: null })
-        this.index++
-        this.deliver()
-    }
-
-    replace(target: BookAnchor) {
-        if (this.index < 0) {
-            this.entries.push({ target, locator: null })
-            this.index = 0
-        } else {
-            this.entries[this.index]!.target = target
-        }
-        this.deliver()
-    }
-
-    saveLocator(locator: BookLocator) {
-        if (this.index < 0) return
-        this.entries[this.index]!.locator = locator
-    }
-
-    historyLocator(): BookLocator | null {
-        return this.entries[this.index]?.locator ?? null
-    }
-
-    go(delta: number) {
-        const next = this.index + delta
-        if (next < 0 || next >= this.entries.length) return
-        this.index = next
-        this.deliver()
-    }
-
-    private deliver() {
-        const target = this.entries[this.index]!.target
-        this.session?.setEntry({ ch: target.href, frag: target.fragment || null })
-    }
 }
 
 /** Stacked 100px blocks, so "first visible block" and sentinel visibility are
@@ -258,9 +211,22 @@ function mount() {
     return { host, sentinel }
 }
 
+let settings: BookSettings
+
+/** A text setting changed: the session captures the passage before the
+ * layout changes (the test's geometry changes after this). */
+async function changeText() {
+    settings.fontSize += 0.1
+    await nextTick()
+}
+
+function open(entry: Partial<BookEntry>, nav: FakeNav) {
+    return createBookSession('c_1', { ch: null, frag: null, ...entry }, nav, ref(settings))
+}
+
 function start(entry: Partial<BookEntry> = {}, nav = new FakeNav()) {
     const { host, sentinel } = mount()
-    const session = createBookSession('c_1', { ch: null, frag: null, ...entry }, nav)
+    const session = open(entry, nav)
     nav.session = session
     session.setElements({ host, sentinel })
     return { session, nav, host, sentinel }
@@ -277,6 +243,7 @@ function writes() {
 const computedStyle = window.getComputedStyle
 
 beforeEach(() => {
+    settings = reactive({ ...zBookSettings.parse({}), mode: 'scroll' })
     scrollY = 0
     charsPerLine = CHARS_PER_LINE
     Object.defineProperty(window, 'innerHeight', { value: 768, configurable: true })
@@ -318,12 +285,14 @@ describe('mounting', () => {
         const { session, host } = start()
         await flush()
 
-        expect(session.pages).toHaveLength(3)
+        expect(session.chapters).toHaveLength(3)
         expect(host.children).toHaveLength(1)
         const shadow = (host.children[0] as HTMLElement).shadowRoot!
         expect(shadow.querySelector('html > body')).not.toBeNull()
         expect(bodyOf(host).textContent).toContain('chapter one text')
         expect(bodyOf(host).textContent).not.toContain('chapter two text')
+        // Versioned by mtime and size: the response is cached as immutable.
+        expect(vi.mocked(contentApi.bookDocument).mock.calls[0]![2]).toBe('2026-01-01-1234')
         await session.dispose()
     })
 
@@ -332,7 +301,7 @@ describe('mounting', () => {
         const host = document.createElement('div')
         const sentinel = document.createElement('div')
         document.body.replaceChildren(host, sentinel)
-        const session = createBookSession('c_1', { ch: null, frag: null }, nav)
+        const session = open({}, nav)
         nav.session = session
         await flush()
         expect(host.children).toHaveLength(0)
@@ -360,18 +329,18 @@ describe('entry resolution', () => {
         vi.mocked(contentApi.get).mockResolvedValue(content({ book: locator }))
         const { session, nav } = start()
         await flush()
-        expect(session.pageIndex).toBe(1)
-        // And the URL is canonicalized onto the page it landed on.
+        expect(session.chapterIndex).toBe(1)
+        // And the URL is canonicalized onto the chapter it landed on.
         expect(nav.entries[nav.index]!.target).toEqual({ href: 'book.xhtml', fragment: 'c2' })
         await session.dispose()
     })
 
-    it('lets a deep link to another page override the saved locator', async () => {
+    it('lets a deep link to another chapter override the saved locator', async () => {
         const locator: BookLocator = { version: 1, href: 'book.xhtml', textOffset: 60 }
         vi.mocked(contentApi.get).mockResolvedValue(content({ book: locator }))
         const { session } = start({ ch: 'book.xhtml' })
         await flush()
-        expect(session.pageIndex).toBe(0)
+        expect(session.chapterIndex).toBe(0)
         await session.dispose()
     })
 
@@ -385,7 +354,7 @@ describe('entry resolution', () => {
         vi.mocked(contentApi.get).mockResolvedValue(content({ book: locator }))
         const { session } = start()
         await flush()
-        expect(session.pageIndex).toBe(2)
+        expect(session.chapterIndex).toBe(2)
         await session.dispose()
     })
 })
@@ -404,7 +373,7 @@ describe('navigation races', () => {
         ],
     }
 
-    it('keeps the last requested page when an earlier fetch resolves late', async () => {
+    it('keeps the last requested chapter when an earlier fetch resolves late', async () => {
         const gates: Record<string, ReturnType<typeof deferred<string>>> = {
             'a.xhtml': deferred<string>(),
             'b.xhtml': deferred<string>(),
@@ -416,11 +385,12 @@ describe('navigation races', () => {
         const { session, host, nav } = start()
         gates['a.xhtml']!.resolve('<html><body><p>first</p></body></html>')
         await flush()
-        expect(session.pageIndex).toBe(0)
+        expect(session.chapterIndex).toBe(0)
 
-        session.goToPage(1)
+        session.goToChapter(1)
         await flush()
-        session.goToPage(2)
+        // As Contents does: turns are dropped while a chapter is pending.
+        nav.push({ href: 'c.xhtml', fragment: '' })
         await flush()
 
         // Both destinations are still in flight; the abandoned one lands first.
@@ -429,7 +399,7 @@ describe('navigation races', () => {
         gates['b.xhtml']!.resolve('<html><body><p>second</p></body></html>')
         await flush()
 
-        expect(session.pageIndex).toBe(2)
+        expect(session.chapterIndex).toBe(2)
         expect(bodyOf(host).textContent).toContain('third')
         expect(bodyOf(host).textContent).not.toContain('second')
         expect(nav.entries[nav.index]!.target.href).toBe('c.xhtml')
@@ -449,8 +419,8 @@ describe('navigation races', () => {
         await flush()
 
         expect(session.loading).toBe(false)
-        expect(session.pages).toHaveLength(3)
-        expect(session.pageIndex).toBe(2)
+        expect(session.chapters).toHaveLength(3)
+        expect(session.chapterIndex).toBe(2)
         await session.dispose()
     })
 
@@ -486,7 +456,7 @@ describe('navigation races', () => {
 })
 
 describe('unreachable documents', () => {
-    it('keeps the mounted page when a linked document cannot be loaded', async () => {
+    it('keeps the mounted chapter when a linked document cannot be loaded', async () => {
         vi.mocked(contentApi.bookStructure).mockResolvedValue({
             spine: [
                 { href: 'book.xhtml', title: 'Book', linear: true, words: 10 },
@@ -504,7 +474,7 @@ describe('unreachable documents', () => {
 
         const { session, host } = start()
         await flush()
-        expect(session.pageIndex).toBe(0)
+        expect(session.chapterIndex).toBe(0)
 
         const link = bodyOf(host).querySelector('[data-book-href="gone.xhtml"]') as HTMLElement
         link.click()
@@ -512,7 +482,7 @@ describe('unreachable documents', () => {
 
         expect(session.error).toBeNull()
         expect(session.notice).toContain('missing')
-        expect(session.pageIndex).toBe(0)
+        expect(session.chapterIndex).toBe(0)
         expect(bodyOf(host).textContent).toContain('here')
         await session.dispose()
     })
@@ -595,12 +565,12 @@ describe('stale books without word counts', () => {
 })
 
 describe('completion', () => {
-    it('completes only after the reader produces input on the final page', async () => {
+    it('completes only after the reader produces input on the final chapter', async () => {
         const { session } = start()
         await flush()
-        session.goToPage(2)
+        session.goToChapter(2)
         await flush()
-        expect(session.pageIndex).toBe(2)
+        expect(session.chapterIndex).toBe(2)
 
         scrollTo(10)
         await flush()
@@ -615,7 +585,7 @@ describe('completion', () => {
     it('does not complete when the sentinel is above the viewport', async () => {
         const { session } = start()
         await flush()
-        session.goToPage(2)
+        session.goToChapter(2)
         await flush()
         scrollTo(5000)
         window.dispatchEvent(new Event('pointerdown'))
@@ -624,11 +594,11 @@ describe('completion', () => {
         expect(writes().every(([, payload]) => payload.status !== 'completed')).toBe(true)
     })
 
-    // On the last page, where everything but the standalone guard says complete.
+    // On the last chapter, where everything but the standalone guard says complete.
     it('never completes a book from standalone viewing', async () => {
         const { session, host } = start()
         await flush()
-        session.goToPage(2)
+        session.goToChapter(2)
         await flush()
         scrollTo(10)
         await flush()
@@ -660,13 +630,13 @@ describe('standalone documents', () => {
         const link = bodyOf(host).querySelector('[data-book-href="notes.xhtml"]') as HTMLElement
         link.click()
         await flush()
-        expect(session.standalone).toEqual({ href: 'notes.xhtml', title: 'Notes' })
+        expect(session.standalone).toMatchObject({ href: 'notes.xhtml', title: 'Notes' })
         expect(bodyOf(host).textContent).toContain('a note')
 
         session.closeStandalone()
         await flush()
         expect(session.standalone).toBeNull()
-        expect(session.pageIndex).toBe(0)
+        expect(session.chapterIndex).toBe(0)
         expect(scrollY).toBe(restoredAt(2 * BLOCK_HEIGHT))
         await session.dispose()
     })
@@ -708,20 +678,20 @@ describe('standalone documents', () => {
         await flush()
         expect(gone.session.standalone).toBeNull()
         expect(gone.session.notice).toContain('unavailable')
-        expect(gone.session.pageIndex).toBe(0)
+        expect(gone.session.chapterIndex).toBe(0)
         await gone.session.dispose()
     })
 })
 
 describe('internal links', () => {
-    it('follows a legacy name anchor onto its own page', async () => {
+    it('follows a legacy name anchor onto its own chapter', async () => {
         const { session, host } = start()
         await flush()
         const link = bodyOf(host).querySelector('[data-book-frag="legacy"]') as HTMLElement
         link.click()
         await flush()
 
-        expect(session.pageIndex).toBe(2)
+        expect(session.chapterIndex).toBe(2)
         expect(scrollY).toBe(2 * BLOCK_HEIGHT - 8)
         expect(session.notice).toBeNull()
         await session.dispose()
@@ -756,9 +726,9 @@ describe('history', () => {
         await vi.advanceTimersByTimeAsync(600)
         expect(nav.entries[0]!.locator?.anchorId).toBe('p1b')
 
-        session.goToPage(2)
+        session.goToChapter(2)
         await vi.advanceTimersByTimeAsync(300)
-        expect(session.pageIndex).toBe(2)
+        expect(session.chapterIndex).toBe(2)
 
         // Read on at the destination, then leave and come back both ways.
         await vi.advanceTimersByTimeAsync(50)
@@ -769,13 +739,13 @@ describe('history', () => {
         nav.go(-1)
         await vi.advanceTimersByTimeAsync(300)
         await flush()
-        expect(session.pageIndex).toBe(0)
+        expect(session.chapterIndex).toBe(0)
         expect(scrollY).toBe(restoredAt(2 * BLOCK_HEIGHT))
 
         nav.go(1)
         await vi.advanceTimersByTimeAsync(300)
         await flush()
-        expect(session.pageIndex).toBe(2)
+        expect(session.chapterIndex).toBe(2)
         expect(scrollY).toBe(restoredAt(BLOCK_HEIGHT))
         await session.dispose()
     })
@@ -808,28 +778,46 @@ describe('history adapter', () => {
         )
         expect(createBookNav(router, 'c_1').historyLocator()).toBeNull()
     })
+
+    it('runs the leave hook only while the entry is still the one being left', async () => {
+        const real = createRouter({
+            history: createMemoryHistory(),
+            routes: [{ path: '/r/:id', component: { template: '<div />' } }],
+        })
+        await real.push('/r/c_1')
+        const leave = vi.fn()
+        const remove = createBookNav(real, 'c_1').beforeLeave(leave)
+        history.replaceState({ current: '/r/c_1' }, '')
+        await real.push('/r/c_1?ch=b.xhtml')
+        expect(leave).toHaveBeenCalledOnce()
+        // As after Back: the browser entry has already moved.
+        history.replaceState({ current: '/r/c_1?ch=c.xhtml' }, '')
+        await real.push('/r/c_1?ch=d.xhtml')
+        expect(leave).toHaveBeenCalledOnce()
+        remove()
+    })
 })
 
 describe('paging backwards', () => {
-    it('lands at the bottom of the page it arrives at', async () => {
+    it('lands at the bottom of the chapter it arrives at', async () => {
         const { session } = start()
         await flush()
-        session.goToPage(1)
+        session.goToChapter(1)
         await flush()
-        expect(session.pageIndex).toBe(1)
+        expect(session.chapterIndex).toBe(1)
 
         Object.defineProperty(document.documentElement, 'scrollHeight', {
             value: 4000,
             configurable: true,
         })
-        session.goToPage(0, true)
+        session.goToChapter(0, true)
         await flush()
 
-        expect(session.pageIndex).toBe(0)
+        expect(session.chapterIndex).toBe(0)
         expect(scrollY).toBe(4000)
 
         // The landing is spent, so the next arrival is positioned normally.
-        session.goToPage(1)
+        session.goToChapter(1)
         await flush()
         expect(scrollY).toBe(0)
 
@@ -840,19 +828,19 @@ describe('paging backwards', () => {
     it('drops the landing when the turn is overtaken by another entry', async () => {
         const { session } = start()
         await flush()
-        session.goToPage(1)
+        session.goToChapter(1)
         await flush()
 
         Object.defineProperty(document.documentElement, 'scrollHeight', {
             value: 4000,
             configurable: true,
         })
-        session.goToPage(0, true)
-        // Same page, but a deliberate anchor: it must not inherit the landing.
+        session.goToChapter(0, true)
+        // Same chapter, but a deliberate anchor: it must not inherit the landing.
         session.setEntry({ ch: 'book.xhtml', frag: 'p1b' })
         await flush()
 
-        expect(session.pageIndex).toBe(0)
+        expect(session.chapterIndex).toBe(0)
         expect(scrollY).toBe(BLOCK_HEIGHT - 8)
 
         Reflect.deleteProperty(document.documentElement, 'scrollHeight')
@@ -896,7 +884,7 @@ async function startTimed() {
  * of reusing its anchor. */
 async function expectStableReflows(session: BookSession, y: number) {
     for (let i = 0; i < 3; i++) {
-        session.reflow()
+        await changeText()
         await vi.advanceTimersByTimeAsync(300)
         expect(scrollY).toBe(y)
         scrollTo(scrollY)
@@ -911,7 +899,7 @@ describe('reflow', () => {
         await vi.advanceTimersByTimeAsync(300)
         const before = session.percent
 
-        session.reflow()
+        await changeText()
         scrollY = 0
         await vi.advanceTimersByTimeAsync(300)
 
@@ -968,14 +956,14 @@ describe('reflow', () => {
         const anchor = 50 + 2 * CHARS_PER_LINE
         expect(nav.historyLocator()?.textOffset).toBe(anchor)
 
-        session.reflow()
+        await changeText()
         charsPerLine = 7
         scrollTo(scrollY - 3)
         await vi.advanceTimersByTimeAsync(600)
         expect(scrollY).toBe(restoredAt(BLOCK_HEIGHT, 2))
         expect(nav.historyLocator()?.textOffset).toBe(anchor)
 
-        session.reflow()
+        await changeText()
         charsPerLine = 6
         await vi.advanceTimersByTimeAsync(600)
         expect(scrollY).toBe(restoredAt(BLOCK_HEIGHT, 3))
@@ -996,7 +984,7 @@ describe('reflow anchor lifetime', () => {
         const started = await startTimed()
         scrollTo(150)
         await vi.advanceTimersByTimeAsync(600)
-        started.session.reflow()
+        await changeText()
         await vi.advanceTimersByTimeAsync(600)
         expect(started.nav.historyLocator()?.textOffset).toBe(THIRD_BLOCK)
         return started
@@ -1017,16 +1005,16 @@ describe('reflow anchor lifetime', () => {
 
     it('is dropped by a navigation', async () => {
         const { session, nav } = await reflowed()
-        session.goToPage(1)
+        session.goToChapter(1)
         await vi.advanceTimersByTimeAsync(600)
-        expect(session.pageIndex).toBe(1)
+        expect(session.chapterIndex).toBe(1)
         expect(nav.historyLocator()).toMatchObject({ textOffset: P2, anchorId: 'p2' })
 
         nav.go(-1)
         await vi.advanceTimersByTimeAsync(600)
         nav.go(1)
         await vi.advanceTimersByTimeAsync(600)
-        expect(session.pageIndex).toBe(1)
+        expect(session.chapterIndex).toBe(1)
         expect(scrollY).toBe(restoredAt(BLOCK_HEIGHT))
         await session.dispose()
     })
@@ -1186,7 +1174,31 @@ describe('write ordering', () => {
     })
 })
 
-describe('textless pages', () => {
+describe('empty slices', () => {
+    const body = (html: string) => {
+        const el = document.createElement('body')
+        el.innerHTML = html
+        return el
+    }
+
+    it('are whitespace and bare elements only', () => {
+        expect(isEmptySlice(body(' <div>\n</div> '), ['p { color: red }'])).toBe(true)
+        expect(isEmptySlice(body('<div>x</div>'), [])).toBe(false)
+        expect(isEmptySlice(body('<div><img src="a.png"></div>'), [])).toBe(false)
+    })
+
+    it('keeps a cover drawn with a background image', () => {
+        expect(
+            isEmptySlice(body('<div class="cover"></div>'), ['.cover { background: url(a.png) }'])
+        ).toBe(false)
+        expect(isEmptySlice(body('<div style="background-image: url(a.png)"></div>'), [])).toBe(
+            false
+        )
+        expect(isEmptySlice(body(''), ['@font-face { src: url(a.woff) }'])).toBe(true)
+    })
+})
+
+describe('textless chapters', () => {
     const PLATES: BookStructure = {
         spine: [{ href: 'plates.xhtml', title: 'Plates', linear: true, words: 0 }],
         toc: [
@@ -1205,13 +1217,13 @@ describe('textless pages', () => {
         )
     }
 
-    // Both plates sit at offset 0, so only the anchor can tell the pages apart.
+    // Both plates sit at offset 0, so only the anchor can tell the chapters apart.
     it('restores the second plate from its anchor', async () => {
         withPlates('b')
         const { session } = start()
         await flush()
-        expect(session.pages).toHaveLength(2)
-        expect(session.pageIndex).toBe(1)
+        expect(session.chapters).toHaveLength(2)
+        expect(session.chapterIndex).toBe(1)
         await session.dispose()
     })
 
@@ -1219,7 +1231,7 @@ describe('textless pages', () => {
         withPlates('a')
         const { session } = start()
         await flush()
-        expect(session.pageIndex).toBe(0)
+        expect(session.chapterIndex).toBe(0)
         await session.dispose()
     })
 })
@@ -1258,14 +1270,14 @@ describe('surviving a failed navigation', () => {
         })
     }
 
-    it('keeps capturing on the page it kept after Next fails', async () => {
+    it('keeps capturing on the chapter it kept after Next fails', async () => {
         withMissingSecondDocument()
         const { session } = start()
         await flush()
 
-        session.goToPage(1)
+        session.goToChapter(1)
         await flush()
-        expect(session.pageIndex).toBe(0)
+        expect(session.chapterIndex).toBe(0)
         expect(session.error).toBeNull()
 
         scrollTo(150)
@@ -1275,7 +1287,7 @@ describe('surviving a failed navigation', () => {
         expect(writes().at(-1)![1].progress!.book).toMatchObject({ anchorId: 'p1b' })
     })
 
-    it('hands the page back when a link fails mid-settlement', async () => {
+    it('hands the chapter back when a link fails mid-settlement', async () => {
         withMissingSecondDocument()
         vi.spyOn(HTMLImageElement.prototype, 'complete', 'get').mockReturnValue(false)
         vi.mocked(contentApi.bookDocument).mockImplementation(async (_id, href) => {
@@ -1313,7 +1325,7 @@ describe('disposal', () => {
         await flush()
 
         scrollTo(150)
-        session.reflow()
+        await changeText()
         await session.dispose()
 
         const stamped = JSON.stringify(nav.entries)
@@ -1327,7 +1339,7 @@ describe('disposal', () => {
     })
 })
 
-describe('merged pages', () => {
+describe('merged chapters', () => {
     const MERGED: BookStructure = {
         spine: [
             { href: 'a.xhtml', title: 'A', linear: true, words: 10 },
@@ -1351,7 +1363,7 @@ describe('merged pages', () => {
         const { session, host } = start()
         await flush()
 
-        expect(session.pages).toHaveLength(1)
+        expect(session.chapters).toHaveLength(1)
         expect(host.children).toHaveLength(2)
         // The second slice's band, not the identically-anchored first one.
         expect(scrollY).toBe(SLICE_HEIGHT - 8)
@@ -1384,7 +1396,7 @@ describe('recovering from a failed Contents selection', () => {
         vi.mocked(contentApi.bookDocument).mockImplementation((_id, href) =>
             href === 'notes.xhtml'
                 ? gate.promise
-                : // only the later page carries the image that blocks settling
+                : // only the later chapter carries the image that blocks settling
                   Promise.resolve(DOCUMENTS[href]!.replace('<p id="p2">', '<img /><p id="p2">'))
         )
 
@@ -1396,7 +1408,7 @@ describe('recovering from a failed Contents selection', () => {
         link.click()
         await flush()
 
-        session.goToPage(1)
+        session.goToChapter(1)
         await flush()
         expect(session.standalone).toBeNull()
         expect(session.restoring).toBe(true)
@@ -1432,15 +1444,15 @@ describe('body as a target', () => {
         const { session, host } = start({ ch: 'b.xhtml', frag: 'chapter' })
         await flush()
 
-        expect(session.pages).toHaveLength(2)
-        expect(session.pageIndex).toBe(1)
+        expect(session.chapters).toHaveLength(2)
+        expect(session.chapterIndex).toBe(1)
         expect(session.notice).toBeNull()
         expect(bodyOf(host).textContent).toContain('second')
         await session.dispose()
     })
 })
 
-describe('atomic page transitions', () => {
+describe('atomic chapter transitions', () => {
     const TWO: BookStructure = {
         spine: [
             { href: 'a.xhtml', title: 'A', linear: true, words: 10 },
@@ -1452,7 +1464,7 @@ describe('atomic page transitions', () => {
         ],
     }
 
-    it('does not complete the book after a cancelled move to the final page', async () => {
+    it('does not complete the book after a cancelled move to the final chapter', async () => {
         const gate = deferred<string>()
         vi.mocked(contentApi.bookStructure).mockResolvedValue(TWO)
         vi.mocked(contentApi.bookDocument).mockImplementation((_id, href) => {
@@ -1467,12 +1479,12 @@ describe('atomic page transitions', () => {
 
         const { session, host } = start()
         await flush()
-        expect(session.pageIndex).toBe(0)
+        expect(session.chapterIndex).toBe(0)
 
-        session.goToPage(1)
+        session.goToChapter(1)
         await flush()
 
-        // The final page never mounts: a link still on screen cancels it, and
+        // The final chapter never mounts: a link still on screen cancels it, and
         // then fails itself.
         const link = bodyOf(host).querySelector('[data-book-href="nowhere.xhtml"]') as HTMLElement
         link.click()
@@ -1480,7 +1492,7 @@ describe('atomic page transitions', () => {
         gate.resolve('<html><body><p>second</p></body></html>')
         await flush()
 
-        expect(session.pageIndex).toBe(0)
+        expect(session.chapterIndex).toBe(0)
         expect(bodyOf(host).textContent).toContain('first')
 
         window.dispatchEvent(new Event('pointerdown'))
@@ -1558,5 +1570,192 @@ describe('disposal during a pending mount', () => {
             new Promise(resolve => setTimeout(() => resolve('hung'), 100)),
         ])
         expect(outcome).toBe('settled')
+    })
+})
+
+describe('chapter crossing', () => {
+    const THREE: BookStructure = {
+        spine: [
+            { href: 'a.xhtml', title: 'A', linear: true, words: 10 },
+            { href: 'b.xhtml', title: 'B', linear: true, words: 10 },
+            { href: 'c.xhtml', title: 'C', linear: true, words: 10 },
+        ],
+        toc: [
+            { id: 'a', title: 'A', depth: 0, href: 'a.xhtml', fragment: '' },
+            { id: 'b', title: 'B', depth: 0, href: 'b.xhtml', fragment: '' },
+            { id: 'c', title: 'C', depth: 0, href: 'c.xhtml', fragment: '' },
+        ],
+    }
+    const text = (href: string) => `<html><body><p id="${href}">in ${href}</p></body></html>`
+
+    it('drops repeated turns while the crossing is pending, then captures in the new chapter', async () => {
+        const gate = deferred<string>()
+        vi.mocked(contentApi.bookStructure).mockResolvedValue(THREE)
+        vi.mocked(contentApi.bookDocument).mockImplementation(async (_id, href) =>
+            href === 'b.xhtml' ? gate.promise : text(href)
+        )
+        const { session, host, nav } = start()
+        await flush()
+        const pushes = nav.entries.length
+
+        session.goToChapter(1)
+        await flush()
+        // Held `.`: the chapter index is still the old one, so it asks for B again.
+        session.goToChapter(session.chapterIndex + 1)
+        session.goToChapter(session.chapterIndex + 1)
+        expect(nav.entries.length).toBe(pushes + 1)
+
+        gate.resolve(text('b.xhtml'))
+        await flush()
+        expect(session.chapterIndex).toBe(1)
+        expect(bodyOf(host).textContent).toContain('in b.xhtml')
+        expect(session.restoring).toBe(false)
+
+        scrollTo(0)
+        await session.dispose()
+        expect(writes().at(-1)![1].progress!.book).toMatchObject({ href: 'b.xhtml' })
+    })
+
+    it('crosses again once the pending chapter has committed', async () => {
+        vi.mocked(contentApi.bookStructure).mockResolvedValue(THREE)
+        vi.mocked(contentApi.bookDocument).mockImplementation(async (_id, href) => text(href))
+        const { session } = start()
+        await flush()
+        session.goToChapter(1)
+        await flush()
+        session.goToChapter(session.chapterIndex + 1)
+        await flush()
+        expect(session.chapterIndex).toBe(2)
+        await session.dispose()
+    })
+
+    it('prefetches the next chapter when idle, so crossing fetches nothing', async () => {
+        const idle: Array<() => void> = []
+        vi.stubGlobal('requestIdleCallback', (job: () => void) => idle.push(job))
+        vi.stubGlobal('cancelIdleCallback', () => {})
+        vi.mocked(contentApi.bookStructure).mockResolvedValue(THREE)
+        vi.mocked(contentApi.bookDocument).mockImplementation(async (_id, href) => text(href))
+        const { session } = start({ ch: 'b.xhtml' })
+        await flush()
+        const fetched = () => vi.mocked(contentApi.bookDocument).mock.calls.map(call => call[1])
+        expect(fetched()).toEqual(['b.xhtml'])
+
+        idle.shift()!()
+        await flush()
+        expect(fetched()).toEqual(['b.xhtml', 'c.xhtml', 'a.xhtml'])
+
+        session.goToChapter(2)
+        await flush()
+        expect(session.chapterIndex).toBe(2)
+        expect(fetched()).toHaveLength(3)
+        await session.dispose()
+        vi.unstubAllGlobals()
+    })
+
+    it('clears the crossing when the router refuses the push', async () => {
+        vi.mocked(contentApi.bookStructure).mockResolvedValue(THREE)
+        vi.mocked(contentApi.bookDocument).mockImplementation(async (_id, href) => text(href))
+        const router = createRouter({
+            history: createMemoryHistory(),
+            routes: [{ path: '/r/:id', component: { template: '<div />' } }],
+        })
+        await router.push('/r/c_1')
+        let refuse = false
+        router.beforeEach(() => !refuse)
+        mount()
+        const session = createBookSession(
+            'c_1',
+            { ch: null, frag: null },
+            createBookNav(router, 'c_1'),
+            ref(settings)
+        )
+        router.afterEach((to, _from, failure) => {
+            if (!failure) session.setEntry(parseBookEntry(to.query))
+        })
+        session.setElements({ host: document.body.children[0] as HTMLElement, sentinel: null })
+        await flush()
+        await router.isReady()
+
+        refuse = true
+        session.goToChapter(1)
+        await flush()
+        expect(session.chapterIndex).toBe(0)
+
+        refuse = false
+        session.goToChapter(1)
+        await flush()
+        await flush()
+        expect(session.chapterIndex).toBe(1)
+        await session.dispose()
+    })
+})
+
+describe('failed documents', () => {
+    it('fetches a document again after a failed attempt', async () => {
+        let failures = 1
+        vi.mocked(contentApi.bookStructure).mockResolvedValue({
+            spine: [
+                { href: 'a.xhtml', title: 'A', linear: true, words: 10 },
+                { href: 'b.xhtml', title: 'B', linear: true, words: 10 },
+            ],
+            toc: [
+                { id: 'a', title: 'A', depth: 0, href: 'a.xhtml', fragment: '' },
+                { id: 'b', title: 'B', depth: 0, href: 'b.xhtml', fragment: '' },
+            ],
+        })
+        vi.mocked(contentApi.bookDocument).mockImplementation(async (_id, href) => {
+            if (href === 'b.xhtml' && failures-- > 0) throw new Error('503')
+            return `<html><body><p>in ${href}</p></body></html>`
+        })
+        const { session, host } = start()
+        await flush()
+
+        session.goToChapter(1)
+        await flush()
+        expect(session.chapterIndex).toBe(0)
+        expect(session.notice).toBeTruthy()
+
+        session.goToChapter(1)
+        await flush()
+        expect(session.chapterIndex).toBe(1)
+        expect(bodyOf(host).textContent).toContain('in b.xhtml')
+        expect(session.notice).toBeNull()
+        await session.dispose()
+    })
+
+    it('puts the route back on the chapter shown, so a fragment target can be retried', async () => {
+        // The second chapter opens mid-b and runs through c, which fails once.
+        let failures = 1
+        vi.mocked(contentApi.bookStructure).mockResolvedValue({
+            spine: ['a', 'b', 'c', 'd'].map(id => ({
+                href: `${id}.xhtml`,
+                title: id,
+                linear: true,
+                words: 10,
+            })),
+            toc: [
+                { id: 'a', title: 'A', depth: 0, href: 'a.xhtml', fragment: '' },
+                { id: 'b', title: 'B', depth: 0, href: 'b.xhtml', fragment: 'b1' },
+                { id: 'd', title: 'D', depth: 0, href: 'd.xhtml', fragment: '' },
+            ],
+        })
+        vi.mocked(contentApi.bookDocument).mockImplementation(async (_id, href) => {
+            if (href === 'c.xhtml' && failures-- > 0) throw new Error('503')
+            return `<html><body><p id="${href[0]}1">in ${href}</p></body></html>`
+        })
+        const { session, host, nav } = start()
+        await flush()
+
+        session.goToChapter(1)
+        await flush()
+        expect(session.chapterIndex).toBe(0)
+        expect(session.notice).toBeTruthy()
+        expect(nav.entries[nav.index]!.target).toEqual({ href: 'a.xhtml', fragment: '' })
+
+        session.goToChapter(1)
+        await flush()
+        expect(session.chapterIndex).toBe(1)
+        expect(bodyOf(host, 1).textContent).toContain('in c.xhtml')
+        await session.dispose()
     })
 })

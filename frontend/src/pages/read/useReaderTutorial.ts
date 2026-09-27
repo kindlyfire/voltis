@@ -1,5 +1,6 @@
-import { watch, type Ref } from 'vue'
+import { toValue, watch, type MaybeRefOrGetter, type Ref } from 'vue'
 import { usersApi } from '@/utils/api/users'
+import type { LayoutKind } from './BookDisplay/readingLayout'
 import { showReaderTutorial } from './ReaderTutorialModal.vue'
 import type { ReaderKind } from './shortcuts'
 
@@ -7,7 +8,11 @@ const FLAG = { comic: 'comicReader', book: 'bookReader' } as const
 
 /** Shows the tutorial once per reader, then records it server-side. A failed
  * save only means it shows again next time. */
-export function useReaderTutorial(kind: ReaderKind, ready: Ref<boolean>) {
+export function useReaderTutorial(
+    kind: ReaderKind,
+    ready: Ref<boolean>,
+    bookMode?: MaybeRefOrGetter<LayoutKind | undefined>
+) {
     const qMe = usersApi.useMe()
     const patch = usersApi.usePatchPreferences()
     const key = FLAG[kind]
@@ -20,7 +25,7 @@ export function useReaderTutorial(kind: ReaderKind, ready: Ref<boolean>) {
             // Set before the await: the reader stays mounted across
             // sibling-entry navigation, which flips `ready` false→true again.
             shown = true
-            void showReaderTutorial(kind).then(() => {
+            void showReaderTutorial(kind, toValue(bookMode)).then(() => {
                 patch.mutate({ tutorials: { [key]: true } })
             })
         },

@@ -57,6 +57,11 @@ function classify(p: NodePath, start: NodePath | null, end: NodePath | null) {
     return partial ? 'partial' : 'in'
 }
 
+/** Whether the node at `p` intersects `[start, end)`. */
+export function pathInRange(p: NodePath, start: NodePath | null, end: NodePath | null): boolean {
+    return classify(p, start, end) !== 'out'
+}
+
 /** Drops every subtree wholly outside `[start, end)`, keeping the ancestors
  * that intersect it. Boundaries always sit before an element, so no text node
  * is ever split. Mutates `root`, which must be a clone. */
@@ -138,12 +143,6 @@ export interface TextPoint {
     index: number
 }
 
-/** Collapses the prefix itself: `contribution` counts a whitespace-only prefix
- * as 0, which breaks the round trip for `"\n  Hello"`. */
-export function textOffsetOfPoint(root: Node, node: Text, index: number): number {
-    return textOffsetOfNode(root, node) + node.data.slice(0, index).replace(/\s+/g, ' ').length
-}
-
 function rawIndex(data: string, collapsed: number): number {
     let count = 0
     for (let i = 0; i < data.length; i++) {
@@ -153,30 +152,71 @@ function rawIndex(data: string, collapsed: number): number {
     return data.length
 }
 
-/** The first non-whitespace character at or after `offset`: block-start
- * offsets often land on indentation, which has no rect of its own. Null when
- * the offset falls outside the document, so a stale locator falls back to its
- * anchor rather than silently landing on the last paragraph. */
-export function textPointAtOffset(root: Node, offset: number): TextPoint | null {
-    if (offset < 0) return null
+/** The text offsets of a tree whose text no longer changes, such as a mounted
+ * slice: built once, so lookups are O(log n) rather than a walk from the
+ * start. */
+export interface TextIndex {
+    offsetOfNode(node: Node): number
+    /** Collapses the prefix itself: `contribution` counts a whitespace-only
+     * prefix as 0, which breaks the round trip for `"\n  Hello"`. */
+    offsetOfPoint(node: Text, index: number): number
+    /** The first non-whitespace character at or after `offset`: block-start
+     * offsets often land on indentation, which has no rect of its own. Null
+     * when the offset falls outside the document, so a stale locator falls
+     * back to its anchor rather than silently landing on the last paragraph. */
+    pointAtOffset(offset: number): TextPoint | null
+}
+
+export function createTextIndex(root: Node): TextIndex {
+    const texts: Text[] = []
+    const at = new Map<Text, number>()
+    /** `starts[i]` is the offset where `texts[i]` begins; one extra entry holds
+     * the total. */
+    const starts = [0]
     const walker = textWalkerFor(root)
-    let total = 0
-    let found = false
-    let text: Node | null
-    while ((text = walker.nextNode())) {
-        const data = (text as Text).data
-        let from = 0
-        if (!found) {
-            const length = contribution(data)
-            if (offset >= total + length) {
-                total += length
-                continue
-            }
-            found = true
-            from = rawIndex(data, offset - total)
-        }
-        const index = data.slice(from).search(/\S/)
-        if (index !== -1) return { node: text as Text, index: from + index }
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        at.set(node as Text, texts.length)
+        texts.push(node as Text)
+        starts.push(starts.at(-1)! + contribution((node as Text).data))
     }
-    return null
+
+    /** The first `i` in `[0, texts.length]` for which `test(i)` holds, given
+     * that it holds for every later `i` too. */
+    const search = (test: (i: number) => boolean) => {
+        let lo = 0
+        let hi = texts.length
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1
+            if (test(mid)) hi = mid
+            else lo = mid + 1
+        }
+        return lo
+    }
+
+    const offsetOfNode = (node: Node) => {
+        if (node === root) return 0
+        const i =
+            at.get(node as Text) ??
+            search(
+                i => !(node.compareDocumentPosition(texts[i]!) & Node.DOCUMENT_POSITION_PRECEDING)
+            )
+        return starts[i]!
+    }
+
+    return {
+        offsetOfNode,
+        offsetOfPoint: (node, index) =>
+            offsetOfNode(node) + node.data.slice(0, index).replace(/\s+/g, ' ').length,
+        pointAtOffset(offset) {
+            if (offset < 0) return null
+            const first = search(i => starts[i + 1]! > offset)
+            for (let i = first; i < texts.length; i++) {
+                const data = texts[i]!.data
+                const from = i === first ? rawIndex(data, offset - starts[i]!) : 0
+                const index = data.slice(from).search(/\S/)
+                if (index !== -1) return { node: texts[i]!, index: from + index }
+            }
+            return null
+        },
+    }
 }

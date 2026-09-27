@@ -38,6 +38,20 @@ const topLayer = computed(() =>
 /** The main-nav drawer is open (it covers page drawers, so the reader leaves its drawer alone). */
 export const navDrawerOpen = computed(() => layers.value.some(l => l.kind === 'nav-drawer'))
 
+// While a drawer is open, the page doesn't scroll: the scrim covers it, but its scrollbar at the
+// viewport edge would stay draggable. The gutter stays reserved so the page doesn't reflow, but
+// only if there was a scrollbar: an unscrolled page would gain one. See ADrawer's global styles.
+watch(
+    () => layers.value.some(l => RANK[l.kind] < RANK.dialog),
+    lock => {
+        const html = document.documentElement
+        // Measured before the lock hides the scrollbar.
+        html.classList.toggle('drawer-lock-gutter', lock && innerWidth > html.clientWidth)
+        html.classList.toggle('drawer-lock', lock)
+    },
+    { flush: 'sync' }
+)
+
 /** Registers an overlay while `open` is true. `isTop()` tells whether it's the topmost one. */
 export function useOverlayLayer(kind: Layer['kind'], open: MaybeRefOrGetter<boolean>) {
     const id = Symbol(kind)
