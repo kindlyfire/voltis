@@ -1,0 +1,133 @@
+[
+  {
+    "id": 5012,
+    "state": "active",
+    "merged_with": null,
+    "canonical_url": "https://mangabaka.org/manga/5012/Ascendance-of-a-Bookworm-I-ll-do-anything-to-become-a-librarian-Part-2-I-ll-even-join-the",
+    "authors": [
+      "Miya Kazuki",
+      "Suzuka"
+    ],
+    "artists": [
+      "Suzuka"
+    ],
+    "status": "completed",
+    "type": "manga",
+    "final_volume": 13,
+    "published": {
+      "start_date": "2018-09-24"
+    },
+    "titles": [
+      {
+        "language": "ko",
+        "title": "책벌레의 하극상 제2부",
+        "traits": [
+          "official"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "en",
+        "title": "Ascendance of a Bookworm: I’ll do anything to become a librarian!—Part 2: I’ll even join the temple to read books!",
+        "traits": [
+          "official"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "en",
+        "title": "Ascendance of a Bookworm: Part 2",
+        "traits": [
+          "alternative"
+        ],
+        "is_primary": false
+      },
+      {
+        "language": "vi",
+        "title": "Cuộc nổi dậy của nàng mọt sách ~Để trở thành thủ thư, tôi sẽ làm mọi cách~ Phần 2: Vì sách, tôi trở thành nữ tu!",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "es",
+        "title": "El Ratón de Biblioteca: Temporada 2",
+        "traits": [
+          "official"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "ja-Latn",
+        "title": "Honzuki no Gekokujou: Dai-2 Bu",
+        "traits": [
+          "alternative"
+        ],
+        "is_primary": false
+      },
+      {
+        "language": "ja-Latn",
+        "title": "Honzuki no Gekokujou: Part 2",
+        "traits": [
+          "alternative"
+        ],
+        "is_primary": false
+      },
+      {
+        "language": "ja-Latn",
+        "title": "Honzuki no Gekokujou: Shisho ni Naru tame ni wa Shudan o Erandeiraremasen—Dai-2 Bu: Hon no Tamenara Miko ni Naru!",
+        "traits": [
+          "native"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "ja-Latn",
+        "title": "Honzuki no Gekokujou: Shisho ni Naru tame ni wa Shudan o Erandeiraremasen—Daini Bu: Hon no Tamenara Miko ni Naru!",
+        "traits": [
+          "alternative"
+        ],
+        "is_primary": false
+      },
+      {
+        "language": "fr",
+        "title": "La Petite Faiseuse de livres – Ascendance of a Bookworm : Deuxième arc",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "fr",
+        "title": "La Petite Faiseuse de Livres: Deuxième arc",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "ru",
+        "title": "Власть книжного червя: часть вторая",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "th",
+        "title": "การปฏิวัติของสาวน้อยหนอนหนังสือ ภาค 2",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "ja",
+        "title": "本好きの下剋上　～司書になるためには手段を選んでいられません～　第二部　「本のためなら巫女になる！」",
+        "traits": [
+          "native"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "ja",
+        "title": "本好きの下剋上　第二部",
+        "traits": [
+          "alternative"
+        ],
+        "is_primary": false
+      }
+    ]
+  }
+]

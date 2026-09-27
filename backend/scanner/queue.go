@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 
 	"voltis/db"
 	"voltis/lib/fp"
 	"voltis/lib/tasks"
+	"voltis/metadata"
 	"voltis/models"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -20,15 +22,23 @@ type Queue struct {
 	def     *tasks.TaskDef
 }
 
-func NewQueue(manager *tasks.Manager, pool *pgxpool.Pool, notify Notifier) *Queue {
-	def := NewScanTask(notify)
+func NewQueue(manager *tasks.Manager, pool *pgxpool.Pool, notify Notifier, store *metadata.Store) *Queue {
+	def := NewScanTask(notify, store)
 	manager.Register(def)
 	return &Queue{manager: manager, pool: pool, def: def}
 }
 
+// Scanning reports whether a scan of the library runs or waits.
+func (q *Queue) Scanning(libraryID string) bool {
+	return slices.ContainsFunc(q.manager.Pending(TaskName), func(p tasks.Pending) bool {
+		si, ok := p.Input.(ScanInput)
+		return ok && si.LibraryID == libraryID
+	})
+}
+
 func (q *Queue) Enqueue(libraryID string, force bool, filterPaths []string) (string, error) {
 	if len(filterPaths) == 0 {
-		for _, p := range q.manager.Pending("scan_library") {
+		for _, p := range q.manager.Pending(TaskName) {
 			si, ok := p.Input.(ScanInput)
 			if ok && si.LibraryID == libraryID && len(si.FilterPaths) == 0 {
 				slog.Info("[scanner] scan already queued", "library", libraryID)

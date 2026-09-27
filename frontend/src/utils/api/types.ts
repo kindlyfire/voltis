@@ -1,3 +1,5 @@
+import type { DisplayMetadata } from './metadata'
+
 export interface LibraryPreference {
     visibility?: 'show' | 'hide' | 'overflow'
 }
@@ -103,6 +105,8 @@ export type BookSeriesInference = 'off' | 'conservative'
 
 export interface LibrarySettings {
     book_series_inference: BookSeriesInference
+    /** Match series with metadata providers in the background; off by default. */
+    auto_match: boolean
 }
 
 export interface Library {
@@ -217,6 +221,37 @@ export interface BrokenRefsFixRequest {
     update?: Record<string, string>
 }
 
+/** Content an orphan can move to. */
+export interface OrphanTarget {
+    uri: string
+    title: string | null
+}
+
+/** Metadata and provider links kept at a URI no content holds. */
+export interface OrphanedMetadata {
+    uri: string
+    title: string | null
+    /** Overridden field keys. */
+    overrides: string[]
+    links: {
+        provider: string
+        state: 'review' | 'unmatched' | 'linked' | 'ignored'
+        external_id: string | null
+        rejected: string[]
+    }[]
+}
+
+export interface OrphansSummaryItem {
+    library_id: string
+    count: number
+}
+
+export interface OrphansFixRequest {
+    delete?: string[]
+    /** Orphaned URI -> content URI. */
+    move?: Record<string, string>
+}
+
 export interface UserToContentUpdate {
     starred?: boolean
     status?: ReadingStatus | null
@@ -229,48 +264,10 @@ export interface ContentFileData {
     pages?: Array<[filename: string, width: number, height: number]>
 }
 
-export interface StaffEntry {
-    name: string
-    role: string
-}
-
-export interface ContentMetadata {
-    title?: string
-    description?: string
-    staff?: StaffEntry[]
-    publisher?: string
-    language?: string
-    publication_date?: string
-    series?: string
-    number?: string
-    volume?: number
-    count?: number
-    genre?: string
-    age_rating?: string
-    manga?: string
-    format?: string
-    imprint?: string
-    web?: string
-    notes?: string
-    scan_information?: string
-    black_and_white?: string
-    series_group?: string
-    alternate_series?: string
-    alternate_number?: string
-    alternate_count?: number
-    series_index?: number
-    mangabaka_id?: number
-}
-
-export interface MetadataLayer {
-    source: string
-    data: ContentMetadata
-    raw: Record<string, unknown>
-}
-
-export interface MetadataLayersResponse {
-    merged: ContentMetadata
-    layers: MetadataLayer[]
+/** A content's cover as the API versions it; see `coverUrl`. */
+export interface Cover {
+    id: string
+    cover_version: string | null
 }
 
 export interface Content {
@@ -284,10 +281,11 @@ export interface Content {
     file_mtime: string | null
     file_size: number | null
     cover_uri: string | null
+    cover_version: string | null
     type: ContentType
     order: number | null
     order_parts: number[]
-    meta: ContentMetadata
+    meta: DisplayMetadata
     file_data: ContentFileData
     parent_id: string | null
     library_id: string
@@ -362,7 +360,7 @@ export interface CustomListPartial {
     visibility: CustomListVisibility
     user_id: string
     entry_count: number | null
-    cover_content_ids: string[]
+    covers: Cover[]
 }
 
 export interface CustomListEntry {
@@ -376,7 +374,7 @@ export interface CustomListEntry {
     order: number | null
 }
 
-export type CustomList = Omit<CustomListPartial, 'cover_content_ids'> & {
+export type CustomList = Omit<CustomListPartial, 'covers'> & {
     entries: CustomListEntry[]
 }
 
@@ -441,8 +439,7 @@ export interface ScanProgress {
 export interface ScanRecent {
     id: string
     title: string
-    has_cover: boolean
-    file_mtime: string | null
+    cover_version: string | null
     added: number
     updated: number
     removed: number
@@ -504,19 +501,4 @@ export interface TaskListParams {
     offset?: number
     sort?: 'created_at' | 'updated_at'
     sort_order?: 'asc' | 'desc'
-}
-
-export interface MangaBakaSearchResult {
-    id: number
-    title: string
-    type: string
-    status: string
-    year: number | null
-    cover_url: string | null
-    authors: string[]
-    genres: string[]
-}
-
-export interface MangaBakaSearchResponse {
-    data: MangaBakaSearchResult[]
 }

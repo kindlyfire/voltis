@@ -11,8 +11,9 @@ import (
 
 	"voltis/db"
 	"voltis/db/dbtest"
+	"voltis/metadata"
 	"voltis/models"
-	"voltis/models/metaraw"
+	"voltis/providers"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -28,14 +29,12 @@ func fsFile(path string, mtime time.Time, size int64) FSFile {
 	return FSFile{Path: path, Mtime: mtime, Size: size}
 }
 
-func rawMeta(m models.Metadata) metaraw.MetadataRaw {
-	return metaraw.MetadataRaw{File: &metaraw.RawContainer[models.Metadata]{Raw: m}}
-}
+var testStore = metadata.NewStore(providers.NewRegistry())
 
-func comicItem(dir, number string, meta models.Metadata) Result {
-	meta.Number = number
+func comicItem(dir, number string, meta metadata.Fields) Result {
+	meta.Number = metadata.Val(number)
 	file := fsFile(dir+"/ch"+number+".cbz", baseTime, 10)
-	return Result{File: file, Item: classifyComic(file, meta, 0, testPages)}
+	return Result{File: file, Item: classifyComic(file, meta, nil, testPages)}
 }
 
 type recordingQuerier struct {
@@ -135,14 +134,16 @@ func seedContent(t *testing.T, pool *pgxpool.Pool, rows ...models.Content) {
 	}
 }
 
-func seedMetadata(t *testing.T, q db.Querier, libraryID, uri string, mr metaraw.MetadataRaw) {
+func seedMetadata(t *testing.T, q db.Querier, libraryID, uri string, doc metadata.Doc) {
 	t.Helper()
-	merged, _ := json.Marshal(mr.Merge())
+	doc.V = 2
+	data, _ := json.Marshal(doc.Local())
+	raw, _ := json.Marshal(doc)
 	exec(t, q, `
 		INSERT INTO content_metadata (uri, library_id, data, data_raw, updated_at)
 		VALUES ($1, $2, $3, $4, now())
 		ON CONFLICT (uri, library_id) DO UPDATE SET data = EXCLUDED.data, data_raw = EXCLUDED.data_raw
-	`, uri, libraryID, merged, mr.Dump())
+	`, uri, libraryID, data, raw)
 }
 
 func readContent(t *testing.T, pool *pgxpool.Pool, id string) models.Content {
@@ -154,15 +155,26 @@ func readContent(t *testing.T, pool *pgxpool.Pool, id string) models.Content {
 	return c
 }
 
-func readMeta(t *testing.T, pool *pgxpool.Pool, libraryID, uri string) metaraw.MetadataRaw {
+func readMeta(t *testing.T, pool *pgxpool.Pool, libraryID, uri string) metadata.Doc {
 	t.Helper()
-	var raw json.RawMessage
+	var doc metadata.Doc
 	err := pool.QueryRow(context.Background(),
-		"SELECT data_raw FROM content_metadata WHERE library_id = $1 AND uri = $2", libraryID, uri).Scan(&raw)
+		"SELECT data_raw FROM content_metadata WHERE library_id = $1 AND uri = $2", libraryID, uri).Scan(&doc)
 	if err != nil {
 		t.Fatalf("read metadata %s: %v", uri, err)
 	}
-	return metaraw.From(raw)
+	return doc
+}
+
+func readData(t *testing.T, pool *pgxpool.Pool, libraryID, uri string) metadata.Fields {
+	t.Helper()
+	var data metadata.Fields
+	err := pool.QueryRow(context.Background(),
+		"SELECT data FROM content_metadata WHERE library_id = $1 AND uri = $2", libraryID, uri).Scan(&data)
+	if err != nil {
+		t.Fatalf("read data %s: %v", uri, err)
+	}
+	return data
 }
 
 func contentIDByURI(t *testing.T, pool *pgxpool.Pool, libraryID, uri string) string {
@@ -286,7 +298,7 @@ func (r *scanRun) recordCommit(final bool) (*recordingTx, Counts, []RecentEntry,
 	err := db.WithTx(context.Background(), r.pool, func(tx pgx.Tx) error {
 		rec.Tx = tx
 		var txErr error
-		counts, recent, txErr = commit(context.Background(), rec, r.fs, r.lib, f, time.Now().UTC())
+		counts, recent, txErr = commit(context.Background(), rec, testStore, r.fs, r.lib, f, time.Now().UTC())
 		return txErr
 	})
 	return rec, counts, recent, err

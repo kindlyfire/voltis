@@ -37,7 +37,7 @@
                     />
                 </template>
                 <ACover
-                    :src="randomCover(list.cover_content_ids)"
+                    :src="randomCover(list.covers)"
                     alt=""
                     class="pointer-events-none col-start-1 row-span-2 row-start-1 self-start"
                 />
@@ -65,8 +65,9 @@ import AIconButton from '@/ui/AIconButton.vue'
 import APageHeader from '@/ui/APageHeader.vue'
 import ASpinner from '@/ui/ASpinner.vue'
 import { IconPencil, IconPlus } from '@/ui/icons'
+import { coverUrl } from '@/utils/api/content'
 import { customListsApi } from '@/utils/api/custom-lists'
-import { API_URL } from '@/utils/fetch'
+import type { Cover } from '@/utils/api/types'
 import { plural } from '@/utils/misc'
 import { showListModal } from './ListModal.vue'
 
@@ -82,12 +83,11 @@ function formatDate(value: string) {
 }
 
 const coverCache = new Map<string, string | null>()
-function randomCover(ids: string[]): string | null {
-    if (!ids.length) return null
-    const key = ids.join(',')
+function randomCover(covers: Cover[]): string | null {
+    if (!covers.length) return null
+    const key = covers.map(c => `${c.id}@${c.cover_version}`).join(',')
     if (!coverCache.has(key)) {
-        const id = ids[Math.floor(Math.random() * ids.length)]!
-        coverCache.set(key, `${API_URL}/files/cover/${id}`)
+        coverCache.set(key, coverUrl(covers[Math.floor(Math.random() * covers.length)]!))
     }
     return coverCache.get(key)!
 }

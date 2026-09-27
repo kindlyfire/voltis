@@ -36,7 +36,7 @@ function library(name: string): Library {
         root_content_count: 0,
         scanned_at: null,
         sources: [{ path_uri: '/comics' }],
-        settings: { book_series_inference: 'conservative' },
+        settings: { book_series_inference: 'conservative', auto_match: true },
     }
 }
 

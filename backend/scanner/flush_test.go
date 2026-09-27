@@ -16,15 +16,14 @@ import (
 	"voltis/db"
 	"voltis/lib/epub"
 	"voltis/lib/fp"
-	"voltis/lib/sources"
+	"voltis/metadata"
 	"voltis/models"
-	"voltis/models/metaraw"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func withMeta(r Result, m models.Metadata) Result {
+func withMeta(r Result, m metadata.Fields) Result {
 	r.Item.MetaRaw = m
 	return r
 }
@@ -190,7 +189,7 @@ func TestFlushHydratesOnlyTheRowsTheFlushTouches(t *testing.T) {
 func TestFlushKeepsManifestThroughInvalidationAndSeriesPatch(t *testing.T) {
 	r := newTestScan(t, "comics")
 
-	r.place(comicItem("/lib/S", "1", models.Metadata{}))
+	r.place(comicItem("/lib/S", "1", metadata.Fields{}))
 	if counts := r.commit(false); counts.Added != 1 {
 		t.Fatalf("counts = %+v", counts)
 	}
@@ -238,7 +237,7 @@ func TestFlushKeepsManifestThroughInvalidationAndSeriesPatch(t *testing.T) {
 func TestFlushInvalidationKeepsTheRowAndItsKey(t *testing.T) {
 	r := newTestScan(t, "comics")
 
-	chapter := comicItem("/lib/S", "1", models.Metadata{})
+	chapter := comicItem("/lib/S", "1", metadata.Fields{})
 	r.place(chapter)
 	r.commit(false)
 
@@ -257,7 +256,7 @@ func TestFlushInvalidationKeepsTheRowAndItsKey(t *testing.T) {
 	if !reflect.DeepEqual(after, want) || !after.UpdatedAt.After(before.UpdatedAt) {
 		t.Fatalf("row = %+v, want %+v with only its validity and timestamp changed", after, want)
 	}
-	if got := readMeta(t, r.pool, r.lib, "comic/S/ch1").File.Raw.Title; got != "Ch. 1" {
+	if got := readMeta(t, r.pool, r.lib, "comic/S/ch1").File.Title.V; got != "Ch. 1" {
 		t.Fatalf("leaf metadata title = %q, want the invalidated leaf's metadata left alone", got)
 	}
 
@@ -289,24 +288,24 @@ func TestFlushReReducesSeriesAfterLaterMember(t *testing.T) {
 	r := newTestScan(t, "comics")
 
 	r.place(withOrder(withMeta(comicResult("/lib/S/ch2.cbz", "ch2", "S", "/lib/S"),
-		models.Metadata{Series: "S", Publisher: "Beta", Language: "fr"}), 0, 2))
+		metadata.Fields{Series: metadata.Val("S"), Publishers: metadata.Val([]string{"Beta"}), Language: metadata.Val("fr")}), 0, 2))
 	r.commit(false)
 
-	if got := readMeta(t, r.pool, r.lib, "comic/S").File.Raw; got.Publisher != "Beta" || got.Title != "S" {
+	if got := readMeta(t, r.pool, r.lib, "comic/S").File; !slices.Equal(got.Publishers.V, []string{"Beta"}) || got.Title.V != "S" {
 		t.Fatalf("series metadata = %+v", got)
 	}
 
 	r.reload()
 	r.place(withOrder(withMeta(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"),
-		models.Metadata{Series: "S", Publisher: "Alpha"}), 0, 1))
+		metadata.Fields{Series: metadata.Val("S"), Publishers: metadata.Val([]string{"Alpha"})}), 0, 1))
 	r.commit(false)
 
-	got := readMeta(t, r.pool, r.lib, "comic/S").File.Raw
-	if got.Publisher != "Alpha" {
-		t.Fatalf("publisher = %q, want the earlier member to win", got.Publisher)
+	got := readMeta(t, r.pool, r.lib, "comic/S").File
+	if !slices.Equal(got.Publishers.V, []string{"Alpha"}) {
+		t.Fatalf("publishers = %v, want the earlier member to win", got.Publishers.V)
 	}
-	if got.Language != "fr" {
-		t.Fatalf("language = %q, want the later member to still contribute", got.Language)
+	if got.Language.V != "fr" {
+		t.Fatalf("language = %q, want the later member to still contribute", got.Language.V)
 	}
 
 	seriesID := r.w.byURI["comic/S"]
@@ -436,6 +435,88 @@ func TestFlushDeletesOrphansAndStampsScannedAt(t *testing.T) {
 	}
 }
 
+// orphanRows lists a library's metadata and link rows as uri, or uri:provider for links.
+func orphanRows(t *testing.T, r *scanRun) []string {
+	t.Helper()
+	rows, err := db.SelectScalars[string](context.Background(), r.pool, `
+		SELECT uri FROM content_metadata WHERE library_id = $1
+		UNION ALL SELECT uri || ':' || provider FROM metadata_links WHERE library_id = $1`, r.lib)
+	must(t, err)
+	slices.Sort(rows)
+	return rows
+}
+
+func TestFlushFinalCollectsOrphansWithoutDecisions(t *testing.T) {
+	r := newTestScan(t, "comics")
+	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
+	r.commit(false)
+	seedMetadata(t, r.pool, r.lib, "comic/gone", metadata.Doc{File: metadata.Fields{Title: metadata.Val("file only")}})
+	seedMetadata(t, r.pool, r.lib, "comic/kept", metadata.Doc{Overrides: metadata.Fields{Title: metadata.Val("mine")}})
+	exec(t, r.pool, "INSERT INTO provider_entries (provider, external_id, canonical_id, raw, fetched_at, refresh_at) VALUES ('linked', '1', '1', '{}', now(), now())")
+	exec(t, r.pool, `INSERT INTO metadata_links (library_id, uri, provider, state, external_id, origin, rejected) VALUES
+		($1, 'comic/gone', 'review', 'review', NULL, NULL, '{}'),
+		($1, 'comic/gone', 'unmatched', 'unmatched', NULL, NULL, '{}'),
+		($1, 'comic/gone', 'rejected', 'unmatched', NULL, NULL, '{x}'),
+		($1, 'comic/gone', 'ignored', 'ignored', NULL, NULL, '{}'),
+		($1, 'comic/gone', 'linked', 'linked', '1', 'manual', '{}'),
+		($1, 'comic/S', 'live', 'review', NULL, NULL, '{}')`, r.lib)
+	all := orphanRows(t, r)
+
+	r.reload()
+	r.commit(false)
+	if got := orphanRows(t, r); !slices.Equal(got, all) {
+		t.Fatalf("rows = %v, want all kept until the final flush", got)
+	}
+
+	r.reload()
+	r.commit(true)
+	want := []string{"comic/S", "comic/S/ch1", "comic/S:live", "comic/gone:ignored", "comic/gone:linked",
+		"comic/gone:rejected", "comic/kept"}
+	if got := orphanRows(t, r); !slices.Equal(got, want) {
+		t.Fatalf("rows = %v, want %v", got, want)
+	}
+}
+
+// A moving source replaces the links at its destination even where it has none of its own.
+func TestFlushRenameDropsDestinationOrphans(t *testing.T) {
+	r := newTestScan(t, "comics")
+	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
+	r.commit(false)
+	exec(t, r.pool, "INSERT INTO metadata_links (library_id, uri, provider, state) VALUES ($1, 'comic/S_2019', 'p', 'ignored')", r.lib)
+
+	r.reload()
+	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S_2019", "/lib/S"))
+	r.commit(false)
+	if got, want := orphanRows(t, r), []string{"comic/S_2019", "comic/S_2019/ch1"}; !slices.Equal(got, want) {
+		t.Fatalf("rows = %v, want %v", got, want)
+	}
+}
+
+func TestFlushReaddedSeriesGetsItsMetadataBack(t *testing.T) {
+	r := newTestScan(t, "comics")
+	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
+	r.place(comicResult("/lib/T/ch1.cbz", "ch1", "T", "/lib/T"))
+	r.commit(false)
+	seedMetadata(t, r.pool, r.lib, "comic/S", metadata.Doc{Overrides: metadata.Fields{Title: metadata.Val("Mine")}})
+	exec(t, r.pool, "INSERT INTO metadata_links (library_id, uri, provider, state) VALUES ($1, 'comic/S', 'p', 'ignored')", r.lib)
+
+	r.reload()
+	r.w.event(listedEvent(t, r.w, "/lib/S"))
+	r.commit(true)
+	assertCatalog(t, r.pool, r.lib, []string{"comic/T", "comic/T/ch1"})
+
+	r.reload()
+	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
+	r.commit(true)
+	assertCatalog(t, r.pool, r.lib, []string{"comic/S", "comic/S/ch1", "comic/T", "comic/T/ch1"})
+	if doc := readMeta(t, r.pool, r.lib, "comic/S"); doc.File.Title.V != "S" || readData(t, r.pool, r.lib, "comic/S").Title.V != "Mine" {
+		t.Fatalf("metadata = %+v, want the overrides over a new file layer", doc)
+	}
+	if got := orphanRows(t, r); !slices.Contains(got, "comic/S:p") {
+		t.Fatalf("rows = %v, want the link back on the series", got)
+	}
+}
+
 func TestFlushNoOpFinalStillEmits(t *testing.T) {
 	fastFlushes(t)
 	pool := newTestPool(t)
@@ -443,7 +524,7 @@ func TestFlushNoOpFinalStillEmits(t *testing.T) {
 	notify := &recorder{}
 	w := newWriter(ScanInput{LibraryID: lib}, nil, notify, newResolver(), nil, nil)
 	rig := newRig(t, w)
-	go commitLoop(rig.ctx, pool, &ComicsScanner{}, lib, rig.flushes, rig.done)
+	go commitLoop(rig.ctx, pool, testStore, &ComicsScanner{}, lib, rig.flushes, rig.done)
 	rig.start()
 	rig.walkOver()
 
@@ -480,8 +561,8 @@ func TestFlushRenameHistory(t *testing.T) {
 
 			layered := []string{"", "/ch1", "/ch3"}
 			for _, suffix := range layered {
-				seedMetadata(t, r.pool, r.lib, "comic/S"+suffix, metaraw.MetadataRaw{
-					Overrides: &metaraw.RawContainer[models.Metadata]{Raw: models.Metadata{Title: "kept comic/S" + suffix}},
+				seedMetadata(t, r.pool, r.lib, "comic/S"+suffix, metadata.Doc{
+					Overrides: metadata.Fields{Title: metadata.Val("kept comic/S" + suffix)},
 				})
 			}
 			exec(t, r.pool, "INSERT INTO users (id, username, password_hash) VALUES ('u1', 'u', 'x')")
@@ -495,7 +576,7 @@ func TestFlushRenameHistory(t *testing.T) {
 
 			assertCatalog(t, r.pool, r.lib, []string{c.final, c.final + "/ch1", c.final + "/ch2", c.final + "/ch3"})
 			for _, suffix := range layered {
-				if got := readMeta(t, r.pool, r.lib, c.final+suffix).Overrides; got == nil || got.Raw.Title != "kept comic/S"+suffix {
+				if got := readMeta(t, r.pool, r.lib, c.final+suffix).Overrides; got.Title.V != "kept comic/S"+suffix {
 					t.Fatalf("override at %s = %+v, want the one from comic/S%s", c.final+suffix, got, suffix)
 				}
 			}
@@ -510,9 +591,7 @@ func TestFlushIgnoresSelfRenameFromAnyProducer(t *testing.T) {
 	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
 	r.commit(false)
 	for _, uri := range []string{"comic/S", "comic/S/ch1"} {
-		seedMetadata(t, r.pool, r.lib, uri, metaraw.MetadataRaw{
-			Overrides: &metaraw.RawContainer[models.Metadata]{Raw: models.Metadata{Title: "kept " + uri}},
-		})
+		seedMetadata(t, r.pool, r.lib, uri, metadata.Doc{Overrides: metadata.Fields{Title: metadata.Val("kept " + uri)}})
 	}
 
 	r.reload()
@@ -521,7 +600,7 @@ func TestFlushIgnoresSelfRenameFromAnyProducer(t *testing.T) {
 	r.commit(false)
 
 	for _, uri := range []string{"comic/S", "comic/S/ch1"} {
-		if got := readMeta(t, r.pool, r.lib, uri).Overrides; got == nil || got.Raw.Title != "kept "+uri {
+		if got := readMeta(t, r.pool, r.lib, uri).Overrides; got.Title.V != "kept "+uri {
 			t.Fatalf("override at %s = %+v, want it preserved", uri, got)
 		}
 	}
@@ -581,13 +660,13 @@ func TestFlushCustomListAnnotationCollision(t *testing.T) {
 
 func TestFlushIntermediateReductionExcludesGone(t *testing.T) {
 	r := newTestScan(t, "comics")
+	beta := metadata.Fields{Publishers: metadata.Val([]string{"Beta"}), Language: metadata.Val("fr")}
 
 	r.place(withOrder(withMeta(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"),
-		models.Metadata{Series: "S", Publisher: "Alpha"}), 0, 1))
-	r.place(withOrder(withMeta(comicResult("/lib/S/ch2.cbz", "ch2", "S", "/lib/S"),
-		models.Metadata{Publisher: "Beta", Language: "fr"}), 0, 2))
+		metadata.Fields{Series: metadata.Val("S"), Publishers: metadata.Val([]string{"Alpha"})}), 0, 1))
+	r.place(withOrder(withMeta(comicResult("/lib/S/ch2.cbz", "ch2", "S", "/lib/S"), beta), 0, 2))
 	r.commit(false)
-	if got := readMeta(t, r.pool, r.lib, "comic/S").File.Raw; got.Publisher != "Alpha" {
+	if got := readMeta(t, r.pool, r.lib, "comic/S").File; !slices.Equal(got.Publishers.V, []string{"Alpha"}) {
 		t.Fatalf("series metadata = %+v", got)
 	}
 
@@ -599,12 +678,11 @@ func TestFlushIntermediateReductionExcludesGone(t *testing.T) {
 	if !r.w.gone[goneID] {
 		t.Fatalf("gone = %v, want the missing leaf", r.w.gone)
 	}
-	r.place(withOrder(withMeta(comicResult("/lib/S/ch2.cbz", "ch2", "S", "/lib/S"),
-		models.Metadata{Publisher: "Beta", Language: "fr"}), 0, 2))
+	r.place(withOrder(withMeta(comicResult("/lib/S/ch2.cbz", "ch2", "S", "/lib/S"), beta), 0, 2))
 	r.commit(false)
 
-	if got := readMeta(t, r.pool, r.lib, "comic/S").File.Raw; got.Publisher != "Beta" {
-		t.Fatalf("publisher = %q, want the proven-missing child excluded", got.Publisher)
+	if got := readMeta(t, r.pool, r.lib, "comic/S").File; !slices.Equal(got.Publishers.V, []string{"Beta"}) {
+		t.Fatalf("publishers = %v, want the proven-missing child excluded", got.Publishers.V)
 	}
 	if row := readContent(t, r.pool, goneID); row.URI != "comic/S/ch1" {
 		t.Fatalf("proven-missing row = %+v, want it kept until the final flush", row)
@@ -720,7 +798,7 @@ func TestSlashSeriesAppearsWhileTheLeafItShadowsDeparts(t *testing.T) {
 	if series.Type != "book_series" || series.URIPart != "Foo_bar" {
 		t.Fatalf("series = %+v, want the sanitized series row", series)
 	}
-	if got := readMeta(t, r.pool, r.lib, "book/Foo_bar").File.Raw.Title; got != "Foo/bar" {
+	if got := readMeta(t, r.pool, r.lib, "book/Foo_bar").File.Title.V; got != "Foo/bar" {
 		t.Fatalf("series title = %q, want the name kept verbatim", got)
 	}
 }
@@ -728,45 +806,44 @@ func TestSlashSeriesAppearsWhileTheLeafItShadowsDeparts(t *testing.T) {
 func TestFlushInheritsTheRawFallbackSeriesTitle(t *testing.T) {
 	r := newTestScan(t, "comics")
 
-	item := classifyComic(fsFile("/lib/Foo\\bar/ch1.cbz", baseTime, 10), models.Metadata{}, 0, testPages)
+	item := classifyComic(fsFile("/lib/Foo\\bar/ch1.cbz", baseTime, 10), metadata.Fields{}, nil, testPages)
 	r.place(Result{File: item.File, Item: item})
 	r.commit(true)
 
 	want := []string{"comic/Foo_bar", "comic/Foo_bar/ch1"}
 	assertCatalog(t, r.pool, r.lib, want)
-	if got := readMeta(t, r.pool, r.lib, "comic/Foo_bar").File.Raw.Title; got != "Foo\\bar" {
+	if got := readMeta(t, r.pool, r.lib, "comic/Foo_bar").File.Title.V; got != "Foo\\bar" {
 		t.Fatalf("series title = %q, want the raw directory name", got)
 	}
 }
 
-func TestFlushPrefersExplicitChildSeriesOverFolderFallback(t *testing.T) {
+func TestFlushSeriesTitleIgnoresChildOverrides(t *testing.T) {
 	r := newTestScan(t, "comics")
 
-	chapter := func(number string) Result { return comicItem("/lib/Series", number, models.Metadata{}) }
+	chapter := func(number string) Result { return comicItem("/lib/Series", number, metadata.Fields{}) }
 	r.place(chapter("1"), chapter("2"))
 	r.commit(false)
 
-	mr := readMeta(t, r.pool, r.lib, "comic/Series/ch2")
-	mr.Overrides = &metaraw.RawContainer[models.Metadata]{Raw: models.Metadata{Series: "Curated"}}
-	seedMetadata(t, r.pool, r.lib, "comic/Series/ch2", mr)
+	doc := readMeta(t, r.pool, r.lib, "comic/Series/ch1")
+	doc.Overrides = metadata.Fields{Series: metadata.Val("Curated")}
+	seedMetadata(t, r.pool, r.lib, "comic/Series/ch1", doc)
 
 	r.reload()
 	r.place(chapter("1"))
 	r.commit(true)
-
-	if got := readMeta(t, r.pool, r.lib, "comic/Series").File.Raw.Title; got != "Curated" {
-		t.Fatalf("series title = %q, want the override on the later child to beat the folder fallback", got)
+	if got := readMeta(t, r.pool, r.lib, "comic/Series").File.Title.V; got != "Series" {
+		t.Fatalf("series title = %q, want the folder name, not a child override", got)
 	}
 }
 
-func TestFlushFallsBackToTheSeriesKeyWhenTheFolderDiffers(t *testing.T) {
+func TestFlushSeriesTitleFallsBackToTheFolderName(t *testing.T) {
 	r := newTestScan(t, "comics")
 
-	r.place(comicItem("/lib/Foo (2019)", "1", models.Metadata{}))
+	r.place(comicItem("/lib/Foo (2019)", "1", metadata.Fields{}))
 	r.commit(true)
 
-	if got := readMeta(t, r.pool, r.lib, "comic/Foo_2019").File.Raw.Title; got != "Foo_2019" {
-		t.Fatalf("series title = %q, want the series key", got)
+	if got := readMeta(t, r.pool, r.lib, "comic/Foo_2019").File.Title.V; got != "Foo" {
+		t.Fatalf("series title = %q, want the folder name without its year", got)
 	}
 }
 
@@ -780,11 +857,11 @@ func TestFallbackTitleHoldsWhateverFolderSharesASeriesFirst(t *testing.T) {
 		lib := newTestLibrary(t, pool, "comics")
 		run := newScanRun(t, pool, lib, &ComicsScanner{})
 		for n, i := range seen {
-			run.place(comicItem(dirs[i], fmt.Sprint(n+1), models.Metadata{}))
+			run.place(comicItem(dirs[i], fmt.Sprint(n+1), metadata.Fields{}))
 		}
 		run.commit(true)
-		if got := readMeta(t, pool, lib, "comic/Foo_2019").File.Raw.Title; got != "Foo_2019" {
-			t.Errorf("title = %q with %s first, want %q", got, dirs[first], "Foo_2019")
+		if got := readMeta(t, pool, lib, "comic/Foo_2019").File.Title.V; got != "Foo" {
+			t.Errorf("title = %q with %s first, want %q", got, dirs[first], "Foo")
 		}
 	}
 }
@@ -803,7 +880,7 @@ func TestSharedSeriesFileURIPicksTheSmallestDirectory(t *testing.T) {
 		lib := newTestLibrary(t, pool, "comics")
 		run := newScanRun(t, pool, lib, &ComicsScanner{})
 		for n, i := range seen {
-			run.place(comicItem(dirs[i], fmt.Sprint(n+1), models.Metadata{}))
+			run.place(comicItem(dirs[i], fmt.Sprint(n+1), metadata.Fields{}))
 		}
 		run.commit(true)
 		assertSeriesLocation(t, pool, contentIDByURI(t, pool, lib, "comic/Foo_bar"), dirs[0])
@@ -848,47 +925,39 @@ func TestSeriesKeepsItsDirectoryWhileANeighbourClaimsTheOther(t *testing.T) {
 	}
 }
 
-func TestInheritReplacesWholeFileLayer(t *testing.T) {
+func TestSeriesLayerReplacesWholeFileLayer(t *testing.T) {
 	r := newTestScan(t, "comics")
-	seedMetadata(t, r.pool, r.lib, "comic/S", metaraw.MetadataRaw{
-		File: &metaraw.RawContainer[models.Metadata]{Raw: models.Metadata{
-			Title: "Stale", Publisher: "Stale Press", Genre: "Stale Genre", Language: "jp",
-		}},
-		MangaBaka: &metaraw.RawContainer[sources.Series]{Raw: sources.Series{
-			ID: 7, Title: "External Title", Genres: []string{"Action", "Drama"},
-			Publishers: []sources.Publisher{{Name: new("External Press")}},
-		}},
-		Overrides: &metaraw.RawContainer[models.Metadata]{Raw: models.Metadata{Publisher: "Override Press"}},
+	seedMetadata(t, r.pool, r.lib, "comic/S", metadata.Doc{
+		File: metadata.Fields{
+			Title: metadata.Val("Stale"), Publishers: metadata.Val([]string{"Stale Press"}),
+			Genres: metadata.Val([]string{"stale"}), Language: metadata.Val("jp"),
+		},
+		Overrides: metadata.Fields{
+			Publishers: metadata.Val([]string{"Override Press"}), Description: metadata.Opt[string]{P: metadata.Null},
+		},
 	})
 
-	r.place(withMeta(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"),
-		models.Metadata{Series: "New Series", Genre: "Child Genre", Language: "en"}))
+	r.place(withMeta(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"), metadata.Fields{
+		Series: metadata.Val("New Series"), Genres: metadata.Val([]string{"Child Genre"}),
+		Language: metadata.Val("en"), Description: metadata.Val("A volume"),
+	}))
 	r.commit(true)
 
 	got := readMeta(t, r.pool, r.lib, "comic/S")
-	file := got.File.Raw
-	if file.Title != "New Series" || file.Genre != "Child Genre" || file.Language != "en" {
+	file := got.File
+	if file.Title.V != "New Series" || !slices.Equal(file.Genres.V, []string{"child_genre"}) || file.Language.V != "en" {
 		t.Fatalf("file layer = %+v", file)
 	}
-	if file.Publisher != "" {
-		t.Fatalf("stale file fields persisted: %+v", file)
+	if file.Publishers.P != metadata.Absent || file.Description.P != metadata.Absent {
+		t.Fatalf("stale or volume fields in the series layer: %+v", file)
 	}
-	if got.MangaBaka == nil || got.MangaBaka.Raw.Title != "External Title" || got.MangaBaka.Raw.ID != 7 {
-		t.Fatalf("external layer = %+v", got.MangaBaka)
-	}
-	if got.Overrides == nil || got.Overrides.Raw.Publisher != "Override Press" {
+	if !slices.Equal(got.Overrides.Publishers.V, []string{"Override Press"}) || got.Overrides.Description.P != metadata.Null {
 		t.Fatalf("overrides = %+v", got.Overrides)
 	}
 
-	merged := got.Merge()
-	if merged.Title != "External Title" || merged.Genre != "Action, Drama" {
-		t.Fatalf("external layer must beat file: %+v", merged)
-	}
-	if merged.Publisher != "Override Press" {
-		t.Fatalf("overrides must beat external: %+v", merged)
-	}
-	if merged.Language != "en" {
-		t.Fatalf("file layer must survive where higher layers are empty: %+v", merged)
+	data := readData(t, r.pool, r.lib, "comic/S")
+	if !slices.Equal(data.Publishers.V, []string{"Override Press"}) || data.Title.V != "New Series" || data.Language.V != "en" {
+		t.Fatalf("data = %+v, want overrides over the new file layer", data)
 	}
 }
 
@@ -904,7 +973,7 @@ func TestFlushReducesSeriesOverInvalidChildren(t *testing.T) {
 			part := func(path string) string {
 				return strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 			}
-			member := func(path string, index float32, mtime time.Time, m models.Metadata) Result {
+			member := func(path string, index float32, mtime time.Time, m metadata.Fields) Result {
 				item := &ParsedItem{
 					File:        fsFile(path, mtime, 10),
 					URIPrefix:   c.kind,
@@ -921,8 +990,9 @@ func TestFlushReducesSeriesOverInvalidChildren(t *testing.T) {
 				return Result{File: item.File, Item: item}
 			}
 
-			r.place(member(c.first, 1, baseTime, models.Metadata{
-				Series: "Retained Series", Publisher: "Retained Press", Genre: "Retained Genre"}))
+			r.place(member(c.first, 1, baseTime, metadata.Fields{
+				Series: metadata.Val("Retained Series"), Publishers: metadata.Val([]string{"Retained Press"}),
+				Genres: metadata.Val([]string{"Retained Genre"})}))
 			r.commit(false)
 
 			r.reload()
@@ -931,15 +1001,16 @@ func TestFlushReducesSeriesOverInvalidChildren(t *testing.T) {
 			exec(t, r.pool, "UPDATE content SET cover_uri = NULL, file_mtime = NULL WHERE id = $1",
 				r.w.byURI[c.kind+"/s"])
 			r.place(Result{File: fsFile(c.first, baseTime, 10)})
-			r.place(member(c.second, 2, baseTime.Add(time.Hour), models.Metadata{
-				Series: "Other", Publisher: "Other Press", Language: "en"}))
+			r.place(member(c.second, 2, baseTime.Add(time.Hour), metadata.Fields{
+				Series: metadata.Val("Other"), Publishers: metadata.Val([]string{"Other Press"}), Language: metadata.Val("en")}))
 			r.commit(false)
 
-			got := readMeta(t, r.pool, r.lib, c.kind+"/s").File.Raw
-			if got.Title != "Retained Series" || got.Publisher != "Retained Press" || got.Genre != "Retained Genre" {
+			got := readMeta(t, r.pool, r.lib, c.kind+"/s").File
+			if got.Title.V != "Retained Series" || !slices.Equal(got.Publishers.V, []string{"Retained Press"}) ||
+				!slices.Equal(got.Genres.V, []string{"retained_genre"}) {
 				t.Fatalf("series metadata = %+v, want the invalid first child still inherited from", got)
 			}
-			if got.Language != "en" {
+			if got.Language.V != "en" {
 				t.Fatalf("series metadata = %+v, want the valid child to contribute too", got)
 			}
 
@@ -967,18 +1038,20 @@ func TestFlushReducesSeriesOverInvalidChildren(t *testing.T) {
 	}
 }
 
-func TestInheritSkipsSeriesWithoutChildren(t *testing.T) {
+func TestSeriesLayerSkipsSeriesWithoutChildren(t *testing.T) {
 	r := newTestScan(t, "comics")
 	r.place(comicResult("/lib/A/ch1.cbz", "ch1", "S", "/lib/A"))
 	r.commit(false)
-	seedMetadata(t, r.pool, r.lib, "comic/S", rawMeta(models.Metadata{Title: "Existing"}))
+	// Overrides keep the row past the final flush.
+	seedMetadata(t, r.pool, r.lib, "comic/S", metadata.Doc{File: metadata.Fields{Title: metadata.Val("Existing")},
+		Overrides: metadata.Fields{Description: metadata.Val("mine")}})
 
 	r.reload()
 	r.w.event(listedEvent(t, r.w, "/lib/A"))
 	r.commit(true)
 
 	assertCatalog(t, r.pool, r.lib, nil)
-	if got := readMeta(t, r.pool, r.lib, "comic/S").File.Raw.Title; got != "Existing" {
+	if got := readMeta(t, r.pool, r.lib, "comic/S").File.Title.V; got != "Existing" {
 		t.Fatalf("series title = %q, want a childless series left alone", got)
 	}
 }
@@ -1060,9 +1133,7 @@ func seedRefs(t *testing.T, r *scanRun, uris ...string) {
 		id := fmt.Sprint("r", i)
 		exec(t, r.pool, "INSERT INTO user_to_content (id, user_id, library_id, uri, notes) VALUES ($1, 'u1', $2, $3, $3)", id, r.lib, uri)
 		exec(t, r.pool, "INSERT INTO custom_list_to_content (id, custom_list_id, library_id, uri, notes) VALUES ($1, 'cl1', $2, $3, $3)", id, r.lib, uri)
-		seedMetadata(t, r.pool, r.lib, uri, metaraw.MetadataRaw{
-			Overrides: &metaraw.RawContainer[models.Metadata]{Raw: models.Metadata{Title: uri}},
-		})
+		seedMetadata(t, r.pool, r.lib, uri, metadata.Doc{Overrides: metadata.Fields{Title: metadata.Val(uri)}})
 	}
 }
 
@@ -1081,7 +1152,7 @@ func assertRefs(t *testing.T, r *scanRun, want map[string]string) {
 		}
 	}
 	for uri, label := range want {
-		if got := readMeta(t, r.pool, r.lib, uri).Overrides; got == nil || got.Raw.Title != label {
+		if got := readMeta(t, r.pool, r.lib, uri).Overrides; got.Title.V != label {
 			t.Fatalf("override at %s = %+v, want %s's", uri, got, label)
 		}
 	}
@@ -1198,7 +1269,7 @@ func TestFlushRecentCountsAReclaimedIDAsUpdated(t *testing.T) {
 
 func TestFlushRecentStandaloneDeleteKeepsItsTitle(t *testing.T) {
 	r := newTestScan(t, "comics")
-	r.place(withCover(withMeta(comicResult("/lib/solo.cbz", "solo", "", ""), models.Metadata{Title: "Solo Title"})))
+	r.place(withCover(withMeta(comicResult("/lib/solo.cbz", "solo", "", ""), metadata.Fields{Title: metadata.Val("Solo Title")})))
 	r.commit(false)
 	solo := r.w.keys[Key{"", "solo"}]
 
@@ -1214,18 +1285,18 @@ func TestFlushRecentStandaloneDeleteKeepsItsTitle(t *testing.T) {
 
 func TestFlushRecentDeleteKeepsItsTitleWhenALeafTakesItsURI(t *testing.T) {
 	r := newTestScan(t, "comics")
-	r.place(withMeta(comicResult("/lib/Foo.cbz", "Foo", "", ""), models.Metadata{Title: "Original"}))
-	r.place(withMeta(comicResult("/lib/S/Foo.cbz", "Foo", "S", "/lib/S"), models.Metadata{Title: "Replacement"}))
+	r.place(withMeta(comicResult("/lib/Foo.cbz", "Foo", "", ""), metadata.Fields{Title: metadata.Val("Original")}))
+	r.place(withMeta(comicResult("/lib/S/Foo.cbz", "Foo", "S", "/lib/S"), metadata.Fields{Title: metadata.Val("Replacement")}))
 	r.commit(false)
 	original := r.w.keys[Key{"", "Foo"}]
 	survivor := r.w.keys[Key{r.w.byURI["comic/S"], "Foo"}]
 
 	r.reload()
 	r.w.gone[original] = true
-	r.place(withMeta(comicResult("/lib/S/Foo.cbz", "Foo", "", ""), models.Metadata{Title: "Replacement"}))
+	r.place(withMeta(comicResult("/lib/S/Foo.cbz", "Foo", "", ""), metadata.Fields{Title: metadata.Val("Replacement")}))
 	_, recent := r.commitRecent(false)
 
-	if got := readMeta(t, r.pool, r.lib, "comic/Foo").File.Raw.Title; got != "Replacement" {
+	if got := readMeta(t, r.pool, r.lib, "comic/Foo").File.Title.V; got != "Replacement" {
 		t.Fatalf("comic/Foo title = %q, want the survivor's metadata there", got)
 	}
 	byID := recentByID(recent)
@@ -1295,7 +1366,7 @@ func TestFlushRecentKeepsTheNewestEntries(t *testing.T) {
 	got := make([]string, len(recent))
 	for i, e := range recent {
 		got[i] = e.ID
-		if !e.HasCover || e.FileMtime == nil || e.Counts != (Counts{Added: 1}) {
+		if e.CoverVersion == nil || e.Counts != (Counts{Added: 1}) {
 			t.Fatalf("entry = %+v", e)
 		}
 	}

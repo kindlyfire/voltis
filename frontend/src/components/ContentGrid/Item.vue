@@ -57,10 +57,10 @@ import {
     IconInformation,
     IconPauseFilled,
 } from '@/ui/icons'
+import { coverUrl } from '@/utils/api/content'
 import { READING_STATUS_LABELS } from '@/utils/api/types'
 import type { Content, ReadingStatus } from '@/utils/api/types'
 import { contentProgress } from '@/utils/contentProgress'
-import { API_URL } from '@/utils/fetch'
 import { useContentGridStore } from './store'
 
 const props = withDefaults(
@@ -93,10 +93,7 @@ const to = computed(() =>
     props.toReadRoute ? `/r/${props.content.id}?page=resume` : `/${props.content.id}`
 )
 
-const coverUri = computed(() => {
-    if (!props.content.cover_uri) return null
-    return `${API_URL}/files/cover/${props.content.id}?v=${props.content.file_mtime}`
-})
+const coverUri = computed(() => coverUrl(props.content))
 
 const childrenCount = computed(() => {
     if (props.content.type !== 'book_series' && props.content.type !== 'comic_series') return null

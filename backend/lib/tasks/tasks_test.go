@@ -465,3 +465,20 @@ func TestLoadCancelsRunningRowsAndRequeuesPending(t *testing.T) {
 		t.Fatal("a stale running row was adopted into the live map")
 	}
 }
+
+// Whoever a terminal snapshot wakes no longer sees the task pending.
+func TestTerminalSnapshotFollowsLeavingThePendingList(t *testing.T) {
+	var m *Manager
+	pendingAtEnd := make(chan int, 1)
+	m, _ = newManager(t, func(s Snapshot) {
+		if s.Status == models.TaskStatusCompleted {
+			pendingAtEnd <- len(m.Pending("quick"))
+		}
+	})
+	if _, err := m.Push(compatibleDef("quick", func(any, *TaskContext) (any, error) { return nil, nil }), nil); err != nil {
+		t.Fatal(err)
+	}
+	if n := <-pendingAtEnd; n != 0 {
+		t.Fatalf("%d pending when the terminal snapshot was published", n)
+	}
+}

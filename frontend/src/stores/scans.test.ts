@@ -1,17 +1,10 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { effectScope, nextTick } from 'vue'
-import {
-    invalidateCatalog,
-    type ScanLead,
-    scanRow,
-    useScanStore,
-    useScanSync,
-} from '@/stores/scans'
+import { type ScanLead, scanRow, useScanStore, useScanSync } from '@/stores/scans'
 import { tasksApi } from '@/utils/api/tasks'
 import type { ScanProgress, TaskLogs, TaskSnapshot } from '@/utils/api/types'
 import { usersApi } from '@/utils/api/users'
-import { queryClient } from '@/utils/misc'
 import { ws } from '@/utils/ws'
 
 vi.mock('@/utils/api/tasks', () => ({
@@ -178,8 +171,7 @@ describe('scanRow', () => {
             {
                 id: 'c_1',
                 title: 'S',
-                has_cover: true,
-                file_mtime: '2026-09-18T08:00:00Z',
+                cover_version: 'abc',
                 added: 1,
                 updated: 0,
                 removed: 0,
@@ -272,29 +264,6 @@ describe('log tails', () => {
         await store.fetchLogs('t_1')
 
         expect(store.logs['t_1']).toEqual({ text: 'abc', len: 3 })
-    })
-})
-
-describe('catalog invalidation', () => {
-    it('throttles to 500ms with leading and trailing edges', async () => {
-        vi.useFakeTimers()
-        const spy = vi.spyOn(queryClient, 'invalidateQueries').mockImplementation(async () => {})
-
-        invalidateCatalog()
-        expect(spy).toHaveBeenCalledTimes(2)
-        expect(spy).toHaveBeenCalledWith({ queryKey: ['libraries'] })
-        expect(spy).toHaveBeenCalledWith({ queryKey: ['content'] })
-
-        invalidateCatalog()
-        invalidateCatalog()
-        expect(spy).toHaveBeenCalledTimes(2)
-
-        await vi.advanceTimersByTimeAsync(500)
-        expect(spy).toHaveBeenCalledTimes(4)
-
-        await vi.advanceTimersByTimeAsync(2000)
-        expect(spy).toHaveBeenCalledTimes(4)
-        spy.mockRestore()
     })
 })
 

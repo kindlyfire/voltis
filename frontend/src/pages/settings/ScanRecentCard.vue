@@ -12,14 +12,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import ACover from '@/ui/ACover.vue'
+import { coverUrl } from '@/utils/api/content'
 import type { ScanRecent } from '@/utils/api/types'
-import { API_URL } from '@/utils/fetch'
 import ScanCounts from './ScanCounts.vue'
 
 const props = defineProps<{ entry: ScanRecent }>()
 
-const src = computed(() => {
-    if (!props.entry.has_cover) return null
-    return `${API_URL}/files/cover/${props.entry.id}?v=${props.entry.file_mtime}`
-})
+const src = computed(() => coverUrl(props.entry))
 </script>

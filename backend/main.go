@@ -6,12 +6,16 @@ import (
 	"errors"
 	"log/slog"
 	"net"
-	"net/http"
 	"os"
 
 	"voltis/cmd"
 	"voltis/config"
+	"voltis/covers"
 	"voltis/db"
+	"voltis/linking"
+	"voltis/metadata"
+	"voltis/providers"
+	"voltis/providers/mangabaka"
 	"voltis/routes"
 	"voltis/settings"
 
@@ -73,6 +77,27 @@ func main() {
 							pool := connectDB(ctx)
 							defer pool.Close()
 							return cmd.SetSetting(ctx, pool, key, value)
+						},
+					},
+				},
+			},
+			{
+				Name:  "metadata",
+				Usage: "Metadata provider commands",
+				Commands: []*cli.Command{
+					{
+						Name:  "match",
+						Usage: "Match a library's series with metadata providers",
+						Flags: []cli.Flag{
+							&cli.StringFlag{Name: "library", Usage: "Library ID", Required: true},
+							&cli.BoolFlag{Name: "dry-run", Usage: "Print each decision without writing it"},
+						},
+						Action: func(ctx context.Context, c *cli.Command) error {
+							pool := connectDB(ctx)
+							defer pool.Close()
+							reg := newProviders()
+							links := linking.New(pool, metadata.NewStore(reg), reg, covers.New(config.Get().CacheDir), func(string) {})
+							return cmd.MatchLibrary(ctx, pool, links, c.String("library"), c.Bool("dry-run"))
 						},
 					},
 				},
@@ -156,6 +181,9 @@ func main() {
 	}
 }
 
+// newProviders lists the metadata providers, in merge order.
+func newProviders() *providers.Registry { return providers.NewRegistry(mangabaka.New()) }
+
 func connectDB(ctx context.Context) *pgxpool.Pool {
 	cfg := config.Load()
 	pool, err := db.Connect(ctx, cfg.DatabaseURL)
@@ -190,19 +218,14 @@ func runServer(ctx context.Context) error {
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
-	e.HTTPErrorHandler = func(err error, c echo.Context) {
-		if c.Response().Committed {
-			return
-		}
-		if he, ok := errors.AsType[*echo.HTTPError](err); ok {
-			_ = c.JSON(he.Code, map[string]any{"error": he.Message})
-		} else {
-			slog.Error("unhandled error", "err", err, "method", c.Request().Method, "path", c.Request().URL.String())
-			_ = c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal server error"})
-		}
-	}
 
-	routes.Register(e, pool, store, cfg.ProxyAuth)
+	hub := routes.NewHub()
+	reg := newProviders()
+	meta := metadata.NewStore(reg)
+	cov := covers.New(cfg.CacheDir)
+	links := linking.New(pool, meta, reg, cov, hub.LibraryChanged)
+	routes.Register(ctx, e, pool, store, cfg.ProxyAuth,
+		routes.Deps{Hub: hub, Providers: reg, Metadata: meta, Links: links, Covers: cov})
 
 	slog.Info("starting server", "url", "http://"+net.JoinHostPort(cmp.Or(cfg.Host, "localhost"), cfg.Port))
 	return e.Start(net.JoinHostPort(cfg.Host, cfg.Port))

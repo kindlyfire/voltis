@@ -1,4 +1,3 @@
-import { useThrottleFn } from '@vueuse/core'
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import { tasksApi } from '@/utils/api/tasks'
@@ -10,7 +9,6 @@ import {
     type TaskSnapshot,
 } from '@/utils/api/types'
 import { usersApi } from '@/utils/api/users'
-import { queryClient } from '@/utils/misc'
 import { ws } from '@/utils/ws'
 
 export function isTerminal(task: TaskSnapshot): boolean {
@@ -142,19 +140,6 @@ export const useScanStore = defineStore('scans', () => {
 
     return { tasks, logs, dismissed, accept, reconcile, fetchLogs, dismiss, reset }
 })
-
-export const invalidateCatalog = useThrottleFn(
-    () => {
-        queryClient.invalidateQueries({ queryKey: ['libraries'] })
-        queryClient.invalidateQueries({ queryKey: ['content'] })
-    },
-    500,
-    true,
-    true
-)
-
-ws.on('catalog_changed', invalidateCatalog)
-ws.on('$open', invalidateCatalog)
 
 export function useScanSync(): void {
     const store = useScanStore()

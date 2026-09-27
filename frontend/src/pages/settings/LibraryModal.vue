@@ -23,6 +23,11 @@
                 :hint="inferenceHint"
                 @update:model-value="v => v && form.setValue('book_series_inference', v)"
             />
+            <ASwitch
+                v-bind="form.field('auto_match')"
+                label="Match series automatically"
+                description="Links series to metadata providers in the background with MangaBaka."
+            />
             <fieldset ref="sourcesEl" class="flex flex-col gap-2">
                 <legend class="mb-2 text-sm font-semibold">Sources</legend>
                 <div
@@ -103,6 +108,7 @@ import AButton from '@/ui/AButton.vue'
 import ADialog from '@/ui/ADialog.vue'
 import AIconButton from '@/ui/AIconButton.vue'
 import ASelect from '@/ui/ASelect.vue'
+import ASwitch from '@/ui/ASwitch.vue'
 import ATextField from '@/ui/ATextField.vue'
 import { IconClose, IconFolderOpen, IconPlus } from '@/ui/icons'
 import { useToast } from '@/ui/useToast'
@@ -148,12 +154,14 @@ const form = useForm({
             })
         ),
         book_series_inference: z.enum(['off', 'conservative']),
+        auto_match: z.boolean(),
     }),
     initialValues: {
         name: '',
         type: null,
         sources: [],
         book_series_inference: 'conservative',
+        auto_match: false,
     },
     onSubmit: async values => {
         await upsert.mutateAsync({
@@ -161,7 +169,10 @@ const form = useForm({
             name: values.name,
             type: values.type!,
             sources: values.sources.filter(s => s.path_uri.trim() !== ''),
-            settings: { book_series_inference: values.book_series_inference },
+            settings: {
+                book_series_inference: values.book_series_inference,
+                auto_match: values.auto_match,
+            },
         })
         toast.show({ message: isNew.value ? `Created ${values.name}` : 'Library saved' })
         props.close()
@@ -252,6 +263,7 @@ watch(
                 type: l.type,
                 sources: l.sources,
                 book_series_inference: l.settings.book_series_inference,
+                auto_match: l.settings.auto_match,
             })
         }
     },

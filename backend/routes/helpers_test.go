@@ -15,7 +15,12 @@ import (
 	"testing"
 
 	"voltis/config"
+	"voltis/covers"
 	"voltis/db/dbtest"
+	"voltis/linking"
+	"voltis/metadata"
+	"voltis/providers"
+	"voltis/providers/providertest"
 	"voltis/settings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -35,6 +40,7 @@ type testClient struct {
 	hub     *WebSocketHub
 	st      *settings.Store
 	db      *pgxpool.Pool
+	fake    *providertest.Provider
 	headers map[string]string
 	extra   http.Header
 }
@@ -62,7 +68,13 @@ func newProxyClient(t *testing.T, pool *pgxpool.Pool, proxy config.ProxyAuth) *t
 	st := newStore(t, pool)
 
 	e := echo.New()
-	hub, manager := Register(e, pool, st, proxy)
+	hub, fake := NewHub(), providertest.New()
+	reg := providers.NewRegistry(fake)
+	store := metadata.NewStore(reg)
+	cov := covers.New(t.TempDir())
+	links := linking.New(pool, store, reg, cov, hub.LibraryChanged)
+	manager := Register(t.Context(), e, pool, st, proxy, Deps{Hub: hub, Providers: reg, Metadata: store, Links: links,
+		Covers: cov})
 	t.Cleanup(manager.Close)
 
 	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +86,7 @@ func newProxyClient(t *testing.T, pool *pgxpool.Pool, proxy config.ProxyAuth) *t
 	}))
 	server.Start()
 
-	return &testClient{t: t, server: server, http: newHTTPClient(), hub: hub, st: st, db: pool}
+	return &testClient{t: t, server: server, http: newHTTPClient(), hub: hub, st: st, db: pool, fake: fake}
 }
 
 func newHTTPClient() *http.Client {

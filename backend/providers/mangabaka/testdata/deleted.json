@@ -1,0 +1,115 @@
+{
+  "id": 100002,
+  "state": "deleted",
+  "merged_with": null,
+  "canonical_url": "https://mangabaka.org/manga/100001/King-of-Fighters-Giga",
+  "authors": [
+    "Ryou Takamisaki"
+  ],
+  "artists": [
+    "Ryou Takamisaki"
+  ],
+  "description": "Following the massive success of his 6-part KOF'94 Gaiden manga, Ryo Takamisaki is at it again with 'King of Fighters Giga', an all-new 3-part series based on K",
+  "published": {
+    "start_date": "1997-01-01",
+    "end_date": null,
+    "start_date_is_estimated": true,
+    "end_date_is_estimated": null
+  },
+  "status": "completed",
+  "is_licensed": false,
+  "content_rating": "safe",
+  "type": "manga",
+  "original_language": "ja",
+  "rating": 57,
+  "popularity": null,
+  "publishers": null,
+  "last_updated_at": "2026-09-24T03:42:31.896Z",
+  "source": {
+    "anilist": {
+      "id": 73431,
+      "rating": 5.7,
+      "rating_normalized": 57
+    }
+  },
+  "rating_count": 4,
+  "final_volume": 3,
+  "total_chapters": null,
+  "titles": [
+    {
+      "language": "ja-Latn",
+      "traits": [
+        "native"
+      ],
+      "title": "King of Fighters: Giga",
+      "note": null,
+      "is_primary": true
+    },
+    {
+      "language": "ja",
+      "traits": [
+        "native"
+      ],
+      "title": "ザ･キング・オブ・ファイターズG（ギガ）",
+      "note": null,
+      "is_primary": true
+    },
+    {
+      "language": "ja-Latn",
+      "traits": [],
+      "title": "KoF G",
+      "note": null,
+      "is_primary": false
+    },
+    {
+      "language": "ja-Latn",
+      "traits": [],
+      "title": "The King of Fighters G",
+      "note": null,
+      "is_primary": false
+    }
+  ],
+  "cover": {
+    "raw": "https://s4.anilist.co/file/anilistcdn/media/manga/cover/medium/43431.jpg",
+    "x150": "https://cdn.mangabaka.dev/imgproxy/plain/x150@1/aHR0cHM6Ly9zNC5hbmlsaXN0LmNvL2ZpbGUvYW5pbGlzdGNkbi9tZWRpYS9tYW5nYS9jb3Zlci9tZWRpdW0vNDM0MzEuanBn",
+    "x250": "https://cdn.mangabaka.dev/imgproxy/plain/x250@1/aHR0cHM6Ly9zNC5hbmlsaXN0LmNvL2ZpbGUvYW5pbGlzdGNkbi9tZWRpYS9tYW5nYS9jb3Zlci9tZWRpdW0vNDM0MzEuanBn",
+    "x350": "https://cdn.mangabaka.dev/imgproxy/plain/x350@1/aHR0cHM6Ly9zNC5hbmlsaXN0LmNvL2ZpbGUvYW5pbGlzdGNkbi9tZWRpYS9tYW5nYS9jb3Zlci9tZWRpdW0vNDM0MzEuanBn",
+    "blurhash": "|KPFZUyPTbm.%N$*xo%gv#X=Sit9ggoyozS$s9XSv|xbrXJ,r;V@WBV@oHRVNG%0$%TcNHWCn$SiQ.xsNJs8IVkBnOV]o}$wRiIpjwnhxtXSg3V@yWDj$$tla2bIWVbuRQIn%LNbR5V@S$xZR+t6-ot8M{njWBe-ayWUnj",
+    "width": 225,
+    "height": 320
+  },
+  "anime": {
+    "exists": false,
+    "start": null,
+    "end": null
+  },
+  "links": [],
+  "tags": [
+    {
+      "id": 39,
+      "is_spoiler": false,
+      "is_genre": true,
+      "is_explicit": true,
+      "implied_by_tag_ids": [],
+      "parent_id": 542,
+      "name": "Action",
+      "level": 2,
+      "name_path": "Themes > Action",
+      "series_count": 34791,
+      "description": null,
+      "content_rating": "safe",
+      "weight": "defining"
+    }
+  ],
+  "relationships": [
+    {
+      "id": "019f7f19-fd1d-7158-92cd-bf89370c1a6c",
+      "to_series_id": 14316,
+      "relation_type": "alternative",
+      "is_manual": false,
+      "note": null,
+      "chronology": "unknown",
+      "published_start_date": null
+    }
+  ]
+}

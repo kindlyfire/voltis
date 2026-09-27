@@ -111,7 +111,7 @@
                             <td class="py-2">
                                 <div class="flex items-start gap-1">
                                     <ACombobox
-                                        :model-value="replacement(item.id)"
+                                        :model-value="target(item.id)"
                                         :options="contentUris"
                                         :label="`New ref for ${item.uri}`"
                                         placeholder="Replace with…"
@@ -121,7 +121,9 @@
                                         :hint="actionHint(item.id)"
                                         hint-tone="warning"
                                         class="min-w-64 flex-1"
-                                        @update:model-value="v => setEdit(item.id, v ?? undefined)"
+                                        @update:model-value="
+                                            v => setTarget(item.id, v ?? undefined)
+                                        "
                                     />
                                     <AIconButton
                                         :icon="IconDelete"
@@ -144,14 +146,15 @@
                 </footer>
             </ACard>
         </template>
+
+        <OrphanedMetadataSection v-if="isAdmin" />
     </div>
 </template>
 
 <script setup lang="ts">
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import { useHead } from '@unhead/vue'
-import { refDebounced } from '@vueuse/core'
-import { computed, nextTick, reactive, ref, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, useTemplateRef } from 'vue'
 import QueryError from '@/components/QueryError.vue'
 import AButton from '@/ui/AButton.vue'
 import ACard from '@/ui/ACard.vue'
@@ -168,13 +171,13 @@ import ATextField from '@/ui/ATextField.vue'
 import { IconChevronDown, IconDelete, IconEye, IconMagnify, IconRestart } from '@/ui/icons'
 import { useToast } from '@/ui/useToast'
 import { contentApi } from '@/utils/api/content'
-import { librariesApi } from '@/utils/api/libraries'
 import { READING_STATUS_LABELS } from '@/utils/api/types'
 import type { BrokenUserToContent } from '@/utils/api/types'
+import { usersApi } from '@/utils/api/users'
 import { plural } from '@/utils/misc'
 import { showBrokenRefDetailModal } from './BrokenRefDetailModal.vue'
-
-const PAGE_SIZE = 50
+import OrphanedMetadataSection from './OrphanedMetadataSection.vue'
+import { useRepairTable } from './useRepairTable'
 
 useHead({ title: 'Broken references' })
 
@@ -182,72 +185,27 @@ const queryClient = useQueryClient()
 const toast = useToast()
 const emptyHeading = useTemplateRef('emptyHeading')
 const qSummary = contentApi.useBrokenRefsSummary()
-const qLibraries = librariesApi.useList()
+const qMe = usersApi.useMe()
+const isAdmin = computed(() => qMe.data.value?.permissions.includes('ADMIN'))
 
-const selectedLibraryId = ref<string | null>(null)
-const searchInput = ref('')
-const search = refDebounced(searchInput, 300)
-const page = ref(1)
-const edits = reactive(new Map<string, string | 'delete'>())
-
-const libraryOptions = computed(() => {
-    const summaryData = qSummary.data.value ?? []
-    const libraries = qLibraries.data.value ?? []
-    // Refs whose library was deleted have no library to fix them in.
-    return summaryData.flatMap(s => {
-        if (!s.library_id) return []
-        const lib = libraries.find(l => l.id === s.library_id)
-        return [{ value: s.library_id, label: `${lib?.name ?? s.library_id} (${s.count})` }]
-    })
-})
-
-watch(
+const {
+    selectedLibraryId,
     libraryOptions,
-    options => {
-        if (!options.some(o => o.value === selectedLibraryId.value)) {
-            selectedLibraryId.value = options[0]?.value ?? null
-        }
-    },
-    { immediate: true }
-)
-
-const qBrokenRefs = contentApi.useBrokenRefs(selectedLibraryId, () => ({
-    search: search.value || undefined,
-    limit: PAGE_SIZE,
-    offset: (page.value - 1) * PAGE_SIZE,
-}))
+    searchInput,
+    search,
+    page,
+    pageCount,
+    query: qBrokenRefs,
+    edits,
+    target,
+    setTarget,
+    toggleDelete,
+    changes,
+} = useRepairTable(() => qSummary.data.value, contentApi.useBrokenRefs)
 const qUris = contentApi.useLibraryUris(selectedLibraryId)
-const userUriSet = computed(() => new Set(qUris.data.value?.user_uris ?? []))
 const contentUris = computed(() => qUris.data.value?.content_uris ?? [])
+const userUriSet = computed(() => new Set(qUris.data.value?.user_uris ?? []))
 const items = computed(() => qBrokenRefs.data.value?.data ?? [])
-const pageCount = computed(() => Math.ceil((qBrokenRefs.data.value?.total ?? 0) / PAGE_SIZE))
-
-// Saving can shrink the list below the current page, also when the pagination isn't rendered.
-watch(
-    () => qBrokenRefs.data.value?.total,
-    total => {
-        if (total == null) return
-        page.value = Math.min(page.value, Math.max(1, Math.ceil(total / PAGE_SIZE)))
-    }
-)
-
-watch([selectedLibraryId, search], () => {
-    edits.clear()
-    page.value = 1
-})
-
-function replacement(id: string): string | null {
-    const edit = edits.get(id)
-    return edit && edit !== 'delete' ? edit : null
-}
-
-function setEdit(id: string, uri: string | undefined) {
-    if (uri) {
-        edits.set(id, uri)
-    } else {
-        edits.delete(id)
-    }
-}
 
 function markAllDelete() {
     for (const item of items.value) {
@@ -261,18 +219,10 @@ function unmarkAllDeletes() {
     }
 }
 
-function toggleDelete(id: string) {
-    if (edits.get(id) === 'delete') {
-        edits.delete(id)
-    } else {
-        edits.set(id, 'delete')
-    }
-}
-
 // Shown under the field, not in a tooltip, so touch users see it too.
 function actionHint(id: string) {
     if (edits.get(id) === 'delete') return 'Saving deletes this data.'
-    const edit = replacement(id)
+    const edit = target(id)
     if (edit && userUriSet.value.has(edit)) {
         return 'This ref already has user data. Saving replaces it with this older entry.'
     }
@@ -281,18 +231,10 @@ function actionHint(id: string) {
 const mSave = useMutation({
     mutationFn: async () => {
         if (!selectedLibraryId.value) return
-        const toDelete: string[] = []
-        const toUpdate: Record<string, string> = {}
-        for (const [id, value] of edits) {
-            if (value === 'delete') {
-                toDelete.push(id)
-            } else {
-                toUpdate[id] = value
-            }
-        }
+        const { deletes, targets } = changes()
         await contentApi.fixBrokenRefs(selectedLibraryId.value, {
-            delete: toDelete,
-            update: toUpdate,
+            delete: deletes,
+            update: targets,
         })
     },
     onSuccess: async () => {

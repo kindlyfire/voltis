@@ -39,6 +39,7 @@ const (
 	AuthLinkMatchUsername      = "auth.link.match_username"
 	AuthLinkMatchEmail         = "auth.link.match_email"
 	AuthProxyLogoutURL         = "auth.proxy.logout_url"
+	MetadataMatchingPaused     = "metadata.matching_paused"
 	BootstrapCompleted         = "internal.bootstrap_completed"
 )
 
@@ -92,6 +93,10 @@ var defs = []Def{
 		Help: "Link an external login to the local account with the same email. The identity provider is trusted to own that address: anyone who can register it there can claim the local account.",
 	},
 	{Key: AuthProxyLogoutURL, Type: TypeString, Default: "", Help: "Where to send proxy users on logout. Empty hides the logout button.", validate: optionalURL},
+	{
+		Key: MetadataMatchingPaused, Type: TypeBool, Default: false,
+		Help: "Pause matching series with metadata providers automatically. Linked metadata keeps refreshing.",
+	},
 	{Key: BootstrapCompleted, Type: TypeBool, Default: false, Internal: true},
 }
 

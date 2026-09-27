@@ -21,6 +21,7 @@ import (
 type LibraryRoutes struct {
 	pool      *pgxpool.Pool
 	scanQueue *scanner.Queue
+	wake      func() // wakes metadata matching, which auto_match turns on
 }
 
 func (lr *LibraryRoutes) Register(g *echo.Group) {
@@ -68,10 +69,10 @@ func libraryToDTO(lib models.Library, contentCount, rootContentCount *int) Libra
 }
 
 type upsertLibraryRequest struct {
-	Name     string                  `json:"name"`
-	Type     string                  `json:"type"`
-	Sources  []LibrarySourceDTO      `json:"sources"`
-	Settings *models.LibrarySettings `json:"settings"`
+	Name     string             `json:"name"`
+	Type     string             `json:"type"`
+	Sources  []LibrarySourceDTO `json:"sources"`
+	Settings json.RawMessage    `json:"settings"`
 }
 
 func (lr *LibraryRoutes) list(c echo.Context) error {
@@ -219,14 +220,19 @@ func (lr *LibraryRoutes) upsert(c echo.Context) error {
 		return err
 	}
 
-	// Omitted settings keep the stored ones, or the defaults for a new library.
+	// Omitted settings keep the stored ones, or the defaults for a new library; omitted keys take
+	// their defaults.
 	var settingsJSON []byte
-	if req.Settings != nil {
-		mode := req.Settings.BookSeriesInference
+	if len(req.Settings) > 0 && string(req.Settings) != "null" {
+		settings := models.DefaultLibrarySettings()
+		if err := json.Unmarshal(req.Settings, &settings); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "Invalid settings: "+err.Error())
+		}
+		mode := settings.BookSeriesInference
 		if mode != models.BookSeriesInferenceOff && mode != models.BookSeriesInferenceConservative {
 			return echo.NewHTTPError(http.StatusBadRequest, "Invalid book_series_inference: "+mode)
 		}
-		if settingsJSON, err = json.Marshal(req.Settings); err != nil {
+		if settingsJSON, err = json.Marshal(settings); err != nil {
 			return err
 		}
 	}
@@ -252,6 +258,7 @@ func (lr *LibraryRoutes) upsert(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	lr.wake()
 
 	lib, err := getLibrary(ctx, lr.pool, id)
 	if err != nil {

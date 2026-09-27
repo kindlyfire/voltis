@@ -292,7 +292,16 @@ func (m *Manager) finish(e *entry, status int, output, result any, err error) {
 	term.UpdatedAt = time.Now().UTC()
 	e.mu.Unlock()
 
-	if persistErr := m.persist(context.Background(), e, term.Status, term.Output, term.UpdatedAt); persistErr != nil {
+	persistErr := m.persist(context.Background(), e, term.Status, term.Output, term.UpdatedAt)
+
+	// Off the running list before publishing, so that whoever the terminal snapshot wakes no longer
+	// sees the task pending; still live, so that its snapshot and logs stay readable until then.
+	m.mu.Lock()
+	m.running = fp.Remove(m.running, e)
+	m.scheduleUnlocked()
+	m.mu.Unlock()
+
+	if persistErr != nil {
 		err = errors.Join(err, fmt.Errorf("persist terminal task state: %w", persistErr))
 	} else {
 		e.mu.Lock()
@@ -307,8 +316,6 @@ func (m *Manager) finish(e *entry, status int, output, result any, err error) {
 
 	m.mu.Lock()
 	delete(m.live, term.ID)
-	m.running = fp.Remove(m.running, e)
-	m.scheduleUnlocked()
 	m.mu.Unlock()
 
 	e.result, e.err = result, err

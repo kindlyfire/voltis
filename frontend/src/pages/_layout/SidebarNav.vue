@@ -37,6 +37,12 @@
                     label="Libraries"
                 />
                 <ANavItem
+                    to="/settings/metadata"
+                    :icon="IconLink"
+                    label="Metadata"
+                    :badge="reviewCount"
+                />
+                <ANavItem
                     to="/settings/tasks"
                     :icon="IconClipboardList"
                     :active-icon="IconClipboardListFilled"
@@ -124,6 +130,7 @@ import {
     IconCogFilled,
     IconHome,
     IconHomeFilled,
+    IconLink,
     IconLinkOff,
     IconList,
     IconListFilled,
@@ -135,6 +142,7 @@ import {
     IconWeatherSunny,
 } from '@/ui/icons'
 import { contentApi } from '@/utils/api/content'
+import { metadataApi } from '@/utils/api/metadata'
 import { usersApi } from '@/utils/api/users'
 import Libraries from './Libraries.vue'
 import { useLayoutStore } from './useLayoutStore'
@@ -150,8 +158,16 @@ const isAdmin = computed(() => qMe.data.value?.permissions.includes('ADMIN'))
 const { canLogout, logout, mutation: mLogout } = useLogout()
 
 const qBrokenRefs = contentApi.useBrokenRefsSummary({ enabled: () => isSettings.value })
+const qOrphans = contentApi.useOrphansSummary({
+    enabled: () => isSettings.value && !!isAdmin.value,
+})
 // Refs whose library was deleted can't be fixed on the page, which leaves them out.
-const hasBrokenRefs = computed(() => qBrokenRefs.data.value?.some(s => s.library_id) ?? false)
+const hasBrokenRefs = computed(
+    () => !!qBrokenRefs.data.value?.some(s => s.library_id) || !!qOrphans.data.value?.length
+)
+
+const qSummary = metadataApi.useSummary({ enabled: () => isSettings.value && !!isAdmin.value })
+const reviewCount = computed(() => qSummary.data.value?.libraries.reduce((n, s) => n + s.review, 0))
 
 // Theme: click toggles, Shift+click or a long press goes back to the system theme.
 let pressTimer: ReturnType<typeof setTimeout> | undefined

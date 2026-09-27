@@ -17,6 +17,7 @@
             <span class="a-nav-item__label"
                 ><slot>{{ label }}</slot></span
             >
+            <span v-if="badge" class="a-nav-item__badge">{{ badge }}</span>
         </a>
     </RouterLink>
     <button
@@ -33,6 +34,7 @@
         <span class="a-nav-item__label"
             ><slot>{{ label }}</slot></span
         >
+        <span v-if="badge" class="a-nav-item__badge">{{ badge }}</span>
     </button>
 </template>
 
@@ -59,6 +61,8 @@ const props = withDefaults(
         indent?: number
         /** Lets long labels wrap instead of truncating. */
         wrap?: boolean
+        /** A count of things waiting there; hidden at 0. */
+        badge?: number
     }>(),
     { active: undefined, indent: 0 }
 )
@@ -113,6 +117,19 @@ function classes(active: boolean) {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+    }
+
+    .a-nav-item__badge {
+        flex: none;
+        min-width: 22px;
+        padding: 2px 7px;
+        border-radius: 999px;
+        background: var(--color-primary-container);
+        color: var(--color-on-primary-container);
+        font-size: 12px;
+        font-weight: 600;
+        text-align: center;
+        font-variant-numeric: tabular-nums;
     }
 
     .wrap {

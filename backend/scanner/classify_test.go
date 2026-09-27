@@ -12,7 +12,7 @@ import (
 
 	"voltis/lib/comic"
 	"voltis/lib/epub"
-	"voltis/models"
+	"voltis/metadata"
 )
 
 var testPages = []comic.PageInfo{
@@ -24,30 +24,29 @@ func TestClassifyComicTuples(t *testing.T) {
 	cases := []struct {
 		name string
 		path string
-		meta models.Metadata
-		year int
+		meta metadata.Fields
 		want string
 	}{
 		{
 			"chapter only",
-			"/lib/Other Series/Other Series ch7.cbz", models.Metadata{}, 0,
+			"/lib/Other Series/Other Series ch7.cbz", metadata.Fields{},
 			"prefix=comic type=comic part=ch7 order=[nil,7] cover=001.jpg title=Ch. 7 series=comic|comic_series|Other Series index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
 		},
 		{
 			"fallback chapter strips directory prefix",
-			"/lib/Series 1000/Series 1000 002.cbz", models.Metadata{}, 0,
+			"/lib/Series 1000/Series 1000 002.cbz", metadata.Fields{},
 			"prefix=comic type=comic part=ch2 order=[nil,2] cover=001.jpg title=Ch. 2 series=comic|comic_series|Series 1000 index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
 		},
 		{
 			"metadata year without comicinfo year",
-			"/lib/Plain/Plain ch1.cbz", models.Metadata{Series: "Plain Series"}, 0,
+			"/lib/Plain/Plain ch1.cbz", metadata.Fields{Series: metadata.Val("Plain Series")},
 			"prefix=comic type=comic part=ch1 order=[nil,1] cover=001.jpg title=Ch. 1 series=comic|comic_series|Plain Series index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			file := FSFile{Path: c.path, Mtime: baseTime, Size: 10}
-			got := summarize(classifyComic(file, c.meta, c.year, testPages))
+			got := summarize(classifyComic(file, c.meta, nil, testPages))
 			if got != c.want {
 				t.Errorf("got  %s\nwant %s", got, c.want)
 			}
@@ -130,9 +129,9 @@ func TestClassifyBookInference(t *testing.T) {
 			if len(item.OrderParts) != 1 || !reflect.DeepEqual(item.OrderParts[0], c.order) {
 				t.Errorf("order = %v, want [%v]", item.OrderParts, c.order)
 			}
-			if item.MetaRaw.Series != c.meta.Series || item.MetaRaw.SeriesIndex != c.meta.SeriesIndex {
+			if item.MetaRaw.Series.V != c.meta.Series || item.MetaRaw.SeriesIndex.V != c.meta.SeriesIndex {
 				t.Errorf("child series = %q/%g, want the metadata values %q/%g",
-					item.MetaRaw.Series, item.MetaRaw.SeriesIndex, c.meta.Series, c.meta.SeriesIndex)
+					item.MetaRaw.Series.V, item.MetaRaw.SeriesIndex.V, c.meta.Series, c.meta.SeriesIndex)
 			}
 		})
 	}
@@ -150,17 +149,17 @@ func TestClassifyBookMetadata(t *testing.T) {
 		Series:          "Book Series",
 	}
 	got := classifyBook(file, meta, false, nil, false).MetaRaw
-	want := models.Metadata{
-		Title:       "Story",
-		Description: "A story",
-		Staff: []models.StaffEntry{
+	want := metadata.Fields{
+		Title:       metadata.Val("Story"),
+		Description: metadata.Val("A story"),
+		Staff: metadata.Val([]metadata.Staff{
 			{Name: "Ann Author", Role: "author"},
 			{Name: "Ben Writer", Role: "author"},
-		},
-		Publisher:       "Pub",
-		Language:        "en",
-		PublicationDate: "2020-01-02",
-		Series:          "Book Series",
+		}),
+		Publishers:      metadata.Val([]string{"Pub"}),
+		Language:        metadata.Val("en"),
+		PublicationDate: metadata.Val("2020-01-02"),
+		Series:          metadata.Val("Book Series"),
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("meta = %+v, want %+v", got, want)
@@ -201,14 +200,14 @@ func TestSanitizeURIPartAtBookProducers(t *testing.T) {
 	if item.URIPart != "a_b_c" {
 		t.Errorf("item part = %q, want the stem sanitized", item.URIPart)
 	}
-	if item.MetaRaw.Title != "a\tb\\c" {
-		t.Errorf("title = %q, want the stem kept verbatim", item.MetaRaw.Title)
+	if item.MetaRaw.Title.V != "a\tb\\c" {
+		t.Errorf("title = %q, want the stem kept verbatim", item.MetaRaw.Title.V)
 	}
 	if item.Series.URIPart != "Foo_bar_" {
 		t.Errorf("series part = %q, want the series name sanitized", item.Series.URIPart)
 	}
-	if item.MetaRaw.Series != "Foo/bar\x01" {
-		t.Errorf("metadata series = %q, want it kept verbatim", item.MetaRaw.Series)
+	if item.MetaRaw.Series.V != "Foo/bar\x01" {
+		t.Errorf("metadata series = %q, want it kept verbatim", item.MetaRaw.Series.V)
 	}
 
 	empty := classifyBook(FSFile{Path: "/lib/Books/.epub"}, epub.Metadata{Series: "/"}, false, nil, false)
@@ -219,22 +218,22 @@ func TestSanitizeURIPartAtBookProducers(t *testing.T) {
 
 func TestSanitizeURIPartAtComicProducers(t *testing.T) {
 	file := FSFile{Path: "/lib/S/S ch1.cbz", Mtime: baseTime, Size: 10}
-	item := classifyComic(file, models.Metadata{Series: "Foo/bar", Title: "Ch. 1 / Special"}, 2019, testPages)
+	item := classifyComic(file, metadata.Fields{Series: metadata.Val("Foo/bar"), Title: metadata.Val("Ch. 1 / Special")}, new(2019), testPages)
 
 	if item.Series.URIPart != "Foo_bar_2019" {
 		t.Errorf("series part = %q, want the separator replaced and the year suffix kept", item.Series.URIPart)
 	}
-	if item.MetaRaw.Title != "Ch. 1 / Special" {
-		t.Errorf("title = %q, want it kept verbatim", item.MetaRaw.Title)
+	if item.MetaRaw.Title.V != "Ch. 1 / Special" {
+		t.Errorf("title = %q, want it kept verbatim", item.MetaRaw.Title.V)
 	}
-	if item.MetaRaw.Series != "Foo/bar" {
-		t.Errorf("metadata series = %q, want it kept verbatim", item.MetaRaw.Series)
+	if item.MetaRaw.Series.V != "Foo/bar" {
+		t.Errorf("metadata series = %q, want it kept verbatim", item.MetaRaw.Series.V)
 	}
 	if item.URIPart != "ch1" {
 		t.Errorf("item part = %q, want an ordinary part unchanged", item.URIPart)
 	}
 
-	control := classifyComic(file, models.Metadata{Series: "Foo\x02bar"}, 0, testPages)
+	control := classifyComic(file, metadata.Fields{Series: metadata.Val("Foo\x02bar")}, nil, testPages)
 	if control.Series.URIPart != "Foo_bar" {
 		t.Errorf("series part = %q, want the control character replaced", control.Series.URIPart)
 	}
@@ -320,12 +319,12 @@ func TestClassifySanitizedPartReachesTheWriter(t *testing.T) {
 
 func TestComicFallbackSeriesLeavesTheInferredNameOffTheChild(t *testing.T) {
 	file := fsFile("/lib/Foo\\bar/ch1.cbz", baseTime, 10)
-	item := classifyComic(file, models.Metadata{}, 0, testPages)
+	item := classifyComic(file, metadata.Fields{}, nil, testPages)
 	if item.Series.URIPart != "Foo_bar" {
 		t.Fatalf("series = %+v, want the folder name sanitized into the part", item.Series)
 	}
-	if item.MetaRaw.Series != "" {
-		t.Errorf("child series = %q, want an inferred name left off the child", item.MetaRaw.Series)
+	if item.MetaRaw.Series.P != metadata.Absent {
+		t.Errorf("child series = %+v, want an inferred name left off the child", item.MetaRaw.Series)
 	}
 }
 

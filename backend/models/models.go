@@ -70,11 +70,16 @@ const (
 
 type LibrarySettings struct {
 	BookSeriesInference string `json:"book_series_inference"`
+	AutoMatch           bool   `json:"auto_match"` // match series with metadata providers unattended; off unless set
+}
+
+func DefaultLibrarySettings() LibrarySettings {
+	return LibrarySettings{BookSeriesInference: BookSeriesInferenceConservative}
 }
 
 // ParseLibrarySettings fills in defaults for keys the stored settings lack.
 func ParseLibrarySettings(raw JSONB) LibrarySettings {
-	s := LibrarySettings{BookSeriesInference: BookSeriesInferenceConservative}
+	s := DefaultLibrarySettings()
 	_ = json.Unmarshal(raw, &s)
 	return s
 }

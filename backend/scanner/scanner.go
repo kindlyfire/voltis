@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"voltis/lib/tasks"
+	"voltis/metadata"
 	"voltis/models"
 )
 
@@ -36,7 +37,7 @@ type ParsedItem struct {
 	OrderParts  []*float32
 	CoverSuffix *string
 	FileData    json.RawMessage
-	MetaRaw     models.Metadata
+	MetaRaw     metadata.Fields
 }
 
 type Result struct {
@@ -77,10 +78,9 @@ const RecentCap = 6
 
 // RecentEntry is a series, or a standalone item, changed by a committed flush.
 type RecentEntry struct {
-	ID        string     `json:"id"`
-	Title     string     `json:"title"`
-	HasCover  bool       `json:"has_cover"`
-	FileMtime *time.Time `json:"file_mtime"`
+	ID           string  `json:"id"`
+	Title        string  `json:"title"`
+	CoverVersion *string `json:"cover_version"`
 	Counts
 	Deleted bool `json:"deleted"`
 }
@@ -116,19 +116,21 @@ func unmarshalScanInput(data json.RawMessage) (any, error) {
 	return v, err
 }
 
+const TaskName = "scan_library"
+
 func scanCompatible(self any, other tasks.RunningInfo) bool {
-	if other.Name != "scan_library" {
+	if other.Name != TaskName {
 		return true
 	}
 	otherInput, ok := other.Input.(ScanInput)
 	return ok && self.(ScanInput).LibraryID != otherInput.LibraryID
 }
 
-func NewScanTask(notify Notifier) *tasks.TaskDef {
+func NewScanTask(notify Notifier, store *metadata.Store) *tasks.TaskDef {
 	return &tasks.TaskDef{
-		Name: "scan_library",
+		Name: TaskName,
 		Process: func(input any, tc *tasks.TaskContext) (any, error) {
-			return runScan(tc.Context(), input.(ScanInput), tc, notify)
+			return runScan(tc.Context(), input.(ScanInput), tc, notify, store)
 		},
 		UnmarshalInput:   unmarshalScanInput,
 		IsCompatibleWith: scanCompatible,
@@ -149,7 +151,7 @@ func parseWorker(ctx context.Context, s FileScanner, jobs <-chan FSFile, results
 	}
 }
 
-func runScan(ctx context.Context, in ScanInput, tc *tasks.TaskContext, notify Notifier) (ScanResult, error) {
+func runScan(ctx context.Context, in ScanInput, tc *tasks.TaskContext, notify Notifier, store *metadata.Store) (ScanResult, error) {
 	start := time.Now()
 	tc.Progress(Progress{Phase: "walking"})
 
@@ -203,7 +205,7 @@ func runScan(ctx context.Context, in ScanInput, tc *tasks.TaskContext, notify No
 	for range workers {
 		wg.Go(func() { parseWorker(ctx, s, jobs, results) })
 	}
-	wg.Go(func() { commitLoop(ctx, pool, s, in.LibraryID, flushes, done) })
+	wg.Go(func() { commitLoop(ctx, pool, store, s, in.LibraryID, flushes, done) })
 
 	err = w.run(ctx, events, walkDone, jobs, results, flushes, done)
 	cancel()

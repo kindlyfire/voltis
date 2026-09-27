@@ -857,6 +857,7 @@
                                 active
                             />
                             <ANavItem :icon="IconDotsHorizontal" label="Disabled" disabled />
+                            <ANavItem :icon="IconLink" label="Badge" :badge="3" @click="() => {}" />
                             <ADivider class="mx-3.5 my-2.5" />
                             <ANavItem to="/settings/interface" :icon="IconCog" label="Settings" />
                         </nav>
@@ -1170,6 +1171,7 @@ import {
     IconFilter,
     IconHome,
     IconHomeFilled,
+    IconLink,
     IconList,
     IconListFilled,
     IconMagnify,

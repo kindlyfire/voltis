@@ -1,8 +1,9 @@
-import { useMutation, useQuery } from '@tanstack/vue-query'
+import { keepPreviousData, useMutation, useQuery } from '@tanstack/vue-query'
 import { toValue, type MaybeRefOrGetter } from 'vue'
 import { API_URL, apiFetch } from '../fetch'
 import { queryClient } from '../misc'
 import { isEnabled, type QueryOptions } from './_utils'
+import { libraryScope } from './catalog'
 import type {
     BookStructure,
     BrokenRefsFixRequest,
@@ -10,15 +11,37 @@ import type {
     BrokenUserToContent,
     Content,
     ContentListParams,
-    ContentMetadata,
+    Cover,
     DownloadInfo,
     LibraryUrisResponse,
-    MetadataLayersResponse,
+    OrphanedMetadata,
+    OrphanTarget,
+    OrphansFixRequest,
+    OrphansSummaryItem,
     Paginated,
     ReadingStatus,
     UserToContent,
     UserToContentUpdate,
 } from './types'
+
+export function coverUrl(c: Cover): string | null {
+    return c.cover_version ? `${API_URL}/files/cover/${c.id}?v=${c.cover_version}` : null
+}
+
+export interface PageParams {
+    search?: string
+    limit?: number
+    offset?: number
+}
+
+function pageQuery(p: PageParams): string {
+    const searchParams = new URLSearchParams()
+    if (p.search) searchParams.append('search', p.search)
+    if (p.limit !== undefined) searchParams.append('limit', String(p.limit))
+    if (p.offset !== undefined) searchParams.append('offset', String(p.offset))
+    const query = searchParams.toString()
+    return query ? `?${query}` : ''
+}
 
 export const contentApi = {
     useGet: (
@@ -41,7 +64,7 @@ export const contentApi = {
         options: QueryOptions<Paginated<Content>> = {}
     ) =>
         useQuery({
-            queryKey: ['content', 'list', params],
+            queryKey: ['content', 'list', libraryScope(() => toValue(params)?.library_id), params],
             queryFn: async () => {
                 const p = toValue(params)!
                 const searchParams = new URLSearchParams()
@@ -145,34 +168,13 @@ export const contentApi = {
         })
     },
 
-    useMetadataLayers: (id: MaybeRefOrGetter<string | undefined | null>) =>
-        useQuery({
-            queryKey: ['content', 'metadata-layers', id],
-            queryFn: async () => contentApi.getMetadataLayers(toValue(id)!),
-            enabled: isEnabled(id),
-        }),
-
-    getMetadataLayers: async (contentId: string): Promise<MetadataLayersResponse> => {
-        return apiFetch<MetadataLayersResponse>(`/content/${contentId}/metadata-layers`)
-    },
-
-    updateMetadataOverride: async (
-        contentId: string,
-        data: ContentMetadata
-    ): Promise<MetadataLayersResponse> => {
-        return apiFetch<MetadataLayersResponse>(`/content/${contentId}/metadata-override`, {
-            method: 'POST',
-            body: JSON.stringify({ data }),
-        })
-    },
-
     listLibraryUris: async (libraryId: string): Promise<LibraryUrisResponse> => {
         return apiFetch<LibraryUrisResponse>(`/content/refs/${libraryId}`)
     },
 
     useLibraryUris: (libraryId: MaybeRefOrGetter<string | undefined | null>) =>
         useQuery({
-            queryKey: ['content', 'library-uris', libraryId],
+            queryKey: ['content', 'library-uris', libraryScope(libraryId)],
             queryFn: async () => contentApi.listLibraryUris(toValue(libraryId)!),
             enabled: isEnabled(libraryId),
         }),
@@ -186,28 +188,69 @@ export const contentApi = {
 
     useBrokenRefs: (
         libraryId: MaybeRefOrGetter<string | undefined | null>,
-        params: MaybeRefOrGetter<{ search?: string; limit?: number; offset?: number }> = {},
+        params: MaybeRefOrGetter<PageParams> = {},
         options: QueryOptions<Paginated<BrokenUserToContent>> = {}
     ) =>
         useQuery({
-            queryKey: ['content', 'broken-refs', libraryId, params],
-            queryFn: async () => {
-                const p = toValue(params)
-                const searchParams = new URLSearchParams()
-                if (p.search) searchParams.append('search', p.search)
-                if (p.limit !== undefined) searchParams.append('limit', String(p.limit))
-                if (p.offset !== undefined) searchParams.append('offset', String(p.offset))
-                const query = searchParams.toString()
-                return apiFetch<Paginated<BrokenUserToContent>>(
-                    `/content/broken-refs/${toValue(libraryId)}${query ? `?${query}` : ''}`
-                )
-            },
+            queryKey: ['content', 'broken-refs', libraryScope(libraryId), params],
+            queryFn: async () =>
+                apiFetch<Paginated<BrokenUserToContent>>(
+                    `/content/broken-refs/${toValue(libraryId)}${pageQuery(toValue(params))}`
+                ),
             enabled: isEnabled(libraryId),
             ...options,
         }),
 
     fixBrokenRefs: async (libraryId: string, body: BrokenRefsFixRequest): Promise<void> => {
         await apiFetch(`/content/broken-refs/${libraryId}`, {
+            method: 'POST',
+            body: JSON.stringify(body),
+        })
+    },
+
+    useOrphansSummary: (options: QueryOptions<OrphansSummaryItem[]> = {}) =>
+        useQuery({
+            queryKey: ['content', 'orphaned-metadata-summary'],
+            queryFn: async () => apiFetch<OrphansSummaryItem[]>('/content/orphaned-metadata'),
+            ...options,
+        }),
+
+    useOrphans: (
+        libraryId: MaybeRefOrGetter<string | undefined | null>,
+        params: MaybeRefOrGetter<PageParams> = {}
+    ) =>
+        useQuery({
+            queryKey: ['content', 'orphaned-metadata', libraryScope(libraryId), params],
+            queryFn: async () =>
+                apiFetch<Paginated<OrphanedMetadata>>(
+                    `/content/orphaned-metadata/${toValue(libraryId)}${pageQuery(toValue(params))}`
+                ),
+            enabled: isEnabled(libraryId),
+        }),
+
+    /** Content that orphans can move to: series only for orphans with links. */
+    useOrphanTargets: (
+        libraryId: MaybeRefOrGetter<string>,
+        params: MaybeRefOrGetter<{ search: string; series: boolean }>
+    ) =>
+        useQuery({
+            queryKey: ['content', 'orphaned-metadata', libraryScope(libraryId), 'targets', params],
+            queryFn: async () => {
+                const { search, series } = toValue(params)
+                const query = new URLSearchParams({
+                    q: search,
+                    series: String(series),
+                    limit: '50',
+                })
+                return apiFetch<{ data: OrphanTarget[] }>(
+                    `/content/orphaned-metadata/${toValue(libraryId)}/targets?${query}`
+                )
+            },
+            placeholderData: keepPreviousData,
+        }),
+
+    fixOrphans: async (libraryId: string, body: OrphansFixRequest): Promise<void> => {
+        await apiFetch(`/content/orphaned-metadata/${libraryId}`, {
             method: 'POST',
             body: JSON.stringify(body),
         })

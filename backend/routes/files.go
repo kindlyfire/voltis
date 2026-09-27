@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"os"
@@ -14,20 +15,21 @@ import (
 	"regexp"
 	"strings"
 
-	"voltis/config"
+	"voltis/covers"
 	"voltis/db"
 	"voltis/lib/archive"
 	"voltis/lib/epub"
+	"voltis/metadata"
 	"voltis/models"
 
-	"github.com/cshum/vipsgen/vips"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 )
 
 type FileRoutes struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	covers *covers.Cache
 }
 
 func (fr *FileRoutes) Register(g *echo.Group) {
@@ -45,10 +47,16 @@ func (fr *FileRoutes) getCover(c echo.Context) error {
 		return err
 	}
 
-	ctx := reqCtx(c)
-	contentID := c.Param("content_id")
-
-	content, err := db.SelectOne[models.Content](ctx, fr.pool, "SELECT * FROM content WHERE id = $1", contentID)
+	type coverRow struct {
+		models.Content
+		Cover *metadata.CoverRef `db:"cover"`
+	}
+	r, err := db.SelectOne[coverRow](reqCtx(c), fr.pool, `
+		SELECT c.*, cm.data->'cover' AS cover
+		FROM content c
+		LEFT JOIN content_metadata cm ON cm.library_id = c.library_id AND cm.uri = c.uri
+		WHERE c.id = $1
+	`, c.Param("content_id"))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return echo.NewHTTPError(http.StatusNotFound, "Content not found")
 	}
@@ -56,19 +64,42 @@ func (fr *FileRoutes) getCover(c echo.Context) error {
 		return err
 	}
 
-	if content.CoverURI == nil {
+	version := covers.Version(r.Cover, r.CoverURI != nil, r.FileMtime)
+	if r.Cover != nil {
+		data, err := fr.covers.Provider(*r.Cover)
+		if err == nil {
+			return blobCover(c, data, version)
+		}
+		slog.Warn("provider cover unavailable", "content_id", r.ID, "err", err)
+		// Neither the fallback nor a 404 may stay cached once the provider cover loads.
+		c.Response().Header().Set("Cache-Control", "no-store")
+		version = nil
+	}
+	if r.CoverURI == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "Content has no cover")
 	}
-
-	data, mediaType, err := readCover(content)
+	data, err := fr.covers.Local(r.ID, r.FileMtime, func() ([]byte, error) {
+		data, _, err := readContentFile(*r.CoverURI)
+		return data, err
+	})
 	if err != nil {
 		return err
 	}
+	return blobCover(c, data, version)
+}
 
-	if c.QueryParam("v") != "" {
-		c.Response().Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+// blobCover serves a cover, cached for good only under its own version so that a stale URL cannot
+// pin the cover that replaced it. A nil version marks a fallback, which is not cached at all.
+func blobCover(c echo.Context, data []byte, version *string) error {
+	cache := "no-store"
+	if version != nil {
+		cache = "no-cache"
+		if c.QueryParam("v") == *version {
+			cache = "public, max-age=31536000, immutable"
+		}
 	}
-	return c.Blob(http.StatusOK, mediaType, data)
+	c.Response().Header().Set("Cache-Control", cache)
+	return c.Blob(http.StatusOK, "image/jpeg", data)
 }
 
 func (fr *FileRoutes) getComicPage(c echo.Context) error {
@@ -434,58 +465,6 @@ func readPDFPage(pdfPath, innerPath string) ([]byte, string, error) {
 		return nil, "", echo.NewHTTPError(http.StatusInternalServerError, "PDF rendering failed")
 	}
 	return data, "image/jpeg", nil
-}
-
-const coverMaxWidth = 750
-
-func readCover(content models.Content) ([]byte, string, error) {
-	if content.CoverURI == nil {
-		return nil, "", echo.NewHTTPError(http.StatusNotFound, "Content has no cover")
-	}
-
-	cfg := config.Get()
-	cacheDir := filepath.Join(cfg.CacheDir, "covers")
-	cachePath := filepath.Join(cacheDir, content.ID+".jpg")
-
-	// Check cache
-	if info, err := os.Stat(cachePath); err == nil {
-		if content.FileMtime == nil || !info.ModTime().Before(*content.FileMtime) {
-			data, err := os.ReadFile(cachePath)
-			if err == nil {
-				return data, "image/jpeg", nil
-			}
-		}
-	}
-
-	data, _, err := readContentFile(*content.CoverURI)
-	if err != nil {
-		return nil, "", err
-	}
-
-	data, err = resizeCover(data, coverMaxWidth)
-	if err != nil {
-		return nil, "", err
-	}
-
-	_ = os.MkdirAll(cacheDir, 0o755)
-	_ = os.WriteFile(cachePath, data, 0o644)
-
-	return data, "image/jpeg", nil
-}
-
-func resizeCover(data []byte, maxWidth int) ([]byte, error) {
-	opts := vips.DefaultThumbnailBufferOptions()
-	opts.Height = 10000
-	opts.Size = vips.SizeDown
-	img, err := vips.NewThumbnailBuffer(data, maxWidth, opts)
-	if err != nil {
-		return nil, fmt.Errorf("resize cover: %w", err)
-	}
-	defer img.Close()
-
-	jpegOpts := vips.DefaultJpegsaveBufferOptions()
-	jpegOpts.Q = 85
-	return img.JpegsaveBuffer(jpegOpts)
 }
 
 func findArchiveAndInnerPath(uri string) (string, string) {

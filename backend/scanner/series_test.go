@@ -4,17 +4,19 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"voltis/metadata"
 	"voltis/models"
 )
 
 func f32(v float32) *float32 { return new(v) }
 
-func childOf(id string, parts []*float32, m models.Metadata) Child {
-	return Child{ID: id, OrderParts: parts, Meta: rawMeta(m)}
+func childOf(id string, parts []*float32, m metadata.Fields) Child {
+	return Child{ID: id, OrderParts: parts, Meta: m}
 }
 
 func ids(children []Child) string {
@@ -34,26 +36,26 @@ func TestOrderSortsByPartsThenURIPartThenID(t *testing.T) {
 		{
 			"numeric parts",
 			[]Child{
-				childOf("c", []*float32{f32(2)}, models.Metadata{}),
-				childOf("a", []*float32{f32(1)}, models.Metadata{}),
-				childOf("b", []*float32{f32(1.5)}, models.Metadata{}),
+				childOf("c", []*float32{f32(2)}, metadata.Fields{}),
+				childOf("a", []*float32{f32(1)}, metadata.Fields{}),
+				childOf("b", []*float32{f32(1.5)}, metadata.Fields{}),
 			},
 			"a,b,c",
 		},
 		{
 			"nil parts sort last",
 			[]Child{
-				childOf("nil", []*float32{nil, f32(1)}, models.Metadata{}),
-				childOf("zero", []*float32{f32(0), f32(1)}, models.Metadata{}),
+				childOf("nil", []*float32{nil, f32(1)}, metadata.Fields{}),
+				childOf("zero", []*float32{f32(0), f32(1)}, metadata.Fields{}),
 			},
 			"zero,nil",
 		},
 		{
 			"equal parts fall back to id",
 			[]Child{
-				childOf("z", []*float32{f32(1)}, models.Metadata{}),
-				childOf("m", []*float32{f32(1)}, models.Metadata{}),
-				childOf("a", []*float32{f32(1)}, models.Metadata{}),
+				childOf("z", []*float32{f32(1)}, metadata.Fields{}),
+				childOf("m", []*float32{f32(1)}, metadata.Fields{}),
+				childOf("a", []*float32{f32(1)}, metadata.Fields{}),
 			},
 			"a,m,z",
 		},
@@ -70,8 +72,8 @@ func TestOrderSortsByPartsThenURIPartThenID(t *testing.T) {
 		{
 			"shorter part list first",
 			[]Child{
-				childOf("long", []*float32{f32(1), f32(2)}, models.Metadata{}),
-				childOf("short", []*float32{f32(1)}, models.Metadata{}),
+				childOf("long", []*float32{f32(1), f32(2)}, metadata.Fields{}),
+				childOf("short", []*float32{f32(1)}, metadata.Fields{}),
 			},
 			"short,long",
 		},
@@ -95,14 +97,16 @@ func TestOrderSortsByPartsThenURIPartThenID(t *testing.T) {
 }
 
 func TestTiedChildrenChooseCoverAndMetadataByID(t *testing.T) {
-	tied := func(id string, mtime time.Time, m models.Metadata) Child {
-		c := childOf(id, []*float32{f32(0)}, m)
+	tied := func(id string, mtime time.Time, series, publisher string) Child {
+		c := childOf(id, []*float32{f32(0)}, metadata.Fields{
+			Series: metadata.Val(series), Publishers: metadata.Val([]string{publisher}),
+		})
 		c.CoverURI = new("/lib/s/" + id + ".epub/cover.jpg")
 		c.FileMtime = &mtime
 		return c
 	}
-	z := tied("z", baseTime.Add(2*time.Hour), models.Metadata{Series: "Zed Series", Publisher: "Zed Press"})
-	a := tied("a", baseTime.Add(time.Hour), models.Metadata{Series: "Alpha Series", Publisher: "Alpha Press"})
+	z := tied("z", baseTime.Add(2*time.Hour), "Zed Series", "Zed Press")
+	a := tied("a", baseTime.Add(time.Hour), "Alpha Series", "Alpha Press")
 
 	for _, arrival := range [][]Child{{z, a}, {a, z}} {
 		ordered := order(arrival)
@@ -118,107 +122,123 @@ func TestTiedChildrenChooseCoverAndMetadataByID(t *testing.T) {
 			t.Fatalf("series mtime comes from the lowest-ID tied child, got %v", mtime)
 		}
 
-		file := inherit(SeriesRef{ID: "p", URIPart: "s"}, ordered)
-		if file.Title != "Alpha Series" || file.Publisher != "Alpha Press" {
+		file := seriesLayer(SeriesRef{ID: "p", URIPart: "s"}, ordered)
+		if file.Title.V != "Alpha Series" || !slices.Equal(file.Publishers.V, []string{"Alpha Press"}) {
 			t.Fatalf("the lowest-ID tied child wins inherited fields, got %+v", file)
 		}
 	}
 }
 
-func TestInheritConverges(t *testing.T) {
-	a := childOf("a", []*float32{f32(1)}, models.Metadata{
-		Series: "The Series", Publisher: "Press", Description: "From A",
+func TestSeriesLayerConverges(t *testing.T) {
+	a := childOf("a", []*float32{f32(1)}, metadata.Fields{
+		Series: metadata.Val("The Series"), Publishers: metadata.Val([]string{"Press"}),
+		Description: metadata.Val("From A"),
 	})
-	b := childOf("b", []*float32{f32(2)}, models.Metadata{
-		Series: "Other", Publisher: "Later Press", Genre: "Action", Language: "en",
-		AgeRating: "Teen", Manga: "Yes", Imprint: "Imp", PublicationDate: "2019",
-		Staff: []models.StaffEntry{{Name: "Ann", Role: "author"}},
+	b := childOf("b", []*float32{f32(2)}, metadata.Fields{
+		Series: metadata.Val("Other"), Publishers: metadata.Val([]string{"Later Press"}),
+		Genres: metadata.Val([]string{"Action"}), Language: metadata.Val("en"),
+		ContentRating: metadata.Val(metadata.Suggestive), Manga: metadata.Val("Yes"), Imprint: metadata.Val("Imp"),
+		PublicationDate: metadata.Val("2019"), Staff: metadata.Val([]metadata.Staff{{Name: "Ann", Role: "author"}}),
 	})
 
-	partial := inherit(SeriesRef{URIPart: "s"}, order([]Child{a}))
-	if partial.Title != "The Series" || partial.Publisher != "Press" || partial.Genre != "" {
+	partial := seriesLayer(SeriesRef{URIPart: "s"}, order([]Child{a}))
+	if partial.Title.V != "The Series" || partial.Genres.P != metadata.Absent {
 		t.Fatalf("partial = %+v", partial)
 	}
 
-	full := inherit(SeriesRef{URIPart: "s"}, order([]Child{a, b}))
-	want := models.Metadata{
-		Title: "The Series", Publisher: "Press", Description: "From A",
-		Genre: "Action", Language: "en", AgeRating: "Teen", Manga: "Yes",
-		Imprint: "Imp", PublicationDate: "2019",
-		Staff: []models.StaffEntry{{Name: "Ann", Role: "author"}},
+	// Descriptions and imprints describe a volume, not the series.
+	full := seriesLayer(SeriesRef{URIPart: "s"}, order([]Child{a, b}))
+	want := metadata.Fields{
+		Title: metadata.Val("The Series"), Publishers: metadata.Val([]string{"Press"}),
+		Genres: metadata.Val([]string{"action"}), Language: metadata.Val("en"),
+		ContentRating: metadata.Val(metadata.Suggestive), Manga: metadata.Val("Yes"),
+		PublicationDate: metadata.Val("2019"), Staff: metadata.Val([]metadata.Staff{{Name: "Ann", Role: "author"}}),
 	}
 	if !reflect.DeepEqual(full, want) {
 		t.Fatalf("full = %+v, want %+v", full, want)
 	}
 
-	reversed := inherit(SeriesRef{URIPart: "s"}, order([]Child{b, a}))
-	if !reflect.DeepEqual(reversed, full) {
+	if reversed := seriesLayer(SeriesRef{URIPart: "s"}, order([]Child{b, a})); !reflect.DeepEqual(reversed, full) {
 		t.Fatalf("arrival order matters: %+v != %+v", reversed, full)
-	}
-
-	if again := inherit(SeriesRef{URIPart: "s"}, order([]Child{a, b})); !reflect.DeepEqual(again, full) {
-		t.Fatalf("inherit not idempotent: %+v", again)
 	}
 }
 
-func TestInheritIsPure(t *testing.T) {
+func TestSeriesLayerIsPure(t *testing.T) {
 	build := func() []Child {
 		return []Child{
-			childOf("a", []*float32{f32(1)}, models.Metadata{
-				Series: "S", Publisher: "P",
-				Staff: []models.StaffEntry{{Name: "Ann", Role: "author"}},
+			childOf("a", []*float32{f32(1)}, metadata.Fields{
+				Series: metadata.Val("S"), Publishers: metadata.Val([]string{"P"}),
+				Staff: metadata.Val([]metadata.Staff{{Name: "Ann", Role: "author"}}),
 			}),
-			childOf("b", []*float32{f32(2)}, models.Metadata{
-				Genre: "G",
-				Staff: []models.StaffEntry{{Name: "Bob", Role: "artist"}},
+			childOf("b", []*float32{f32(2)}, metadata.Fields{
+				Genres: metadata.Val([]string{"g"}),
+				Staff:  metadata.Val([]metadata.Staff{{Name: "Bob", Role: "artist"}}),
 			}),
 		}
 	}
 	children, snapshot := build(), build()
-	got := inherit(SeriesRef{URIPart: "s"}, children)
-	if !reflect.DeepEqual(children, snapshot) {
-		t.Fatalf("children mutated: %+v", children)
-	}
-	got.Publisher = "mutated"
-	got.Staff[0] = models.StaffEntry{Name: "mutated", Role: "mutated"}
+	got := seriesLayer(SeriesRef{URIPart: "s"}, children)
+	got.Publishers.V[0] = "mutated"
+	got.Staff.V[0] = metadata.Staff{Name: "mutated", Role: "mutated"}
 	if !reflect.DeepEqual(children, snapshot) {
 		t.Fatalf("result shares backing storage with input: %+v", children)
 	}
-	fresh := inherit(SeriesRef{URIPart: "s"}, children)
-	if fresh.Publisher != "P" || !reflect.DeepEqual(fresh.Staff, snapshot[0].Meta.File.Raw.Staff) {
-		t.Fatalf("result aliases input: %+v", fresh)
-	}
 }
 
-func TestInheritTitleFallback(t *testing.T) {
-	if got := inherit(SeriesRef{URIPart: "Fallback Part"}, nil); got.Title != "Fallback Part" {
-		t.Fatalf("empty children title = %q", got.Title)
-	}
-	children := []Child{childOf("a", nil, models.Metadata{Publisher: "P"})}
-	if got := inherit(SeriesRef{URIPart: "Fallback Part"}, children); got.Title != "Fallback Part" || got.Publisher != "P" {
-		t.Fatalf("inherited = %+v", got)
-	}
-}
-
-func TestInheritTitleFallsBackToTheFolderOnlyWhenItSanitizesToTheKey(t *testing.T) {
+func TestSeriesLayerTitle(t *testing.T) {
+	named := []Child{childOf("a", nil, metadata.Fields{Series: metadata.Val("Child Series")})}
+	unnamed := []Child{childOf("a", nil, metadata.Fields{Title: metadata.Val("Vol. 1")})}
 	for _, tc := range []struct {
-		dir, part, want string
+		dir, part string
+		children  []Child
+		want      string
 	}{
-		{"/lib/Foo\\bar", "Foo_bar", "Foo\\bar"},
-		{"/lib/Foo_bar", "Foo_bar", "Foo_bar"},
-		{"/lib/Foo (2019)", "Foo_2019", "Foo_2019"},
-		{"/lib/(2019)", "_2019", "_2019"},
-		{"/lib/Foo\\bar (2019)", "Foo_bar_2019", "Foo_bar_2019"},
+		{"/lib/Foo (2019)", "Foo_2019", named, "Child Series"},
+		{"/lib/Foo\\bar", "Foo_bar", unnamed, "Foo\\bar"},
+		{"/lib/Foo (2019)", "Foo_2019", unnamed, "Foo"},
+		{"/lib/Foo\\bar (2019)", "Foo_bar_2019", nil, "Foo\\bar"},
+		{"/lib/(2019)", "_2019", nil, "_2019"},
+		// Book series have no folder, and inferred ones no series name.
+		{"", "Fallback Part", unnamed, "Fallback Part"},
+		{"", "Fallback Part", nil, "Fallback Part"},
 	} {
-		ref := SeriesRef{URIPart: tc.part, Type: "comic_series", FileURI: &tc.dir}
-		if got := inherit(ref, nil); got.Title != tc.want {
-			t.Errorf("%s title = %q, want %q", tc.dir, got.Title, tc.want)
+		ref := SeriesRef{URIPart: tc.part}
+		if tc.dir != "" {
+			ref.FileURI = &tc.dir
+		}
+		if got := seriesLayer(ref, tc.children); got.Title.V != tc.want {
+			t.Errorf("%q/%s title = %q, want %q", tc.dir, tc.part, got.Title.V, tc.want)
 		}
 	}
+}
 
-	book := SeriesRef{URIPart: "Foo_bar", Type: "book_series"}
-	if got := inherit(book, nil); got.Title != "Foo_bar" {
-		t.Errorf("book title = %q, want the uri part", got.Title)
+func TestSeriesLayerFolderAndDate(t *testing.T) {
+	dated := []Child{
+		childOf("a", []*float32{f32(1)}, metadata.Fields{PublicationDate: metadata.Val("2014-06-15T00:00:00Z")}),
+		childOf("b", []*float32{f32(2)}, metadata.Fields{PublicationDate: metadata.Val("2012")}),
+		childOf("c", []*float32{f32(3)}, metadata.Fields{PublicationDate: metadata.Val("unknown")}),
+	}
+	for _, tc := range []struct {
+		name, dir string
+		children  []Child
+		alt       []string
+		date      string
+	}{
+		{"folder year wins", "/lib/Foo (2019)", dated, []string{"Foo"}, "2019"},
+		{"earliest child date", "/lib/Foo", dated, []string{"Foo"}, "2012"},
+		{"book series", "", dated[:1], nil, "2014-06-15"},
+		{"no date", "", nil, nil, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ref := SeriesRef{URIPart: "s"}
+			if tc.dir != "" {
+				ref.FileURI = &tc.dir
+			}
+			got := seriesLayer(ref, tc.children)
+			if !slices.Equal(got.AltTitles.V, tc.alt) || got.PublicationDate.V != tc.date {
+				t.Fatalf("alt titles %v, date %q; want %v, %q", got.AltTitles.V, got.PublicationDate.V, tc.alt, tc.date)
+			}
+		})
 	}
 }
 

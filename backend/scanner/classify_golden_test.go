@@ -88,7 +88,7 @@ func summarize(p *ParsedItem) string {
 	}
 	return fmt.Sprintf("prefix=%s type=%s part=%s order=[%s] cover=%s title=%s series=%s index=%g data=%s",
 		p.URIPrefix, p.ContentType, p.URIPart, strings.Join(parts, ","), cover,
-		p.MetaRaw.Title, series, p.MetaRaw.SeriesIndex, string(p.FileData))
+		p.MetaRaw.Title.V, series, p.MetaRaw.SeriesIndex.V, string(p.FileData))
 }
 
 const comicInfoFull = `<?xml version="1.0"?><ComicInfo>

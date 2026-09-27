@@ -12,18 +12,16 @@ import (
 	"voltis/lib/comic"
 	"voltis/lib/epub"
 	"voltis/lib/fp"
-	"voltis/models"
+	"voltis/metadata"
 	"voltis/scanner/keys"
 )
 
 func classifyBook(file FSFile, meta epub.Metadata, coverValid bool, words map[string]int, infer bool) ParsedItem {
 	stem := strings.TrimSuffix(filepath.Base(file.Path), filepath.Ext(file.Path))
 
-	var index float64
 	var order *float32
 	if meta.HasSeriesIndex {
-		index = meta.SeriesIndex
-		order = new(float32(index))
+		order = new(float32(meta.SeriesIndex))
 	}
 
 	// The inferred name and volume only group and order the book; child metadata stays as read.
@@ -41,15 +39,19 @@ func classifyBook(file FSFile, meta epub.Metadata, coverValid bool, words map[st
 		ContentType: "book",
 		URIPart:     sanitizeURIPart(stem),
 		OrderParts:  []*float32{order},
-		MetaRaw: models.Metadata{
-			Title:           cmp.Or(meta.Title, stem),
-			Description:     meta.Description,
-			Publisher:       meta.Publisher,
-			Language:        meta.Language,
-			PublicationDate: meta.PublicationDate,
-			Series:          meta.Series,
-			SeriesIndex:     index,
+		MetaRaw: metadata.Fields{
+			Title:           metadata.Val(cmp.Or(meta.Title, stem)),
+			Description:     metadata.Set(meta.Description),
+			Language:        metadata.Set(meta.Language),
+			PublicationDate: metadata.Set(meta.PublicationDate),
+			Series:          metadata.Set(meta.Series),
 		},
+	}
+	if meta.HasSeriesIndex {
+		item.MetaRaw.SeriesIndex = metadata.Val(meta.SeriesIndex)
+	}
+	if meta.Publisher != "" {
+		item.MetaRaw.Publishers = metadata.Val([]string{meta.Publisher})
 	}
 	if coverValid {
 		item.CoverSuffix = new(meta.CoverPath)
@@ -57,9 +59,9 @@ func classifyBook(file FSFile, meta epub.Metadata, coverValid bool, words map[st
 	if len(words) > 0 {
 		item.FileData, _ = json.Marshal(map[string]any{"words": words})
 	}
-	for _, a := range meta.Authors {
-		item.MetaRaw.Staff = append(item.MetaRaw.Staff, models.StaffEntry{Name: a, Role: "author"})
-	}
+	item.MetaRaw.Staff = metadata.SetList(fp.Map(meta.Authors, func(a string) metadata.Staff {
+		return metadata.Staff{Name: a, Role: "author"}
+	}))
 	if series != "" {
 		item.Series = &ParsedSeries{
 			URIPrefix:   "book",
@@ -90,18 +92,15 @@ func inferBookSeries(path, title, stem string) (string, float64, bool) {
 	return fileName, fileVol, fileOK
 }
 
-func classifyComic(file FSFile, meta models.Metadata, year int, pages []comic.PageInfo) *ParsedItem {
+func classifyComic(file FSFile, meta metadata.Fields, year *int, pages []comic.PageInfo) *ParsedItem {
 	path := file.Path
 
 	dir := filepath.Dir(path)
 	dirName := filepath.Base(dir)
 	fallbackName, fallbackYear := keys.ParseSeriesName(dirName)
 
-	seriesName := cmp.Or(meta.Series, fallbackName)
-	seriesYear := fallbackYear
-	if year != 0 {
-		seriesYear = &year
-	}
+	seriesName := cmp.Or(meta.Series.V, fallbackName)
+	seriesYear := cmp.Or(year, fallbackYear)
 
 	seriesURIPart := seriesName
 	if seriesYear != nil {
@@ -111,18 +110,19 @@ func classifyComic(file FSFile, meta models.Metadata, year int, pages []comic.Pa
 	stem := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	filename := keys.CleanSeriesName(stem)
 
-	var volNum, chNum *float64
-	if meta.Volume != 0 {
-		volNum = new(float64(meta.Volume))
-	} else {
-		volNum = keys.ParseVolume(filename)
+	volNum := keys.ParseVolume(filename)
+	if v, ok := meta.Volume.Get(); ok {
+		if f, err := keys.ParseFloatStr(v); err == nil {
+			volNum = &f
+		}
 	}
 
-	if meta.Number != "" {
-		if f, err := keys.ParseFloatStr(meta.Number); err == nil {
+	var chNum *float64
+	if n, ok := meta.Number.Get(); ok {
+		if f, err := keys.ParseFloatStr(n); err == nil {
 			chNum = &f
 		} else {
-			chNum = keys.ParseChapter(meta.Number)
+			chNum = keys.ParseChapter(n)
 		}
 	} else {
 		chNum = keys.ParseChapter(filename)
@@ -155,7 +155,7 @@ func classifyComic(file FSFile, meta models.Metadata, year int, pages []comic.Pa
 		uriParts = append(uriParts, fmt.Sprintf("y%d", *yearNum))
 		titleParts = append(titleParts, fmt.Sprintf("%s (%d)", seriesName, *yearNum))
 	}
-	meta.Title = cmp.Or(meta.Title, strings.Join(titleParts, " "))
+	meta.Title = cmp.Or(meta.Title, metadata.Val(strings.Join(titleParts, " ")))
 
 	pageTuples := fp.Map(pages, func(p comic.PageInfo) any {
 		return []any{p.Name, p.Width, p.Height}

@@ -1,0 +1,46 @@
+{
+  "Fields": {
+    "title": "Frieren: Beyond Journey's End",
+    "alt_titles": [
+      "Frieren: Beyond Journey's End",
+      "Sousou no Frieren",
+      "葬送のフリーレン",
+      "장송의 프리렌",
+      "Frieren"
+    ],
+    "description": "The adventure is over but life goes on for an elf mage just beginning to learn what living is all about. \n\nElf mage Frieren and her courageous fellow adventurer",
+    "staff": [
+      {
+        "name": "Kanehito Yamada",
+        "role": "author"
+      },
+      {
+        "name": "Tsukasa Abe",
+        "role": "artist"
+      }
+    ],
+    "publishers": [
+      "Shogakukan",
+      "Shogakukan Asia"
+    ],
+    "publication_date": "2020-04-28",
+    "genres": [
+      "fantasy",
+      "sci_fi"
+    ],
+    "tags": [
+      "Cooking",
+      "Travel",
+      "Spearplay"
+    ],
+    "content_rating": "safe",
+    "status": "hiatus",
+    "kind": "manga",
+    "rating": 87.0412,
+    "count": 15
+  },
+  "URL": "https://mangabaka.org/manga/1995/Frieren-Beyond-Journey-s-End",
+  "CoverURL": "https://images.mangabaka.dev/2/c/8/f/c/a/b/7/8b6b/4b85/b23d/49d0bf08af76",
+  "MergedInto": "",
+  "Deleted": false
+}

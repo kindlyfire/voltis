@@ -8,8 +8,8 @@ import (
 
 	"voltis/db"
 	"voltis/db/dbtest"
+	"voltis/metadata"
 	"voltis/models"
-	"voltis/models/metaraw"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -37,12 +37,10 @@ func TestMetadataScanRaceEditBeforeRename(t *testing.T) {
 	if uri != "comic/S/ch1" {
 		t.Fatalf("uri = %q", uri)
 	}
-	seedMetadata(t, tx, lib, uri, metaraw.MetadataRaw{
-		Overrides: &metaraw.RawContainer[models.Metadata]{Raw: models.Metadata{Title: "kept"}},
-	})
+	seedMetadata(t, tx, lib, uri, metadata.Doc{Overrides: metadata.Fields{Title: metadata.Val("kept")}})
 
 	r.reload()
-	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S_2019", "/lib/S"))
+	r.place(withMeta(comicResult("/lib/S/ch1.cbz", "ch1", "S_2019", "/lib/S"), metadata.Fields{Title: metadata.Val("Ch. 1")}))
 	flushed := make(chan error, 1)
 	go func() {
 		_, _, _, err := r.recordCommit(false)
@@ -63,15 +61,15 @@ func TestMetadataScanRaceEditBeforeRename(t *testing.T) {
 
 	assertCatalog(t, pool, lib, []string{"comic/S_2019", "comic/S_2019/ch1"})
 	moved := readMeta(t, pool, lib, "comic/S_2019/ch1")
-	if moved.Overrides == nil || moved.Overrides.Raw.Title != "kept" {
+	if moved.Overrides.Title.V != "kept" {
 		t.Fatalf("override = %+v, want it carried through the rename", moved.Overrides)
 	}
-	if moved.File == nil {
+	if moved.File.Title.V != "Ch. 1" {
 		t.Fatal("file layer was not written after the rename")
 	}
 }
 
-func TestScanConcurrencyAnnotationSourceWins(t *testing.T) {
+func TestScanConcurrencyRenameSourceWins(t *testing.T) {
 	pool := newTestPool(t)
 	lib := newTestLibrary(t, pool, "comics")
 	r, _ := seedSeriesScan(t, pool, lib)
@@ -79,12 +77,10 @@ func TestScanConcurrencyAnnotationSourceWins(t *testing.T) {
 	exec(t, pool, "INSERT INTO users (id, username, password_hash) VALUES ('u1', 'u', 'x')")
 	exec(t, pool, "INSERT INTO user_to_content (id, user_id, library_id, uri, starred) VALUES ('src', 'u1', $1, 'comic/S/ch1', true)", lib)
 	exec(t, pool, "INSERT INTO user_to_content (id, user_id, library_id, uri, notes) VALUES ('dst', 'u1', $1, 'comic/S_2019/ch1', 'destination')", lib)
-	seedMetadata(t, pool, lib, "comic/S_2019/ch1", metaraw.MetadataRaw{
-		Overrides: &metaraw.RawContainer[models.Metadata]{Raw: models.Metadata{Title: "loser"}},
-	})
-	seedMetadata(t, pool, lib, "comic/S/ch1", metaraw.MetadataRaw{
-		Overrides: &metaraw.RawContainer[models.Metadata]{Raw: models.Metadata{Title: "winner"}},
-	})
+	seedMetadata(t, pool, lib, "comic/S_2019/ch1", metadata.Doc{Overrides: metadata.Fields{Title: metadata.Val("loser")}})
+	seedMetadata(t, pool, lib, "comic/S/ch1", metadata.Doc{Overrides: metadata.Fields{Title: metadata.Val("winner")}})
+	exec(t, pool, `INSERT INTO metadata_links (library_id, uri, provider, state) VALUES
+		($1, 'comic/S', 'p', 'review'), ($1, 'comic/S_2019', 'p', 'ignored')`, lib)
 
 	r.reload()
 	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S_2019", "/lib/S"))
@@ -97,8 +93,15 @@ func TestScanConcurrencyAnnotationSourceWins(t *testing.T) {
 		t.Fatalf("annotations = %+v, want the source moved over the orphaned destination", rows)
 	}
 
-	if got := readMeta(t, pool, lib, "comic/S_2019/ch1").Overrides; got == nil || got.Raw.Title != "winner" {
+	if got := readMeta(t, pool, lib, "comic/S_2019/ch1").Overrides; got.Title.V != "winner" {
 		t.Fatalf("metadata = %+v, want the moving source to win", got)
+	}
+
+	links, err := db.SelectScalars[string](context.Background(), pool,
+		"SELECT uri || ':' || state FROM metadata_links WHERE library_id = $1", lib)
+	must(t, err)
+	if len(links) != 1 || links[0] != "comic/S_2019:review" {
+		t.Fatalf("links = %v, want the source moved over the orphaned destination", links)
 	}
 }
 
@@ -123,7 +126,7 @@ func runCommitLoop(t *testing.T, pool *pgxpool.Pool, r *scanRun, final bool) com
 	t.Helper()
 	in := make(chan flush, 1)
 	out := make(chan committed, 1)
-	go commitLoop(context.Background(), pool, r.fs, r.lib, in, out)
+	go commitLoop(context.Background(), pool, testStore, r.fs, r.lib, in, out)
 	in <- r.w.take(final)
 	close(in)
 	select {
@@ -262,7 +265,7 @@ func TestScanConcurrencyRetriesForcedDeadlock(t *testing.T) {
 	r := newScanRun(t, pool, lib, &ComicsScanner{})
 	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
 	in, out := make(chan flush, 1), make(chan committed, 1)
-	go commitLoop(ctx, pool, r.fs, lib, in, out)
+	go commitLoop(ctx, pool, testStore, r.fs, lib, in, out)
 	in <- r.w.take(false)
 	close(in)
 

@@ -7,6 +7,8 @@ import { createPinia } from 'pinia'
 import { createApp } from 'vue'
 import App from './App.vue'
 import router from './router.ts'
+import { syncCatalog } from './utils/api/catalog.ts'
+import { syncWorkerStatus } from './utils/api/metadata.ts'
 import { queryClient } from './utils/misc.ts'
 
 const app = createApp(App)
@@ -17,5 +19,8 @@ app.use(VueQueryPlugin, {
     queryClient,
 })
 app.use(createHead())
+
+syncCatalog(queryClient)
+syncWorkerStatus(queryClient)
 
 app.mount('#app')

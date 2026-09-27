@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"voltis/lib/comic"
-	"voltis/models"
+	"voltis/metadata"
 )
 
 type ComicsScanner struct{}
@@ -24,8 +24,8 @@ func (cs *ComicsScanner) ParseFile(file FSFile) *ParsedItem {
 		return nil
 	}
 
-	var meta models.Metadata
-	year := 0
+	var meta metadata.Fields
+	var year *int
 	if comicInfo != nil {
 		meta = comic.ComicInfoToMetadata(comicInfo)
 		year = comicInfo.Year

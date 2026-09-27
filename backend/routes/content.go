@@ -9,9 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"voltis/covers"
 	"voltis/db"
+	"voltis/metadata"
 	"voltis/models"
-	"voltis/models/metaraw"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -28,9 +29,6 @@ func (cr *ContentRoutes) Register(g *echo.Group) {
 	g.GET("/:content_id/lists", cr.listsForContent)
 	g.POST("/:content_id/user-data", cr.updateUserData)
 	g.POST("/:content_id/series-item-statuses", cr.setSeriesItemStatuses)
-	g.GET("/:content_id/metadata-layers", cr.getMetadataLayers)
-	g.POST("/:content_id/metadata-override", cr.updateMetadataOverride)
-
 }
 
 type UserToContentDTO struct {
@@ -73,6 +71,7 @@ type ContentDTO struct {
 	FileMtime           *time.Time        `json:"file_mtime"`
 	FileSize            *int              `json:"file_size"`
 	CoverURI            *string           `json:"cover_uri"`
+	CoverVersion        *string           `json:"cover_version"`
 	Type                string            `json:"type"`
 	Order               *int              `json:"order"`
 	OrderParts          []*float32        `json:"order_parts"`
@@ -104,14 +103,12 @@ func contentToDTO(c models.Content, opts contentDTOOpts) ContentDTO {
 		fileData = c.FileData
 	}
 
-	title := ""
+	var m struct {
+		Title string             `json:"title"`
+		Cover *metadata.CoverRef `json:"cover"`
+	}
 	if opts.meta != nil {
-		var m map[string]json.RawMessage
-		if json.Unmarshal(opts.meta, &m) == nil {
-			if t, ok := m["title"]; ok {
-				_ = json.Unmarshal(t, &title)
-			}
-		}
+		_ = json.Unmarshal(opts.meta, &m)
 	}
 
 	orderParts := c.OrderParts
@@ -124,12 +121,13 @@ func contentToDTO(c models.Content, opts contentDTOOpts) ContentDTO {
 		CreatedAt:           c.CreatedAt,
 		UpdatedAt:           c.UpdatedAt,
 		URIPart:             c.URIPart,
-		Title:               title,
+		Title:               m.Title,
 		Valid:               c.Valid,
 		FileURI:             c.FileURI,
 		FileMtime:           c.FileMtime,
 		FileSize:            c.FileSize,
 		CoverURI:            c.CoverURI,
+		CoverVersion:        covers.Version(m.Cover, c.CoverURI != nil, c.FileMtime),
 		Type:                c.Type,
 		Order:               c.Order,
 		OrderParts:          orderParts,
@@ -311,14 +309,8 @@ func (cr *ContentRoutes) list(c echo.Context) error {
 		where = append(where, "(utc.user_id IS NULL OR utc.rating IS NULL)")
 	}
 	if q.Search != "" {
-		fuzzyDist := 1
-		if len(q.Search) < 3 {
-			fuzzyDist = 0
-		}
 		args["search"] = q.Search
-		where = append(where, fmt.Sprintf(
-			"cm.data->>'title' ||| (@search)::pdb.fuzzy(%d, t)", fuzzyDist,
-		))
+		where = append(where, metadata.Matches("cm", "search_text", false, q.Search))
 	}
 
 	whereClause := strings.Join(where, " AND ")
@@ -354,13 +346,13 @@ func (cr *ContentRoutes) list(c echo.Context) error {
 	case "order":
 		orderClause = fmt.Sprintf("ORDER BY c.\"order\" %s", q.SortOrder)
 	case "rating":
-		orderClause = fmt.Sprintf("ORDER BY (cm.data->>'community_rating')::numeric %s %s", q.SortOrder, nullsOrder)
+		orderClause = fmt.Sprintf("ORDER BY cm.rating %s %s", q.SortOrder, nullsOrder)
 	case "user_rating":
 		orderClause = fmt.Sprintf("ORDER BY utc.rating %s %s", q.SortOrder, nullsOrder)
 	case "unread_children_count":
 		orderClause = fmt.Sprintf("ORDER BY unread_children_count %s", q.SortOrder)
 	case "release_date":
-		orderClause = fmt.Sprintf("ORDER BY (cm.data->>'publication_date')::date %s %s", q.SortOrder, nullsOrder)
+		orderClause = fmt.Sprintf("ORDER BY cm.release_date %s %s", q.SortOrder, nullsOrder)
 	case "title":
 		orderClause = fmt.Sprintf("ORDER BY cm.data->>'title' %s %s", q.SortOrder, nullsOrder)
 	default:
@@ -631,94 +623,6 @@ func (cr *ContentRoutes) setSeriesItemStatuses(c echo.Context) error {
 	return okResponse(c)
 }
 
-type MetadataLayerDTO struct {
-	Source string          `json:"source"`
-	Data   json.RawMessage `json:"data"`
-	Raw    json.RawMessage `json:"raw"`
-}
-
-type MetadataLayersResponse struct {
-	Merged json.RawMessage    `json:"merged"`
-	Layers []MetadataLayerDTO `json:"layers"`
-}
-
-func (cr *ContentRoutes) getMetadataLayers(c echo.Context) error {
-	if _, err := requireAdmin(c); err != nil {
-		return err
-	}
-
-	ctx := reqCtx(c)
-	contentID := c.Param("content_id")
-
-	content, err := getContent(ctx, cr.pool, contentID)
-	if err != nil {
-		return err
-	}
-
-	var data, dataRaw json.RawMessage
-	err = cr.pool.QueryRow(ctx, `
-		SELECT data, data_raw FROM content_metadata
-		WHERE uri = $1 AND library_id = $2
-	`, content.URI, content.LibraryID).Scan(&data, &dataRaw)
-	if errors.Is(err, pgx.ErrNoRows) {
-		data = json.RawMessage("{}")
-		dataRaw = json.RawMessage("{}")
-	} else if err != nil {
-		return err
-	}
-
-	mr := metaraw.From(dataRaw)
-	mrLayers := mr.Layers()
-
-	layers := make([]MetadataLayerDTO, len(mrLayers))
-	for i, l := range mrLayers {
-		layerData, _ := json.Marshal(l.Materialized)
-		layers[i] = MetadataLayerDTO{Source: l.Name, Data: layerData, Raw: l.Raw}
-	}
-
-	return c.JSON(http.StatusOK, MetadataLayersResponse{Merged: data, Layers: layers})
-}
-
-type metadataOverrideRequest struct {
-	Data json.RawMessage `json:"data"`
-}
-
-func (cr *ContentRoutes) updateMetadataOverride(c echo.Context) error {
-	if _, err := requireAdmin(c); err != nil {
-		return err
-	}
-
-	ctx := reqCtx(c)
-	contentID := c.Param("content_id")
-
-	content, err := getContent(ctx, cr.pool, contentID)
-	if err != nil {
-		return err
-	}
-
-	var req metadataOverrideRequest
-	if err := c.Bind(&req); err != nil {
-		return err
-	}
-
-	err = editMetadataRaw(ctx, cr.pool, content.ID, content.LibraryID, func(mr *metaraw.MetadataRaw) bool {
-		var overrides models.Metadata
-		_ = json.Unmarshal(req.Data, &overrides)
-		// Every field is omitempty: "{}" means no overrides, so drop the layer rather than store it empty.
-		if b, _ := json.Marshal(overrides); string(b) == "{}" {
-			mr.Overrides = nil
-		} else {
-			mr.Overrides = &metaraw.RawContainer[models.Metadata]{Raw: overrides}
-		}
-		return true
-	})
-	if err != nil {
-		return err
-	}
-
-	return cr.getMetadataLayers(c)
-}
-
 type contentWithUTCRow struct {
 	models.Content
 	UTCId                *string    `db:"utc_id"`
@@ -792,51 +696,4 @@ func getContent(ctx context.Context, pool *pgxpool.Pool, id string) (models.Cont
 		return models.Content{}, echo.NewHTTPError(http.StatusNotFound, "Content not found")
 	}
 	return content, err
-}
-
-func editMetadataRaw(
-	ctx context.Context, pool *pgxpool.Pool,
-	contentID, libraryID string,
-	fn func(*metaraw.MetadataRaw) bool,
-) error {
-	return db.WithTx(ctx, pool, func(tx pgx.Tx) error {
-		if err := db.LockMetadata(ctx, tx, libraryID); err != nil {
-			return err
-		}
-
-		var uri string
-		err := tx.QueryRow(ctx, "SELECT uri FROM content WHERE id = $1 AND library_id = $2",
-			contentID, libraryID).Scan(&uri)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusNotFound, "Content not found")
-		} else if err != nil {
-			return err
-		}
-
-		var dataRaw json.RawMessage
-		err = tx.QueryRow(ctx,
-			`SELECT data_raw FROM content_metadata WHERE uri = $1 AND library_id = $2`,
-			uri, libraryID).Scan(&dataRaw)
-		if errors.Is(err, pgx.ErrNoRows) {
-			dataRaw = json.RawMessage("{}")
-		} else if err != nil {
-			return err
-		}
-
-		merged, err := metaraw.EditInPlace(&dataRaw, fn)
-		if err != nil {
-			return err
-		}
-		if merged == nil {
-			return nil
-		}
-
-		_, err = tx.Exec(ctx, `
-			INSERT INTO content_metadata (uri, library_id, data, data_raw, updated_at)
-			VALUES ($1, $2, $3, $4, now())
-			ON CONFLICT (uri, library_id) DO UPDATE
-			SET data = EXCLUDED.data, data_raw = EXCLUDED.data_raw, updated_at = now()
-		`, uri, libraryID, merged, dataRaw)
-		return err
-	})
 }

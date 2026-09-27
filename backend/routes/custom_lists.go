@@ -9,8 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"voltis/covers"
 	"voltis/db"
 	"voltis/lib/fp"
+	"voltis/metadata"
 	"voltis/models"
 
 	"github.com/jackc/pgx/v5"
@@ -38,15 +40,20 @@ func (cr *CustomListRoutes) Register(g *echo.Group) {
 // DTOs
 
 type customListDTO struct {
-	ID              string    `json:"id"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
-	Name            string    `json:"name"`
-	Description     *string   `json:"description"`
-	Visibility      string    `json:"visibility"`
-	UserID          string    `json:"user_id"`
-	EntryCount      *int      `json:"entry_count"`
-	CoverContentIDs []string  `json:"cover_content_ids"`
+	ID          string     `json:"id"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	Name        string     `json:"name"`
+	Description *string    `json:"description"`
+	Visibility  string     `json:"visibility"`
+	UserID      string     `json:"user_id"`
+	EntryCount  *int       `json:"entry_count"`
+	Covers      []coverDTO `json:"covers"`
+}
+
+type coverDTO struct {
+	ID           string  `json:"id"`
+	CoverVersion *string `json:"cover_version"`
 }
 
 type customListEntryDTO struct {
@@ -117,10 +124,16 @@ func (cr *CustomListRoutes) list(c echo.Context) error {
 		whereClause = "WHERE (cl.user_id = $1 OR cl.visibility = 'public')"
 	}
 
+	type listCover struct {
+		ID    string             `json:"id"`
+		Local bool               `json:"local"`
+		Mtime *time.Time         `json:"mtime"`
+		Cover *metadata.CoverRef `json:"cover"`
+	}
 	type listRow struct {
 		models.CustomList
-		EntryCount      *int   `db:"entry_count"`
-		CoverContentIDs []byte `db:"cover_content_ids"`
+		EntryCount *int        `db:"entry_count"`
+		Covers     []listCover `db:"covers"`
 	}
 
 	rows, err := db.Select[listRow](ctx, cr.pool, `
@@ -128,13 +141,16 @@ func (cr *CustomListRoutes) list(c echo.Context) error {
 			(SELECT COUNT(*) FROM custom_list_to_content clc WHERE clc.custom_list_id = cl.id) AS entry_count,
 			(
 				SELECT array_to_json(
-					(array_agg(c.id ORDER BY (clc."order" IS NULL), clc."order", clc.created_at)
-					 FILTER (WHERE c.cover_uri IS NOT NULL))[1:4]
+					(array_agg(json_build_object('id', c.id, 'local', c.cover_uri IS NOT NULL,
+						'mtime', c.file_mtime, 'cover', cm.data->'cover')
+						ORDER BY (clc."order" IS NULL), clc."order", clc.created_at)
+					 FILTER (WHERE c.cover_uri IS NOT NULL OR cm.data ? 'cover'))[1:4]
 				)
 				FROM custom_list_to_content clc
 				LEFT JOIN content c ON c.library_id = clc.library_id AND c.uri = clc.uri
+				LEFT JOIN content_metadata cm ON cm.library_id = c.library_id AND cm.uri = c.uri
 				WHERE clc.custom_list_id = cl.id
-			) AS cover_content_ids
+			) AS covers
 		FROM custom_lists cl
 		`+whereClause+`
 		ORDER BY cl.created_at DESC
@@ -145,23 +161,18 @@ func (cr *CustomListRoutes) list(c echo.Context) error {
 
 	dtos := make([]customListDTO, len(rows))
 	for i, r := range rows {
-		var coverIDs []string
-		if r.CoverContentIDs != nil {
-			_ = json.Unmarshal(r.CoverContentIDs, &coverIDs)
-		}
-		if coverIDs == nil {
-			coverIDs = []string{}
-		}
 		dtos[i] = customListDTO{
-			ID:              r.ID,
-			CreatedAt:       r.CreatedAt,
-			UpdatedAt:       r.UpdatedAt,
-			Name:            r.Name,
-			Description:     r.Description,
-			Visibility:      r.Visibility,
-			UserID:          r.UserID,
-			EntryCount:      r.EntryCount,
-			CoverContentIDs: coverIDs,
+			ID:          r.ID,
+			CreatedAt:   r.CreatedAt,
+			UpdatedAt:   r.UpdatedAt,
+			Name:        r.Name,
+			Description: r.Description,
+			Visibility:  r.Visibility,
+			UserID:      r.UserID,
+			EntryCount:  r.EntryCount,
+			Covers: fp.Map(r.Covers, func(c listCover) coverDTO {
+				return coverDTO{ID: c.ID, CoverVersion: covers.Version(c.Cover, c.Local, c.Mtime)}
+			}),
 		}
 	}
 	return c.JSON(http.StatusOK, dtos)
@@ -281,15 +292,15 @@ func (cr *CustomListRoutes) create(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, customListDTO{
-		ID:              id,
-		CreatedAt:       now,
-		UpdatedAt:       now,
-		Name:            name,
-		Description:     req.Description,
-		Visibility:      req.Visibility,
-		UserID:          user.ID,
-		EntryCount:      new(0),
-		CoverContentIDs: []string{},
+		ID:          id,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		Name:        name,
+		Description: req.Description,
+		Visibility:  req.Visibility,
+		UserID:      user.ID,
+		EntryCount:  new(0),
+		Covers:      []coverDTO{},
 	})
 }
 

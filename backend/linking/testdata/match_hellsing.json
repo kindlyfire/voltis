@@ -1,0 +1,336 @@
+[
+  {
+    "id": 1736,
+    "state": "active",
+    "merged_with": null,
+    "canonical_url": "https://mangabaka.org/manga/1736/HELLSING",
+    "authors": [
+      "Kouta Hirano"
+    ],
+    "artists": [
+      "Kouta Hirano"
+    ],
+    "status": "completed",
+    "type": "manga",
+    "final_volume": 10,
+    "published": {
+      "start_date": "1997-05-02"
+    },
+    "titles": [
+      {
+        "language": "ko",
+        "title": "헬싱",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "en",
+        "title": "Crossfire",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "en",
+        "title": "HELLSING",
+        "traits": [
+          "official"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "es",
+        "title": "HELLSING",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "ja",
+        "title": "HELLSING",
+        "traits": [
+          "native"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "ja-Latn",
+        "title": "HELLSING",
+        "traits": [
+          "native"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "cs",
+        "title": "Hellsing: Balada o lovci upírů",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "en",
+        "title": "Hellsing Cross Fire",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "la",
+        "title": "Hellsing: Epicum de vēnātōre lamiæ",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "en",
+        "title": "Hellsing: The Legend of a Vampire Hunter",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "en",
+        "title": "The Legend of a Vampire Hunter",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "en",
+        "title": "The Legend of the Vampire Hunter",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "vi",
+        "title": "Thợ săn ma cà rồng",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "uk",
+        "title": "Геллсінґ",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "ru",
+        "title": "Хеллсинг",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "uk",
+        "title": "Хеллсінг",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "hy",
+        "title": "Հելլսինգ",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "he",
+        "title": "הלסינג",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "ar",
+        "title": "هلسينغ",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "ar",
+        "title": "هلسينغ : أسطورة صياد مصاصي الدماء",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "fa",
+        "title": "هلسینگ",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "ja",
+        "title": "ヘルシング",
+        "traits": [
+          "native"
+        ],
+        "is_primary": false
+      },
+      {
+        "language": "zh",
+        "title": "厄夜怪客",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "zh-Hant",
+        "title": "厄夜怪客",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "zh",
+        "title": "皇家国教骑士团",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "zh-Hant",
+        "title": "皇家國教騎士團",
+        "traits": [],
+        "is_primary": false
+      }
+    ]
+  },
+  {
+    "id": 103158,
+    "state": "active",
+    "merged_with": null,
+    "canonical_url": "https://mangabaka.org/manga/103158/Hellsing-The-Legend-of-a-Vampire-Hunter",
+    "authors": [
+      "Kouta Hirano"
+    ],
+    "artists": [
+      "Kouta Hirano"
+    ],
+    "status": "completed",
+    "type": "manga",
+    "final_volume": null,
+    "published": {
+      "start_date": "1996-10-01"
+    },
+    "titles": [
+      {
+        "language": "ja",
+        "title": "HELLSING",
+        "traits": [
+          "native"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "ja-Latn",
+        "title": "HELLSING",
+        "traits": [
+          "native"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "en",
+        "title": "Hellsing: The Legend of a Vampire Hunter",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "en",
+        "title": "Hellsing: The Legends of Vampire Hunter",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "ru",
+        "title": "Хеллсинг: Легенда об охотнике на вампиров",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "ja",
+        "title": "ヘルシング",
+        "traits": [],
+        "is_primary": false
+      }
+    ]
+  },
+  {
+    "id": 11425,
+    "state": "active",
+    "merged_with": null,
+    "canonical_url": "https://mangabaka.org/manga/11425/Hellsing-The-Dawn",
+    "authors": [
+      "Kouta Hirano"
+    ],
+    "artists": [
+      "Kouta Hirano"
+    ],
+    "status": "cancelled",
+    "type": "manga",
+    "final_volume": 1,
+    "published": {
+      "start_date": "2001-01-01"
+    },
+    "titles": [
+      {
+        "language": "en",
+        "title": "Hellsing: Gaiden",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "ja-Latn",
+        "title": "HELLSING Gaiden: THE DAWN",
+        "traits": [
+          "native"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "ja-Latn",
+        "title": "Hellsing: The Dawn",
+        "traits": [
+          "native"
+        ],
+        "is_primary": false
+      },
+      {
+        "language": "en",
+        "title": "Hellsing: The Dawn",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "ja",
+        "title": "HELLSING THE DAWN",
+        "traits": [
+          "native"
+        ],
+        "is_primary": false
+      },
+      {
+        "language": "cs",
+        "title": "Hellsing: Úsvit",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "ja",
+        "title": "HELLSING外伝 THE DAWN",
+        "traits": [
+          "native"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "ru",
+        "title": "Хеллсинг: Рассвет",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "ja",
+        "title": "ヘルシング外伝",
+        "traits": [
+          "native"
+        ],
+        "is_primary": false
+      },
+      {
+        "language": "ja",
+        "title": "ヘルシング外伝 THE DAWN",
+        "traits": [],
+        "is_primary": false
+      }
+    ]
+  }
+]

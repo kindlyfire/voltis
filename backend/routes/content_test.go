@@ -2,6 +2,7 @@ package routes
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"voltis/db"
@@ -156,4 +157,54 @@ func TestUserData(t *testing.T) {
 		assertEq(t, s(res["status_updated_at"]), s(first["status_updated_at"]))
 		assertEq(t, s(res["progress_updated_at"]), s(first["progress_updated_at"]))
 	})
+}
+
+func TestListSortReleaseDate(t *testing.T) {
+	pool := newTestPool(t)
+	c := newAdminClient(t, pool)
+	ctx := context.Background()
+
+	libID := models.MakeLibraryID()
+	if _, err := pool.Exec(ctx,
+		"INSERT INTO libraries (id, name, type) VALUES ($1, 'lib', 'comics')", libID); err != nil {
+		t.Fatalf("insert library: %v", err)
+	}
+
+	// A year-only date broke the old `::date` cast.
+	dates := []string{"2015-03-01", "2014", "2014-06-15T00:00:00Z", ""}
+	ids := make([]string, len(dates))
+	for i, date := range dates {
+		ids[i] = models.MakeContentID()
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO content (id, uri_part, uri, type, library_id)
+			VALUES ($1, $1, 'file:///lib/' || $1, 'comic', $2)
+		`, ids[i], libID); err != nil {
+			t.Fatalf("insert content: %v", err)
+		}
+		if date == "" {
+			continue
+		}
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO content_metadata (uri, library_id, data)
+			VALUES ('file:///lib/' || $1, $2, jsonb_build_object('publication_date', $3::text))
+		`, ids[i], libID, date); err != nil {
+			t.Fatalf("insert metadata: %v", err)
+		}
+	}
+
+	for _, tc := range []struct {
+		order string
+		want  []string
+	}{
+		{"asc", []string{ids[3], ids[1], ids[2], ids[0]}},
+		{"desc", []string{ids[0], ids[2], ids[1], ids[3]}},
+	} {
+		res := c.Get("/api/content?library_id="+libID+"&sort=release_date&sort_order="+tc.order).
+			Assert(t, 200).JSON()
+		var got []string
+		for _, item := range res["data"].([]any) {
+			got = append(got, s(item.(map[string]any)["id"]))
+		}
+		assertEq(t, strings.Join(got, ","), strings.Join(tc.want, ","))
+	}
 }

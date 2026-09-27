@@ -1,0 +1,262 @@
+{
+  "id": 1995,
+  "state": "active",
+  "merged_with": null,
+  "canonical_url": "https://mangabaka.org/manga/1995/Frieren-Beyond-Journey-s-End",
+  "authors": [
+    "Kanehito Yamada"
+  ],
+  "artists": [
+    "Tsukasa Abe"
+  ],
+  "description": "The adventure is over but life goes on for an elf mage just beginning to learn what living is all about. \n\nElf mage Frieren and her courageous fellow adventurer",
+  "published": {
+    "start_date": "2020-04-28",
+    "end_date": null,
+    "start_date_is_estimated": false,
+    "end_date_is_estimated": null
+  },
+  "status": "hiatus",
+  "is_licensed": true,
+  "content_rating": "safe",
+  "type": "manga",
+  "original_language": "ja",
+  "rating": 87.0412,
+  "popularity": {
+    "global": {
+      "current": 50,
+      "history": {
+        "1d": 50,
+        "1w": 50,
+        "1mo": 46,
+        "3mo": 44,
+        "6mo": 51,
+        "1y": 104
+      }
+    },
+    "type": {
+      "current": 45,
+      "history": {
+        "1d": 45,
+        "1w": 45,
+        "1mo": 41,
+        "3mo": 41,
+        "6mo": 46,
+        "1y": 98
+      }
+    }
+  },
+  "publishers": [
+    {
+      "name": "Shogakukan",
+      "type": "Original",
+      "note": ""
+    },
+    {
+      "name": "Shogakukan Asia",
+      "type": "English",
+      "note": "12 Volumes - Ongoing"
+    }
+  ],
+  "last_updated_at": "2026-09-24T02:14:12.724Z",
+  "source": {
+    "anilist": {
+      "id": 118586,
+      "rating": 8.7,
+      "rating_normalized": 87
+    }
+  },
+  "rating_count": 84239,
+  "final_volume": 15,
+  "total_chapters": 147,
+  "titles": [
+    {
+      "language": "en",
+      "traits": [
+        "official"
+      ],
+      "title": "Frieren: Beyond Journey's End",
+      "note": null,
+      "is_primary": true
+    },
+    {
+      "language": "ja-Latn",
+      "traits": [
+        "native"
+      ],
+      "title": "Sousou no Frieren",
+      "note": null,
+      "is_primary": true
+    },
+    {
+      "language": "ja",
+      "traits": [
+        "native"
+      ],
+      "title": "葬送のフリーレン",
+      "note": null,
+      "is_primary": true
+    },
+    {
+      "language": "ko",
+      "traits": [
+        "official"
+      ],
+      "title": "장송의 프리렌",
+      "note": null,
+      "is_primary": true
+    },
+    {
+      "language": "pt",
+      "traits": [
+        "official"
+      ],
+      "title": "Frieren",
+      "note": null,
+      "is_primary": true
+    },
+    {
+      "language": "en",
+      "traits": [],
+      "title": "Frieren",
+      "note": null,
+      "is_primary": false
+    }
+  ],
+  "cover": {
+    "raw": "https://images.mangabaka.dev/2/c/8/f/c/a/b/7/8b6b/4b85/b23d/49d0bf08af76",
+    "x150": "https://cdn.mangabaka.dev/imgproxy/plain/x150@1/aHR0cHM6Ly9pbWFnZXMubWFuZ2FiYWthLmRldi8yL2MvOC9mL2MvYS9iLzcvOGI2Yi80Yjg1L2IyM2QvNDlkMGJmMDhhZjc2",
+    "x250": "https://cdn.mangabaka.dev/imgproxy/plain/x250@1/aHR0cHM6Ly9pbWFnZXMubWFuZ2FiYWthLmRldi8yL2MvOC9mL2MvYS9iLzcvOGI2Yi80Yjg1L2IyM2QvNDlkMGJmMDhhZjc2",
+    "x350": "https://cdn.mangabaka.dev/imgproxy/plain/x350@1/aHR0cHM6Ly9pbWFnZXMubWFuZ2FiYWthLmRldi8yL2MvOC9mL2MvYS9iLzcvOGI2Yi80Yjg1L2IyM2QvNDlkMGJmMDhhZjc2",
+    "blurhash": "|PMHMir:NGR%X8nhWARjt6u6s*xdxDM|WAV@a#WB.9xaNGs+V@oNo2flRjj2S5i{bIn%t7t7e-t69YkDR$NFxaxaS5oIbI^+ocayj?R.WAWCfkRjadV]t5R+WGofofjaoLsDR*V@WCa_ozWCoLbGxsxaa$t6aea{WBR%ay",
+    "width": 1303,
+    "height": 2048
+  },
+  "anime": {
+    "exists": true,
+    "start": "Vol 1, Chap 1 (S1) / Vol 7, Chap 61 (S2)",
+    "end": "Vol 7, Chap 60 (S1) / Vol 9, Chap 80 (S2)"
+  },
+  "links": [
+    {
+      "id": "019dbbd8-b7d8-7e25-baa7-77338677b49d",
+      "url": "https://manga.bilibili.com/detail/mc30460",
+      "name": "manga.bilibili.com",
+      "name_display": "Bili Bili Manhua",
+      "type": "webplatform",
+      "language": "zh"
+    }
+  ],
+  "tags": [
+    {
+      "id": 669,
+      "is_spoiler": false,
+      "is_genre": false,
+      "is_explicit": false,
+      "implied_by_tag_ids": [
+        2
+      ],
+      "parent_id": 1141,
+      "name": "Cooking",
+      "level": 3,
+      "name_path": "Activities > Daily Life > Cooking",
+      "series_count": 2659,
+      "description": null,
+      "content_rating": "safe",
+      "weight": "unweighted"
+    },
+    {
+      "id": 391,
+      "is_spoiler": false,
+      "is_genre": false,
+      "is_explicit": true,
+      "implied_by_tag_ids": [],
+      "parent_id": 1144,
+      "name": "Travel",
+      "level": 3,
+      "name_path": "Activities > Leisure > Travel",
+      "series_count": 1248,
+      "description": null,
+      "content_rating": "safe",
+      "weight": "core"
+    },
+    {
+      "id": 3864,
+      "is_spoiler": false,
+      "is_genre": false,
+      "is_explicit": true,
+      "implied_by_tag_ids": [],
+      "parent_id": 537,
+      "name": "Spearplay",
+      "level": 2,
+      "name_path": "Activities > Spearplay",
+      "series_count": 86,
+      "description": "",
+      "content_rating": "safe",
+      "weight": "defining"
+    },
+    {
+      "id": 3179,
+      "is_spoiler": true,
+      "is_genre": false,
+      "is_explicit": true,
+      "implied_by_tag_ids": [],
+      "parent_id": 1671,
+      "name": "Character Death",
+      "level": 3,
+      "name_path": "Narrative Tropes > Death Tropes > Character Death",
+      "series_count": 217,
+      "description": null,
+      "content_rating": "safe",
+      "weight": "defining"
+    },
+    {
+      "id": 36,
+      "is_spoiler": false,
+      "is_genre": true,
+      "is_explicit": true,
+      "implied_by_tag_ids": [
+        121,
+        160,
+        340,
+        698
+      ],
+      "parent_id": 539,
+      "name": "Fantasy",
+      "level": 2,
+      "name_path": "Settings > Fantasy",
+      "series_count": 59914,
+      "description": null,
+      "content_rating": "safe",
+      "weight": "defining"
+    },
+    {
+      "id": 1,
+      "is_spoiler": false,
+      "is_genre": true,
+      "is_explicit": false,
+      "implied_by_tag_ids": [
+        249
+      ],
+      "parent_id": 539,
+      "name": "Sci-Fi",
+      "level": 2,
+      "name_path": "Settings > Sci-Fi",
+      "series_count": 15101,
+      "description": null,
+      "content_rating": "safe",
+      "weight": "unweighted"
+    }
+  ],
+  "relationships": [
+    {
+      "id": "019e41ee-c6b5-7dbe-b84f-5b7bea98c023",
+      "to_series_id": 198452,
+      "relation_type": "parody",
+      "is_manual": false,
+      "note": null,
+      "chronology": "unknown",
+      "published_start_date": null
+    }
+  ]
+}

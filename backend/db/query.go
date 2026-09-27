@@ -81,6 +81,12 @@ func LockIdentity(ctx context.Context, tx pgx.Tx, provider, issuer, subject stri
 	return err
 }
 
+// LockProvider serialises the writes of a provider's entries. It comes before any LockMetadata.
+func LockProvider(ctx context.Context, tx pgx.Tx, provider string) error {
+	_, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtext('provider:' || $1))", provider)
+	return err
+}
+
 func LockMetadata(ctx context.Context, tx pgx.Tx, libraryID string) error {
 	_, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtext('metadata:' || $1))", libraryID)
 	return err

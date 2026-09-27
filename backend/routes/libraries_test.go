@@ -79,15 +79,22 @@ func TestLibrarySettings(t *testing.T) {
 
 	lib := c.Post("/api/libraries/new", body(nil)).Assert(t, 200).JSON()
 	assertEq(t, mode(lib), "conservative")
+	assertEq(t, lib["settings"].(map[string]any)["auto_match"], any(false))
 	id := s(lib["id"])
 
-	off := map[string]any{"book_series_inference": "off"}
+	off := map[string]any{"book_series_inference": "off", "auto_match": true}
 	assertEq(t, mode(c.Post("/api/libraries/"+id, body(off)).Assert(t, 200).JSON()), "off")
 	assertEq(t, mode(c.Post("/api/libraries/"+id, body(nil)).Assert(t, 200).JSON()), "off")
-	assertEq(t, mode(c.Get("/api/libraries").Assert(t, 200).JSONArray()[0]), "off")
+	listed := c.Get("/api/libraries").Assert(t, 200).JSONArray()[0]
+	assertEq(t, mode(listed), "off")
+	assertEq(t, listed["settings"].(map[string]any)["auto_match"], any(true))
 
 	c.Post("/api/libraries/"+id, body(map[string]any{"book_series_inference": "aggressive"})).Assert(t, 400)
-	c.Post("/api/libraries/new", body(map[string]any{})).Assert(t, 400)
+	c.Post("/api/libraries/"+id, body(map[string]any{"auto_match": "yes"})).Assert(t, 400)
+	// Omitted keys take their defaults: matching is off unless asked for.
+	partial := c.Post("/api/libraries/"+id, body(map[string]any{"book_series_inference": "off"})).Assert(t, 200).JSON()
+	assertEq(t, partial["settings"].(map[string]any)["auto_match"], any(false))
+	assertEq(t, mode(c.Post("/api/libraries/new", body(map[string]any{})).Assert(t, 200).JSON()), "conservative")
 	assertEq(t, mode(c.Post("/api/libraries/new", body(off)).Assert(t, 200).JSON()), "off")
 }
 

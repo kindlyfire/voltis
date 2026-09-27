@@ -4,6 +4,7 @@
         :model-value="modelValue"
         :disabled="disabled"
         :by="sameValue"
+        :ignore-filter="remote"
         :class="['a-combobox', $attrs.class]"
         :style="$attrs.style"
         open-on-click
@@ -108,8 +109,8 @@ import { mergeAria, useControlAttrs } from './useFieldIds'
 import { useSelectField, type SelectFieldProps } from './useSelectField'
 
 /**
- * A select with client-side filtering as you type. Long option lists are virtualized, with
- * one-line options.
+ * A select with client-side filtering as you type, or `remote`, filtered by the parent through
+ * `v-model:search`. Long option lists are virtualized, with one-line options.
  */
 defineOptions({ inheritAttrs: false })
 
@@ -119,6 +120,8 @@ const props = withDefaults(
             modelValue: V | null | undefined
             options: Options<V>
             emptyText?: string
+            /** The options already match the search; the selected one must stay among them. */
+            remote?: boolean
         }
     >(),
     { size: 'md', emptyText: 'No matches' }
@@ -144,12 +147,14 @@ const OPTION_HEIGHT = 44
 // Once the virtualizer has mounted, Reka's virtual mode stays on, so ours does too.
 const virtual = ref(false)
 watchEffect(() => (virtual.value ||= items.value.length > VIRTUAL_MIN))
-const search = ref('')
+const search = defineModel<string>('search', { default: '' })
 // Typing into a closed combobox opens it, so the search only resets on close.
 watch(open, isOpen => isOpen || (search.value = ''))
 const { contains } = useFilter({ sensitivity: 'base' })
 const filtered = computed(() =>
-    items.value.filter(o => !search.value || contains(o.label, search.value))
+    props.remote || !search.value
+        ? items.value
+        : items.value.filter(o => contains(o.label, search.value))
 )
 // The virtualizer compares its options, which are Option objects, with the model value.
 const valueOf = (v: unknown) => (typeof v === 'object' && v ? (v as Option<V>).value : v)

@@ -14,6 +14,7 @@ import SettingsBrokenRefsPage from './pages/settings/BrokenRefsPage.vue'
 import SettingsGeneralPage from './pages/settings/GeneralPage.vue'
 import SettingsInterfacePage from './pages/settings/InterfacePage.vue'
 import SettingsLibrariesPage from './pages/settings/LibrariesPage.vue'
+import SettingsMetadataPage from './pages/settings/MetadataPage.vue'
 import SettingsTasksPage from './pages/settings/TasksPage.vue'
 import SettingsUsersPage from './pages/settings/UsersPage.vue'
 
@@ -78,6 +79,11 @@ const router = createRouter({
                     path: '/settings/libraries',
                     name: 'settings-libraries',
                     component: SettingsLibrariesPage,
+                },
+                {
+                    path: '/settings/metadata',
+                    name: 'settings-metadata',
+                    component: SettingsMetadataPage,
                 },
                 {
                     path: '/settings/broken-refs',

@@ -50,8 +50,7 @@ function recent(over: Partial<ScanRecent>): ScanRecent {
     return {
         id: 'c_1',
         title: 'Series',
-        has_cover: true,
-        file_mtime: '2026-09-18T08:00:00Z',
+        cover_version: 'abc',
         added: 0,
         updated: 0,
         removed: 0,
@@ -178,7 +177,7 @@ describe('ScanModal', () => {
                         recent({
                             id: 'c_1',
                             title: 'Gone',
-                            has_cover: false,
+                            cover_version: null,
                             removed: 2,
                             deleted: true,
                         }),
@@ -195,9 +194,7 @@ describe('ScanModal', () => {
         expect(cards[0]!.text()).toContain('5 files left')
         expect(cards[0]!.find('[role="progressbar"]').attributes('aria-valuenow')).toBe('38')
 
-        expect(cards[1]!.find('img').attributes('src')).toMatch(
-            /\/files\/cover\/c_2\?v=2026-09-18T08:00:00Z$/
-        )
+        expect(cards[1]!.find('img').attributes('src')).toMatch(/\/files\/cover\/c_2\?v=abc$/)
         expect(cards[1]!.text()).toContain('Fresh')
         expect(chips(cards[1]!)).toEqual([
             ['+3', '3 added'],

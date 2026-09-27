@@ -1,0 +1,78 @@
+[
+  {
+    "id": 100477,
+    "state": "active",
+    "merged_with": null,
+    "canonical_url": "https://mangabaka.org/novel/100477/Ascendance-of-a-Bookworm-Part-2",
+    "authors": [
+      "Miya Kazuki"
+    ],
+    "artists": [
+      "You Shiina"
+    ],
+    "status": "completed",
+    "type": "novel",
+    "final_volume": 4,
+    "published": {
+      "start_date": "2015-09-25"
+    },
+    "titles": [
+      {
+        "language": "ko",
+        "title": "책벌레의 하극상 제2부",
+        "traits": [
+          "official"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "en",
+        "title": "Ascendance of a Bookworm ~I'll do anything to become a librarian~ Part 2 Apprentice Shrine Maiden",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "fr",
+        "title": "Ascendance of a Bookworm - La Petite Faiseuse de Livres - Partie 2",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "en",
+        "title": "Ascendance of a Bookworm: Part 2",
+        "traits": [
+          "official"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "ja-Latn",
+        "title": "Honzuki no Gekokujou Part 2",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "ja-Latn",
+        "title": "Honzuki no Gekokujou: Shisho ni Naru Tame ni wa Shudan wo Erandeiraremasen Dai 2-bu - Shinden no Miko Minarai",
+        "traits": [
+          "native"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "zh-Hant",
+        "title": "小書痴的下剋上：為了成為圖書管理員不擇手段！【第二部】神殿的見習巫女",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "ja",
+        "title": "本好きの下剋上~司書になるためには手段を選んでいられません~ 第二部「神殿の巫女見習い」",
+        "traits": [
+          "native"
+        ],
+        "is_primary": true
+      }
+    ]
+  }
+]

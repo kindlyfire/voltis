@@ -43,8 +43,37 @@
                     </h1>
                     <div class="flex flex-wrap justify-center gap-1.5 sm:justify-start">
                         <AChip size="sm">{{ displayContentType(content.type) }}</AChip>
+                        <AChip v-if="meta.kind" size="sm">{{ capitalize(meta.kind) }}</AChip>
+                        <AChip v-if="meta.status" size="sm">{{ capitalize(meta.status) }}</AChip>
                         <AChip v-if="language" size="sm">{{ language }}</AChip>
                     </div>
+                    <p
+                        v-for="link in noticeLinks"
+                        :key="link.provider"
+                        class="text-fg-muted text-xs"
+                    >
+                        <template v-if="link.state === 'review'">
+                            {{
+                                plural(link.candidates.length, 'possible match', 'possible matches')
+                            }}
+                            on {{ link.label }}
+                        </template>
+                        <template v-else>Matched automatically on {{ link.label }}</template>
+                        ·
+                        <button
+                            type="button"
+                            class="a-focus text-primary rounded-sm font-medium hover:underline"
+                            @click="
+                                showProviderSearchModal(
+                                    content.id,
+                                    link,
+                                    ownTitle(qMetadata.data.value!)
+                                )
+                            "
+                        >
+                            {{ link.state === 'review' ? 'Review' : 'Wrong match?' }}
+                        </button>
+                    </p>
                 </header>
 
                 <div class="flex flex-wrap items-center gap-2">
@@ -71,6 +100,27 @@
 
                 <RatingButton :content-id="content.id" class="-ml-1 self-center sm:self-start" />
 
+                <div v-if="meta.description" class="flex max-w-[640px] flex-col items-start gap-1">
+                    <p
+                        :id="descriptionId"
+                        ref="descriptionEl"
+                        class="text-sm whitespace-pre-line"
+                        :class="{ 'line-clamp-4': !showDescription }"
+                    >
+                        {{ meta.description }}
+                    </p>
+                    <AButton
+                        v-if="clamped || showDescription"
+                        variant="text"
+                        size="sm"
+                        :aria-expanded="showDescription"
+                        :aria-controls="descriptionId"
+                        @click="showDescription = !showDescription"
+                    >
+                        {{ showDescription ? 'Show less' : 'Show more' }}
+                    </AButton>
+                </div>
+
                 <dl v-if="details.length" class="flex max-w-[640px] flex-col text-sm">
                     <div
                         v-for="row in details"
@@ -79,17 +129,20 @@
                     >
                         <dt>{{ row.label }}</dt>
                         <dd class="text-fg-muted min-w-0 [overflow-wrap:anywhere]">
-                            <a
-                                v-if="row.href"
-                                :href="row.href"
-                                target="_blank"
-                                rel="noopener"
-                                class="a-focus text-primary inline-flex items-center gap-1 rounded-sm font-medium hover:underline"
-                            >
-                                {{ row.value }}
-                                <AIcon :icon="IconOpenInNew" />
-                                <span class="sr-only">(opens in a new tab)</span>
-                            </a>
+                            <template v-if="row.links">
+                                <a
+                                    v-for="link in row.links"
+                                    :key="link.url"
+                                    :href="link.url"
+                                    target="_blank"
+                                    rel="noopener"
+                                    class="a-focus text-primary mr-3 inline-flex items-center gap-1 rounded-sm font-medium hover:underline"
+                                >
+                                    {{ link.label }}
+                                    <AIcon :icon="IconOpenInNew" />
+                                    <span class="sr-only">(opens in a new tab)</span>
+                                </a>
+                            </template>
                             <template v-else>{{ row.value }}</template>
                         </dd>
                     </div>
@@ -109,8 +162,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { useResizeObserver } from '@vueuse/core'
+import { computed, ref, useId, useTemplateRef, watch } from 'vue'
 import { RouterLink } from 'vue-router'
+import AButton from '@/ui/AButton.vue'
 import AChip from '@/ui/AChip.vue'
 import ACover from '@/ui/ACover.vue'
 import ADialog from '@/ui/ADialog.vue'
@@ -118,13 +173,15 @@ import AIcon from '@/ui/AIcon.vue'
 import AIconButton from '@/ui/AIconButton.vue'
 import { IconChevronLeft, IconOpenInNew, IconStar, IconStarFilled } from '@/ui/icons'
 import { useToast } from '@/ui/useToast'
-import { contentApi } from '@/utils/api/content'
+import { contentApi, coverUrl } from '@/utils/api/content'
+import { metadataApi, ownTitle, type MetadataLinkRef } from '@/utils/api/metadata'
 import type { Content } from '@/utils/api/types'
-import { API_URL } from '@/utils/fetch'
-import { displayContentType } from '@/utils/misc'
+import { usersApi } from '@/utils/api/users'
+import { displayContentType, plural } from '@/utils/misc'
 import ContinueReadingButton from './components/ContinueReadingButton.vue'
 import CoverProgress from './components/CoverProgress.vue'
 import OptionsButton from './components/OptionsButton.vue'
+import { showProviderSearchModal } from './components/ProviderSearchModal.vue'
 import RatingButton from './components/RatingButton.vue'
 import ReadingStatusButton from './components/ReadingStatusButton.vue'
 
@@ -141,38 +198,61 @@ const toast = useToast()
 
 const showCover = ref(false)
 
-const coverUri = computed(() =>
-    props.content.cover_uri
-        ? `${API_URL}/files/cover/${props.content.id}?v=${props.content.file_mtime}`
+// Admins can correct what matching decided; only series have links.
+const qMe = usersApi.useMe()
+const qMetadata = metadataApi.useContent(() =>
+    qMe.data.value?.permissions.includes('ADMIN') && props.content.type.endsWith('_series')
+        ? props.content.id
         : null
 )
+const noticeLinks = computed(
+    () =>
+        qMetadata.data.value?.links.filter(
+            l => (l.state === 'linked' && l.origin === 'auto') || l.state === 'review'
+        ) ?? []
+)
+
+const coverUri = computed(() => coverUrl(props.content))
+
+const meta = computed(() => props.content.meta ?? {})
+const showDescription = ref(false)
+const descriptionId = useId()
+const descriptionEl = useTemplateRef('descriptionEl')
+/** Whether the collapsed description hides text, so "Show more" has something to show. */
+const clamped = ref(false)
+
+function measure() {
+    const el = descriptionEl.value
+    if (el && !showDescription.value) clamped.value = el.scrollHeight > el.clientHeight
+}
+useResizeObserver(descriptionEl, measure)
+watch(() => meta.value.description, measure, { flush: 'post' })
 
 const details = computed(() => {
-    const meta = props.content.meta
-    const rows: { label: string; value: string; href?: string }[] = []
-    if (!meta) return rows
-    if (meta.staff?.length) {
+    const m = meta.value
+    const rows: { label: string; value?: string; links?: MetadataLinkRef[] }[] = []
+    if (m.staff?.length) {
         rows.push({
             label: 'Staff',
-            value: meta.staff.map(s => `${s.name} (${s.role})`).join(', '),
+            value: m.staff.map(s => `${s.name} (${s.role})`).join(', '),
         })
     }
-    if (meta.publisher) rows.push({ label: 'Publisher', value: meta.publisher })
-    if (meta.publication_date) {
-        rows.push({ label: 'Published', value: formatDate(meta.publication_date) })
+    if (m.publishers?.length) rows.push({ label: 'Publishers', value: m.publishers.join(', ') })
+    if (m.publication_date) {
+        rows.push({ label: 'Published', value: formatDate(m.publication_date) })
     }
-    if (meta.mangabaka_id) {
+    if (m.genres?.length) {
         rows.push({
-            label: 'Links',
-            value: 'MangaBaka',
-            href: `https://mangabaka.org/${meta.mangabaka_id}`,
+            label: 'Genres',
+            value: m.genres.map(g => capitalize(g.replaceAll('_', ' '))).join(', '),
         })
     }
+    if (m.links?.length) rows.push({ label: 'Links', links: m.links })
     return rows
 })
 
 const language = computed(() => {
-    const code = props.content.meta?.language
+    const code = meta.value.language
     if (!code) return null
     try {
         return new Intl.DisplayNames(undefined, { type: 'language' }).of(code) ?? code
@@ -181,13 +261,20 @@ const language = computed(() => {
     }
 })
 
+function capitalize(s: string) {
+    return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
 /** A full date in words; a year or year-month stays as is (a day would be made up). */
 function formatDate(value: string) {
     if (/^\d{4}(-\d{2})?$/.test(value)) return value
     const date = new Date(value)
     if (isNaN(date.getTime())) return value
     // Date-only values parse as UTC midnight: format in UTC so the day doesn't shift.
-    return date.toLocaleDateString(undefined, { dateStyle: 'long', timeZone: 'UTC' })
+    return date.toLocaleDateString(undefined, {
+        dateStyle: 'long',
+        timeZone: 'UTC',
+    })
 }
 
 async function toggleStar() {

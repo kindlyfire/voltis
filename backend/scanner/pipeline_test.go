@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -14,8 +15,8 @@ import (
 
 	"voltis/db"
 	"voltis/lib/tasks"
+	"voltis/metadata"
 	"voltis/models"
-	"voltis/models/metaraw"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -61,7 +62,7 @@ func newPipeline(t *testing.T, libType string) *pipeline {
 
 	notify := &recorder{}
 	manager := tasks.NewManager(pool, func(tasks.Snapshot) {})
-	def := NewScanTask(notify)
+	def := NewScanTask(notify, testStore)
 	manager.Register(def)
 	t.Cleanup(manager.Close)
 
@@ -137,7 +138,7 @@ func TestScanPipelineComics(t *testing.T) {
 	}
 	want := []string{"comic/Foo_2019", "comic/Foo_2019/ch1", "comic/Foo_2019/ch2"}
 	assertCatalog(t, p.pool, p.lib, want)
-	if meta := readMeta(t, p.pool, p.lib, "comic/Foo_2019").File.Raw; meta.Title != "Foo" {
+	if meta := readMeta(t, p.pool, p.lib, "comic/Foo_2019").File; meta.Title.V != "Foo" {
 		t.Fatalf("series metadata = %+v", meta)
 	}
 	if seqs := p.notify.seqs(); len(seqs) == 0 || seqs[len(seqs)-1] != len(seqs) {
@@ -260,13 +261,13 @@ func TestScanPipelineEarlierMemberCorrectsSeriesWithoutLosingOverrides(t *testin
 	writeCBZ(t, filepath.Join(series, "Foo ch2.cbz"), comicInfoXML("Foo", "2", "Beta", "fr"))
 
 	p.mustScan(ScanInput{})
-	if got := readMeta(t, p.pool, p.lib, "comic/Foo_2019").File.Raw; got.Publisher != "Beta" {
+	if got := readMeta(t, p.pool, p.lib, "comic/Foo_2019").File; !slices.Equal(got.Publishers.V, []string{"Beta"}) {
 		t.Fatalf("series metadata = %+v, want the only member", got)
 	}
 
-	mr := readMeta(t, p.pool, p.lib, "comic/Foo_2019")
-	mr.Overrides = &metaraw.RawContainer[models.Metadata]{Raw: models.Metadata{Publisher: "Override Press"}}
-	seedMetadata(t, p.pool, p.lib, "comic/Foo_2019", mr)
+	doc := readMeta(t, p.pool, p.lib, "comic/Foo_2019")
+	doc.Overrides = metadata.Fields{Publishers: metadata.Val([]string{"Override Press"})}
+	seedMetadata(t, p.pool, p.lib, "comic/Foo_2019", doc)
 
 	writeCBZ(t, filepath.Join(series, "Foo ch1.cbz"), comicInfoXML("Foo", "1", "Alpha", ""))
 	if result := p.mustScan(ScanInput{}); result.Added != 1 || result.Unchanged != 1 {
@@ -274,17 +275,17 @@ func TestScanPipelineEarlierMemberCorrectsSeriesWithoutLosingOverrides(t *testin
 	}
 
 	got := readMeta(t, p.pool, p.lib, "comic/Foo_2019")
-	if got.File.Raw.Publisher != "Alpha" {
-		t.Fatalf("file layer publisher = %q, want the earlier member to win", got.File.Raw.Publisher)
+	if !slices.Equal(got.File.Publishers.V, []string{"Alpha"}) {
+		t.Fatalf("file layer publishers = %v, want the earlier member to win", got.File.Publishers.V)
 	}
-	if got.File.Raw.Language != "fr" {
-		t.Fatalf("file layer language = %q, want the later member to still contribute", got.File.Raw.Language)
+	if got.File.Language.V != "fr" {
+		t.Fatalf("file layer language = %q, want the later member to still contribute", got.File.Language.V)
 	}
-	if got.Overrides == nil || got.Overrides.Raw.Publisher != "Override Press" {
+	if !slices.Equal(got.Overrides.Publishers.V, []string{"Override Press"}) {
 		t.Fatalf("overrides = %+v, want them untouched", got.Overrides)
 	}
-	if merged := got.Merge(); merged.Publisher != "Override Press" {
-		t.Fatalf("merged publisher = %q, want the override to win", merged.Publisher)
+	if data := readData(t, p.pool, p.lib, "comic/Foo_2019"); !slices.Equal(data.Publishers.V, []string{"Override Press"}) {
+		t.Fatalf("data publishers = %v, want the override to win", data.Publishers.V)
 	}
 }
 
@@ -823,4 +824,74 @@ func TestScanInfersBookSeriesAndRescansWithoutChurn(t *testing.T) {
 	p.mustScan(ScanInput{LibraryType: "books", Force: true})
 	inferred()
 	followsV01()
+}
+
+// Migration 009 drops the old metadata and every file's mtime. The next scan of the unchanged tree
+// then reads every file again and rebuilds every file and series layer as the first scan wrote it.
+func TestScanAfterMigration009RebuildsMetadata(t *testing.T) {
+	for _, c := range []struct {
+		libType string
+		files   func(root string)
+	}{
+		{"comics", func(root string) {
+			writeCBZ(t, filepath.Join(root, "Foo (2019)", "Foo ch1.cbz"), comicInfoXML("Foo", "1", "Alpha", "en"))
+			writeCBZ(t, filepath.Join(root, "Foo (2019)", "Foo ch2.cbz"), comicInfoXML("Foo", "2", "Beta", ""))
+			writeCBZFixture(t, filepath.Join(root, "Bar", "b1.cbz"), "Bar", "1")
+		}},
+		{"books", func(root string) {
+			writeEPUBFixture(t, filepath.Join(root, "Bar v1.epub"), "Bar Volume 1", "Bar", "1")
+			writeEPUBFixture(t, filepath.Join(root, "Solo.epub"), "Solo", "", "")
+		}},
+	} {
+		t.Run(c.libType, func(t *testing.T) {
+			p := newPipeline(t, c.libType)
+			c.files(p.root)
+			rows := func() []string {
+				t.Helper()
+				got, err := db.SelectScalars[string](context.Background(), p.pool, `
+					SELECT c.uri || ' ' || coalesce(m.data_raw::text || ' ' || m.data::text, 'no metadata')
+					FROM content c LEFT JOIN content_metadata m ON m.library_id = c.library_id AND m.uri = c.uri
+					ORDER BY c.uri`)
+				must(t, err)
+				return got
+			}
+			in := ScanInput{LibraryType: c.libType}
+			first := p.mustScan(in)
+			want := rows()
+
+			exec(t, p.pool, "TRUNCATE content_metadata")
+			exec(t, p.pool, "UPDATE content SET file_mtime = NULL WHERE type IN ('comic', 'book')")
+			if got := p.mustScan(in); got.Updated != first.Added || got.Unchanged != 0 {
+				t.Fatalf("rescan = %+v, want all %d files read again", got, first.Added)
+			}
+			if got := rows(); !slices.Equal(got, want) {
+				t.Fatalf("rebuilt rows:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+			}
+		})
+	}
+}
+
+// An ignored link outlives its book series; a standalone book taking the URI carries it along when
+// it joins another series, and the final commit moves it up to that series.
+func TestScanMovesALeafLinkUpToItsSeries(t *testing.T) {
+	p := newPipeline(t, "books")
+	in := ScanInput{LibraryType: "books"}
+	old, foo := filepath.Join(p.root, "Old.epub"), filepath.Join(p.root, "Foo.epub")
+	writeEPUBFixture(t, old, "Old", "Foo", "1")
+	p.mustScan(in)
+	exec(t, p.pool, "INSERT INTO metadata_links (library_id, uri, provider, state) VALUES ($1, 'book/Foo', 'p', 'ignored')", p.lib)
+	must(t, os.Remove(old))
+	p.mustScan(in)
+	writeEPUBFixture(t, foo, "Foo", "", "")
+	p.mustScan(in)
+	assertCatalog(t, p.pool, p.lib, []string{"book/Foo"})
+
+	writeEPUBFixture(t, foo, "Foo", "Bar", "1")
+	must(t, os.Chtimes(foo, time.Now(), time.Now().Add(time.Hour)))
+	p.mustScan(in)
+	assertCatalog(t, p.pool, p.lib, []string{"book/Bar", "book/Bar/Foo"})
+	links, err := db.SelectScalars[string](context.Background(), p.pool, "SELECT uri || ' ' || state FROM metadata_links")
+	if must(t, err); !slices.Equal(links, []string{"book/Bar ignored"}) {
+		t.Fatalf("links = %v", links)
+	}
 }

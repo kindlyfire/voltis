@@ -8,12 +8,15 @@ import (
 	"image/color"
 	"image/jpeg"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"voltis/metadata"
 	"voltis/models"
+	"voltis/providers/providertest"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
@@ -202,4 +205,69 @@ func TestGetBookResource(t *testing.T) {
 		c.Get("/api/files/book-resource/"+id+"?path="+url.QueryEscape(p)).Assert(t, 400)
 	}
 	c.Get("/api/files/book-resource/"+id+"?path=OEBPS/missing.jpg").Assert(t, 404)
+}
+
+func TestProviderCover(t *testing.T) {
+	pool := newTestPool(t)
+	c := newAdminClient(t, pool)
+	id := newTestSeries(t, c)
+	base := "/api/metadata/content/" + id
+	img := testJPEG(t)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/missing.jpg" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write(img)
+	}))
+	t.Cleanup(upstream.Close)
+	serve := func(path string) {
+		c.fake.Put("1", providertest.Payload{Fields: metadata.Fields{Title: metadata.Val("Remote"),
+			Kind: metadata.Val(metadata.Manga)}, CoverURL: upstream.URL + path})
+	}
+	version := func() string {
+		t.Helper()
+		v := c.Get("/api/content/"+id).Assert(t, 200).JSON()["cover_version"]
+		if v == nil {
+			t.Fatal("no cover version")
+		}
+		return s(v)
+	}
+	getCoverAt := func(v string, want int) (cacheControl string) {
+		t.Helper()
+		return c.Get("/api/files/cover/"+id+"?v="+v).Assert(t, want).Headers.Get("Cache-Control")
+	}
+	getCover := func(want int) string {
+		t.Helper()
+		return getCoverAt(version(), want)
+	}
+	immutable := "public, max-age=31536000, immutable"
+
+	// Without a local cover, only a provider one.
+	serve("/cover.jpg")
+	c.Post(base+"/link", map[string]any{"provider": "fake", "external_id": "1"}).Assert(t, 200)
+	assertEq(t, getCover(200), immutable)
+	assertEq(t, c.Get("/api/files/cover/"+id).Assert(t, 200).Headers.Get("Cache-Control"), "no-cache")
+	providerVersion := version()
+
+	list := s(c.Post("/api/custom-lists", map[string]any{"name": "l", "visibility": "private"}).Assert(t, 200).JSON()["id"])
+	mustExec(t, pool, `INSERT INTO custom_list_to_content (id, custom_list_id, library_id, uri)
+		SELECT 'e1', $1, library_id, uri FROM content WHERE id = $2`, list, id)
+	covers := c.Get("/api/custom-lists?user=me").Assert(t, 200).JSONArray()[0]["covers"].([]any)
+	if len(covers) != 1 || covers[0].(map[string]any)["cover_version"] == nil {
+		t.Fatalf("list covers = %v", covers)
+	}
+
+	// A failed download falls back, uncached, to the local cover or a 404.
+	serve("/missing.jpg")
+	c.Post(base+"/refresh", map[string]any{"provider": "fake"}).Assert(t, 200)
+	assertEq(t, getCover(404), "no-store")
+	cbz := testCBZ(t, t.TempDir(), map[string][]byte{"01.jpg": img})
+	mustExec(t, pool, "UPDATE content SET cover_uri = $2, file_mtime = now() WHERE id = $1", id, cbz+"/01.jpg")
+	assertEq(t, getCover(200), "no-store")
+
+	// Clearing the cover restores the local one, which the provider cover's URL must not pin.
+	c.Post(base+"/overrides", map[string]any{"rev": 0, "fields": map[string]any{"cover": nil}}).Assert(t, 200)
+	assertEq(t, getCover(200), immutable)
+	assertEq(t, getCoverAt(providerVersion, 200), "no-cache")
 }

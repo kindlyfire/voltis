@@ -9,8 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"voltis/metadata"
 	"voltis/models"
-	"voltis/models/metaraw"
+	"voltis/scanner/keys"
 )
 
 type Key struct{ Parent, URIPart string }
@@ -29,7 +30,7 @@ type Child struct {
 	OrderParts []*float32
 	CoverURI   *string
 	FileMtime  *time.Time
-	Meta       metaraw.MetadataRaw
+	Meta       metadata.Fields // the file layer
 }
 
 type dirPick struct {
@@ -104,35 +105,48 @@ func order(children []Child) []Child {
 	return ordered
 }
 
-func inherit(ref SeriesRef, ordered []Child) models.Metadata {
-	var inherited models.Metadata
-	for _, child := range ordered {
-		m := child.Meta.Merge()
-		if inherited.Staff == nil && len(m.Staff) > 0 {
-			inherited.Staff = slices.Clone(m.Staff)
-		}
-		inherited.Publisher = cmp.Or(inherited.Publisher, m.Publisher)
-		inherited.Language = cmp.Or(inherited.Language, m.Language)
-		inherited.Genre = cmp.Or(inherited.Genre, m.Genre)
-		inherited.AgeRating = cmp.Or(inherited.AgeRating, m.AgeRating)
-		inherited.Manga = cmp.Or(inherited.Manga, m.Manga)
-		inherited.Imprint = cmp.Or(inherited.Imprint, m.Imprint)
-		inherited.Description = cmp.Or(inherited.Description, m.Description)
-		inherited.PublicationDate = cmp.Or(inherited.PublicationDate, m.PublicationDate)
-		inherited.Title = cmp.Or(inherited.Title, m.Series)
+// seriesLayer derives a series' file layer from its children's, never from their overrides.
+// Book series have no folder, so those steps are skipped.
+func seriesLayer(ref SeriesRef, ordered []Child) metadata.Fields {
+	var f metadata.Fields
+	var folder string
+	var folderYear *int
+	if ref.FileURI != nil {
+		folder, folderYear = keys.ParseSeriesName(filepath.Base(*ref.FileURI))
+		f.AltTitles = metadata.Val([]string{folder})
 	}
-	inherited.Title = cmp.Or(inherited.Title, fallbackTitle(ref))
-	return inherited
+	var earliest string
+	for _, child := range ordered {
+		m := child.Meta.Normalize()
+		f.Title = first(f.Title, m.Series)
+		f.Staff = first(f.Staff, m.Staff)
+		f.Publishers = first(f.Publishers, m.Publishers)
+		f.Language = first(f.Language, m.Language)
+		f.Genres = first(f.Genres, m.Genres)
+		f.ContentRating = first(f.ContentRating, m.ContentRating)
+		f.Manga = first(f.Manga, m.Manga)
+		if d, ok := m.PublicationDate.Get(); ok && (earliest == "" || d < earliest) {
+			earliest = d
+		}
+	}
+	f.Title = first(f.Title, metadata.Set(folder), metadata.Val(ref.URIPart))
+	switch {
+	case folderYear != nil:
+		f.PublicationDate = metadata.Val(fmt.Sprintf("%04d", *folderYear))
+	case earliest != "":
+		f.PublicationDate = metadata.Val(earliest)
+	}
+	return f
 }
 
-func fallbackTitle(ref SeriesRef) string {
-	if ref.FileURI == nil {
-		return ref.URIPart
+// first returns the first option that holds a value.
+func first[T any](opts ...metadata.Opt[T]) metadata.Opt[T] {
+	for _, o := range opts {
+		if o.P == metadata.Value {
+			return o
+		}
 	}
-	if base := filepath.Base(*ref.FileURI); sanitizeURIPart(base) == ref.URIPart {
-		return base
-	}
-	return ref.URIPart
+	return metadata.Opt[T]{}
 }
 
 func leafRow(id, libraryID, uri string, p ParsedItem, parentID *string, old *models.Content, now time.Time) models.Content {

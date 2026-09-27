@@ -136,10 +136,10 @@ import APageHeader from '@/ui/APageHeader.vue'
 import ASpinner from '@/ui/ASpinner.vue'
 import { IconChevronDown, IconChevronUp, IconDelete, IconPencil } from '@/ui/icons'
 import { useToast } from '@/ui/useToast'
+import { coverUrl } from '@/utils/api/content'
 import { customListsApi } from '@/utils/api/custom-lists'
 import { librariesApi } from '@/utils/api/libraries'
 import type { CustomListEntry } from '@/utils/api/types'
-import { API_URL } from '@/utils/fetch'
 import { displayContentType, plural } from '@/utils/misc'
 import { showEntryModal } from './EntryModal.vue'
 import { showListModal } from './ListModal.vue'
@@ -180,8 +180,7 @@ function entryTitle(entry: CustomListEntry) {
 }
 
 function entryCoverUri(entry: CustomListEntry) {
-    if (!entry.content?.cover_uri) return null
-    return `${API_URL}/files/cover/${entry.content.id}?v=${entry.content.file_mtime}`
+    return entry.content && coverUrl(entry.content)
 }
 
 async function handleDelete(entry: CustomListEntry) {

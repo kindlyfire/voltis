@@ -1,0 +1,742 @@
+[
+  {
+    "id": 57332,
+    "state": "active",
+    "merged_with": null,
+    "canonical_url": "https://mangabaka.org/manhwa/57332/Fly-Me-to-the-Moon",
+    "authors": [
+      "Go-Yeong Ma",
+      "Su-Yeong Lee"
+    ],
+    "artists": [
+      "Kinteu"
+    ],
+    "status": "completed",
+    "type": "manhwa",
+    "final_volume": null,
+    "published": {
+      "start_date": "2022-11-16"
+    },
+    "titles": [
+      {
+        "language": "ko",
+        "title": "플라이 미 투 더 문",
+        "traits": [
+          "native"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "fr",
+        "title": "Emmène-moi sur la lune",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "ko-Latn",
+        "title": "Fly Me to the Moon",
+        "traits": [
+          "native"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "en",
+        "title": "Fly Me to the Moon",
+        "traits": [
+          "official"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "ja-Latn",
+        "title": "Fly Me to the Moon (Kinteu)",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "ja",
+        "title": "FLY ME TO THE MOON〜宿命を超える運命〜",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "es",
+        "title": "Llévame a la luna",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "uk",
+        "title": "Піднеси мене до місяця",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "ru",
+        "title": "Унеси меня на луну",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "zh",
+        "title": "奔向月亮",
+        "traits": [],
+        "is_primary": true
+      }
+    ]
+  },
+  {
+    "id": 477,
+    "state": "active",
+    "merged_with": null,
+    "canonical_url": "https://mangabaka.org/manga/477/Fly-Me-to-the-Moon",
+    "authors": [
+      "Kenjirou Hata"
+    ],
+    "artists": [
+      "Kenjirou Hata"
+    ],
+    "status": "releasing",
+    "type": "manga",
+    "final_volume": 36,
+    "published": {
+      "start_date": "2018-02-14"
+    },
+    "titles": [
+      {
+        "language": "ko",
+        "title": "아무튼 귀여워",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "ko",
+        "title": "어쨌든 귀여워",
+        "traits": [
+          "official"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "tr",
+        "title": "Beni Ay'a Götür",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "it",
+        "title": "Così carina. Fly me to the moon",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "en",
+        "title": "Cute Anyways",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "en",
+        "title": "Fly Me to the Moon",
+        "traits": [
+          "official"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "ja-Latn",
+        "title": "Fly Me to the Moon (HATA Kenjiro)",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "vi",
+        "title": "Fly me to the moon - Tóm lại là em dễ thương, được chưa?",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "en",
+        "title": "Generally Cute",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "ja-Latn",
+        "title": "Tonikaku Cawaii",
+        "traits": [
+          "native"
+        ],
+        "is_primary": false
+      },
+      {
+        "language": "ja",
+        "title": "Tonikaku Kawaii",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "ja-Latn",
+        "title": "Tonikaku Kawaii",
+        "traits": [
+          "native"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "en",
+        "title": "TONIKAWA: Over The Moon For You",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "uk",
+        "title": "Віднеси мене на місяць",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "ru",
+        "title": "Над луной для тебя",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "ru",
+        "title": "Унеси меня на Луну",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "ar",
+        "title": "طير بي إلى القمر",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "th",
+        "title": "จะยังไงภรรยาของผมก็น่ารัก",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "ja",
+        "title": "トニカクカワイイ",
+        "traits": [
+          "native"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "zh",
+        "title": "总之就是非常可爱",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "zh-Hant",
+        "title": "總之就是很可愛",
+        "traits": [],
+        "is_primary": true
+      }
+    ]
+  },
+  {
+    "id": 63619,
+    "state": "active",
+    "merged_with": null,
+    "canonical_url": "https://mangabaka.org/manga/63619/Fly-Me-to-the-Moon",
+    "authors": [
+      "Keiko Takemiya"
+    ],
+    "artists": [
+      "Keiko Takemiya"
+    ],
+    "status": "completed",
+    "type": "manga",
+    "final_volume": 6,
+    "published": {
+      "start_date": "1981-02-01"
+    },
+    "titles": [
+      {
+        "language": "en",
+        "title": "Fly Me to the Moon!",
+        "traits": [
+          "official"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "en",
+        "title": "Take Me to the Moon!",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "ja-Latn",
+        "title": "Watashi o Tsuki Made Tsuretette!",
+        "traits": [
+          "native"
+        ],
+        "is_primary": false
+      },
+      {
+        "language": "ja-Latn",
+        "title": "Watashi wo Tsuki Made Tsuretette!",
+        "traits": [
+          "native"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "ru",
+        "title": "Забери меня на Луну!",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "ja",
+        "title": "わたしをつきまでつれてって",
+        "traits": [
+          "native"
+        ],
+        "is_primary": false
+      },
+      {
+        "language": "ja",
+        "title": "私を月まで連れてって!",
+        "traits": [
+          "native"
+        ],
+        "is_primary": true
+      }
+    ]
+  },
+  {
+    "id": 15575,
+    "state": "active",
+    "merged_with": null,
+    "canonical_url": "https://mangabaka.org/manga/15575/Fly-Me-to-the-Moon",
+    "authors": [
+      "Kurumi Morisaki"
+    ],
+    "artists": [
+      "Kurumi Morisaki"
+    ],
+    "status": "completed",
+    "type": "manga",
+    "final_volume": 2,
+    "published": {
+      "start_date": "2008-12-09"
+    },
+    "titles": [
+      {
+        "language": "en",
+        "title": "Fly Me to the Moon",
+        "traits": [
+          "official"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "ja-Latn",
+        "title": "Fly Me to the Moon (MORISAKI Kurumi)",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "ja-Latn",
+        "title": "Yamitsuki Marisu",
+        "traits": [
+          "native"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "en",
+        "title": "Yami Tsuki Marisu",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "ja-Latn",
+        "title": "Yamitsuki Marisu - Fly Me to the Moon",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "en",
+        "title": "Yamizuki Marisu",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "ru",
+        "title": "Одержимая тьмой Марис",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "ja",
+        "title": "やみ憑きマリス",
+        "traits": [
+          "native"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "ja",
+        "title": "やみ憑きマリス Fly me to the moon",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "zh",
+        "title": "暗月玛莉斯",
+        "traits": [],
+        "is_primary": true
+      }
+    ]
+  },
+  {
+    "id": 195677,
+    "state": "active",
+    "merged_with": null,
+    "canonical_url": "https://mangabaka.org/manga/195677/Fly-Me-to-the-Moon",
+    "authors": [
+      "Booch"
+    ],
+    "artists": [
+      "Booch"
+    ],
+    "status": "completed",
+    "type": "manga",
+    "final_volume": 1,
+    "published": {
+      "start_date": "2011-12-02"
+    },
+    "titles": [
+      {
+        "language": "en",
+        "title": "Asa ni Akuma ga!?",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "en",
+        "title": "Bokutachi Korekara Ecchi Shimasu!",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "en",
+        "title": "Dakara xxx shite♥Terashima-kun",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "en",
+        "title": "Fly Me to the Moon",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "en",
+        "title": "Hentai Harrassment",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "en",
+        "title": "Nyugyutto Rendezvous♥",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "en",
+        "title": "Papa wa Imasen",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "en",
+        "title": "Shinsen♥Bokujou Musume",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "ja-Latn",
+        "title": "Ultra Love Love Aishiteiru!!",
+        "traits": [
+          "native"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "en",
+        "title": "Ultra Love Love Aishiteru!!",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "en",
+        "title": "Ultra Love Love I Love You!!",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "en",
+        "title": "Yoru ni Akuma ga!!",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "en",
+        "title": "Youkoso! Hotmilk En e♥",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "ja",
+        "title": "ウルトララブラブ愛してるっ！！♥",
+        "traits": [
+          "native"
+        ],
+        "is_primary": true
+      }
+    ]
+  },
+  {
+    "id": 101225,
+    "state": "active",
+    "merged_with": null,
+    "canonical_url": "https://mangabaka.org/manga/101225/Fly-Me-to-the-Moon",
+    "authors": [
+      "Kenjirou Hata"
+    ],
+    "artists": [
+      "Kenjirou Hata"
+    ],
+    "status": "completed",
+    "type": "manga",
+    "final_volume": 1,
+    "published": {
+      "start_date": "2021-03-31"
+    },
+    "titles": [
+      {
+        "language": "en",
+        "title": "Fly Me to the Moon",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "ja",
+        "title": "FLY ME TO THE MOON",
+        "traits": [
+          "native"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "ja-Latn",
+        "title": "FLY ME TO THE MOON",
+        "traits": [
+          "native"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "ja-Latn",
+        "title": "Tonikaku Kawaii",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "ja-Latn",
+        "title": "TONIKAWA",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "ja",
+        "title": "トニカクカワイイ",
+        "traits": [],
+        "is_primary": false
+      }
+    ]
+  },
+  {
+    "id": 184287,
+    "state": "active",
+    "merged_with": null,
+    "canonical_url": "https://mangabaka.org/manga/184287/Fly-Me-to-the-Moon-Booch",
+    "authors": [
+      "Booch"
+    ],
+    "artists": [
+      "Booch"
+    ],
+    "status": "completed",
+    "type": "manga",
+    "final_volume": null,
+    "published": {
+      "start_date": "2015-04-02"
+    },
+    "titles": [
+      {
+        "language": "ja-Latn",
+        "title": "Fly Me to the Moon",
+        "traits": [
+          "native"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "ja",
+        "title": "FLY ME TO THE MOON",
+        "traits": [
+          "native"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "en",
+        "title": "Fly Me to the Moon (Booch)",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "ja",
+        "title": "FLY ME TO THE MOON (ぶーち)",
+        "traits": [],
+        "is_primary": false
+      }
+    ]
+  },
+  {
+    "id": 50688,
+    "state": "active",
+    "merged_with": null,
+    "canonical_url": "https://mangabaka.org/manga/50688/Colorful",
+    "authors": [
+      "Tsunami Umino"
+    ],
+    "artists": [
+      "Aruto Asuka",
+      "Aya Tsuge",
+      "Mamoru Kurihara",
+      "Mari Okazaki",
+      "Momota Nakahara",
+      "Rinko Ueda",
+      "Satoru Hiura",
+      "Shinji Ohara",
+      "Tachibana Higuchi",
+      "TONO"
+    ],
+    "status": "completed",
+    "type": "manga",
+    "final_volume": 1,
+    "published": {
+      "start_date": "2018-09-13"
+    },
+    "titles": [
+      {
+        "language": "en",
+        "title": "Colorful",
+        "traits": [],
+        "is_primary": true
+      },
+      {
+        "language": "en",
+        "title": "Fly Me to the Moon",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "ja-Latn",
+        "title": "Koufuku na Ouhi",
+        "traits": [
+          "native"
+        ],
+        "is_primary": false
+      },
+      {
+        "language": "ja-Latn",
+        "title": "Megami-sama no Yorishiro",
+        "traits": [
+          "native"
+        ],
+        "is_primary": false
+      },
+      {
+        "language": "ja-Latn",
+        "title": "Mura de Ichiban no Bijo",
+        "traits": [
+          "native"
+        ],
+        "is_primary": false
+      },
+      {
+        "language": "en",
+        "title": "Rip van Winkle",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "ja-Latn",
+        "title": "Roujou no Ichinichi",
+        "traits": [
+          "native"
+        ],
+        "is_primary": false
+      },
+      {
+        "language": "ja-Latn",
+        "title": "Sayonara Jinrui",
+        "traits": [
+          "native"
+        ],
+        "is_primary": false
+      },
+      {
+        "language": "ja-Latn",
+        "title": "Seichi Junrei",
+        "traits": [
+          "native"
+        ],
+        "is_primary": false
+      },
+      {
+        "language": "ja-Latn",
+        "title": "Sono Hi Sekai wa Owaru",
+        "traits": [
+          "native"
+        ],
+        "is_primary": true
+      },
+      {
+        "language": "en",
+        "title": "Spiritual",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "en",
+        "title": "The day the world ends",
+        "traits": [],
+        "is_primary": false
+      },
+      {
+        "language": "ja",
+        "title": "その日世界は終わる",
+        "traits": [
+          "native"
+        ],
+        "is_primary": true
+      }
+    ]
+  }
+]

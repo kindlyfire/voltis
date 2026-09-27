@@ -50,11 +50,7 @@
                         :value="item.id"
                         class="a-option search__option"
                     >
-                        <ACover
-                            :src="item.cover_uri ? coverUrl(item) : null"
-                            alt=""
-                            class="w-10 flex-none"
-                        />
+                        <ACover :src="coverUrl(item)" alt="" class="w-10 flex-none" />
                         <span class="flex min-w-0 flex-col">
                             <span class="line-clamp-2">{{ item.meta.title ?? item.title }}</span>
                             <span class="text-fg-muted text-xs font-normal">
@@ -88,9 +84,7 @@ import AIcon from '@/ui/AIcon.vue'
 import AIconButton from '@/ui/AIconButton.vue'
 import { IconClose, IconMagnify } from '@/ui/icons'
 import { useOverlayLayer } from '@/ui/overlay'
-import { contentApi } from '@/utils/api/content'
-import type { Content } from '@/utils/api/types'
-import { API_URL } from '@/utils/fetch'
+import { contentApi, coverUrl } from '@/utils/api/content'
 import { displayContentType } from '@/utils/misc'
 
 const router = useRouter()
@@ -120,8 +114,6 @@ const announcement = computed(() =>
         ? `${results.value.length} result${results.value.length === 1 ? '' : 's'}`
         : status.value
 )
-
-const coverUrl = (item: Content) => `${API_URL}/files/cover/${item.id}?v=${item.file_mtime}`
 
 useEventListener(window, 'keydown', (e: KeyboardEvent) => {
     if (!e.ctrlKey || e.altKey || e.metaKey || e.key.toLowerCase() !== 'k') return

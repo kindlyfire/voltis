@@ -13,6 +13,7 @@ import (
 
 	"voltis/db"
 	"voltis/lib/tasks"
+	"voltis/linking"
 	"voltis/scanner"
 	"voltis/settings"
 
@@ -276,6 +277,16 @@ func (h *WebSocketHub) CatalogChanged(ev scanner.CatalogChanged) {
 		"task_id":    ev.TaskID,
 		"commit_seq": ev.CommitSeq,
 	})
+}
+
+// LibraryChanged tells clients a library's catalog changed outside a scan.
+func (h *WebSocketHub) LibraryChanged(libraryID string) {
+	h.CatalogChanged(scanner.CatalogChanged{LibraryID: libraryID})
+}
+
+// MetadataStatus tells admins what matching and refreshing with metadata providers is doing.
+func (h *WebSocketHub) MetadataStatus(st linking.WorkerStatus) {
+	h.broadcast(toAdmins, map[string]any{"type": "metadata_status", "status": st})
 }
 
 func wsHandler(r *resolver) echo.HandlerFunc {

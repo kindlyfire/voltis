@@ -19,46 +19,47 @@ import (
 	_ "golang.org/x/image/webp"
 
 	"voltis/lib/archive"
-	"voltis/models"
+	"voltis/metadata"
 )
 
 // ComicInfo represents the ComicInfo.xml schema used in CBZ/CBR files.
 type ComicInfo struct {
-	Title           string `xml:"Title" json:"title,omitempty"`
-	Series          string `xml:"Series" json:"series,omitempty"`
-	Number          string `xml:"Number" json:"number,omitempty"`
-	Count           int    `xml:"Count" json:"count,omitempty"`
-	Volume          int    `xml:"Volume" json:"volume,omitempty"`
-	AlternateSeries string `xml:"AlternateSeries" json:"alternate_series,omitempty"`
-	AlternateNumber string `xml:"AlternateNumber" json:"alternate_number,omitempty"`
-	AlternateCount  int    `xml:"AlternateCount" json:"alternate_count,omitempty"`
-	Summary         string `xml:"Summary" json:"summary,omitempty"`
-	Notes           string `xml:"Notes" json:"notes,omitempty"`
-	Year            int    `xml:"Year" json:"year,omitempty"`
-	Month           int    `xml:"Month" json:"month,omitempty"`
-	Day             int    `xml:"Day" json:"day,omitempty"`
-	Writer          string `xml:"Writer" json:"writer,omitempty"`
-	Penciller       string `xml:"Penciller" json:"penciller,omitempty"`
-	Inker           string `xml:"Inker" json:"inker,omitempty"`
-	Colorist        string `xml:"Colorist" json:"colorist,omitempty"`
-	Letterer        string `xml:"Letterer" json:"letterer,omitempty"`
-	CoverArtist     string `xml:"CoverArtist" json:"cover_artist,omitempty"`
-	Editor          string `xml:"Editor" json:"editor,omitempty"`
-	Publisher       string `xml:"Publisher" json:"publisher,omitempty"`
-	Imprint         string `xml:"Imprint" json:"imprint,omitempty"`
-	Genre           string `xml:"Genre" json:"genre,omitempty"`
-	Web             string `xml:"Web" json:"web,omitempty"`
-	LanguageISO     string `xml:"LanguageISO" json:"language_iso,omitempty"`
-	Format          string `xml:"Format" json:"format,omitempty"`
-	AgeRating       string `xml:"AgeRating" json:"age_rating,omitempty"`
-	Manga           string `xml:"Manga" json:"manga,omitempty"`
-	BlackAndWhite   string `xml:"BlackAndWhite" json:"black_and_white,omitempty"`
-	Characters      string `xml:"Characters" json:"characters,omitempty"`
-	Teams           string `xml:"Teams" json:"teams,omitempty"`
-	Locations       string `xml:"Locations" json:"locations,omitempty"`
-	StoryArc        string `xml:"StoryArc" json:"story_arc,omitempty"`
-	SeriesGroup     string `xml:"SeriesGroup" json:"series_group,omitempty"`
-	ScanInformation string `xml:"ScanInformation" json:"scan_information,omitempty"`
+	Title           string   `xml:"Title" json:"title,omitempty"`
+	Series          string   `xml:"Series" json:"series,omitempty"`
+	Number          string   `xml:"Number" json:"number,omitempty"`
+	Count           *int     `xml:"Count" json:"count,omitempty"`
+	Volume          string   `xml:"Volume" json:"volume,omitempty"`
+	AlternateSeries string   `xml:"AlternateSeries" json:"alternate_series,omitempty"`
+	AlternateNumber string   `xml:"AlternateNumber" json:"alternate_number,omitempty"`
+	AlternateCount  *int     `xml:"AlternateCount" json:"alternate_count,omitempty"`
+	Summary         string   `xml:"Summary" json:"summary,omitempty"`
+	Notes           string   `xml:"Notes" json:"notes,omitempty"`
+	Year            *int     `xml:"Year" json:"year,omitempty"`
+	Month           *int     `xml:"Month" json:"month,omitempty"`
+	Day             *int     `xml:"Day" json:"day,omitempty"`
+	Writer          string   `xml:"Writer" json:"writer,omitempty"`
+	Penciller       string   `xml:"Penciller" json:"penciller,omitempty"`
+	Inker           string   `xml:"Inker" json:"inker,omitempty"`
+	Colorist        string   `xml:"Colorist" json:"colorist,omitempty"`
+	Letterer        string   `xml:"Letterer" json:"letterer,omitempty"`
+	CoverArtist     string   `xml:"CoverArtist" json:"cover_artist,omitempty"`
+	Editor          string   `xml:"Editor" json:"editor,omitempty"`
+	Publisher       string   `xml:"Publisher" json:"publisher,omitempty"`
+	Imprint         string   `xml:"Imprint" json:"imprint,omitempty"`
+	Genre           string   `xml:"Genre" json:"genre,omitempty"`
+	Web             string   `xml:"Web" json:"web,omitempty"`
+	LanguageISO     string   `xml:"LanguageISO" json:"language_iso,omitempty"`
+	Format          string   `xml:"Format" json:"format,omitempty"`
+	AgeRating       string   `xml:"AgeRating" json:"age_rating,omitempty"`
+	Manga           string   `xml:"Manga" json:"manga,omitempty"`
+	BlackAndWhite   string   `xml:"BlackAndWhite" json:"black_and_white,omitempty"`
+	Characters      string   `xml:"Characters" json:"characters,omitempty"`
+	Teams           string   `xml:"Teams" json:"teams,omitempty"`
+	Locations       string   `xml:"Locations" json:"locations,omitempty"`
+	StoryArc        string   `xml:"StoryArc" json:"story_arc,omitempty"`
+	SeriesGroup     string   `xml:"SeriesGroup" json:"series_group,omitempty"`
+	ScanInformation string   `xml:"ScanInformation" json:"scan_information,omitempty"`
+	CommunityRating *float64 `xml:"CommunityRating" json:"community_rating,omitempty"` // 0-5
 }
 
 type PageInfo struct {
@@ -68,63 +69,99 @@ type PageInfo struct {
 }
 
 func ParseComicInfo(data []byte) (*ComicInfo, error) {
-	var ci ComicInfo
-	if err := xml.Unmarshal(data, &ci); err != nil {
+	type plain ComicInfo
+	// Numbers are read as text first, so a malformed one is absent instead of failing the document.
+	var raw struct {
+		plain
+		Count           string `xml:"Count"`
+		AlternateCount  string `xml:"AlternateCount"`
+		Year            string `xml:"Year"`
+		Month           string `xml:"Month"`
+		Day             string `xml:"Day"`
+		CommunityRating string `xml:"CommunityRating"`
+	}
+	if err := xml.Unmarshal(data, &raw); err != nil {
 		return nil, err
+	}
+	// The schema writes -1 for unset numbers, so values below the minimum are absent too.
+	ci := ComicInfo(raw.plain)
+	ci.Count, ci.AlternateCount = parseNum(raw.Count, 0), parseNum(raw.AlternateCount, 0)
+	ci.Year, ci.Month, ci.Day = parseNum(raw.Year, 1), parseNum(raw.Month, 1), parseNum(raw.Day, 1)
+	ci.CommunityRating = parseNum(raw.CommunityRating, 0.0)
+	if strings.TrimSpace(ci.Volume) == "-1" {
+		ci.Volume = ""
 	}
 	return &ci, nil
 }
 
-// ComicInfoToMetadata converts a ComicInfo into a Metadata struct.
-func ComicInfoToMetadata(ci *ComicInfo) models.Metadata {
-	m := models.Metadata{}
+func parseNum[T int | float64](s string, least T) *T {
+	f, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) || float64(T(f)) != f || T(f) < least {
+		return nil
+	}
+	return new(T(f))
+}
 
-	clean := func(s string) string {
+// ComicInfoToMetadata converts a ComicInfo into a file layer.
+func ComicInfoToMetadata(ci *ComicInfo) metadata.Fields {
+	text := func(s string) metadata.Opt[string] {
 		if s == "Unknown" {
-			return ""
+			return metadata.Opt[string]{}
 		}
-		return s
+		return metadata.Set(s)
+	}
+	m := metadata.Fields{
+		Title:           text(ci.Title),
+		Description:     text(ci.Summary),
+		Language:        text(ci.LanguageISO),
+		Series:          text(ci.Series),
+		Number:          text(ci.Number),
+		Volume:          text(ci.Volume),
+		Count:           metadata.Ptr(ci.Count),
+		ContentRating:   metadata.AgeRating(ci.AgeRating),
+		Manga:           text(ci.Manga),
+		Imprint:         text(ci.Imprint),
+		Format:          text(ci.Format),
+		Web:             text(ci.Web),
+		Notes:           text(ci.Notes),
+		ScanInformation: text(ci.ScanInformation),
+		BlackAndWhite:   text(ci.BlackAndWhite),
+		SeriesGroup:     text(ci.SeriesGroup),
+		AlternateSeries: text(ci.AlternateSeries),
+		AlternateNumber: text(ci.AlternateNumber),
+		AlternateCount:  metadata.Ptr(ci.AlternateCount),
+	}
+	if p := text(ci.Publisher); p.P == metadata.Value {
+		m.Publishers = metadata.Val([]string{p.V})
+	}
+	if g := text(ci.Genre); g.P == metadata.Value {
+		m.Genres = metadata.Val([]string{g.V})
+	}
+	if ci.CommunityRating != nil {
+		m.Rating = metadata.Val(*ci.CommunityRating * 20)
+	}
+	// An impossible month or day drops only itself and what follows.
+	if ci.Year != nil {
+		parts := []string{fmt.Sprintf("%04d", *ci.Year)}
+		for _, n := range []*int{ci.Month, ci.Day} {
+			if n == nil {
+				break
+			}
+			parts = append(parts, fmt.Sprintf("%02d", *n))
+		}
+		for n := len(parts); n > 0 && m.PublicationDate.P == metadata.Absent; n-- {
+			m.PublicationDate = metadata.Set(metadata.ParsePartialDate(strings.Join(parts[:n], "-")))
+		}
 	}
 
-	m.Title = clean(ci.Title)
-	m.Description = ci.Summary
-	m.Language = ci.LanguageISO
-	m.Series = clean(ci.Series)
-	m.Number = clean(ci.Number)
-	m.Publisher = clean(ci.Publisher)
-	m.Genre = clean(ci.Genre)
-	m.AgeRating = clean(ci.AgeRating)
-	m.Manga = clean(ci.Manga)
-	m.Imprint = clean(ci.Imprint)
-	m.Format = clean(ci.Format)
-	m.Web = clean(ci.Web)
-	m.Notes = clean(ci.Notes)
-	m.ScanInformation = clean(ci.ScanInformation)
-	m.BlackAndWhite = clean(ci.BlackAndWhite)
-	m.SeriesGroup = clean(ci.SeriesGroup)
-	m.AlternateSeries = clean(ci.AlternateSeries)
-	m.AlternateNumber = clean(ci.AlternateNumber)
-	m.Volume = ci.Volume
-	m.Count = ci.Count
-	m.AlternateCount = ci.AlternateCount
-
-	if ci.Year != 0 {
-		if ci.Month != 0 && ci.Day != 0 {
-			m.PublicationDate = fmt.Sprintf("%04d-%02d-%02d", ci.Year, ci.Month, ci.Day)
-		} else {
-			m.PublicationDate = fmt.Sprintf("%d", ci.Year)
-		}
-	}
-
-	// Staff
+	var staff []metadata.Staff
 	addStaff := func(field, role string) {
-		if field == "" || field == "Unknown" {
+		if field == "Unknown" {
 			return
 		}
 		for name := range strings.SplitSeq(field, ",") {
-			name = strings.TrimSpace(name)
-			if name != "" {
-				m.Staff = append(m.Staff, models.StaffEntry{Name: name, Role: role})
+			if name = strings.TrimSpace(name); name != "" {
+				staff = append(staff, metadata.Staff{Name: name, Role: role})
 			}
 		}
 	}
@@ -135,6 +172,7 @@ func ComicInfoToMetadata(ci *ComicInfo) models.Metadata {
 	addStaff(ci.Letterer, "letterer")
 	addStaff(ci.CoverArtist, "cover_artist")
 	addStaff(ci.Editor, "editor")
+	m.Staff = metadata.SetList(staff)
 
 	return m
 }
