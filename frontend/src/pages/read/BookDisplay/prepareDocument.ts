@@ -3,6 +3,7 @@ import type { Content } from '@/utils/api/types'
 import { API_URL } from '@/utils/fetch'
 import { normalizedTextLength } from './documentRange'
 import {
+    childrenOf,
     docBody,
     docRoot,
     elementsUnder,
@@ -46,6 +47,8 @@ const CSS_IMPORT_RE =
 /** A reference we refuse to rewrite must not survive: relative to the reader's
  * own origin it would become a credentialed request to our API. */
 const REJECTED_CSS_URL = 'url("about:invalid")'
+const ROW_GROUPS = new Set(['thead', 'tbody', 'tfoot'])
+const LAYOUT_TABLE_CLASS = 'book-layout-table'
 const PAGE_BREAK_RE =
     /\b(?:page-)?break-(before|after)\s*:\s*(?:always|page|left|right|recto|verso)\b/gi
 
@@ -279,6 +282,25 @@ function rewriteAttributes(el: Element, tag: string, base: string, ctx: PrepareC
     }
 }
 
+/** One plain cell: a wrapper, not data. Only a single row needs it, as Firefox
+ * breaks between rows; more rows keep their table layout (collapsed borders,
+ * shrink-to-fit width). Nested tables are judged on their own. */
+function isLayoutTable(table: Element): boolean {
+    let rows = 0
+    for (const part of childrenOf(table)) {
+        const tag = tagOf(part)
+        if (tag === 'caption') return false
+        if (!ROW_GROUPS.has(tag)) continue
+        for (const row of childrenOf(part)) {
+            if (tagOf(row) !== 'tr') continue
+            const cells = childrenOf(row).filter(cell => /^t[dh]$/.test(tagOf(cell)))
+            const [cell] = cells
+            if (++rows > 1 || cells.length !== 1 || tagOf(cell!) !== 'td') return false
+        }
+    }
+    return rows === 1
+}
+
 async function rewriteDocument(doc: Document, base: string, ctx: PrepareContext) {
     const styles: string[] = []
     const jobs: Promise<void>[] = []
@@ -326,6 +348,10 @@ async function rewriteDocument(doc: Document, base: string, ctx: PrepareContext)
 
         if (tag === 'a') rewriteAnchor(ctx, base, el)
         else rewriteAttributes(el, tag, base, ctx)
+
+        if (tag === 'table' && isLayoutTable(el)) {
+            setAttr(el, 'class', `${getAttr(el, 'class') ?? ''} ${LAYOUT_TABLE_CLASS}`.trim())
+        }
 
         const inline = getAttr(el, 'style')
         if (inline) {
@@ -433,6 +459,17 @@ const PAGED_USER_CSS = `
 }
 :host(.is-paged) figure${BEAT} {
     break-inside: avoid;
+}
+/* Firefox won't fragment a table row in multicol: a cell taller than a page is
+ * clipped at the column's end. Blocks fragment. Only the marked table's own
+ * parts: a table nested in its cell stays a table. A table part's height is a
+ * minimum, a block's is fixed. */
+:host(.is-paged) table.${LAYOUT_TABLE_CLASS}${BEAT},
+:host(.is-paged) .${LAYOUT_TABLE_CLASS} > :is(thead, tbody, tfoot)${BEAT},
+:host(.is-paged) .${LAYOUT_TABLE_CLASS} > :is(thead, tbody, tfoot) > tr${BEAT},
+:host(.is-paged) .${LAYOUT_TABLE_CLASS} > :is(thead, tbody, tfoot) > tr > td${BEAT} {
+    display: block !important;
+    height: auto !important;
 }
 `
 

@@ -213,45 +213,59 @@ describe('paged user styles', () => {
         fx.holders[0]!.classList.remove('is-paged')
         expect(img.getBoundingClientRect().height).toBeGreaterThan(pageH)
     })
+
+    it('fragments a tall layout table cell over columns instead of clipping it', async () => {
+        const { fx, paginator } = await setup([
+            {
+                href: 't.xhtml',
+                body: `<table><tr><td><p>${words(1200)} last</p></td></tr></table><p>after</p>`,
+            },
+        ])
+        fx.holders[0]!.classList.add('is-paged')
+        paginator.measure()
+        const [cell, after] = fx.roots[0]!.querySelectorAll('td, body > p')
+        const pageH = parseInt(fx.viewport.style.getPropertyValue('--pg-h'))
+        const text = cell!.querySelector('p')!.firstChild as Text
+        const last = new Range()
+        last.setStart(text, text.data.length - 4)
+        last.setEnd(text, text.data.length)
+        const frame = fx.host.getBoundingClientRect()
+        const col = (rect: DOMRect) => Math.floor((rect.left - frame.left + 0.5) / pitch(fx))
+        const lastRect = last.getBoundingClientRect()
+        const afterRect = after!.getBoundingClientRect()
+        expect(cell!.getClientRects().length).toBeGreaterThan(2)
+        expect(lastRect.bottom - frame.top).toBeLessThanOrEqual(pageH + 1)
+        // The next block follows the cell's last fragment.
+        const [afterCol, lastCol] = [col(afterRect), col(lastRect)]
+        expect(afterCol > lastCol || (afterCol === lastCol && afterRect.top > lastRect.top)).toBe(
+            true
+        )
+    })
 })
 
 describe('locator geometry in a paged frame', () => {
-    it('captures the first glyph of screen k, across slices', async () => {
-        const { fx, paginator, screen, slices } = await setup([SHORT, LONG])
+    const paragraphs = Array.from({ length: 40 }, (_, i) => `<p>${words(30, `p${i}_`)}</p>`)
+    // Where the search probes first, "before" every screen.
+    paragraphs.splice(20, 0, '<div style="position: absolute; left: -9999px">marker</div>')
+    const MARKED: FixtureDoc = { href: 'm.xhtml', body: paragraphs.join('') }
+
+    // LONG is one text node spanning every column, so screens past its first
+    // capture mid-node.
+    it.each([
+        ['across slices', [SHORT, LONG]],
+        ['stepping over an off-screen positioned block', [MARKED]],
+    ])('captures the first glyph of screen k, %s', async (_name, docs) => {
+        const { fx, paginator, screen, slices } = await setup(docs)
         for (let k = 0; k < screen.count; k++) {
             paginator.showScreen(k)
-            const locator = captureIn(slices, paginator.frame())!
-            const target = locateIn(slices, locator)!
+            const target = locateIn(slices, captureIn(slices, paginator.frame())!)!
             expect(paginator.screenOf(target)).toBe(k)
             // Nothing earlier in reading order is on this screen.
             const rect = (target as Range).getBoundingClientRect()
             expect(rect.left).toBeGreaterThanOrEqual(fx.host.getBoundingClientRect().left - 1)
         }
         paginator.showScreen(1)
-        expect(captureIn(slices, paginator.frame())!.href).toBe('long.xhtml')
-    })
-
-    it('steps over an off-screen positioned block while searching', async () => {
-        const paragraphs = Array.from({ length: 40 }, (_, i) => `<p>${words(30, `p${i}_`)}</p>`)
-        // Where the search probes first, "before" every screen.
-        paragraphs.splice(20, 0, '<div style="position: absolute; left: -9999px">marker</div>')
-        const { paginator, screen, slices } = await setup([
-            { href: 'm.xhtml', body: paragraphs.join('') },
-        ])
-        for (let k = 0; k < screen.count; k++) {
-            paginator.showScreen(k)
-            const target = locateIn(slices, captureIn(slices, paginator.frame())!)!
-            expect(paginator.screenOf(target)).toBe(k)
-        }
-    })
-
-    it('captures mid-paragraph where one text node spans columns', async () => {
-        const { paginator, slices } = await setup([LONG])
-        paginator.showScreen(2)
-        const locator = captureIn(slices, paginator.frame())!
-        expect(locator.textOffset).toBeGreaterThan(0)
-        const point = locateIn(slices, locator) as Range
-        expect(point.startContainer).toBe(slices[0]!.root.querySelector('p')!.firstChild)
+        expect(captureIn(slices, paginator.frame())!.href).toBe(docs.at(-1)!.href)
     })
 
     it('steps over hidden text', async () => {
@@ -279,23 +293,5 @@ describe('locator geometry in a paged frame', () => {
         paginator.showScreen(0)
         paginator.showScreen(paginator.screenOf(locateIn(slices, first)!)!)
         expect(captureIn(slices, paginator.frame())).toEqual(first)
-    })
-
-    it('keeps the passage through a font-size relayout', async () => {
-        const { fx, paginator, slices } = await setup([LONG])
-        paginator.showScreen(3)
-        const before = captureIn(slices, paginator.frame())!
-        for (const size of ['22px', '12px', '16px']) {
-            fx.reader.style.setProperty('--reader-font-size', size)
-            paginator.layout()
-            paginator.measure()
-            const target = locateIn(slices, before)!
-            paginator.showScreen(paginator.screenOf(target)!)
-            const rect = (target as Range).getBoundingClientRect()
-            const frame = fx.host.getBoundingClientRect()
-            expect(rect.left).toBeGreaterThanOrEqual(frame.left - 1)
-            expect(rect.left).toBeLessThan(frame.right)
-        }
-        expect(locateIn(slices, before)).toBeTruthy()
     })
 })

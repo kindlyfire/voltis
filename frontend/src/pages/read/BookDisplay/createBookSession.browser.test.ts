@@ -92,6 +92,17 @@ function holdFonts() {
     return () => fonts.resolve()
 }
 
+/** A saved passage in the middle of chapter a, with settling held open until
+ * `release()`: the chapter is mounted and placed, but still restoring. */
+async function openSettling() {
+    const release = holdFonts()
+    const saved: BookLocator = { version: 1, href: 'a.xhtml', textOffset: 'a0 '.length * 300 }
+    vi.mocked(contentApi.get).mockResolvedValue(content({ book: saved }))
+    const opened = await open({}, { settle: false })
+    await vi.waitFor(() => expect(opened.session.firstChapterMounted).toBe(true))
+    return { ...opened, saved, release }
+}
+
 /** A session in the reader DOM, which follows the layout and the font size
  * the way `BookReader.vue` renders them. */
 async function open(entry: Partial<BookEntry> = {}, { settle = true } = {}) {
@@ -213,10 +224,12 @@ describe('paged session', () => {
         const { session, nav, host, settings } = await open()
         await turnTo(session, 2)
         const before = passage(session, nav)
-        settings.fontSize = 1.4
-        await frames(3)
-        expect(onScreen(host, before)).toBe(true)
-        expect(passage(session, nav)).toEqual(before)
+        for (const size of [1.4, 0.8, 1]) {
+            settings.fontSize = size
+            await frames(3)
+            expect(onScreen(host, before)).toBe(true)
+            expect(passage(session, nav)).toEqual(before)
+        }
     })
 
     it('restores a saved locator to the screen containing it', async () => {
@@ -228,11 +241,7 @@ describe('paged session', () => {
     })
 
     it('lets the reader take over while the chapter settles', async () => {
-        const release = holdFonts()
-        const saved: BookLocator = { version: 1, href: 'a.xhtml', textOffset: 'a0 '.length * 300 }
-        vi.mocked(contentApi.get).mockResolvedValue(content({ book: saved }))
-        const { session } = await open({}, { settle: false })
-        await vi.waitFor(() => expect(session.firstChapterMounted).toBe(true))
+        const { session, release } = await openSettling()
         expect(session.restoring).toBe(true)
         const landed = session.screen!.index
 
@@ -242,12 +251,9 @@ describe('paged session', () => {
         await settled(session)
         expect(session.screen!.index).toBe(landed + 1)
     })
+
     it('saves where the reader took over if the tab closes before settling', async () => {
-        holdFonts()
-        const saved: BookLocator = { version: 1, href: 'a.xhtml', textOffset: 'a0 '.length * 300 }
-        vi.mocked(contentApi.get).mockResolvedValue(content({ book: saved }))
-        const { session } = await open({}, { settle: false })
-        await vi.waitFor(() => expect(session.firstChapterMounted).toBe(true))
+        const { session, saved } = await openSettling()
         session.turn('next')
         await session.dispose()
         const written = vi.mocked(contentApi.updateUserData).mock.calls.at(-1)![1].progress!.book!
@@ -255,9 +261,7 @@ describe('paged session', () => {
     })
 
     it('lays out again for a text setting changed while the chapter settles', async () => {
-        const release = holdFonts()
-        const { session, settings, viewport } = await open({}, { settle: false })
-        await vi.waitFor(() => expect(session.firstChapterMounted).toBe(true))
+        const { session, settings, viewport, release } = await openSettling()
         const columnWidth = () => parseInt(viewport.style.getPropertyValue('--pg-col-w'))
         const before = columnWidth()
         settings.fontSize = 1.4
@@ -285,6 +289,7 @@ describe('paged turns during a route change', () => {
         nav.push({ href: 'c.xhtml', fragment: '' })
         session.turn('next')
         session.turn('next')
+        expect(session.screen!.index).toBe(0)
         session.goToChapter(1)
         expect(nav.entries.map(entry => entry.target.href)).toEqual(['a.xhtml', 'c.xhtml'])
         await settled(session, 2)
@@ -377,11 +382,7 @@ describe('switching layouts', () => {
     })
 
     it('lands on the target when switched while the chapter settles', async () => {
-        const release = holdFonts()
-        const saved: BookLocator = { version: 1, href: 'a.xhtml', textOffset: 'a0 '.length * 300 }
-        vi.mocked(contentApi.get).mockResolvedValue(content({ book: saved }))
-        const { session, host, settings } = await open({}, { settle: false })
-        await vi.waitFor(() => expect(session.firstChapterMounted).toBe(true))
+        const { session, host, settings, saved, release } = await openSettling()
         await setMode(settings, 'scroll')
         await frames()
         release()

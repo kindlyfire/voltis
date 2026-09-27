@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia, type Pinia } from 'pinia'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import { contentApi } from '@/utils/api/content'
 import type { BookStructure, Content, UserToContent } from '@/utils/api/types'
@@ -81,23 +81,31 @@ beforeEach(async () => {
     })
 })
 
-function render() {
-    return mount(BookReader, {
-        props: { contentId: 'c_1' },
+let wrapper: ReturnType<typeof mount>
+
+afterEach(async () => {
+    wrapper.unmount()
+    await useBookDisplayStore(pinia).dispose()
+})
+
+/** The reader, showing `contentId` in `mode`, once its loads have settled. */
+async function open(mode: 'paged' | 'scroll', contentId = 'c_1') {
+    wrapper = mount(BookReader, {
+        props: { contentId },
         global: { plugins: [pinia, router], stubs },
         attachTo: document.body,
     })
-}
-
-function hostOf(wrapper: ReturnType<typeof render>) {
-    return wrapper.find('.book-host')
+    const store = useBookDisplayStore(pinia)
+    store.settings.mode = mode
+    store.setContent(contentId, { ch: null, frag: null })
+    await settle()
+    return store
 }
 
 /** Each mounted slice lives in its own shadow root under the host. */
-function mountedText(wrapper: ReturnType<typeof render>): string {
-    const host = hostOf(wrapper).element as HTMLElement
-    return Array.from(host.children)
-        .map(child => (child as HTMLElement).shadowRoot?.textContent ?? '')
+function mountedText(): string {
+    return Array.from(wrapper.find('.book-host').element.children)
+        .map(child => child.shadowRoot?.textContent ?? '')
         .join('')
 }
 
@@ -130,16 +138,11 @@ describe('BookReader host lifecycle', () => {
             return '<html><body><p id="p">second chapter</p></body></html>'
         })
 
-        const wrapper = render()
-        const store = useBookDisplayStore(pinia)
-        store.settings.mode = 'scroll'
-        store.setContent('c_1', { ch: null, frag: null })
-        await settle()
-
+        const store = await open('scroll')
         expect(store.session!.error).toBeTruthy()
         expect(wrapper.text()).toContain('500')
         // The host must survive the error, or nothing can ever render again.
-        expect(hostOf(wrapper).exists()).toBe(true)
+        expect(wrapper.find('.book-host').exists()).toBe(true)
 
         store.session!.setEntry({ ch: 'b.xhtml', frag: null })
         await settle()
@@ -147,14 +150,11 @@ describe('BookReader host lifecycle', () => {
         expect(store.session!.error).toBeNull()
         expect(store.session!.restoring).toBe(false)
         expect(store.session!.chapterIndex).toBe(1)
-        expect(mountedText(wrapper)).toContain('second chapter')
+        expect(mountedText()).toContain('second chapter')
         // The sentinel comes back with the chapter chrome, so completion can work.
         expect(wrapper.find('.h-px').exists()).toBe(true)
         expect(wrapper.text()).toContain('Previous: One')
         expect(wrapper.text()).toContain('End of book')
-
-        wrapper.unmount()
-        await store.dispose()
     })
 })
 
@@ -180,27 +180,20 @@ describe('BookReader across books', () => {
                 : gate.promise
         )
 
-        const wrapper = render()
-        const store = useBookDisplayStore(pinia)
-        store.settings.mode = 'scroll'
-        store.setContent('c_a', { ch: null, frag: null })
-        await settle()
-        expect(mountedText(wrapper)).toContain('book a text')
+        const store = await open('scroll', 'c_a')
+        expect(mountedText()).toContain('book a text')
         expect(wrapper.find('.h-px').exists()).toBe(true)
 
         // The reader stays mounted; only the book changes.
         store.setContent('c_b', { ch: null, frag: null })
         await settle()
         expect(store.session!.contentId).toBe('c_b')
-        expect(mountedText(wrapper)).not.toContain('book a text')
+        expect(mountedText()).not.toContain('book a text')
 
         gate.reject(new Error('500'))
         await settle()
         expect(store.session!.error).toBeTruthy()
-        expect(mountedText(wrapper)).not.toContain('book a text')
-
-        wrapper.unmount()
-        await store.dispose()
+        expect(mountedText()).not.toContain('book a text')
     })
 })
 
@@ -216,12 +209,7 @@ describe('BookReader layouts', () => {
     }
 
     it('pages with a counter and no chapter buttons or progress bar', async () => {
-        const wrapper = render()
-        const store = useBookDisplayStore(pinia)
-        store.settings.mode = 'paged'
-        store.setContent('c_1', { ch: null, frag: null })
-        await settle()
-        const session = store.session!
+        const session = (await open('paged')).session!
         expect(session.layoutMode).toBe('paged')
         expect(wrapper.find('.book-reader').classes()).toContain('is-paged')
         expect(wrapper.find('.book-footer').text()).toContain('Page 1 / 1')
@@ -243,28 +231,13 @@ describe('BookReader layouts', () => {
         expect(session.atBookEnd).toBe(true)
         expect(wrapper.text()).toContain('End of book')
         expect(wrapper.find('.book-footer').text()).not.toContain('Page')
-
-        wrapper.unmount()
-        await store.dispose()
     })
 
     it('scrolls with chapter buttons and a chapter progress bar', async () => {
-        const wrapper = render()
-        const store = useBookDisplayStore(pinia)
-        store.settings.mode = 'scroll'
-        store.setContent('c_1', { ch: null, frag: null })
-        await settle()
-        const session = store.session!
-        expect(session.layoutMode).toBe('scroll')
+        const store = await open('scroll')
+        expect(store.session!.layoutMode).toBe('scroll')
         expect(wrapper.find('.book-footer').exists()).toBe(false)
         expect(wrapper.text()).toContain('Next: Two')
         expect(wrapper.find('.progress').exists()).toBe(true)
-
-        const turn = vi.spyOn(session, 'turn')
-        key('ArrowDown')
-        expect(turn).not.toHaveBeenCalled()
-
-        wrapper.unmount()
-        await store.dispose()
     })
 })

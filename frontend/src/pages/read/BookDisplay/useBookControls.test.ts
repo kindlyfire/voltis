@@ -1,6 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { getClickZone } from '../useClickZones'
@@ -123,15 +123,25 @@ describe('click zones', () => {
 })
 
 describe('paged controls', () => {
+    let wrapper: ReturnType<typeof mount> | null = null
+    afterEach(() => wrapper?.unmount())
+
     function setup(layoutMode: 'paged' | 'scroll' = 'paged') {
         const pinia = createPinia()
         setActivePinia(pinia)
         const router = createRouter({ history: createMemoryHistory(), routes: [] })
         const store = useBookDisplayStore()
         const turn = vi.fn()
-        store.session = { layoutMode, turn, standalone: null } as unknown as BookSession
+        const goToChapter = vi.fn()
+        store.session = {
+            layoutMode,
+            turn,
+            goToChapter,
+            chapterIndex: 1,
+            standalone: null,
+        } as unknown as BookSession
         let controls!: ReturnType<typeof useBookControls>
-        const wrapper = mount(
+        wrapper = mount(
             defineComponent({
                 setup() {
                     controls = useBookControls()
@@ -140,7 +150,7 @@ describe('paged controls', () => {
             }),
             { global: { plugins: [pinia, router] }, attachTo: document.body }
         )
-        return { store, turn, controls, wrapper }
+        return { store, turn, goToChapter, controls }
     }
 
     const key = (name: string, init: KeyboardEventInit = {}) =>
@@ -171,7 +181,7 @@ describe('paged controls', () => {
     })
 
     it('turns pages from the keyboard', () => {
-        const { turn, wrapper } = setup()
+        const { turn } = setup()
         for (const name of ['ArrowRight', 'ArrowDown', 'PageDown', ' ']) key(name)
         for (const name of ['ArrowLeft', 'ArrowUp', 'PageUp']) key(name)
         key(' ', { shiftKey: true })
@@ -179,35 +189,43 @@ describe('paged controls', () => {
             ...Array(4).fill('next'),
             ...Array(4).fill('prev'),
         ])
-        wrapper.unmount()
     })
 
-    it('leaves scroll mode to the window', () => {
+    it('scrolls the window in scroll mode, crossing chapters at its edges', () => {
         window.scrollBy = vi.fn()
-        Object.defineProperty(document.documentElement, 'scrollHeight', {
-            value: 5000,
-            configurable: true,
-        })
-        const { turn, wrapper } = setup('scroll')
+        const height = (value: number) =>
+            Object.defineProperty(document.documentElement, 'scrollHeight', {
+                value,
+                configurable: true,
+            })
+        height(5000)
+        const { turn, goToChapter } = setup('scroll')
         key('ArrowDown')
+        expect(window.scrollBy).toHaveBeenCalledOnce()
+        // At the top, back into the previous chapter, landing at its end.
+        key('ArrowUp')
+        height(800)
+        key('ArrowDown')
+        expect(goToChapter.mock.calls).toEqual([
+            [0, true],
+            [2, false],
+        ])
         expect(turn).not.toHaveBeenCalled()
-        expect(window.scrollBy).toHaveBeenCalled()
-        wrapper.unmount()
+        Reflect.deleteProperty(document.documentElement, 'scrollHeight')
     })
 
     it('turns on zone taps, except while zoomed in', () => {
-        const { turn, controls, wrapper } = setup()
+        const { turn, controls } = setup()
         click(controls, 850)
         click(controls, 50)
         expect(turn.mock.calls).toEqual([['next'], ['prev']])
         Object.defineProperty(window, 'visualViewport', { value: { scale: 2 }, configurable: true })
         click(controls, 850)
         expect(turn).toHaveBeenCalledTimes(2)
-        wrapper.unmount()
     })
 
     it('keeps a quick click after a turn from selecting the word under it', () => {
-        const { controls, wrapper } = setup()
+        const { controls } = setup()
         const press = (detail: number) => {
             const e = new MouseEvent('mousedown', { detail, cancelable: true })
             controls.handleMouseDown(e)
@@ -220,11 +238,10 @@ describe('paged controls', () => {
         // After the menu zone, a double-click still selects.
         click(controls, 450)
         expect(press(2)).toBe(false)
-        wrapper.unmount()
     })
 
     it('turns on wheel and swipe, but not under the drawer or a modal', () => {
-        const { store, turn, controls, wrapper } = setup()
+        const { store, turn, controls } = setup()
         const gesture = (at: number) => {
             controls.handleWheel(new WheelEvent('wheel', { deltaY: 100 }))
             controls.handleTouchStart(touch(300, at))
@@ -238,6 +255,5 @@ describe('paged controls', () => {
         modal.value = true
         gesture(2000)
         expect(turn).toHaveBeenCalledTimes(2)
-        wrapper.unmount()
     })
 })

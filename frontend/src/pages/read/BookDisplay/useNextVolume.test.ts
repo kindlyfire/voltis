@@ -6,36 +6,33 @@ function book(id: string, order: number | null, extra: Partial<Content> = {}): C
     return { id, order, type: 'book', valid: true, ...extra } as Content
 }
 
-describe('next volume', () => {
-    it('takes the smallest order after the current one, whatever the list order', () => {
-        const current = book('b2', 2)
-        const siblings = [book('b5', 5), current, book('b1', 1), book('b3', 3), book('bn', null)]
-        expect(nextVolume(current, siblings)?.id).toBe('b3')
-    })
+const current = book('b2', 2)
 
-    it('bridges a gap in the orders', () => {
-        const current = book('b1', 1)
-        expect(nextVolume(current, [current, book('b4', 4), book('b7', 7)])?.id).toBe('b4')
+describe('next volume', () => {
+    it.each([
+        [
+            'takes the smallest later order, whatever the list order',
+            [book('b5', 5), current, book('b1', 1), book('b3', 3), book('bn', null)],
+            'b3',
+        ],
+        ['bridges a gap in the orders', [current, book('b4', 4), book('b7', 7)], 'b4'],
+        [
+            'skips invalid items and other content types',
+            [
+                current,
+                book('bad', 3, { valid: false }),
+                book('comic', 3, { type: 'comic' }),
+                book('b4', 4),
+            ],
+            'b4',
+        ],
+        ['offers nothing after the last volume', [book('b1', 1), current], null],
+    ])('%s', (_name, siblings, expected) => {
+        expect(nextVolume(current, siblings)?.id ?? null).toBe(expected)
     })
 
     it('offers nothing while the current order is unknown', () => {
-        const current = book('b', null)
-        expect(nextVolume(current, [current, book('b1', 1)])).toBeNull()
-    })
-
-    it('skips invalid items and other content types', () => {
-        const current = book('b1', 1)
-        const siblings = [
-            current,
-            book('bad', 2, { valid: false }),
-            book('comic', 3, { type: 'comic' }),
-            book('b4', 4),
-        ]
-        expect(nextVolume(current, siblings)?.id).toBe('b4')
-    })
-
-    it('offers nothing after the last volume', () => {
-        const current = book('b2', 2)
-        expect(nextVolume(current, [book('b1', 1), current])).toBeNull()
+        const unknown = book('b', null)
+        expect(nextVolume(unknown, [unknown, book('b1', 1)])).toBeNull()
     })
 })

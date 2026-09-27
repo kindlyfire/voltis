@@ -13,6 +13,12 @@ export default defineConfig({
     },
     test: {
         restoreMocks: true,
+        // Istanbul instruments in every browser; v8 coverage is Chromium-only.
+        coverage: {
+            provider: 'istanbul',
+            include: ['src/**'],
+            exclude: ['**/*.test.ts', '**/browserFixture.ts', '**/fakeNav.ts'],
+        },
         projects: [
             {
                 extends: true,

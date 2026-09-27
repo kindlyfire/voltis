@@ -10,6 +10,7 @@
         "build-only": "vite build",
         "test": "vitest run",
         "test:unit": "vitest run --project unit",
+        "coverage": "vitest run --coverage.enabled",
         "type-check": "vue-tsc --build",
         "format": "oxfmt --write \"src/**/*.{vue,ts}\" \"*.json\" \"*.ts\" index.html"
     },
