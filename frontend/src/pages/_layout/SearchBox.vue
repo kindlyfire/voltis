@@ -1,5 +1,6 @@
 <template>
     <ComboboxRoot
+        ref="root"
         :open="isOpen"
         :model-value="null"
         ignore-filter
@@ -11,7 +12,8 @@
         @update:model-value="navigate"
     >
         <ComboboxAnchor class="search__pill">
-            <AIcon :icon="IconMagnify" class="search__icon" />
+            <ASpinner v-if="loading" size="inherit" decorative class="search__icon" />
+            <AIcon v-else :icon="IconMagnify" class="search__icon search__magnifier" />
             <ComboboxInput
                 ref="input"
                 v-model="term"
@@ -21,7 +23,8 @@
                 placeholder="Search…"
                 aria-label="Search"
                 aria-keyshortcuts="Control+K"
-                @keydown.enter.capture="guardIme"
+                @keydown.enter.capture="guardEnter"
+                @keydown.up.down.home.end="markNavigated"
                 @keydown.esc="onEscape"
                 @blur="onBlur"
             />
@@ -42,6 +45,8 @@
                 class="a-listbox search__results"
                 :side-offset="6"
                 :collision-padding="8"
+                :aria-busy="loading || undefined"
+                @pointermove.capture="onPointerMove"
             >
                 <ComboboxViewport>
                     <ComboboxItem
@@ -58,11 +63,13 @@
                             </span>
                         </span>
                     </ComboboxItem>
+                    <div v-if="!results.length" class="search__status">{{ status }}</div>
                 </ComboboxViewport>
-                <div v-if="!results.length" class="search__status">{{ status }}</div>
             </ComboboxContent>
         </ComboboxPortal>
-        <div class="sr-only" aria-live="polite">{{ isOpen ? announcement : '' }}</div>
+        <div class="sr-only" aria-live="polite">
+            {{ isOpen ? announcement : '' }}
+        </div>
     </ComboboxRoot>
 </template>
 
@@ -77,43 +84,94 @@ import {
     ComboboxRoot,
     ComboboxViewport,
 } from 'reka-ui'
-import { computed, ref, useTemplateRef } from 'vue'
+import { computed, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import ACover from '@/ui/ACover.vue'
 import AIcon from '@/ui/AIcon.vue'
 import AIconButton from '@/ui/AIconButton.vue'
+import ASpinner from '@/ui/ASpinner.vue'
 import { IconClose, IconMagnify } from '@/ui/icons'
 import { useOverlayLayer } from '@/ui/overlay'
 import { contentApi, coverUrl } from '@/utils/api/content'
+import type { Content, Paginated } from '@/utils/api/types'
 import { displayContentType } from '@/utils/misc'
 
 const router = useRouter()
+const root = useTemplateRef('root')
 const input = useTemplateRef<{ $el: HTMLInputElement }>('input')
 const term = ref('')
-const debounced = refDebounced(
-    computed(() => term.value.trim()),
-    300
-)
+const trimmed = computed(() => term.value.trim())
+const debounced = refDebounced(trimmed, 300)
 const wantOpen = ref(false)
 const isOpen = computed(() => wantOpen.value && !!debounced.value)
 useOverlayLayer('menu', isOpen)
 
-// Keyed by the search term, so a slow response for an older term never shows under a newer one.
+// Keyed by the search term, so a late response for an older term can't overwrite a newer one's.
 const query = contentApi.useList(() =>
     debounced.value ? { search: debounced.value, limit: 10, parent_id: 'null' } : undefined
 )
-const results = computed(() => query.data.value?.data ?? [])
+const last = shallowRef<Paginated<Content>>()
+// Set while the term is blank until the debounce catches up, so a late response for the term
+// that was cleared doesn't refill `last`.
+let blanked = false
+let navigated = false
+watch(term, () => {
+    navigated = false
+    if (trimmed.value) return
+    last.value = undefined
+    blanked = true
+})
+watch(debounced, () => (blanked = false))
+watch([query.data, isOpen, query.isError], ([d, open, err]) => {
+    if (err || !open) last.value = undefined
+    else if (d && trimmed.value && !blanked) last.value = d
+})
+const data = computed(() => query.data.value ?? last.value)
+
+function markNavigated(e: KeyboardEvent) {
+    // Reka ignores navigation keys mid-composition (see guardEnter for Safari).
+    if (!e.isComposing && e.keyCode !== 229) navigated = true
+}
+function onPointerMove(e: PointerEvent) {
+    const option = (e.target as Element).closest('[role="option"]')
+    // Reka's root pointerleave fires when moving from the pill into the portaled popup and clears
+    // the highlight; the first row is then still the automatic one.
+    const auto =
+        root.value?.highlightedElement ??
+        (e.currentTarget as Element).querySelector('[role="option"]')
+    if (option && option !== auto) navigated = true
+}
+// Reka doesn't reset the highlight when a non-empty list is replaced.
+watch(
+    query.data,
+    d => {
+        const el = root.value?.highlightedElement
+        if (d?.data.length && (!navigated || !el?.isConnected)) root.value?.highlightFirstItem?.()
+    },
+    { flush: 'post' }
+)
+const results = computed(() => data.value?.data ?? [])
+// Results on screen don't match the term yet: the debounce is pending or the new term has no data.
+// Background refetches of the current term don't count; isPending (unlike isLoading) also covers
+// a fetch paused while offline.
+const pending = computed(
+    () => trimmed.value !== debounced.value || (!!debounced.value && query.isPending.value)
+)
+// A blank term's pending debounce only closes the popup, so it doesn't spin.
+const loading = computed(() => !!trimmed.value && pending.value)
 
 const status = computed(() => {
     if (query.isError.value) return 'Search failed'
-    if (query.isFetching.value && !query.data.value) return 'Searching…'
+    if (query.isFetching.value && !data.value) return 'Searching…'
     return 'No results'
 })
-const announcement = computed(() =>
-    results.value.length
+const announcement = computed(() => {
+    // Old results are still on screen; with none, "Searching…" is announced instead.
+    if (pending.value && results.value.length) return ''
+    return results.value.length
         ? `${results.value.length} result${results.value.length === 1 ? '' : 's'}`
         : status.value
-)
+})
 
 useEventListener(window, 'keydown', (e: KeyboardEvent) => {
     if (!e.ctrlKey || e.altKey || e.metaKey || e.key.toLowerCase() !== 'k') return
@@ -122,9 +180,13 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
     input.value?.$el.select()
 })
 
-/** Enter confirming an IME composition must not pick a result (Safari ends it before keydown). */
-function guardIme(e: KeyboardEvent) {
-    if (e.isComposing || e.keyCode === 229) e.stopImmediatePropagation()
+function guardEnter(e: KeyboardEvent) {
+    // Safari ends an IME composition before keydown, so also check keyCode 229.
+    if (e.isComposing || e.keyCode === 229) return e.stopImmediatePropagation()
+    // The highlighted row belongs to an older term.
+    if (!pending.value) return
+    e.preventDefault()
+    e.stopImmediatePropagation()
 }
 
 /** With the results closed, Esc clears the term (and stays away from a drawer around it). */
@@ -177,6 +239,9 @@ function navigate(id: unknown) {
 
     .search__icon {
         font-size: 22px;
+    }
+
+    .search__magnifier {
         color: var(--color-fg-muted);
     }
 
