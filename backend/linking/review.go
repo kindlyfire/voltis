@@ -176,23 +176,24 @@ func (s *Service) Summary(ctx context.Context) (Summary, error) {
 type ReviewAction struct {
 	ContentID   string   `json:"content_id"`
 	Provider    string   `json:"provider"`
-	Action      string   `json:"action"`       // link | reject | ignore
+	Action      string   `json:"action"`       // link | reject | ignore | undo
 	ExternalID  string   `json:"external_id"`  // link
 	ExternalIDs []string `json:"external_ids"` // reject
-	ExpectRev   *int64   `json:"expect_rev"`
+	ExpectRev   *int64   `json:"expect_rev"`   // undo: the revision the decision saved
 }
 
 type ReviewResult struct {
 	ContentID string `json:"content_id"`
 	Provider  string `json:"provider"`
 	OK        bool   `json:"ok"`
+	Rev       *int64 `json:"rev,omitempty"` // the revision saved, to undo it
 	Error     string `json:"error,omitempty"`
 }
 
 // ResolveReview applies each item on its own, reporting how each went. The links go first: their
 // entries are fetched and published together.
 func (s *Service) ResolveReview(ctx context.Context, items []ReviewAction) []ReviewResult {
-	errs := make([]error, len(items))
+	revs, errs := make([]int64, len(items)), make([]error, len(items))
 	var links []LinkRequest
 	var linkItems []int
 	for i, it := range items {
@@ -200,16 +201,23 @@ func (s *Service) ResolveReview(ctx context.Context, items []ReviewAction) []Rev
 			links, linkItems = append(links, LinkRequest{it.ContentID, it.Provider, it.ExternalID, it.ExpectRev}), append(linkItems, i)
 		}
 	}
-	for k, err := range s.LinkAll(ctx, links) {
-		errs[linkItems[k]] = err
+	linkRevs, linkErrs := s.LinkAll(ctx, links)
+	for k, i := range linkItems {
+		revs[i], errs[i] = linkRevs[k], linkErrs[k]
 	}
 	for i, it := range items {
 		switch it.Action {
 		case "link":
 		case "reject":
-			errs[i] = s.Reject(ctx, it.ContentID, it.Provider, it.ExternalIDs, it.ExpectRev)
+			revs[i], errs[i] = s.Reject(ctx, it.ContentID, it.Provider, it.ExternalIDs, it.ExpectRev)
 		case "ignore":
-			errs[i] = s.Ignore(ctx, it.ContentID, it.Provider, it.ExpectRev)
+			revs[i], errs[i] = s.Ignore(ctx, it.ContentID, it.Provider, it.ExpectRev)
+		case "undo":
+			if it.ExpectRev == nil {
+				errs[i] = &metadata.ValidationError{Field: "expect_rev", Msg: "required"}
+			} else {
+				errs[i] = s.Undo(ctx, it.ContentID, it.Provider, *it.ExpectRev)
+			}
 		default:
 			errs[i] = &metadata.ValidationError{Field: "action", Msg: fmt.Sprintf("unknown action %q", it.Action)}
 		}
@@ -217,8 +225,11 @@ func (s *Service) ResolveReview(ctx context.Context, items []ReviewAction) []Rev
 	out := make([]ReviewResult, len(items))
 	for i, it := range items {
 		out[i] = ReviewResult{ContentID: it.ContentID, Provider: it.Provider, OK: errs[i] == nil}
-		if errs[i] != nil {
+		switch {
+		case errs[i] != nil:
 			out[i].Error = errs[i].Error()
+		case revs[i] != 0:
+			out[i].Rev = &revs[i]
 		}
 	}
 	return out

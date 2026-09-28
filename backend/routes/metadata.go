@@ -34,6 +34,7 @@ func (r *MetadataRoutes) Register(g *echo.Group) {
 	g.POST("/content/:id/ignore", adminOnly(r.ignore))
 	g.POST("/content/:id/rematch", adminOnly(r.rematch))
 	g.POST("/content/:id/refresh", adminOnly(r.refresh))
+	g.POST("/content/:id/undo", adminOnly(r.undo))
 	g.GET("/review", adminOnly(r.review))
 	g.POST("/review/resolve", adminOnly(r.resolveReview))
 	g.GET("/summary", adminOnly(r.summary))
@@ -114,7 +115,8 @@ func (r *MetadataRoutes) reject(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return err
 	}
-	return r.respond(c, r.links.Reject(reqCtx(c), c.Param("id"), req.Provider, req.ExternalIDs, req.ExpectRev))
+	_, err := r.links.Reject(reqCtx(c), c.Param("id"), req.Provider, req.ExternalIDs, req.ExpectRev)
+	return r.respond(c, err)
 }
 
 func (r *MetadataRoutes) ignore(c echo.Context) error {
@@ -122,7 +124,8 @@ func (r *MetadataRoutes) ignore(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return err
 	}
-	return r.respond(c, r.links.Ignore(reqCtx(c), c.Param("id"), req.Provider, req.ExpectRev))
+	_, err := r.links.Ignore(reqCtx(c), c.Param("id"), req.Provider, req.ExpectRev)
+	return r.respond(c, err)
 }
 
 func (r *MetadataRoutes) rematch(c echo.Context) error {
@@ -139,6 +142,17 @@ func (r *MetadataRoutes) refresh(c echo.Context) error {
 		return err
 	}
 	return r.respond(c, r.links.Refresh(reqCtx(c), c.Param("id"), req.Provider))
+}
+
+func (r *MetadataRoutes) undo(c echo.Context) error {
+	var req linkRequest
+	if err := c.Bind(&req); err != nil {
+		return err
+	}
+	if req.ExpectRev == nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "expect_rev is required")
+	}
+	return r.respond(c, r.links.Undo(reqCtx(c), c.Param("id"), req.Provider, *req.ExpectRev))
 }
 
 type reviewQuery struct {
@@ -230,6 +244,8 @@ func metadataError(err error) error {
 		return echo.NewHTTPError(http.StatusNotFound, "Content not found")
 	case errors.Is(err, linking.ErrLinked):
 		return echo.NewHTTPError(http.StatusConflict, "Linked; link another entry, reject it or ignore it instead")
+	case errors.Is(err, linking.ErrNoUndo):
+		return echo.NewHTTPError(http.StatusConflict, "Can no longer undo; it expired or changed since")
 	case errors.Is(err, metadata.ErrConflict):
 		return echo.NewHTTPError(http.StatusConflict, "Changed since it was loaded; reload and try again")
 	case errors.Is(err, metadata.ErrOccupied):

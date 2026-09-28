@@ -4,6 +4,7 @@ import { flushPromises, mount, RouterLinkStub } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import ASelect from '@/ui/ASelect.vue'
+import { toasts } from '@/ui/useToast'
 import type { ReviewAction, ReviewItem } from '@/utils/api/metadata'
 import { apiFetch } from '@/utils/fetch'
 import { addOverlays } from '@/utils/modalTesting'
@@ -62,6 +63,7 @@ let libraries: {
 
 beforeEach(async () => {
     addOverlays()
+    toasts.value = []
     resolved = []
     requests = []
     reviewQueries = []
@@ -112,6 +114,10 @@ beforeEach(async () => {
             requests.push({ url, body: JSON.parse(init!.body as string) })
             return { ok: true }
         }
+        if (url === '/metadata/content/c_1/undo' || url === '/metadata/content/c_1/rematch') {
+            requests.push({ url, body: JSON.parse(init!.body as string) })
+            return { links: [{ provider: 'mangabaka', rev: 7 }] }
+        }
         if (url.startsWith('/metadata/review?')) {
             reviewQueries.push(new URLSearchParams(url.split('?')[1]))
             return { data: [item('c_1', 'Frieren', 3), item('c_2', 'Emma', 5)], total: 2 }
@@ -119,12 +125,18 @@ beforeEach(async () => {
         if (url === '/metadata/review/resolve') {
             const { items } = JSON.parse(init!.body as string)
             resolved.push(items)
-            if (items[0].action === 'reject') {
-                return { results: items.map((i: ReviewAction) => ({ ...i, ok: true })) }
+            if (items[0].action !== 'link') {
+                return {
+                    results: items.map((i: ReviewAction) => ({
+                        ...i,
+                        ok: true,
+                        rev: i.action === 'undo' ? undefined : i.expect_rev! + 1,
+                    })),
+                }
             }
             return {
                 results: [
-                    { content_id: 'c_1', provider: 'mangabaka', ok: true },
+                    { content_id: 'c_1', provider: 'mangabaka', ok: true, rev: 4 },
                     {
                         content_id: 'c_2',
                         provider: 'mangabaka',
@@ -200,6 +212,14 @@ describe('MetadataPage', () => {
         expect(rows[1].text()).toContain('changed since it was read')
         // The failed row stays selectable for another try; the rest were cleared.
         expect(wrapper.text()).toContain('0 selected')
+
+        // Undo reverts the one that succeeded.
+        expect(toasts.value[0]).toMatchObject({ message: '1 done, 1 failed', tone: 'danger' })
+        toasts.value[0]!.action!.onClick()
+        await flushPromises()
+        expect(requests).toEqual([
+            { url: '/metadata/content/c_1/undo', body: { provider: 'mangabaka', expect_rev: 4 } },
+        ])
     })
 
     it('rejects the candidates of the selected series', async () => {
@@ -216,6 +236,34 @@ describe('MetadataPage', () => {
                 external_ids: [`e_${id}`, 'other'],
                 expect_rev: [3, 5][i],
             })),
+        ])
+
+        toasts.value[0]!.action!.onClick()
+        await flushPromises()
+        expect(resolved.at(-1)).toEqual([
+            { content_id: 'c_1', provider: 'mangabaka', action: 'undo', expect_rev: 4 },
+            { content_id: 'c_2', provider: 'mangabaka', action: 'undo', expect_rev: 6 },
+        ])
+        expect(toasts.value.at(-1)!.message).toBe('2 undone')
+    })
+
+    it('rematches an ignored series, undoably', async () => {
+        await flushPromises()
+        await button('Ignored').trigger('click')
+        await flushPromises()
+        await wrapper
+            .findAll('button')
+            .find(b => b.text() === 'Rematch')!
+            .trigger('click')
+        await flushPromises()
+        toasts.value[0]!.action!.onClick()
+        await flushPromises()
+        expect(requests).toEqual([
+            {
+                url: '/metadata/content/c_1/rematch',
+                body: { provider: 'mangabaka', expect_rev: 3 },
+            },
+            { url: '/metadata/content/c_1/undo', body: { provider: 'mangabaka', expect_rev: 7 } },
         ])
     })
 

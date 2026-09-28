@@ -104,10 +104,11 @@ type op struct {
 	tx      pgx.Tx
 	dirty   map[string]map[string]bool // library -> uris
 	changed changes
+	decided map[linkKey]undo // kept for Undo once committed
 }
 
 func newOp(tx pgx.Tx) *op {
-	return &op{tx: tx, dirty: map[string]map[string]bool{}, changed: changes{}}
+	return &op{tx: tx, dirty: map[string]map[string]bool{}, changed: changes{}, decided: map[linkKey]undo{}}
 }
 
 // touch marks a row for recomputing, which changes its library only if its data changes.
@@ -163,6 +164,7 @@ func (s *Service) commit(ctx context.Context, c changes, fn func(o *op) error) e
 	})
 	if err == nil {
 		maps.Copy(c, o.changed)
+		s.undos.put(o.decided)
 	}
 	return err
 }

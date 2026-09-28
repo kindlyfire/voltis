@@ -180,8 +180,8 @@ func retrieve(ctx context.Context, p providers.Provider, find lookup, q MatchQue
 }
 
 // record writes an attempt's outcome unless the link moved past rev or the series' match inputs
-// changed, publishing the entry it links first, per the lock order.
-func (s *Service) record(ctx context.Context, p providers.Provider, a attempt, rev *int64) func(o *op) error {
+// changed, publishing the entry it links first, per the lock order. An admin's is decided, for Undo.
+func (s *Service) record(ctx context.Context, p providers.Provider, a attempt, rev *int64, decided bool) func(o *op) error {
 	return func(o *op) error {
 		d := a.decision
 		res := slices.Clone(a.stubs)
@@ -202,7 +202,7 @@ func (s *Service) record(ctx context.Context, p providers.Provider, a attempt, r
 			return err
 		}
 		now := time.Now()
-		return s.write(ctx, o, t, p.Name(), Expect{rev, a.query.Fingerprint()}, func(l *Link) error {
+		change := func(l *Link) error {
 			if a.err != nil {
 				return l.MatchFailed(a.err, now)
 			}
@@ -217,7 +217,13 @@ func (s *Service) record(ctx context.Context, p providers.Provider, a attempt, r
 				}
 			}
 			return l.Match(d, now)
-		})
+		}
+		expect := Expect{rev, a.query.Fingerprint()}
+		if decided {
+			_, err := s.decide(ctx, o, t, p.Name(), expect, change)
+			return err
+		}
+		return s.write(ctx, o, t, p.Name(), expect, change)
 	}
 }
 
@@ -241,7 +247,7 @@ func (s *Service) Rematch(ctx context.Context, contentID, provider string, expec
 	if a.err != nil {
 		return a.err
 	}
-	return s.run(ctx, s.record(ctx, p, a, expectRev))
+	return s.run(ctx, s.record(ctx, p, a, expectRev, true))
 }
 
 // pendingSeries selects the titled series of library $1 that provider $2 describes (content types
@@ -297,12 +303,12 @@ func (s *Service) matchSeries(ctx context.Context, c changes, p providers.Provid
 			out.Skipped++ // a scan started during the lookup
 			continue
 		}
-		err = s.commit(ctx, c, s.record(ctx, p, a, l.revision()))
+		err = s.commit(ctx, c, s.record(ctx, p, a, l.revision(), false))
 		if err != nil && !stale(err) && ctx.Err() == nil {
 			// Recorded as a failure, so the series backs off rather than fail every time.
 			slog.Warn("[linking] failed to record a match", "library", t.LibraryID, "uri", t.URI, "err", err)
 			a.decision, a.stubs, a.err = MatchDecision{}, nil, err
-			err = s.commit(ctx, c, s.record(ctx, p, a, l.revision()))
+			err = s.commit(ctx, c, s.record(ctx, p, a, l.revision(), false))
 		}
 		switch {
 		case stale(err):

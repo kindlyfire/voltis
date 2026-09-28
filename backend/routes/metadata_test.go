@@ -102,6 +102,14 @@ func TestMetadataLinking(t *testing.T) {
 		t.Fatalf("ignored = %v", l)
 	}
 	c.Post(base+"/refresh", map[string]any{"provider": "fake"}).Assert(t, 400)
+
+	rev := v["links"].([]any)[0].(map[string]any)["rev"]
+	c.Post(base+"/undo", map[string]any{"provider": "fake"}).Assert(t, 400)
+	v = c.Post(base+"/undo", map[string]any{"provider": "fake", "expect_rev": rev}).Assert(t, 200).JSON()
+	if l := v["links"].([]any)[0].(map[string]any); l["state"] != "linked" || l["external_id"] != "1" {
+		t.Fatalf("undone = %v", l)
+	}
+	c.Post(base+"/undo", map[string]any{"provider": "fake", "expect_rev": rev}).Assert(t, 409)
 }
 
 func TestMetadataRefreshNow(t *testing.T) {

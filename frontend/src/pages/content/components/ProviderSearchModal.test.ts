@@ -1,6 +1,7 @@
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import { mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { toasts } from '@/ui/useToast'
 import type { Candidate, MetadataLink } from '@/utils/api/metadata'
 import { apiFetch } from '@/utils/fetch'
 import { ModalContainer } from '@/utils/modals'
@@ -46,6 +47,7 @@ const link: MetadataLink = {
 
 let requests: { url: string; body?: unknown }[]
 let found: Promise<Candidate[]>
+let rejected: Promise<void>
 let wrapper: ReturnType<typeof mount>
 
 function button(label: string) {
@@ -67,13 +69,20 @@ beforeEach(() => {
     vi.useFakeTimers()
     addOverlays()
     requests = []
+    toasts.value = []
     found = Promise.resolve([candidate('3', 'Found Three')])
+    rejected = Promise.resolve()
     vi.mocked(apiFetch).mockImplementation(async (url, init) => {
         requests.push({ url, body: init?.body && JSON.parse(init.body as string) })
         if (url.startsWith('/metadata/content/c_1/candidates?')) {
             return { data: await found }
         }
-        if (url === '/metadata/content/c_1/reject') return { links: [] }
+        if (url === '/metadata/content/c_1/reject') {
+            await rejected
+            return { links: [{ ...link, rev: 5 }] }
+        }
+        if (url === '/metadata/content/c_1/link') return { links: [{ ...link, rev: 6 }] }
+        if (url === '/metadata/content/c_1/undo') return { links: [link] }
         throw new Error(`unexpected ${url}`)
     })
     wrapper = mount(ModalContainer, {
@@ -118,6 +127,54 @@ describe('ProviderSearchModal', () => {
                 body: { provider: 'mangabaka', external_ids: ['1', '2'], expect_rev: 4 },
             },
         ])
+    })
+
+    it('undoes from the toast, which outlives the modal', async () => {
+        showProviderSearchModal('c_1', link, 'Local')
+        await settle()
+        await click('None of these')
+        expect(document.body.textContent).not.toContain('Stored One')
+
+        toasts.value[0]!.action!.onClick()
+        await settle()
+        expect(requests.at(-1)).toEqual({
+            url: '/metadata/content/c_1/undo',
+            body: { provider: 'mangabaka', expect_rev: 5 },
+        })
+        expect(toasts.value[1]!.message).toBe('Undone')
+    })
+
+    it('undoes a selection', async () => {
+        showProviderSearchModal('c_1', link, 'Local')
+        await settle()
+        await click('Select')
+        toasts.value[0]!.action!.onClick()
+        await settle()
+        expect(requests).toEqual([
+            {
+                url: '/metadata/content/c_1/link',
+                body: { provider: 'mangabaka', external_id: '1', expect_rev: 4 },
+            },
+            { url: '/metadata/content/c_1/undo', body: { provider: 'mangabaka', expect_rev: 6 } },
+        ])
+    })
+
+    it('offers Undo when dismissed before the decision is saved', async () => {
+        let answer!: () => void
+        rejected = new Promise(resolve => (answer = resolve))
+        showProviderSearchModal('c_1', link, 'Local')
+        await settle()
+        // settle() would spin on the pending button's timers.
+        vi.advanceTimersByTime(1)
+        button('None of these').click()
+        await vi.advanceTimersByTimeAsync(1)
+        button('Cancel').click()
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(document.body.textContent).not.toContain('Stored One')
+
+        answer()
+        await settle()
+        expect(toasts.value[0]!.action!.label).toBe('Undo')
     })
 
     it('rejects nothing while searching or without results', async () => {

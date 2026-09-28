@@ -233,10 +233,11 @@ export interface MetadataSummary {
 export interface ReviewAction {
     content_id: string
     provider: string
-    action: 'link' | 'reject' | 'ignore'
+    action: 'link' | 'reject' | 'ignore' | 'undo'
     external_id?: string
     /** Reject: the candidates none of which fits. */
     external_ids?: string[]
+    /** Undo: the revision the decision saved. */
     expect_rev: number | null
 }
 
@@ -244,6 +245,8 @@ export interface ReviewResult {
     content_id: string
     provider: string
     ok: boolean
+    /** The revision saved, which undoes it. */
+    rev?: number
     error?: string
 }
 
@@ -269,6 +272,8 @@ export type LinkAction =
           rev: number | null
       }
     | { action: 'refresh'; contentId: string; provider: string }
+    /** Restores the link as the decision that saved `rev` found it. */
+    | { action: 'undo'; contentId: string; provider: string; rev: number }
 
 const viewKey = (contentId: MaybeRefOrGetter<string | undefined | null>) => [
     'content',
@@ -282,6 +287,34 @@ function onChanged(client: QueryClient, contentId: string, view: MetadataView) {
     const key = viewKey(contentId)
     client.setQueryData(key, view)
     void refetchCatalog(client, key)
+}
+
+export const revOf = (view: MetadataView, provider: string) =>
+    view.links.find(l => l.provider === provider)!.rev!
+
+/** A plain function, as the toast undoing a decision outlives the component that made it. */
+export async function linkAction(client: QueryClient, a: LinkAction): Promise<MetadataView> {
+    const view = await apiFetch<MetadataView>(`/metadata/content/${a.contentId}/${a.action}`, {
+        method: 'POST',
+        body: JSON.stringify({
+            provider: a.provider,
+            external_id: a.action === 'link' ? a.externalId : undefined,
+            external_ids: a.action === 'reject' ? a.externalIds : undefined,
+            expect_rev: a.action === 'refresh' ? undefined : a.rev,
+        }),
+    })
+    onChanged(client, a.contentId, view)
+    return view
+}
+
+/** Applies each item on its own; the results say how each went. */
+export async function resolveReview(client: QueryClient, items: ReviewAction[]) {
+    const res = await apiFetch<{ results: ReviewResult[] }>('/metadata/review/resolve', {
+        method: 'POST',
+        body: JSON.stringify({ items }),
+    })
+    void refetchCatalog(client)
+    return res
 }
 
 export const metadataApi = {
@@ -335,19 +368,7 @@ export const metadataApi = {
 
     useLinkAction: () => {
         const queryClient = useQueryClient()
-        return useMutation({
-            mutationFn: (a: LinkAction) =>
-                apiFetch<MetadataView>(`/metadata/content/${a.contentId}/${a.action}`, {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        provider: a.provider,
-                        external_id: a.action === 'link' ? a.externalId : undefined,
-                        external_ids: a.action === 'reject' ? a.externalIds : undefined,
-                        expect_rev: a.action === 'refresh' ? undefined : a.rev,
-                    }),
-                }),
-            onSuccess: (view, a) => onChanged(queryClient, a.contentId, view),
-        })
+        return useMutation({ mutationFn: (a: LinkAction) => linkAction(queryClient, a) })
     },
 
     useReview: (
@@ -381,18 +402,10 @@ export const metadataApi = {
             placeholderData: keepPreviousData,
         }),
 
-    /** Applies each item on its own; the results say how each went. */
     useResolveReview: () => {
         const queryClient = useQueryClient()
         return useMutation({
-            mutationFn: (items: ReviewAction[]) =>
-                apiFetch<{ results: ReviewResult[] }>('/metadata/review/resolve', {
-                    method: 'POST',
-                    body: JSON.stringify({ items }),
-                }),
-            onSuccess: () => {
-                void refetchCatalog(queryClient)
-            },
+            mutationFn: (items: ReviewAction[]) => resolveReview(queryClient, items),
         })
     },
 

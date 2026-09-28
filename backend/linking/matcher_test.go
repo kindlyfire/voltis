@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"sync"
 	"testing"
@@ -70,7 +71,7 @@ func TestMatchBackfill(t *testing.T) {
 	if err := e.svc.Link(ctx, "d", "fake", "1", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.svc.Ignore(ctx, "e", "fake", nil); err != nil {
+	if _, err := e.svc.Ignore(ctx, "e", "fake", nil); err != nil {
 		t.Fatal(err)
 	}
 	e.series("l2", "f", "Remote One")
@@ -185,7 +186,7 @@ func TestMatchNeverRelinksRejected(t *testing.T) {
 	if err := e.svc.Rematch(ctx, "s", "fake", new(int64(1))); !errors.Is(err, ErrLinked) {
 		t.Fatalf("rematch of a linked series: err = %v", err)
 	}
-	if err := e.svc.Ignore(ctx, "s", "fake", new(int64(1))); err != nil {
+	if _, err := e.svc.Ignore(ctx, "s", "fake", new(int64(1))); err != nil {
 		t.Fatal(err)
 	}
 	// Each result is the rejected entry: merged into it upstream, or here.
@@ -274,7 +275,7 @@ func TestMatchLeavesOutMergesThroughARejectedEntry(t *testing.T) {
 	if err := e.svc.Link(ctx, "s", "fake", "2", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.svc.Ignore(ctx, "s", "fake", new(int64(1))); err != nil {
+	if _, err := e.svc.Ignore(ctx, "s", "fake", new(int64(1))); err != nil {
 		t.Fatal(err)
 	}
 	alias := providertest.Series("Target", metadata.Manga)
@@ -306,7 +307,7 @@ func TestMatchLeavesOutAResultAlsoReachedThroughARejectedEntry(t *testing.T) {
 	if err := e.svc.Link(ctx, "s", "fake", "2", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.svc.Ignore(ctx, "s", "fake", new(int64(1))); err != nil {
+	if _, err := e.svc.Ignore(ctx, "s", "fake", new(int64(1))); err != nil {
 		t.Fatal(err)
 	}
 	alias := providertest.Series("Target", metadata.Manga)
@@ -356,7 +357,7 @@ func TestMatchSkipsSeriesChangedDuringTheLookup(t *testing.T) {
 		case "Remote One":
 			e.retitle("s", "Renamed")
 		case "Remote Two":
-			if err := e.svc.Ignore(ctx, "t", "fake", nil); err != nil {
+			if _, err := e.svc.Ignore(ctx, "t", "fake", nil); err != nil {
 				t.Error(err)
 			}
 		case "Gone":
@@ -421,11 +422,11 @@ func TestResolveReview(t *testing.T) {
 		{ContentID: "b", Provider: "fake", Action: "unlink", ExpectRev: &rev},
 	})
 	want := []ReviewResult{
-		{ContentID: "a", Provider: "fake", OK: true},
+		{ContentID: "a", Provider: "fake", OK: true, Rev: new(rev + 1)},
 		{ContentID: "b", Provider: "fake", Error: metadata.ErrConflict.Error()},
 		{ContentID: "b", Provider: "fake", Error: `action: unknown action "unlink"`},
 	}
-	if !slices.Equal(got, want) {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("results = %+v", got)
 	}
 	if l := e.link("a"); *l.ExternalID != "2" || *l.Origin != OriginManual {
@@ -493,11 +494,11 @@ func TestResolveReviewFetchesEntriesTogether(t *testing.T) {
 		{ContentID: "c", Provider: "fake", Action: "link", ExternalID: "2", ExpectRev: new(revs["c"] - 1)},
 	})
 	want := []ReviewResult{
-		{ContentID: "a", Provider: "fake", OK: true},
-		{ContentID: "b", Provider: "fake", OK: true},
+		{ContentID: "a", Provider: "fake", OK: true, Rev: new(revs["a"] + 1)},
+		{ContentID: "b", Provider: "fake", OK: true, Rev: new(revs["b"] + 1)},
 		{ContentID: "c", Provider: "fake", Error: metadata.ErrConflict.Error()},
 	}
-	if !slices.Equal(got, want) {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("results = %+v", got)
 	}
 	if f := e.fake.Fetches()[fetched:]; len(f) != 1 || !slices.Equal(f[0], []string{"1", "2"}) {
@@ -519,7 +520,7 @@ func TestRejectCandidates(t *testing.T) {
 	e.series("l1", "s", "Remote")
 	e.match()
 	l := e.link("s")
-	if err := e.svc.Reject(ctx, "s", "fake", nil, &l.Rev); !isValidation(err) {
+	if _, err := e.svc.Reject(ctx, "s", "fake", nil, &l.Rev); !isValidation(err) {
 		t.Fatalf("rejecting nothing: err = %v", err)
 	}
 	if after := e.link("s"); after.Rev != l.Rev || len(after.Candidates) != 2 {
@@ -528,7 +529,7 @@ func TestRejectCandidates(t *testing.T) {
 	from := time.Now()
 	got := e.svc.ResolveReview(ctx, []ReviewAction{{ContentID: "s", Provider: "fake", Action: "reject",
 		ExternalIDs: candidateIDs(l.Candidates), ExpectRev: &l.Rev}})
-	if !got[0].OK {
+	if !got[0].OK || *got[0].Rev != l.Rev+1 {
 		t.Fatalf("results = %+v", got)
 	}
 	l = e.link("s")
@@ -553,14 +554,14 @@ func TestRejectedCandidateMergedLater(t *testing.T) {
 	l := e.link("s")
 	fetched := len(e.fake.Fetches())
 	e.fake.Fail(errors.New("down"))
-	if err := e.svc.Reject(ctx, "s", "fake", append(candidateIDs(l.Candidates), "99"), &l.Rev); err != nil {
+	if _, err := e.svc.Reject(ctx, "s", "fake", append(candidateIDs(l.Candidates), "99"), &l.Rev); err != nil {
 		t.Fatal(err)
 	}
 	if len(e.fake.Fetches()) != fetched {
 		t.Fatalf("rejecting fetched %v", e.fake.Fetches()[fetched:])
 	}
 	l = e.link("s")
-	if err := e.svc.Reject(ctx, "s", "fake", []string{"one"}, &l.Rev); !isValidation(err) {
+	if _, err := e.svc.Reject(ctx, "s", "fake", []string{"one"}, &l.Rev); !isValidation(err) {
 		t.Fatalf("not an ID: err = %v", err)
 	}
 

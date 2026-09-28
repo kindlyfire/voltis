@@ -165,7 +165,7 @@ func TestLinkAndIgnore(t *testing.T) {
 	if got := e.link("s"); *got.ExternalID != "2" || !slices.Equal(got.Rejected, []string{"1"}) {
 		t.Fatalf("relinked = %+v", got)
 	}
-	if err := e.svc.Ignore(ctx, "s", "fake", new(int64(2))); err != nil {
+	if _, err := e.svc.Ignore(ctx, "s", "fake", new(int64(2))); err != nil {
 		t.Fatal(err)
 	}
 	if got := e.link("s"); got.State != StateIgnored || !slices.Equal(got.Rejected, []string{"1", "2"}) {

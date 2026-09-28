@@ -311,6 +311,7 @@ import { useToast } from '@/ui/useToast'
 import { librariesApi } from '@/utils/api/libraries'
 import {
     metadataApi,
+    revOf,
     type MatchCounts,
     type RefreshCounts,
     type ReviewAction,
@@ -321,6 +322,7 @@ import {
 import { settingsApi, settingValue } from '@/utils/api/settings'
 import { libraryAutoMatches } from '@/utils/librarySettings'
 import { plural, useRouteQueryParams } from '@/utils/misc'
+import { useUndoToast } from '@/utils/useUndoToast'
 
 useHead({ title: 'Metadata' })
 
@@ -346,6 +348,7 @@ const EMPTY: Record<ReviewTab, string> = {
 }
 
 const toast = useToast()
+const undoToast = useUndoToast()
 const TABS: ReviewTab[] = ['review', 'unmatched', 'auto', 'ignored']
 // The list's state lives in the URL, so going back from an entry returns to the same rows.
 const query = useRouteQueryParams({
@@ -573,8 +576,8 @@ const mResolve = metadataApi.useResolveReview()
 /** Resolves items one by one; the ones that failed stay listed, with their error. */
 function resolve(actions: ReviewAction[]) {
     if (!actions.length) return
-    mResolve.mutate(actions, {
-        onSuccess({ results }) {
+    mResolve.mutateAsync(actions).then(
+        ({ results }) => {
             let done = 0
             for (const r of results) {
                 const key = `${r.content_id}:${r.provider}`
@@ -587,14 +590,16 @@ function resolve(actions: ReviewAction[]) {
                 }
             }
             const failed = results.length - done
-            toast.show({
-                message: failed
+            undoToast(
+                failed
                     ? `${done} done, ${failed} failed`
                     : `${plural(done, 'series', 'series')} done`,
-                tone: failed ? 'danger' : undefined,
-            })
+                results.flatMap(r => (r.rev === undefined ? [] : [{ ...r, rev: r.rev }])),
+                failed ? 'danger' : undefined
+            )
         },
-    })
+        () => {}
+    )
 }
 
 const mAction = metadataApi.useLinkAction()
@@ -605,17 +610,21 @@ function isRematching(item: ReviewItem) {
 }
 
 function rematch(item: ReviewItem) {
-    mAction.mutate(
-        {
+    const { provider } = item.link
+    mAction
+        .mutateAsync({
             action: 'rematch',
             contentId: item.content.id,
-            provider: item.link.provider,
+            provider,
             rev: item.link.rev,
-        },
-        {
-            onSuccess: () => toast.show({ message: `Matched ${titleOf(item)} again` }),
-        }
-    )
+        })
+        .then(
+            view =>
+                undoToast(`Matched ${titleOf(item)} again`, [
+                    { content_id: item.content.id, provider, rev: revOf(view, provider) },
+                ]),
+            () => {}
+        )
 }
 
 function choose(item: ReviewItem) {

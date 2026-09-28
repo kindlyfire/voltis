@@ -130,13 +130,14 @@ import ADialog from '@/ui/ADialog.vue'
 import ASpinner from '@/ui/ASpinner.vue'
 import ATextField from '@/ui/ATextField.vue'
 import { IconMagnify } from '@/ui/icons'
-import { useToast } from '@/ui/useToast'
 import {
     metadataApi,
+    revOf,
     type Candidate,
     type LinkAction,
     type MetadataLink,
 } from '@/utils/api/metadata'
+import { useUndoToast } from '@/utils/useUndoToast'
 import { evaluationChips } from './evaluationChips'
 
 const props = defineProps<{
@@ -147,7 +148,7 @@ const props = defineProps<{
     title: string
 }>()
 
-const toast = useToast()
+const undoToast = useUndoToast()
 const idPrefix = useId()
 const currentId = computed(() => props.link.entry?.key.id ?? props.link.external_id)
 
@@ -186,12 +187,14 @@ function isPending(id: string) {
 }
 
 function run(action: LinkAction, message: string) {
-    mAction.mutate(action, {
-        onSuccess() {
-            toast.show({ message })
+    const { contentId, provider } = action
+    mAction.mutateAsync(action).then(
+        view => {
+            undoToast(message, [{ content_id: contentId, provider, rev: revOf(view, provider) }])
             props.close()
         },
-    })
+        () => {}
+    )
 }
 
 function select(item: Candidate) {

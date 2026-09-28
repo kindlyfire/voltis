@@ -18,7 +18,7 @@ func TestMatchFetchesRejectedStubs(t *testing.T) {
 	ctx := context.Background()
 	e.series("l1", "s", "Remote Two")
 	e.fake.Put("1", providertest.Payload{MergedInto: "2"})
-	if err := e.svc.Reject(ctx, "s", "fake", []string{"1"}, nil); err != nil {
+	if _, err := e.svc.Reject(ctx, "s", "fake", []string{"1"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	e.matchNow()
@@ -42,7 +42,7 @@ func TestUndecodableStubDoesNotBlockMatching(t *testing.T) {
 	ctx := context.Background()
 	e.series("l1", "s", "Remote Two")
 	e.fake.Put("1", json.RawMessage(`{}`))
-	if err := e.svc.Reject(ctx, "s", "fake", []string{"1"}, nil); err != nil {
+	if _, err := e.svc.Reject(ctx, "s", "fake", []string{"1"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	e.matchNow()
@@ -61,7 +61,7 @@ func TestStubHopsFollowStoredMerges(t *testing.T) {
 	e.fake.Put("4", providertest.Series("Remote Four", metadata.Manga))
 	e.exec(`INSERT INTO provider_entries (provider, external_id, canonical_id, raw, merged_into, fetched_at, refresh_at)
 		VALUES ('fake', '4', '4', '{}', NULL, now(), now()), ('fake', '2', '4', '{}', '4', now(), now())`)
-	if err := e.svc.Reject(ctx, "s", "fake", []string{"1"}, nil); err != nil {
+	if _, err := e.svc.Reject(ctx, "s", "fake", []string{"1"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	e.matchNow()
@@ -79,7 +79,7 @@ func TestUnsettledStubRejectsWhereItStopped(t *testing.T) {
 	for i, id := range chain[:len(chain)-1] {
 		e.fake.Put(id, providertest.Payload{MergedInto: chain[i+1]})
 	}
-	if err := e.svc.Reject(ctx, "s", "fake", []string{"1"}, nil); err != nil {
+	if _, err := e.svc.Reject(ctx, "s", "fake", []string{"1"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	e.matchNow()
@@ -95,7 +95,7 @@ func TestRejectWakesTheWorkerForItsStubs(t *testing.T) {
 	if e.woken() {
 		t.Fatal("woken before")
 	}
-	if err := e.svc.Reject(ctx, "s", "fake", []string{"2"}, nil); err != nil {
+	if _, err := e.svc.Reject(ctx, "s", "fake", []string{"2"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !e.woken() {
@@ -117,7 +117,7 @@ func TestDeletedStubTakesTheDeletion(t *testing.T) {
 	if err := e.svc.Link(ctx, "s", "fake", "1", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.svc.Reject(ctx, "t", "fake", []string{"2"}, nil); err != nil {
+	if _, err := e.svc.Reject(ctx, "t", "fake", []string{"2"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	e.fake.Put("1", providertest.Payload{MergedInto: "2"})
@@ -136,7 +136,7 @@ func TestStubsAreKeptAndNeverOverwrite(t *testing.T) {
 	ctx := context.Background()
 	e.series("l1", "s", "Local")
 	e.series("l1", "t", "Local")
-	if err := e.svc.Reject(ctx, "s", "fake", []string{"2"}, nil); err != nil {
+	if _, err := e.svc.Reject(ctx, "s", "fake", []string{"2"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	e.collect()
@@ -146,7 +146,7 @@ func TestStubsAreKeptAndNeverOverwrite(t *testing.T) {
 	if err := e.svc.Link(ctx, "t", "fake", "2", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.svc.Reject(ctx, "s", "fake", []string{"2"}, new(int64(1))); err != nil {
+	if _, err := e.svc.Reject(ctx, "s", "fake", []string{"2"}, new(int64(1))); err != nil {
 		t.Fatal(err)
 	}
 	if l := e.view("t").Links[0]; l.Entry == nil || l.Entry.Title != "Remote Two" {

@@ -126,8 +126,10 @@ func (l *Link) settle(s State, id *string, origin *Origin) {
 // disposable reports whether the link records no admin decision: pending, rejecting nothing.
 // It matches the negation of metadata.KeptLink.
 func (l Link) disposable() bool {
-	return (l.State == StateReview || l.State == StateUnmatched) && len(l.Rejected) == 0
+	return l.pending() && len(l.Rejected) == 0
 }
+
+func (l Link) pending() bool { return l.State == StateReview || l.State == StateUnmatched }
 
 // Expect guards a write against a link changed since it was read.
 type Expect struct {

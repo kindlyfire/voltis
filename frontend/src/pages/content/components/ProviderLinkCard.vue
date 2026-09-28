@@ -149,9 +149,9 @@ import AButton from '@/ui/AButton.vue'
 import ACard from '@/ui/ACard.vue'
 import AChip from '@/ui/AChip.vue'
 import { IconLinkOff, IconMagnify, IconRefresh, IconSync } from '@/ui/icons'
-import { useToast } from '@/ui/useToast'
-import { metadataApi, type LinkAction, type MetadataLink } from '@/utils/api/metadata'
+import { metadataApi, revOf, type LinkAction, type MetadataLink } from '@/utils/api/metadata'
 import { plural } from '@/utils/misc'
+import { useUndoToast } from '@/utils/useUndoToast'
 import { evaluationChips } from './evaluationChips'
 import { showProviderSearchModal } from './ProviderSearchModal.vue'
 
@@ -182,7 +182,7 @@ const top = computed(() => (props.link.state === 'review' ? props.link.candidate
 
 const date = (iso: string) => new Date(iso).toLocaleString()
 
-const toast = useToast()
+const undoToast = useUndoToast()
 const target = computed(() => ({
     contentId: props.contentId,
     provider: props.link.provider,
@@ -194,7 +194,17 @@ function isPending(action: LinkAction['action']) {
 }
 
 function run(action: LinkAction, message: string) {
-    mAction.mutate(action, { onSuccess: () => toast.show({ message }) })
+    const { contentId, provider } = action
+    mAction.mutateAsync(action).then(
+        view =>
+            undoToast(
+                message,
+                action.action === 'refresh'
+                    ? []
+                    : [{ content_id: contentId, provider, rev: revOf(view, provider) }]
+            ),
+        () => {}
+    )
 }
 
 function search() {

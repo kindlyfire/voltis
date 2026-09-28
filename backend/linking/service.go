@@ -27,6 +27,7 @@ type Service struct {
 	covers *covers.Cache
 	notify func(libraryID string)
 	wake   chan struct{}
+	undos  undos
 
 	mu       sync.Mutex // guards the status
 	status   WorkerStatus
@@ -44,6 +45,7 @@ type Service struct {
 func New(pool *pgxpool.Pool, store *metadata.Store, reg *providers.Registry, cov *covers.Cache,
 	notify func(libraryID string)) *Service {
 	return &Service{pool: pool, store: store, reg: reg, covers: cov, notify: notify, wake: make(chan struct{}, 1),
+		undos:  undos{m: map[linkKey]undo{}, now: time.Now},
 		status: WorkerStatus{Activity: Idle}, scanning: func(string) bool { return false }, cursors: map[[2]string]string{}}
 }
 
@@ -235,7 +237,8 @@ func (s *Service) Candidates(ctx context.Context, contentID, provider, input str
 
 // Link links an entry by ID or URL, as an admin chose it.
 func (s *Service) Link(ctx context.Context, contentID, provider, input string, expectRev *int64) error {
-	return s.LinkAll(ctx, []LinkRequest{{contentID, provider, input, expectRev}})[0]
+	_, errs := s.LinkAll(ctx, []LinkRequest{{contentID, provider, input, expectRev}})
+	return errs[0]
 }
 
 // LinkRequest is an admin's choice of an entry, by ID or URL, for a series.
@@ -253,10 +256,11 @@ type linkItem struct {
 	fetched Fetched
 }
 
-// LinkAll links entries as admins chose them, reporting how each went. It fetches them in
-// batches, publishes them at once, and then links each series unless it changed since it was read.
-func (s *Service) LinkAll(ctx context.Context, reqs []LinkRequest) []error {
-	errs := make([]error, len(reqs))
+// LinkAll links entries as admins chose them, reporting how each went and the revision it saved.
+// It fetches them in batches, publishes them at once, and then links each series unless it changed
+// since it was read.
+func (s *Service) LinkAll(ctx context.Context, reqs []LinkRequest) ([]int64, []error) {
+	revs, errs := make([]int64, len(reqs)), make([]error, len(reqs))
 	byProvider := map[string][]*linkItem{}
 	for i, r := range reqs {
 		t, p, err := s.target(ctx, r.ContentID, r.Provider)
@@ -294,7 +298,7 @@ func (s *Service) LinkAll(ctx context.Context, reqs []LinkRequest) []error {
 		}
 	}
 	if len(linking) == 0 {
-		return errs
+		return revs, errs
 	}
 	err := s.run(ctx, func(o *op) error {
 		finals, err := s.publish(ctx, o, fp.Map(linking, func(it *linkItem) Fetched { return it.fetched }),
@@ -305,7 +309,7 @@ func (s *Service) LinkAll(ctx context.Context, reqs []LinkRequest) []error {
 		for _, it := range linking {
 			t, err := s.store.Lock(ctx, o.tx, it.req.ContentID)
 			if err == nil {
-				err = s.write(ctx, o, t, it.req.Provider, Expect{Rev: it.req.ExpectRev}, func(l *Link) error {
+				revs[it.i], err = s.decide(ctx, o, t, it.req.Provider, Expect{Rev: it.req.ExpectRev}, func(l *Link) error {
 					l.LinkTo(finals[it.fetched.Requested].ID, OriginManual)
 					return nil
 				})
@@ -319,51 +323,58 @@ func (s *Service) LinkAll(ctx context.Context, reqs []LinkRequest) []error {
 		}
 		return nil
 	})
-	for _, it := range linking {
-		if err != nil && errs[it.i] == nil {
-			errs[it.i] = err
+	if err != nil {
+		for _, it := range linking {
+			revs[it.i] = 0
+			if errs[it.i] == nil {
+				errs[it.i] = err
+			}
 		}
 	}
-	return errs
+	return revs, errs
 }
 
-// Ignore records that the provider has nothing for the series.
-func (s *Service) Ignore(ctx context.Context, contentID, provider string, expectRev *int64) error {
+// Ignore records that the provider has nothing for the series, returning the revision it saved.
+func (s *Service) Ignore(ctx context.Context, contentID, provider string, expectRev *int64) (int64, error) {
 	if _, _, err := s.target(ctx, contentID, provider); err != nil {
-		return err
+		return 0, err
 	}
-	return s.run(ctx, func(o *op) error {
+	var rev int64
+	err := s.run(ctx, func(o *op) error {
 		t, err := s.store.Lock(ctx, o.tx, contentID)
 		if err != nil {
 			return err
 		}
-		return s.write(ctx, o, t, provider, Expect{Rev: expectRev}, func(l *Link) error {
+		rev, err = s.decide(ctx, o, t, provider, Expect{Rev: expectRev}, func(l *Link) error {
 			l.Ignore()
 			return nil
 		})
+		return err
 	})
+	return rev, err
 }
 
 // Reject records that none of the entries fits the series, nor its linked one; matching goes on
 // without them. It needs something to reject: dropping the candidates alone would lose them.
 // Entries not stored yet get a stub, which refreshing fetches, so that their merges, which reject
-// the targets too, are recorded.
-func (s *Service) Reject(ctx context.Context, contentID, provider string, ids []string, expectRev *int64) error {
+// the targets too, are recorded. It returns the revision it saved.
+func (s *Service) Reject(ctx context.Context, contentID, provider string, ids []string, expectRev *int64) (int64, error) {
 	_, p, err := s.target(ctx, contentID, provider)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if len(ids) > 50 {
-		return &metadata.ValidationError{Field: "external_ids", Msg: "at most 50"}
+		return 0, &metadata.ValidationError{Field: "external_ids", Msg: "at most 50"}
 	}
 	ids = slices.Clone(ids)
 	for i, input := range ids {
 		var ok bool
 		if ids[i], ok = p.ParseID(input); !ok {
-			return &metadata.ValidationError{Field: "external_ids", Msg: fmt.Sprintf("%q is not a %s ID", input, p.Label())}
+			return 0, &metadata.ValidationError{Field: "external_ids", Msg: fmt.Sprintf("%q is not a %s ID", input, p.Label())}
 		}
 	}
 	now := time.Now()
+	var rev int64
 	err = s.run(ctx, func(o *op) error {
 		if err := db.LockProvider(ctx, o.tx, provider); err != nil {
 			return err
@@ -375,18 +386,19 @@ func (s *Service) Reject(ctx context.Context, contentID, provider string, ids []
 		if err != nil {
 			return err
 		}
-		return s.write(ctx, o, t, provider, Expect{Rev: expectRev}, func(l *Link) error {
+		rev, err = s.decide(ctx, o, t, provider, Expect{Rev: expectRev}, func(l *Link) error {
 			if len(ids) == 0 && l.State != StateLinked {
 				return &metadata.ValidationError{Field: "external_ids", Msg: "no entry to reject"}
 			}
 			l.Reject(ids, now)
 			return nil
 		})
+		return err
 	})
 	if err == nil {
 		s.Wake() // the stubs are due
 	}
-	return err
+	return rev, err
 }
 
 // Refresh fetches the linked entry again now.
