@@ -114,6 +114,9 @@ function close(id: number) {
         bottom: calc(28px + env(safe-area-inset-bottom));
         left: 50%;
         z-index: var(--z-toast);
+        /* A modal dialog sets `pointer-events: none` on body. Reka's inline `none` still wins while
+         * the region is empty. */
+        pointer-events: auto;
         display: flex;
         flex-direction: column;
         gap: 8px;
