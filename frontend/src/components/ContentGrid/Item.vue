@@ -18,17 +18,18 @@
             </template>
             <span v-if="toReadRoute && !selecting" class="content-card__details">
                 <AIconButton
-                    :to="`/${content.id}`"
+                    :to="`/${(series ?? content).id}`"
                     :icon="IconInformation"
-                    :label="`Details for ${content.title}`"
+                    :label="`Details for ${title}`"
                     variant="tonal"
                     size="sm"
                 />
             </span>
         </ACover>
 
-        <div v-if="!settings.hideTitle" class="content-card__title" aria-hidden="true">
-            {{ content.title }}
+        <div v-if="!settings.hideTitle" aria-hidden="true">
+            <div class="content-card__title">{{ title }}</div>
+            <div v-if="subtitle" class="content-card__subtitle">{{ subtitle }}</div>
         </div>
 
         <ACheckbox
@@ -60,12 +61,14 @@ import {
 import { coverUrl } from '@/utils/api/content'
 import { READING_STATUS_LABELS } from '@/utils/api/types'
 import type { Content, ReadingStatus } from '@/utils/api/types'
-import { contentProgress } from '@/utils/contentProgress'
+import { contentProgress, seriesPosition } from '@/utils/contentProgress'
 import { useContentGridStore } from './store'
 
 const props = withDefaults(
     defineProps<{
         content: Content
+        /** Shows `content` as the item to read next in this series. */
+        series?: Content | null
         toReadRoute?: boolean
         storeKey?: string
         selecting?: boolean
@@ -93,6 +96,14 @@ const to = computed(() =>
     props.toReadRoute ? `/r/${props.content.id}?page=resume` : `/${props.content.id}`
 )
 
+const title = computed(() => (props.series ?? props.content).title)
+const position = computed(() => (props.series ? seriesPosition(props.series) : null))
+const subtitle = computed(() => {
+    if (!props.series) return undefined
+    const p = position.value
+    return p ? `${props.content.title} · ${p.read} / ${p.total}` : props.content.title
+})
+
 const coverUri = computed(() => coverUrl(props.content))
 
 const childrenCount = computed(() => {
@@ -113,7 +124,11 @@ const statusLabel = computed(() => (status.value ? READING_STATUS_LABELS[status.
 
 // Deliberate, so the progress bar and badges don't end up in the name.
 const linkLabel = computed(() => {
-    const parts = [props.toReadRoute ? `Read ${props.content.title}` : props.content.title]
+    const parts = [props.toReadRoute ? `Read ${title.value}` : title.value]
+    if (props.series) {
+        parts.push(props.content.title)
+        if (position.value) parts.push(`${position.value.read} of ${position.value.total} read`)
+    }
     if (statusLabel.value) parts.push(statusLabel.value)
     if (childrenCount.value != null) {
         const unread = settings.value.itemCountMode === 'unread'
@@ -155,6 +170,16 @@ const linkLabel = computed(() => {
         overflow-wrap: anywhere;
         -webkit-box-orient: vertical;
         -webkit-line-clamp: 2;
+    }
+
+    .content-card__subtitle {
+        overflow: hidden;
+        padding: 0 2px;
+        color: var(--color-fg-muted);
+        font-size: 13px;
+        line-height: 1.35;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
     .content-card__link {

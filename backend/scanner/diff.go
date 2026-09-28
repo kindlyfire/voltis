@@ -119,7 +119,3 @@ func deref[T any](p *T) (v T) {
 	}
 	return v
 }
-
-func ptrEq(a, b *string) bool {
-	return a == b || (a != nil && b != nil && *a == *b)
-}

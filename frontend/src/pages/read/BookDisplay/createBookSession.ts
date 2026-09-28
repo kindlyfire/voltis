@@ -11,7 +11,7 @@ import {
     type Ref,
 } from 'vue'
 import { isNavigationFailure, type NavigationFailure } from 'vue-router'
-import { contentApi } from '@/utils/api/content'
+import { contentApi, invalidateRecentlyRead } from '@/utils/api/content'
 import type {
     BookLocator,
     BookStructure,
@@ -686,6 +686,7 @@ export function createBookSession(
             writeController?.abort()
             const request = contentApi
                 .updateUserData(contentId, payload, { keepalive: true })
+                .then(() => void invalidateRecentlyRead())
                 .catch(err => {
                     console.error('Failed to update reading progress', err)
                 })

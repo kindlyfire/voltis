@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode"
 
+	"voltis/lib/fp"
 	"voltis/lib/tasks"
 	"voltis/models"
 
@@ -468,7 +469,7 @@ func (w *writer) aim(id string, dir *string) {
 	}
 	ref := w.series[id]
 	picked := d.pick()
-	if ptrEq(ref.FileURI, picked) {
+	if fp.PtrEq(ref.FileURI, picked) {
 		return
 	}
 	if ref.FileURI != nil {

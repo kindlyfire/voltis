@@ -246,7 +246,7 @@ func commit(ctx context.Context, tx pgx.Tx, store *metadata.Store, s FileScanner
 			continue
 		}
 		c, ok := cur[id]
-		if !ok || (c.URIPart == set.Ref.URIPart && ptrEq(c.FileURI, set.Ref.FileURI)) {
+		if !ok || (c.URIPart == set.Ref.URIPart && fp.PtrEq(c.FileURI, set.Ref.FileURI)) {
 			continue
 		}
 		_, err := tx.Exec(ctx, "UPDATE content SET uri_part = $2, file_uri = $3, updated_at = $4 WHERE id = $1",

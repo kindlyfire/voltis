@@ -28,3 +28,8 @@ func Dedup[T comparable](in []T) []T {
 	}
 	return out
 }
+
+// PtrEq reports whether both pointers are nil or point to equal values.
+func PtrEq[T comparable](a, b *T) bool {
+	return a == b || (a != nil && b != nil && *a == *b)
+}

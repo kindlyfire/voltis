@@ -32,6 +32,17 @@
             </template>
         </ACard>
 
+        <ACard title="Home">
+            <ASwitch
+                v-model="ignoreSeriesStatus"
+                label="Show on-hold and dropped series in Recently Read"
+                description="Otherwise a series you put on hold or dropped is hidden, even while you read one of its items."
+                :readonly="homeMutation.isPending.value"
+                @update:model-value="saveHome"
+            />
+            <QueryError :mutation="homeMutation" />
+        </ACard>
+
         <ACard title="Reader">
             <div class="flex flex-wrap gap-3">
                 <AButton
@@ -64,8 +75,10 @@ import AIcon from '@/ui/AIcon.vue'
 import APageHeader from '@/ui/APageHeader.vue'
 import ASegmented from '@/ui/ASegmented.vue'
 import ASpinner from '@/ui/ASpinner.vue'
+import ASwitch from '@/ui/ASwitch.vue'
 import { IconAutoStories, IconBookOpen, IconBookshelf } from '@/ui/icons'
 import { useToast } from '@/ui/useToast'
+import { invalidateRecentlyRead } from '@/utils/api/content'
 import { librariesApi } from '@/utils/api/libraries'
 import type { LibraryPreference, PreferencesPatch } from '@/utils/api/types'
 import { usersApi } from '@/utils/api/users'
@@ -88,12 +101,11 @@ const visibilityOptions = [
 
 const libraryPrefs = ref<Record<string, LibraryPreference>>({})
 
+// Only `libraries`: other saves replace the user, which would wipe unsaved edits.
 watch(
-    () => qMe.data.value,
-    user => {
-        if (user) {
-            libraryPrefs.value = jsonClone(user.preferences.libraries ?? {})
-        }
+    () => qMe.data.value?.preferences.libraries,
+    libraries => {
+        libraryPrefs.value = jsonClone(libraries ?? {})
     },
     { immediate: true }
 )
@@ -135,5 +147,26 @@ async function save() {
 
     await mutation.mutateAsync({ libraries })
     toast.show({ message: 'Saved library visibility' })
+}
+
+const homeMutation = usersApi.usePatchPreferences()
+// Local, since ASwitch resets to `modelValue` before the PATCH lands.
+const ignoreSeriesStatus = ref(false)
+
+watch(
+    () => qMe.data.value?.preferences.home?.ignoreSeriesStatus ?? false,
+    v => (ignoreSeriesStatus.value = v),
+    { immediate: true }
+)
+
+async function saveHome(v: boolean) {
+    try {
+        await homeMutation.mutateAsync({ home: { ignoreSeriesStatus: v || null } })
+    } catch {
+        ignoreSeriesStatus.value = !v
+        return
+    }
+    invalidateRecentlyRead()
+    toast.show({ message: 'Saved Home preferences' })
 }
 </script>

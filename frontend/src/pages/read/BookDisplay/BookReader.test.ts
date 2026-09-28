@@ -14,6 +14,7 @@ vi.mock('@/utils/api/content', () => ({
         bookDocument: vi.fn(),
         updateUserData: vi.fn(),
     },
+    invalidateRecentlyRead: vi.fn(),
 }))
 
 // Real, it would pull in Vue Query with no provider.

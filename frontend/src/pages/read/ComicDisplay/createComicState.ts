@@ -1,6 +1,6 @@
 import { useDebounceFn } from '@vueuse/core'
 import { reactive, readonly, toRefs } from 'vue'
-import { contentApi } from '@/utils/api/content'
+import { contentApi, invalidateRecentlyRead } from '@/utils/api/content'
 import type { Content, ReadingStatus, UserToContent } from '@/utils/api/types'
 import { API_URL } from '@/utils/fetch'
 import type { PageDimensions } from './types'
@@ -69,6 +69,7 @@ export function createComicState(contentId: string, initialPage: number | 'last'
                         }),
                     },
                 })
+                invalidateRecentlyRead()
             })
             .catch(err => {
                 console.error('Failed to update reading progress', err)

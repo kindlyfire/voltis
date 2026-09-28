@@ -1,4 +1,4 @@
-import { keepPreviousData, useMutation, useQuery } from '@tanstack/vue-query'
+import { keepPreviousData, useMutation, useQuery, type Query } from '@tanstack/vue-query'
 import { toValue, type MaybeRefOrGetter } from 'vue'
 import { API_URL, apiFetch } from '../fetch'
 import { queryClient } from '../misc'
@@ -20,6 +20,7 @@ import type {
     OrphansSummaryItem,
     Paginated,
     ReadingStatus,
+    RecentlyReadEntry,
     UserToContent,
     UserToContentUpdate,
 } from './types'
@@ -41,6 +42,17 @@ function pageQuery(p: PageParams): string {
     if (p.offset !== undefined) searchParams.append('offset', String(p.offset))
     const query = searchParams.toString()
     return query ? `?${query}` : ''
+}
+
+/** Only the recently-read query: the readers keep sibling lists active under ['content', 'list']. */
+export async function invalidateRecentlyRead() {
+    const filters = {
+        queryKey: ['content', 'list'],
+        predicate: (q: Query) => q.queryKey[3] === 'recently-read',
+    }
+    // Without data, invalidating joins an in-flight fetch, whose response may predate the write.
+    await queryClient.cancelQueries(filters)
+    await queryClient.invalidateQueries(filters)
 }
 
 export const contentApi = {
@@ -93,6 +105,14 @@ export const contentApi = {
             },
             enabled: isEnabled(params),
             ...options,
+        }),
+
+    useRecentlyRead: (limit = 10) =>
+        useQuery({
+            // Under ['content', 'list'], so the list invalidations cover it too.
+            queryKey: ['content', 'list', libraryScope(undefined), 'recently-read', limit],
+            queryFn: async () =>
+                apiFetch<RecentlyReadEntry[]>(`/content/recently-read?limit=${limit}`),
         }),
 
     useDownloadInfo: (id: MaybeRefOrGetter<string | undefined | null>) =>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Content, ReadingProgress, ReadingStatus } from '@/utils/api/types'
-import { contentProgress, type ContentProgress } from './contentProgress'
+import { contentProgress, seriesPosition, type ContentProgress } from './contentProgress'
 
 /** `pages` undefined mirrors a list response, which omits `file_data`. */
 function comic(progress: ReadingProgress, pages?: number, status: ReadingStatus = 'reading') {
@@ -65,5 +65,16 @@ describe('contentProgress', () => {
         }
         expect(result?.label).toBe(expected.label)
         expect(result?.fraction).toBeCloseTo(expected.fraction, 6)
+    })
+})
+
+describe('seriesPosition', () => {
+    it('counts read children', () => {
+        expect(seriesPosition(series(10, 7))).toEqual({ read: 3, total: 10 })
+    })
+
+    it('is null without children', () => {
+        expect(seriesPosition(series(0, 0))).toBeNull()
+        expect(seriesPosition({ type: 'comic_series' } as Content)).toBeNull()
     })
 })

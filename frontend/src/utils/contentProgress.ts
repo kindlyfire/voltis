@@ -40,3 +40,10 @@ export function contentProgress(content: Content): ContentProgress | null {
     if (total <= 0 || read <= 0 || read >= total) return null
     return { fraction: read / total, label: `${read} / ${total} chapters` }
 }
+
+/** The series' `read / total` children, with the unread count's semantics. */
+export function seriesPosition(series: Content): { read: number; total: number } | null {
+    const total = series.children_count ?? 0
+    if (total <= 0) return null
+    return { read: total - (series.unread_children_count ?? 0), total }
+}

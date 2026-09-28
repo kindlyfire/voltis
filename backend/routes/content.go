@@ -11,6 +11,7 @@ import (
 
 	"voltis/covers"
 	"voltis/db"
+	"voltis/lib/fp"
 	"voltis/metadata"
 	"voltis/models"
 
@@ -25,6 +26,7 @@ type ContentRoutes struct {
 
 func (cr *ContentRoutes) Register(g *echo.Group) {
 	g.GET("", cr.list)
+	g.GET("/recently-read", cr.recentlyRead)
 	g.GET("/:content_id", cr.get)
 	g.GET("/:content_id/lists", cr.listsForContent)
 	g.POST("/:content_id/user-data", cr.updateUserData)
@@ -141,6 +143,46 @@ func contentToDTO(c models.Content, opts contentDTOOpts) ContentDTO {
 	}
 }
 
+// contentRowColumns selects a contentListRow from content c, user_to_content utc (for @user_id)
+// and content_metadata cm.
+const contentRowColumns = `c.*,
+	(SELECT COUNT(*) FROM content child WHERE child.parent_id = c.id) AS children_count,
+	(SELECT COUNT(*) FROM content child
+		LEFT JOIN user_to_content child_utc
+			ON child_utc.library_id = child.library_id
+			AND child_utc.uri = child.uri
+			AND child_utc.user_id = @user_id
+		WHERE child.parent_id = c.id
+			AND (child_utc.id IS NULL OR child_utc.status IS NULL
+				OR child_utc.status NOT IN ('completed', 'dropped'))
+	) AS unread_children_count,
+	utc.id AS utc_id, utc.user_id AS utc_user_id, utc.library_id AS utc_library_id,
+	utc.uri AS utc_uri, utc.starred AS utc_starred, utc.status AS utc_status,
+	utc.status_updated_at AS utc_status_updated_at, utc.notes AS utc_notes,
+	utc.rating AS utc_rating, utc.progress AS utc_progress,
+	utc.progress_updated_at AS utc_progress_updated_at,
+	cm.data AS meta_data`
+
+func selectContentRows(ctx context.Context, pool *pgxpool.Pool, userID string, ids []string) (map[string]contentListRow, error) {
+	rows, err := db.Select[contentListRow](ctx, pool, `
+		SELECT `+contentRowColumns+`
+		FROM content c
+		LEFT JOIN user_to_content utc
+			ON utc.library_id = c.library_id AND utc.uri = c.uri AND utc.user_id = @user_id
+		LEFT JOIN content_metadata cm
+			ON cm.uri = c.uri AND cm.library_id = c.library_id
+		WHERE c.id = ANY(@ids)
+	`, pgx.NamedArgs{"user_id": userID, "ids": ids})
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]contentListRow, len(rows))
+	for _, r := range rows {
+		byID[r.ID] = r
+	}
+	return byID, nil
+}
+
 func (cr *ContentRoutes) get(c echo.Context) error {
 	user, err := requireUser(c)
 	if err != nil {
@@ -151,30 +193,14 @@ func (cr *ContentRoutes) get(c echo.Context) error {
 	contentID := c.Param("content_id")
 
 	r, err := db.SelectOne[contentListRow](ctx, cr.pool, `
-		SELECT c.*,
-			(SELECT COUNT(*) FROM content child WHERE child.parent_id = c.id) AS children_count,
-			(SELECT COUNT(*) FROM content child
-				LEFT JOIN user_to_content child_utc
-					ON child_utc.library_id = child.library_id
-					AND child_utc.uri = child.uri
-					AND child_utc.user_id = $1
-				WHERE child.parent_id = c.id
-					AND (child_utc.id IS NULL OR child_utc.status IS NULL
-						OR child_utc.status NOT IN ('completed', 'dropped'))
-			) AS unread_children_count,
-			utc.id AS utc_id, utc.user_id AS utc_user_id, utc.library_id AS utc_library_id,
-			utc.uri AS utc_uri, utc.starred AS utc_starred, utc.status AS utc_status,
-			utc.status_updated_at AS utc_status_updated_at, utc.notes AS utc_notes,
-			utc.rating AS utc_rating, utc.progress AS utc_progress,
-			utc.progress_updated_at AS utc_progress_updated_at,
-			cm.data AS meta_data
+		SELECT `+contentRowColumns+`
 		FROM content c
 		LEFT JOIN user_to_content utc
-			ON utc.library_id = c.library_id AND utc.uri = c.uri AND utc.user_id = $1
+			ON utc.library_id = c.library_id AND utc.uri = c.uri AND utc.user_id = @user_id
 		LEFT JOIN content_metadata cm
 			ON cm.uri = c.uri AND cm.library_id = c.library_id
-		WHERE c.id = $2
-	`, user.ID, contentID)
+		WHERE c.id = @id
+	`, pgx.NamedArgs{"user_id": user.ID, "id": contentID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return echo.NewHTTPError(http.StatusNotFound, "Content not found")
 	}
@@ -363,26 +389,10 @@ func (cr *ContentRoutes) list(c echo.Context) error {
 
 	// Data query with children counts
 	dataQuery := fmt.Sprintf(`
-		SELECT c.*,
-			(SELECT COUNT(*) FROM content child WHERE child.parent_id = c.id) AS children_count,
-			(SELECT COUNT(*) FROM content child
-				LEFT JOIN user_to_content child_utc
-					ON child_utc.library_id = child.library_id
-					AND child_utc.uri = child.uri
-					AND child_utc.user_id = @user_id
-				WHERE child.parent_id = c.id
-					AND (child_utc.id IS NULL OR child_utc.status IS NULL
-						OR child_utc.status NOT IN ('completed', 'dropped'))
-			) AS unread_children_count,
-			utc.id AS utc_id, utc.user_id AS utc_user_id, utc.library_id AS utc_library_id,
-			utc.uri AS utc_uri, utc.starred AS utc_starred, utc.status AS utc_status,
-			utc.status_updated_at AS utc_status_updated_at, utc.notes AS utc_notes,
-			utc.rating AS utc_rating, utc.progress AS utc_progress,
-			utc.progress_updated_at AS utc_progress_updated_at,
-			cm.data AS meta_data
+		SELECT %s
 		%s
 		%s
-	`, baseFrom, orderClause)
+	`, contentRowColumns, baseFrom, orderClause)
 
 	if q.Limit != nil {
 		dataQuery += fmt.Sprintf(" LIMIT %d", *q.Limit)
@@ -409,6 +419,144 @@ func (cr *ContentRoutes) list(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, PaginatedResponse[ContentDTO]{Data: dtos, Total: total})
+}
+
+type RecentlyReadEntryDTO struct {
+	Item   ContentDTO  `json:"item"`
+	Series *ContentDTO `json:"series"`
+}
+
+type recentlyReadQuery struct {
+	Limit int `query:"limit" default:"10" validate:"min=1,max=50"`
+}
+
+// homePrefs reads the user's home preferences; malformed preferences mean the defaults.
+func homePrefs(raw models.JSONB) (ignoreSeriesStatus bool) {
+	var p struct {
+		Home struct {
+			IgnoreSeriesStatus bool `json:"ignoreSeriesStatus"`
+		} `json:"home"`
+	}
+	if json.Unmarshal(raw, &p) != nil {
+		return false
+	}
+	return p.Home.IgnoreSeriesStatus
+}
+
+// recentlyRead lists the items in progress, one per series. A series' item is its first eligible
+// (unread, valid, not on hold) child from the anchor onwards, wrapping to the start, where the
+// anchor is the active child with the latest status change or, while eligible, activity.
+func (cr *ContentRoutes) recentlyRead(c echo.Context) error {
+	user, err := requireUser(c)
+	if err != nil {
+		return err
+	}
+	q, err := BindQuery[recentlyReadQuery](c)
+	if err != nil {
+		return err
+	}
+	ctx := reqCtx(c)
+
+	type pickRow struct {
+		ItemID   string  `db:"item_id"`
+		SeriesID *string `db:"series_id"`
+	}
+	picks, err := db.Select[pickRow](ctx, cr.pool, `
+		WITH last AS (
+			SELECT DISTINCT ON (c.parent_id)
+				c.parent_id AS series_id, c.id AS last_id,
+				MAX(COALESCE(utc.progress_updated_at, utc.status_updated_at))
+					OVER (PARTITION BY c.parent_id) AS sort_at
+			FROM user_to_content utc
+			JOIN content c ON c.library_id = utc.library_id AND c.uri = utc.uri
+			WHERE utc.user_id = @user_id
+				AND c.parent_id IS NOT NULL AND c.type IN ('book', 'comic')
+				AND (utc.progress_updated_at IS NOT NULL OR utc.status IN ('reading', 'completed'))
+			ORDER BY c.parent_id,
+				CASE WHEN utc.status IS NULL OR utc.status IN ('reading', 'plan_to_read')
+					THEN GREATEST(utc.progress_updated_at, utc.status_updated_at)
+					ELSE utc.status_updated_at END DESC NULLS LAST,
+				c."order" DESC NULLS FIRST, c.id DESC
+		), kids AS (
+			SELECT c.id, c.parent_id,
+				row_number() OVER (PARTITION BY c.parent_id ORDER BY c."order" ASC NULLS LAST, c.id) AS pos,
+				c.valid AND (utc.status IS NULL OR utc.status IN ('reading', 'plan_to_read')) AS eligible
+			FROM content c
+			LEFT JOIN user_to_content utc
+				ON utc.library_id = c.library_id AND utc.uri = c.uri AND utc.user_id = @user_id
+			WHERE c.parent_id IN (SELECT series_id FROM last) AND c.type IN ('book', 'comic')
+		), pick AS (
+			-- Children from L onwards first (false < true), then the earlier ones.
+			SELECT DISTINCT ON (k.parent_id) k.parent_id AS series_id, k.id AS item_id
+			FROM kids k
+			JOIN last l ON l.series_id = k.parent_id
+			JOIN kids lk ON lk.id = l.last_id
+			WHERE k.eligible
+			ORDER BY k.parent_id, (k.pos < lk.pos), k.pos
+		), series_pick AS (
+			SELECT l.series_id, l.sort_at, p.item_id
+			FROM last l
+			JOIN pick p USING (series_id)
+			JOIN content s ON s.id = l.series_id
+			LEFT JOIN user_to_content sutc
+				ON sutc.library_id = s.library_id AND sutc.uri = s.uri AND sutc.user_id = @user_id
+			WHERE @ignore_series_status OR sutc.status IS NULL OR sutc.status NOT IN ('dropped', 'on_hold')
+		), standalone AS (
+			SELECT NULL::text AS series_id,
+				COALESCE(utc.progress_updated_at, utc.status_updated_at) AS sort_at, c.id AS item_id
+			FROM user_to_content utc
+			JOIN content c ON c.library_id = utc.library_id AND c.uri = utc.uri
+			WHERE utc.user_id = @user_id AND utc.status = 'reading'
+				AND c.parent_id IS NULL AND c.valid AND c.type IN ('book', 'comic')
+		)
+		SELECT item_id, series_id FROM (TABLE series_pick UNION ALL TABLE standalone) g
+		ORDER BY sort_at DESC NULLS LAST, item_id
+		LIMIT @limit
+	`, pgx.NamedArgs{"user_id": user.ID, "limit": q.Limit, "ignore_series_status": homePrefs(user.Preferences)})
+	if err != nil {
+		return err
+	}
+
+	ids := make([]string, 0, 2*len(picks))
+	for _, p := range picks {
+		ids = append(ids, p.ItemID)
+		if p.SeriesID != nil {
+			ids = append(ids, *p.SeriesID)
+		}
+	}
+	rows, err := selectContentRows(ctx, cr.pool, user.ID, ids)
+	if err != nil {
+		return err
+	}
+	toDTO := func(r contentListRow) ContentDTO {
+		return contentToDTO(r.Content, contentDTOOpts{
+			meta:                r.MetaData,
+			childrenCount:       r.ChildrenCount,
+			unreadChildrenCount: r.UnreadChildrenCount,
+			userToContent:       r.utc(),
+		})
+	}
+
+	entries := []RecentlyReadEntryDTO{}
+	for _, p := range picks {
+		// A scan may have deleted, invalidated or reparented the item, or deleted the series, since
+		// the pick.
+		item, ok := rows[p.ItemID]
+		if !ok || !item.Valid || !fp.PtrEq(item.ParentID, p.SeriesID) {
+			continue
+		}
+		entry := RecentlyReadEntryDTO{Item: toDTO(item)}
+		if p.SeriesID != nil {
+			series, ok := rows[*p.SeriesID]
+			if !ok {
+				continue
+			}
+			dto := toDTO(series)
+			entry.Series = &dto
+		}
+		entries = append(entries, entry)
+	}
+	return c.JSON(http.StatusOK, entries)
 }
 
 type userToContentRequest struct {

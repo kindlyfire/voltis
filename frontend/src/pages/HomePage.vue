@@ -20,9 +20,16 @@
                 :aria-busy="qLastRead.isLoading.value || undefined"
             >
                 <template v-if="qLastRead.isLoading.value">
-                    <ContentGridItemSkeleton v-for="i in 6" :key="i" />
+                    <ContentGridItemSkeleton v-for="i in 6" :key="i" subtitle />
                 </template>
-                <ContentGridItem v-for="item in lastRead" v-else :key="item.id" :content="item" />
+                <ContentGridItem
+                    v-for="e in lastRead"
+                    v-else
+                    :key="e.item.id"
+                    :content="e.item"
+                    :series="e.series"
+                    to-read-route
+                />
             </AScrollRow>
 
             <QueryError :query="qNewest" />
@@ -64,14 +71,8 @@ const libraries = computed(() => qLibraries.data.value)
 const qUser = usersApi.useMe()
 const user = qUser.data
 
-const qLastRead = contentApi.useList({
-    reading_status: 'reading',
-    sort: 'progress_updated_at',
-    sort_order: 'desc',
-    type: ['book', 'comic'],
-    limit: 10,
-})
-const lastRead = computed(() => qLastRead.data.value?.data ?? [])
+const qLastRead = contentApi.useRecentlyRead(10)
+const lastRead = computed(() => qLastRead.data.value ?? [])
 
 const qNewest = contentApi.useList({
     parent_id: 'null',
