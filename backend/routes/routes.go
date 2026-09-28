@@ -113,7 +113,7 @@ func Register(ctx context.Context, e *echo.Echo, pool *pgxpool.Pool, st *setting
 	(&AuthRoutes{pool: pool, hub: hub, st: st}).Register(api.Group("/auth"))
 	(&OIDCRoutes{res: res, oidc: newOIDCClient(st)}).Register(api.Group("/auth/oidc"))
 	(&SettingsRoutes{st: st, proxy: proxy}).Register(api.Group("/settings"))
-	(&LibraryRoutes{pool: pool, scanQueue: scanQueue, wake: links.Wake}).Register(api.Group("/libraries"))
+	(&LibraryRoutes{pool: pool, scanQueue: scanQueue, links: links, reg: deps.Providers, ctx: ctx}).Register(api.Group("/libraries"))
 	(&UserRoutes{pool: pool, hub: hub, st: st}).Register(api.Group("/users"))
 	(&ContentRoutes{pool: pool}).Register(api.Group("/content"))
 	(&FileRoutes{pool: pool, covers: deps.Covers}).Register(api.Group("/files"))

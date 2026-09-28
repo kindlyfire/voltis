@@ -4,13 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"os"
 	"slices"
+	"sync"
 	"time"
 
 	"voltis/db"
+	"voltis/linking"
 	"voltis/models"
+	"voltis/providers"
 	"voltis/scanner"
 
 	"github.com/jackc/pgx/v5"
@@ -21,7 +25,9 @@ import (
 type LibraryRoutes struct {
 	pool      *pgxpool.Pool
 	scanQueue *scanner.Queue
-	wake      func() // wakes metadata matching, which auto_match turns on
+	links     *linking.Service
+	reg       *providers.Registry
+	ctx       context.Context // the server's
 }
 
 func (lr *LibraryRoutes) Register(g *echo.Group) {
@@ -29,10 +35,6 @@ func (lr *LibraryRoutes) Register(g *echo.Group) {
 	g.POST("/scan", adminOnly(lr.scan))
 	g.POST("/:id_or_new", adminOnly(lr.upsert))
 	g.DELETE("/:id", adminOnly(lr.delete))
-}
-
-type LibrarySourceDTO struct {
-	PathURI string `json:"path_uri"`
 }
 
 type LibraryDTO struct {
@@ -44,16 +46,11 @@ type LibraryDTO struct {
 	ContentCount     *int                   `json:"content_count"`
 	RootContentCount *int                   `json:"root_content_count"`
 	ScannedAt        *time.Time             `json:"scanned_at"`
-	Sources          []LibrarySourceDTO     `json:"sources"`
+	Sources          []models.LibrarySource `json:"sources"`
 	Settings         models.LibrarySettings `json:"settings"`
 }
 
 func libraryToDTO(lib models.Library, contentCount, rootContentCount *int) LibraryDTO {
-	var sources []LibrarySourceDTO
-	_ = json.Unmarshal(lib.Sources, &sources)
-	if sources == nil {
-		sources = []LibrarySourceDTO{}
-	}
 	return LibraryDTO{
 		ID:               lib.ID,
 		CreatedAt:        lib.CreatedAt,
@@ -63,16 +60,16 @@ func libraryToDTO(lib models.Library, contentCount, rootContentCount *int) Libra
 		ContentCount:     contentCount,
 		RootContentCount: rootContentCount,
 		ScannedAt:        lib.ScannedAt,
-		Sources:          sources,
+		Sources:          models.ParseLibrarySources(lib.Sources),
 		Settings:         models.ParseLibrarySettings(lib.Settings),
 	}
 }
 
 type upsertLibraryRequest struct {
-	Name     string             `json:"name"`
-	Type     string             `json:"type"`
-	Sources  []LibrarySourceDTO `json:"sources"`
-	Settings json.RawMessage    `json:"settings"`
+	Name     string                 `json:"name"`
+	Type     string                 `json:"type"`
+	Sources  []models.LibrarySource `json:"sources"`
+	Settings json.RawMessage        `json:"settings"`
 }
 
 func (lr *LibraryRoutes) list(c echo.Context) error {
@@ -207,14 +204,25 @@ func (lr *LibraryRoutes) upsert(c echo.Context) error {
 		return err
 	}
 
+	prefixes := map[string]bool{}
 	for _, source := range req.Sources {
 		info, err := os.Stat(source.PathURI)
 		if err != nil || !info.IsDir() {
 			return echo.NewHTTPError(http.StatusBadRequest,
 				"Source path does not exist or is not a directory: "+source.PathURI)
 		}
+		// Their overrides would compete for the same files.
+		if p, ok := source.Prefix(); ok {
+			if prefixes[p] {
+				return echo.NewHTTPError(http.StatusBadRequest, "Duplicate source: "+source.PathURI)
+			}
+			prefixes[p] = true
+		}
 	}
 
+	if req.Sources == nil {
+		req.Sources = []models.LibrarySource{}
+	}
 	sourcesJSON, err := json.Marshal(req.Sources)
 	if err != nil {
 		return err
@@ -232,6 +240,9 @@ func (lr *LibraryRoutes) upsert(c echo.Context) error {
 		if mode != models.BookSeriesInferenceOff && mode != models.BookSeriesInferenceConservative {
 			return echo.NewHTTPError(http.StatusBadRequest, "Invalid book_series_inference: "+mode)
 		}
+		if settings.AutoMatch == nil {
+			settings.AutoMatch = models.Switches{}
+		}
 		if settingsJSON, err = json.Marshal(settings); err != nil {
 			return err
 		}
@@ -240,6 +251,7 @@ func (lr *LibraryRoutes) upsert(c echo.Context) error {
 	now := time.Now().UTC()
 
 	id := idOrNew
+	var before models.Library // a new library matches nothing
 	if idOrNew == "new" {
 		id = models.MakeLibraryID()
 		_, err = lr.pool.Exec(ctx, `
@@ -247,8 +259,8 @@ func (lr *LibraryRoutes) upsert(c echo.Context) error {
 			VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::jsonb, '{}'))
 		`, id, now, now, req.Name, req.Type, sourcesJSON, settingsJSON)
 	} else {
-		if _, err := getLibrary(ctx, lr.pool, idOrNew); err != nil {
-			return echo.NewHTTPError(http.StatusNotFound, "Library not found")
+		if before, err = getLibrary(ctx, lr.pool, idOrNew); err != nil {
+			return err
 		}
 		_, err = lr.pool.Exec(ctx, `
 			UPDATE libraries SET name = $1, sources = $2, updated_at = $3, settings = COALESCE($5::jsonb, settings)
@@ -258,14 +270,35 @@ func (lr *LibraryRoutes) upsert(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	lr.wake()
 
 	lib, err := getLibrary(ctx, lr.pool, id)
 	if err != nil {
 		return err
 	}
+	// Series newly covered are due already if never matched, but those unmatched are not. Coverage
+	// that only shrank leaves links alone.
+	var grown []string
+	for _, p := range lr.reg.All() {
+		if linking.AutoMatchGrew(before, lib, p.Name()) {
+			grown = append(grown, p.Name())
+		}
+	}
+	// After responding: it rewrites every covered link, which takes a while in a large library, and
+	// only makes series due early.
+	if len(grown) > 0 {
+		autoMatching.Go(func() {
+			ctx, cancel := context.WithTimeout(lr.ctx, 5*time.Minute)
+			defer cancel()
+			if err := lr.links.MatchNow(ctx, []string{id}, grown); err != nil {
+				slog.Warn("[libraries] failed to make newly auto-matched series due", "library", id, "err", err)
+			}
+		})
+	}
 	return c.JSON(http.StatusOK, libraryToDTO(lib, nil, nil))
 }
+
+// autoMatching tracks the saves' background MatchNow runs, for tests to wait on.
+var autoMatching sync.WaitGroup
 
 func (lr *LibraryRoutes) delete(c echo.Context) error {
 	ctx := reqCtx(c)

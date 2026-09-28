@@ -61,13 +61,27 @@ func (e *env) exec(sql string, args ...any) {
 // series adds a comic series with a file layer titled after it, in a library that matches automatically.
 func (e *env) series(lib, id, title string) {
 	e.t.Helper()
-	e.exec(`INSERT INTO libraries (id, name, type, settings) VALUES ($1, 'lib', 'comics', '{"auto_match": true}')
+	e.exec(`INSERT INTO libraries (id, name, type, settings) VALUES ($1, 'lib', 'comics', '{"auto_match": {"fake": true}}')
 		ON CONFLICT DO NOTHING`, lib)
 	e.exec(`INSERT INTO content (id, uri_part, uri, type, library_id) VALUES ($1, $1, 'comic/' || $1, 'comic_series', $2)`, id, lib)
 	e.tx(func(tx pgx.Tx) error {
 		return e.svc.store.WriteFileLayers(context.Background(), tx, lib,
 			[]metadata.FileLayer{{URI: "comic/" + id, Fields: metadata.Fields{Title: metadata.Val(title)}}}, time.Now())
 	})
+}
+
+// leaf adds a file of the series at fileURI.
+func (e *env) leaf(series, fileURI string) {
+	e.t.Helper()
+	e.exec(`INSERT INTO content (id, uri_part, uri, file_uri, type, parent_id, library_id)
+		SELECT s.id || '/' || $2, $2, s.uri || '/' || $2, $2, 'comic', s.id, s.library_id FROM content s WHERE s.id = $1`,
+		series, fileURI)
+}
+
+// sources sets the library's sources and its settings.
+func (e *env) sources(lib, settings, sources string) {
+	e.t.Helper()
+	e.exec(`UPDATE libraries SET settings = $2, sources = $3 WHERE id = $1`, lib, settings, sources)
 }
 
 func (e *env) tx(fn func(tx pgx.Tx) error) {

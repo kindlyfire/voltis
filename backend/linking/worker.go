@@ -10,6 +10,7 @@ import (
 
 	"voltis/db"
 	"voltis/metadata"
+	"voltis/models"
 	"voltis/providers"
 )
 
@@ -131,7 +132,7 @@ func (s *Service) step(ctx context.Context, paused bool) (time.Duration, error) 
 	if did, err := s.recomputeStale(ctx, c); did || err != nil {
 		return 0, err
 	}
-	var libs []string
+	var libs []libraryPlan
 	var matched MatchResult
 	var matchErr, refreshErr error
 	if !paused {
@@ -216,31 +217,58 @@ func (s *Service) recomputeStale(ctx context.Context, c changes) (bool, error) {
 	return true, nil
 }
 
-// matchLibraries lists the libraries that match automatically (a missing setting is off), but not
-// while a scan of them runs or waits, since a series read between two of its flushes may lack
-// members that would contradict a match.
-func (s *Service) matchLibraries(ctx context.Context) ([]string, error) {
-	libs, err := db.SelectScalars[string](ctx, s.pool,
-		"SELECT id FROM libraries WHERE settings->'auto_match' = 'true' ORDER BY id")
-	return slices.DeleteFunc(libs, s.scanning), err
+// libraryPlan is what the worker matches in a library: its coverage by provider.
+type libraryPlan struct {
+	ID string
+	By map[string]autoMatch
+}
+
+// matchLibraries lists the libraries that match automatically with some provider, but not while a
+// scan of them runs or waits, since a series read between two of its flushes may lack members that
+// would contradict a match.
+func (s *Service) matchLibraries(ctx context.Context) ([]libraryPlan, error) {
+	libs, err := db.Select[models.Library](ctx, s.pool, "SELECT * FROM libraries ORDER BY id")
+	if err != nil {
+		return nil, err
+	}
+	var plans []libraryPlan
+	for _, lib := range libs {
+		if s.scanning(lib.ID) {
+			continue
+		}
+		plan := libraryPlan{lib.ID, map[string]autoMatch{}}
+		for _, p := range s.reg.All() {
+			if cov := autoMatchOf(lib, p.Name()); cov.any() {
+				plan.By[p.Name()] = cov
+			}
+		}
+		if len(plan.By) > 0 {
+			plans = append(plans, plan)
+		}
+	}
+	return plans, nil
 }
 
 // matchNext matches a page of due series from the next of libs in turn that has any, continuing
 // where its last page stopped and then from its start.
-func (s *Service) matchNext(ctx context.Context, c changes, libs []string) (MatchResult, error) {
-	start := slices.Index(libs, s.lastLib) + 1
+func (s *Service) matchNext(ctx context.Context, c changes, libs []libraryPlan) (MatchResult, error) {
+	start := slices.IndexFunc(libs, func(l libraryPlan) bool { return l.ID == s.lastLib }) + 1
 	for i := range libs {
 		lib := libs[(start+i)%len(libs)]
 		for _, p := range s.reg.All() {
-			key := [2]string{lib, p.Name()}
+			cov, ok := lib.By[p.Name()]
+			if !ok {
+				continue
+			}
+			key := [2]string{lib.ID, p.Name()}
 			for _, after := range slices.Compact([]string{s.cursors[key], ""}) {
-				page, err := s.duePage(ctx, p, lib, after, time.Now())
+				page, err := s.duePage(ctx, p, lib.ID, cov, after, time.Now())
 				if err != nil {
 					return MatchResult{}, err
 				}
 				if len(page) > 0 {
-					s.lastLib = lib
-					s.update(func(st *WorkerStatus) { st.Activity, st.LibraryID = Matching, lib })
+					s.lastLib = lib.ID
+					s.update(func(st *WorkerStatus) { st.Activity, st.LibraryID = Matching, lib.ID })
 					res, n, err := s.matchSeries(ctx, c, p, page, s.scanning, nil)
 					s.cursors[key] = page[n-1].URI
 					return res, err
@@ -253,23 +281,37 @@ func (s *Service) matchNext(ctx context.Context, c changes, libs []string) (Matc
 }
 
 // nextDue is how long until the next series of libs or used entry falls due, at most 15 minutes.
-func (s *Service) nextDue(ctx context.Context, libs []string) (time.Duration, error) {
-	next := time.Now().Add(15 * time.Minute)
-	for _, p := range s.reg.All() {
-		retry, err := db.SelectScalar[*time.Time](ctx, s.pool, "SELECT min(l.retry_at) "+pendingSeries,
-			libs, p.Name(), providers.ContentTypes(p))
-		if err != nil {
-			return 0, err
+func (s *Service) nextDue(ctx context.Context, libs []libraryPlan) (time.Duration, error) {
+	var due []*time.Time
+	for _, lib := range libs {
+		for _, p := range s.reg.All() {
+			cov, ok := lib.By[p.Name()]
+			if !ok {
+				continue
+			}
+			covered, args := cov.sql(4)
+			// The first in idx_metadata_links_retry order that is covered, rather than the least of all.
+			retry, err := db.SelectScalar[*time.Time](ctx, s.pool,
+				"SELECT (SELECT l.retry_at "+pendingSeries+" AND l.retry_at IS NOT NULL"+covered+" ORDER BY l.retry_at LIMIT 1)",
+				append([]any{customPlan, lib.ID, p.Name(), providers.ContentTypes(p)}, args...)...)
+			if err != nil {
+				return 0, err
+			}
+			due = append(due, retry)
 		}
+	}
+	for _, p := range s.reg.All() {
 		refresh, err := db.SelectScalar[*time.Time](ctx, s.pool,
 			"SELECT (SELECT e.refresh_at "+usedEntries+" ORDER BY e.refresh_at LIMIT 1)", p.Name())
 		if err != nil {
 			return 0, err
 		}
-		for _, t := range []*time.Time{retry, refresh} {
-			if t != nil && t.Before(next) {
-				next = *t
-			}
+		due = append(due, refresh)
+	}
+	next := time.Now().Add(15 * time.Minute)
+	for _, t := range due {
+		if t != nil && t.Before(next) {
+			next = *t
 		}
 	}
 	return max(time.Until(next), 0), nil

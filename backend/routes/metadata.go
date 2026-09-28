@@ -199,7 +199,7 @@ func (r *MetadataRoutes) matchNow(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return err
 	}
-	if err := r.links.MatchNow(reqCtx(c), req.LibraryIDs); err != nil {
+	if err := r.links.MatchNow(reqCtx(c), req.LibraryIDs, nil); err != nil {
 		return err
 	}
 	return okResponse(c)

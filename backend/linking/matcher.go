@@ -10,7 +10,10 @@ import (
 	"voltis/db"
 	"voltis/lib/fp"
 	"voltis/metadata"
+	"voltis/models"
 	"voltis/providers"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // MatchResult counts the matcher's outcomes.
@@ -241,20 +244,28 @@ func (s *Service) Rematch(ctx context.Context, contentID, provider string, expec
 	return s.run(ctx, s.record(ctx, p, a, expectRev))
 }
 
-// pendingSeries selects the titled series of libraries $1 that provider $2 describes (content types
+// pendingSeries selects the titled series of library $1 that provider $2 describes (content types
 // $3) and neither links nor ignores. A series has no title until a scan writes its file layer, and
-// matching it before would record a false "no match"; writing the layer makes it due.
+// matching it before would record a false "no match"; writing the layer makes it due. Series have
+// no parent, which lets idx_content_roots list them.
 const pendingSeries = `FROM content c
 	JOIN content_metadata m ON m.library_id = c.library_id AND m.uri = c.uri AND m.data->>'title' <> ''
 	LEFT JOIN metadata_links l ON l.library_id = c.library_id AND l.uri = c.uri AND l.provider = $2
-	WHERE c.library_id = ANY($1) AND c.type = ANY($3) AND (l.state IS NULL OR l.state IN ('review', 'unmatched'))`
+	WHERE c.library_id = $1 AND c.parent_id IS NULL AND c.type = ANY($3)
+	  AND (l.state IS NULL OR l.state IN ('review', 'unmatched'))`
 
-// duePage lists up to twenty of the library's series due for matching with the provider by dueBy,
-// after the URI: never matched, or due again.
-func (s *Service) duePage(ctx context.Context, p providers.Provider, libraryID, after string, dueBy time.Time) ([]metadata.Target, error) {
+// customPlan runs a query with a plan for its arguments. A generic plan cannot tell how many rows
+// a coverage prefix holds, nor how many are due, and walks the wrong index for either.
+const customPlan = pgx.QueryExecModeExec
+
+// duePage lists up to twenty of the library's series in cov due for matching with the provider by
+// dueBy, after the URI: never matched, or due again.
+func (s *Service) duePage(ctx context.Context, p providers.Provider, libraryID string, cov autoMatch, after string,
+	dueBy time.Time) ([]metadata.Target, error) {
+	covered, args := cov.sql(6)
 	return db.Select[metadata.Target](ctx, s.pool, "SELECT c.id, c.library_id, c.uri, c.type "+pendingSeries+
-		" AND (l.state IS NULL OR l.retry_at <= $5) AND c.uri > $4 ORDER BY c.uri LIMIT 20",
-		[]string{libraryID}, p.Name(), providers.ContentTypes(p), after, dueBy)
+		" AND (l.state IS NULL OR l.retry_at <= $5) AND c.uri > $4"+covered+" ORDER BY c.uri LIMIT 20",
+		append([]any{customPlan, libraryID, p.Name(), providers.ContentTypes(p), after, dueBy}, args...)...)
 }
 
 // matchSeries runs the matcher on each series, skipping those of libraries scanning, adds the
@@ -321,7 +332,7 @@ func (s *Service) MatchLibrary(ctx context.Context, libraryID string, scanning f
 	anytime := time.Now().AddDate(1000, 0, 0)
 	for _, p := range s.reg.All() {
 		for after := ""; ; {
-			page, err := s.duePage(ctx, p, libraryID, after, anytime)
+			page, err := s.duePage(ctx, p, libraryID, autoMatch{Library: true}, after, anytime)
 			if err != nil {
 				return out, err
 			}
@@ -338,19 +349,48 @@ func (s *Service) MatchLibrary(ctx context.Context, libraryID string, scanning f
 	return out, nil
 }
 
-// MatchNow makes the unmatched series of libraries that match automatically due for matching, and
-// those in review whose inputs changed, then wakes the worker; only the given libraries' if any.
-func (s *Service) MatchNow(ctx context.Context, libraryIDs []string) error {
-	_, err := s.pool.Exec(ctx, `
-		UPDATE metadata_links l SET retry_at = now()
-		FROM libraries b
-		WHERE b.id = l.library_id AND b.settings->'auto_match' = 'true'
-		  AND (l.state = 'unmatched' OR (l.state = 'review' AND l.retry_at IS NOT NULL))
-		  AND (COALESCE(cardinality($1::text[]), 0) = 0 OR l.library_id = ANY($1))
-	`, libraryIDs)
+// MatchNow makes the unmatched series that match automatically due for matching, and those in
+// review whose inputs changed, then wakes the worker: only the given libraries' and providers', if
+// any.
+func (s *Service) MatchNow(ctx context.Context, libraryIDs, providerNames []string) error {
+	libs, err := db.Select[models.Library](ctx, s.pool,
+		"SELECT * FROM libraries WHERE COALESCE(cardinality($1::text[]), 0) = 0 OR id = ANY($1)", libraryIDs)
 	if err != nil {
 		return err
 	}
-	s.Wake()
+	defer s.Wake() // also after a failure, for the libraries done before
+	for _, lib := range libs {
+		for _, p := range s.reg.All() {
+			cov := autoMatchOf(lib, p.Name())
+			if !cov.any() || len(providerNames) > 0 && !slices.Contains(providerNames, p.Name()) {
+				continue
+			}
+			if err := s.bump(ctx, lib.ID, p.Name(), cov); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
+}
+
+// bump makes the library's series in cov due for matching with the provider.
+func (s *Service) bump(ctx context.Context, libraryID, provider string, cov autoMatch) error {
+	const retriable = `l.library_id = $1 AND l.provider = $2
+		AND (l.state = 'unmatched' OR (l.state = 'review' AND l.retry_at IS NOT NULL))`
+	const due = "UPDATE metadata_links l SET retry_at = now() WHERE " + retriable
+	covered, args := cov.sql(3)
+	if covered == "" {
+		_, err := s.pool.Exec(ctx, due, libraryID, provider)
+		return err
+	}
+	// Read the covered links first: an UPDATE plans without parallel workers, and then rather
+	// hashes every leaf of the table than probes the series' own.
+	uris, err := db.SelectScalars[string](ctx, s.pool, `SELECT l.uri FROM metadata_links l
+		JOIN content c ON c.library_id = l.library_id AND c.uri = l.uri WHERE `+retriable+covered,
+		append([]any{customPlan, libraryID, provider}, args...)...)
+	if err != nil {
+		return err
+	}
+	_, err = s.pool.Exec(ctx, due+" AND l.uri = ANY($3)", libraryID, provider, uris)
+	return err
 }

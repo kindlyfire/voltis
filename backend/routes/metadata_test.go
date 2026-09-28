@@ -243,7 +243,7 @@ func TestMetadataReview(t *testing.T) {
 
 	c.Get("/api/metadata/review?tab=nope").Assert(t, 400)
 	c.Post("/api/metadata/review/resolve", map[string]any{"items": make([]map[string]any, 201)}).Assert(t, 400)
-	mustExec(t, pool, `UPDATE libraries SET settings = '{"auto_match": true}' WHERE id = $1`, lib)
+	mustExec(t, pool, `UPDATE libraries SET settings = '{"auto_match": {"fake": true}}' WHERE id = $1`, lib)
 	c.Post("/api/metadata/match", map[string]any{"library_ids": []string{lib}}).Assert(t, 200)
 	var item map[string]any
 	waitUntil(t, "the match", func() bool {

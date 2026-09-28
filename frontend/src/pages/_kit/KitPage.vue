@@ -247,6 +247,10 @@
                                 <template #about>
                                     <p class="text-fg-muted p-4 text-sm">Nothing here.</p>
                                 </template>
+                                <template #tab-about>
+                                    About
+                                    <AIcon :icon="IconAlert" label="Empty" class="text-warning" />
+                                </template>
                             </ATabs>
                         </div>
                     </KitDemo>
@@ -466,6 +470,9 @@
                     </KitDemo>
                     <KitDemo label="readonly" stack>
                         <ACheckbox :model-value="true" label="Admin" readonly />
+                    </KitDemo>
+                    <KitDemo label="size sm (toolbar, beside sm fields)" stack>
+                        <ACheckbox v-model="check1" label="Errors only" size="sm" />
                     </KitDemo>
                     <KitDemo label="hidden label (grid overlay), shift-click passthrough">
                         <ACheckbox
@@ -1192,6 +1199,7 @@ import AToastRegion from '@/ui/AToastRegion.vue'
 import ATooltip from '@/ui/ATooltip.vue'
 import * as icons from '@/ui/icons'
 import {
+    IconAlert,
     IconBookOpen,
     IconBookOpenFilled,
     IconBookshelf,

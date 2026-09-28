@@ -26,7 +26,11 @@
                     {{ description }}
                 </DialogDescription>
 
-                <div v-if="$slots.default" class="a-dialog__body">
+                <div
+                    v-if="$slots.default"
+                    class="a-dialog__body"
+                    :class="{ 'a-dialog__body--flex': flexBody }"
+                >
                     <slot />
                 </div>
 
@@ -79,6 +83,8 @@ const props = withDefaults(
         dismissible?: boolean
         /** `bare` has no chrome (image lightbox) but keeps a hidden title and a close button. */
         variant?: 'default' | 'bare'
+        /** The body is a flex column, so a child can bound its height (tabs that scroll on their own). */
+        flexBody?: boolean
     }>(),
     { size: 'md', dismissible: true, variant: 'default' }
 )
@@ -235,6 +241,11 @@ function onCloseAutoFocus(e: Event) {
         font-size: 14px;
         line-height: 1.5;
         overscroll-behavior: contain;
+    }
+
+    .a-dialog__body--flex {
+        display: flex;
+        flex-direction: column;
     }
 
     .a-dialog__actions {

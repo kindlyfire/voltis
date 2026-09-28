@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -54,13 +53,7 @@ func (q *Queue) Enqueue(libraryID string, force bool, filterPaths []string) (str
 		return "", fmt.Errorf("library not found: %s: %w", libraryID, err)
 	}
 
-	type source struct {
-		PathURI string `json:"path_uri"`
-	}
-	var sources []source
-	_ = json.Unmarshal(lib.Sources, &sources)
-
-	paths := fp.Map(sources, func(s source) string { return s.PathURI })
+	paths := fp.Map(models.ParseLibrarySources(lib.Sources), func(s models.LibrarySource) string { return s.PathURI })
 
 	handle, err := q.manager.Push(q.def, ScanInput{
 		LibraryID:   lib.ID,

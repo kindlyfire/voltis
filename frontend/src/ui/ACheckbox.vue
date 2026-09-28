@@ -1,7 +1,11 @@
 <template>
     <div
         class="a-checkbox"
-        :class="[{ disabled, readonly, invalid: errors.length, compact: hideLabel }, $attrs.class]"
+        :class="[
+            { disabled, readonly, invalid: errors.length, compact: hideLabel },
+            `size-${size}`,
+            $attrs.class,
+        ]"
         :style="$attrs.style as StyleValue"
     >
         <label class="a-checkbox__row">
@@ -43,7 +47,17 @@ import { mergeAria, useControlAttrs, useFieldIds, type FieldProps } from './useF
 
 defineOptions({ inheritAttrs: false })
 
-const props = defineProps<FieldProps & { modelValue: boolean; indeterminate?: boolean }>()
+const props = withDefaults(
+    defineProps<
+        FieldProps & {
+            modelValue: boolean
+            indeterminate?: boolean
+            /** `sm` matches the height of `sm` fields, for toolbars. */
+            size?: 'sm' | 'md'
+        }
+    >(),
+    { size: 'md' }
+)
 
 const emit = defineEmits<{
     'update:modelValue': [value: boolean]
@@ -92,6 +106,10 @@ defineExpose({ focus: () => input.value?.focus() })
         min-height: 44px;
         font-size: 15px;
         cursor: pointer;
+    }
+
+    .size-sm .a-checkbox__row {
+        min-height: 40px;
     }
 
     .compact .a-checkbox__row {

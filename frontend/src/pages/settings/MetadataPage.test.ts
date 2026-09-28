@@ -52,7 +52,12 @@ let resolved: ReviewAction[][]
 let requests: { url: string; body: unknown }[]
 let reviewQueries: URLSearchParams[]
 let wrapper: ReturnType<typeof mount>
-let libraries: { id: string; name: string; settings: { auto_match: boolean } }[]
+let libraries: {
+    id: string
+    name: string
+    settings: { auto_match: Record<string, boolean> }
+    sources: { path_uri: string; settings: { auto_match?: Record<string, boolean> } }[]
+}[]
 
 beforeEach(() => {
     addOverlays()
@@ -60,8 +65,8 @@ beforeEach(() => {
     requests = []
     reviewQueries = []
     libraries = [
-        { id: 'l1', name: 'Manga', settings: { auto_match: true } },
-        { id: 'l2', name: 'Books', settings: { auto_match: false } },
+        { id: 'l1', name: 'Manga', settings: { auto_match: { mangabaka: true } }, sources: [] },
+        { id: 'l2', name: 'Books', settings: { auto_match: {} }, sources: [] },
     ]
     vi.mocked(apiFetch).mockImplementation(async (url, init) => {
         if (url === '/libraries') return libraries
@@ -130,14 +135,18 @@ beforeEach(() => {
         }
         throw new Error(`unexpected ${url}`)
     })
-    wrapper = mount(MetadataPage, {
+    wrapper = mountPage()
+})
+
+function mountPage() {
+    return mount(MetadataPage, {
         attachTo: document.body,
         global: {
             plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }], createHead()],
             stubs: { RouterLink: RouterLinkStub, ATooltip: { template: '<slot />' } },
         },
     })
-})
+}
 
 afterEach(() => {
     wrapper.unmount()
@@ -266,9 +275,45 @@ describe('MetadataPage', () => {
         await flushPromises()
         expect(requests).toEqual([])
         // Nor for all libraries, when none does.
-        libraries[0].settings.auto_match = false
+        libraries[0]!.settings.auto_match = {}
         wrapper.findComponent(ASelect).vm.$emit('update:modelValue', null)
         await flushPromises()
         expect(button('Match now').attributes('aria-disabled')).toBe('true')
+    })
+
+    it('enables Match now for a library that a source matches automatically in', async () => {
+        const enabled = async (lib: (typeof libraries)[number]) => {
+            libraries = [lib]
+            wrapper.unmount()
+            wrapper = mountPage()
+            await flushPromises()
+            return button('Match now').attributes('aria-disabled') === undefined
+        }
+        const src = (auto_match?: Record<string, boolean>) => ({
+            path_uri: '/s',
+            settings: auto_match ? { auto_match } : {},
+        })
+        const lib = { id: 'l1', name: 'Manga' }
+        expect(
+            await enabled({
+                ...lib,
+                settings: { auto_match: {} },
+                sources: [src({ mangabaka: true })],
+            })
+        ).toBe(true)
+        expect(
+            await enabled({
+                ...lib,
+                settings: { auto_match: { mangabaka: true } },
+                sources: [src({ mangabaka: false })],
+            })
+        ).toBe(true)
+        expect(
+            await enabled({
+                ...lib,
+                settings: { auto_match: { mangabaka: false } },
+                sources: [src()],
+            })
+        ).toBe(false)
     })
 })

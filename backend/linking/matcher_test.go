@@ -44,7 +44,7 @@ func (e *env) match() MatchResult {
 
 func (e *env) matchNow(libs ...string) {
 	e.t.Helper()
-	if err := e.svc.MatchNow(context.Background(), libs); err != nil {
+	if err := e.svc.MatchNow(context.Background(), libs, nil); err != nil {
 		e.t.Fatal(err)
 	}
 }
@@ -74,7 +74,7 @@ func TestMatchBackfill(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.series("l2", "f", "Remote One")
-	e.exec(`UPDATE libraries SET settings = '{"auto_match": false}' WHERE id = 'l2'`)
+	e.exec(`UPDATE libraries SET settings = '{"auto_match": {"fake": false}}' WHERE id = 'l2'`)
 	e.notified = nil
 
 	from := time.Now()
@@ -363,7 +363,7 @@ func TestMatchSkipsSeriesChangedDuringTheLookup(t *testing.T) {
 			e.exec("DELETE FROM content WHERE id = 'u'")
 		}
 	})
-	if res, err := e.svc.matchNext(ctx, changes{}, []string{"l1"}); err != nil || res != (MatchResult{Skipped: 3}) {
+	if res, err := e.svc.matchNext(ctx, changes{}, []libraryPlan{{"l1", map[string]autoMatch{"fake": {Library: true}}}}); err != nil || res != (MatchResult{Skipped: 3}) {
 		t.Fatalf("result = %+v (%v)", res, err)
 	}
 	if s, t2 := e.link("s"), e.link("t"); s.State != StateNone || t2.State != StateIgnored {

@@ -2,7 +2,11 @@ package models
 
 import (
 	"encoding/json"
+	"fmt"
+	"maps"
 	"math/rand"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -69,18 +73,89 @@ const (
 )
 
 type LibrarySettings struct {
-	BookSeriesInference string `json:"book_series_inference"`
-	AutoMatch           bool   `json:"auto_match"` // match series with metadata providers unattended; off unless set
+	BookSeriesInference string   `json:"book_series_inference"`
+	AutoMatch           Switches `json:"auto_match"` // match series with each provider unattended; a missing one is off
+}
+
+// SourceSettings overlay a library's settings for the files under a source: a missing key inherits.
+type SourceSettings struct {
+	AutoMatch Switches `json:"auto_match,omitempty"`
+}
+
+// Switches are on or off by key. A null switch is refused, rather than read as off.
+type Switches map[string]bool
+
+func (s *Switches) UnmarshalJSON(b []byte) error {
+	var m map[string]*bool
+	if err := json.Unmarshal(b, &m); err != nil || m == nil {
+		*s = nil
+		return err
+	}
+	*s = make(Switches, len(m))
+	for k, v := range m {
+		if v == nil {
+			return fmt.Errorf("%s: null is not on or off", k)
+		}
+		(*s)[k] = *v
+	}
+	return nil
+}
+
+type LibrarySource struct {
+	PathURI  string         `json:"path_uri"`
+	Settings SourceSettings `json:"settings"`
+}
+
+// Resolve is the settings of a file under the source. Adding an overridable setting adds a
+// SourceSettings field and its line here.
+func (l LibrarySettings) Resolve(s SourceSettings) LibrarySettings {
+	l.AutoMatch = overlay(l.AutoMatch, s.AutoMatch)
+	return l
+}
+
+func overlay[K comparable, V any](base, over map[K]V) map[K]V {
+	out := maps.Clone(base)
+	if out == nil {
+		out = map[K]V{}
+	}
+	maps.Copy(out, over)
+	return out
+}
+
+// Prefix is what the file_uri of every file under the source starts with, as the scanner stores
+// it. A "." source has none: its files are stored without a prefix.
+func (s LibrarySource) Prefix() (string, bool) {
+	p := filepath.Clean(s.PathURI)
+	if p == "." {
+		return "", false
+	}
+	if !strings.HasSuffix(p, "/") {
+		p += "/"
+	}
+	return p, true
+}
+
+// ParseLibrarySources reads the stored sources; none is an empty list.
+func ParseLibrarySources(raw JSONB) []LibrarySource {
+	var out []LibrarySource
+	_ = json.Unmarshal(raw, &out)
+	if out == nil {
+		out = []LibrarySource{}
+	}
+	return out
 }
 
 func DefaultLibrarySettings() LibrarySettings {
-	return LibrarySettings{BookSeriesInference: BookSeriesInferenceConservative}
+	return LibrarySettings{BookSeriesInference: BookSeriesInferenceConservative, AutoMatch: Switches{}}
 }
 
 // ParseLibrarySettings fills in defaults for keys the stored settings lack.
 func ParseLibrarySettings(raw JSONB) LibrarySettings {
 	s := DefaultLibrarySettings()
 	_ = json.Unmarshal(raw, &s)
+	if s.AutoMatch == nil {
+		s.AutoMatch = Switches{}
+	}
 	return s
 }
 

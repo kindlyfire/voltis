@@ -76,6 +76,7 @@ func newProxyClient(t *testing.T, pool *pgxpool.Pool, proxy config.ProxyAuth) *t
 	manager := Register(t.Context(), e, pool, st, proxy, Deps{Hub: hub, Providers: reg, Metadata: store, Links: links,
 		Covers: cov})
 	t.Cleanup(manager.Close)
+	t.Cleanup(autoMatching.Wait) // before the database goes; t.Context() has cancelled them
 
 	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if addr := r.Header.Get(testRemoteAddrHeader); addr != "" {

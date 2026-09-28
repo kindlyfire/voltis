@@ -99,16 +99,22 @@ export interface LogoutResponse {
 
 export type ScannerType = 'comics' | 'books'
 
+/** Overlays the library's settings for the files under a source: a missing key inherits. */
+export interface SourceSettings {
+    auto_match?: Record<string, boolean>
+}
+
 export interface LibrarySource {
     path_uri: string
+    settings: SourceSettings
 }
 
 export type BookSeriesInference = 'off' | 'conservative'
 
 export interface LibrarySettings {
     book_series_inference: BookSeriesInference
-    /** Match series with metadata providers in the background; off by default. */
-    auto_match: boolean
+    /** Match series with each metadata provider in the background; a missing provider is off. */
+    auto_match: Record<string, boolean>
 }
 
 export interface Library {
@@ -163,7 +169,7 @@ export interface LibraryUpsert {
     id?: string
     name: string
     type: ScannerType
-    sources: LibrarySource[]
+    sources: { path_uri: string; settings?: SourceSettings }[]
     settings?: LibrarySettings
 }
 

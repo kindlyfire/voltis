@@ -8,7 +8,9 @@
                 :disabled="option.disabled"
                 class="a-tabs__trigger a-state"
             >
-                <span class="a-tabs__label">{{ option.label }}</span>
+                <span class="a-tabs__label"
+                    ><slot :name="`tab-${option.value}`">{{ option.label }}</slot></span
+                >
             </TabsTrigger>
             <TabsIndicator class="a-tabs__indicator" />
         </TabsList>
@@ -41,7 +43,8 @@ import { computed, type ComponentPublicInstance } from 'vue'
 import { normalizeOptions, type Options, type OptionValue } from './options'
 
 /**
- * Tabs with one named slot per option value. Every panel stays mounted (keeping its DOM and
+ * Tabs with one named slot per option value, and an optional `tab-<value>` slot that replaces a
+ * tab's label (to add a status icon, say). Every panel stays mounted (keeping its DOM and
  * state) and scrolls on its own, below a fixed tab bar: give the tabs a bounded height (a flex
  * column parent, like the drawer's body).
  */
@@ -128,6 +131,14 @@ defineExpose({
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+    }
+
+    /* A status icon in a `tab-<value>` slot, beside the text. */
+    .a-tabs__label > .a-icon {
+        display: inline-block;
+        margin-inline-start: 4px;
+        font-size: 18px;
+        vertical-align: -4px;
     }
 
     /* Over the list's border. */

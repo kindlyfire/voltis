@@ -2,80 +2,204 @@
     <ADialog
         :open="open"
         :title="isNew ? 'Create library' : 'Edit library'"
+        size="lg"
+        flex-body
         @update:open="v => !v && close()"
     >
-        <form :id="formId" novalidate class="flex flex-col gap-3" @submit="form.onSubmit">
-            <ATextField v-bind="form.field('name')" label="Name" autocomplete="off" autofocus />
-            <ASelect
-                :model-value="form.values.value.type"
-                :options="typeOptions"
-                label="Type"
-                :readonly="!isNew"
-                :hint="isNew ? undefined : 'Fixed once the library is created.'"
-                :error="form.field('type').error"
-                @update:model-value="form.field('type')['onUpdate:modelValue']"
-            />
-            <ASelect
-                v-if="form.values.value.type === 'books'"
-                :model-value="form.values.value.book_series_inference"
-                :options="inferenceOptions"
-                label="Series without metadata"
-                :hint="inferenceHint"
-                @update:model-value="v => v && form.setValue('book_series_inference', v)"
-            />
-            <ASwitch
-                v-bind="form.field('auto_match')"
-                label="Match series automatically"
-                description="Links series to metadata providers in the background with MangaBaka."
-            />
-            <fieldset ref="sourcesEl" class="flex flex-col gap-2">
-                <legend class="mb-2 text-sm font-semibold">Sources</legend>
-                <div
-                    v-for="(source, index) in form.values.value.sources"
-                    :key="index"
-                    class="flex items-start gap-1"
-                >
-                    <ATextField
-                        :model-value="source.path_uri"
-                        :label="`Source ${index + 1}`"
-                        placeholder="/path/to/folder"
-                        size="sm"
-                        :hint="sourceHint(index)"
-                        hint-tone="warning"
-                        class="flex-1"
-                        @update:model-value="(v: string) => updateSource(index, v)"
-                    />
-                    <!-- Centred on the 40px field box, not on the box plus its hint. -->
-                    <div class="flex h-10 items-center gap-1">
-                        <AIconButton
-                            :icon="IconFolderOpen"
-                            :label="`Browse for source ${index + 1}`"
-                            size="sm"
-                            @click="browseSource(index)"
+        <form :id="formId" novalidate class="flex min-h-0 flex-1 flex-col gap-3" @submit="onSubmit">
+            <ATabs v-model="tab" :options="tabOptions" label="Library settings" class="min-h-80">
+                <template #general>
+                    <div class="flex flex-col gap-3 pt-4">
+                        <ATextField
+                            v-bind="form.field('name')"
+                            label="Name"
+                            autocomplete="off"
+                            autofocus
                         />
-                        <AIconButton
-                            :icon="IconClose"
-                            :label="`Remove source ${index + 1}`"
-                            size="sm"
-                            @click="removeSource(index)"
+                        <ASelect
+                            :model-value="form.values.value.type"
+                            :options="typeOptions"
+                            label="Type"
+                            :readonly="!isNew"
+                            :hint="isNew ? undefined : 'Fixed once the library is created.'"
+                            :error="form.field('type').error"
+                            @update:model-value="form.field('type')['onUpdate:modelValue']"
                         />
+                        <ASelect
+                            v-if="form.values.value.type === 'books'"
+                            :model-value="form.values.value.book_series_inference"
+                            :options="inferenceOptions"
+                            label="Series without metadata"
+                            :hint="inferenceHint"
+                            @update:model-value="
+                                v => v && form.setValue('book_series_inference', v)
+                            "
+                        />
+                        <div class="mt-3 flex flex-col gap-3" :aria-busy="config.isPending.value">
+                            <QueryError :query="config" />
+                            <template v-if="config.data.value">
+                                <div
+                                    v-for="p in providers"
+                                    :key="p.name"
+                                    class="flex flex-col items-start"
+                                >
+                                    <ASwitch
+                                        :model-value="!!form.values.value.auto_match[p.name]"
+                                        :label="`Match series automatically with ${p.label}`"
+                                        description="Links series to the provider in the background."
+                                        class="self-stretch"
+                                        @update:model-value="v => setLibraryAutoMatch(p.name, v)"
+                                    />
+                                    <AButton
+                                        v-if="overrideCount(form.values.value.sources, p.name)"
+                                        variant="text"
+                                        size="sm"
+                                        @click="showOverrides(p.name)"
+                                    >
+                                        Overridden in
+                                        {{
+                                            plural(
+                                                overrideCount(form.values.value.sources, p.name),
+                                                'source'
+                                            )
+                                        }}
+                                    </AButton>
+                                </div>
+                                <p v-if="!providers.length" class="text-fg-muted">
+                                    No metadata provider handles this library's type.
+                                </p>
+                            </template>
+                            <ASkeleton v-else-if="config.isPending.value" height="56px" />
+                        </div>
                     </div>
-                </div>
-                <div class="flex flex-wrap gap-2">
-                    <AButton
-                        ref="addSourceButton"
-                        variant="tonal"
-                        size="sm"
-                        :leading-icon="IconFolderOpen"
-                        @click="browseSources"
-                    >
-                        Browse folders…
-                    </AButton>
-                    <AButton variant="text" size="sm" :leading-icon="IconPlus" @click="addSource">
-                        Add path manually
-                    </AButton>
-                </div>
-            </fieldset>
+                </template>
+                <template #tab-sources>
+                    Sources
+                    <AIcon
+                        v-if="!hasSources"
+                        :icon="IconAlert"
+                        label="No sources"
+                        class="text-warning"
+                    />
+                </template>
+                <template #sources>
+                    <fieldset ref="sourcesEl" class="flex flex-col gap-3 pt-4">
+                        <legend class="sr-only">Sources</legend>
+                        <p v-if="form.values.value.sources.length" class="text-fg-muted">
+                            Click
+                            <AIcon :icon="IconTune" class="inline align-[-3px] text-base" />
+                            to override the library's settings for a source.
+                        </p>
+                        <div
+                            v-for="(source, index) in form.values.value.sources"
+                            :key="source.key"
+                            class="flex flex-col gap-2"
+                        >
+                            <div class="flex items-start gap-1">
+                                <ATextField
+                                    :model-value="source.path_uri"
+                                    :label="`Source ${index + 1}`"
+                                    placeholder="/path/to/folder"
+                                    size="sm"
+                                    :hint="sourceHint(index)"
+                                    hint-tone="warning"
+                                    class="flex-1"
+                                    @update:model-value="(v: string) => updateSource(index, v)"
+                                />
+                                <!-- Centred on the 40px field box, not on the box plus its hint. -->
+                                <div class="flex h-10 items-center gap-1">
+                                    <AIconButton
+                                        :icon="IconTune"
+                                        :label="`Settings of source ${index + 1}`"
+                                        size="sm"
+                                        :variant="overrides(source).length ? 'tonal' : 'standard'"
+                                        :tone="overrides(source).length ? 'primary' : 'neutral'"
+                                        :aria-expanded="expanded.has(source.key)"
+                                        :aria-controls="`${formId}-${source.key}`"
+                                        @click="toggleExpanded(source.key)"
+                                    />
+                                    <AIconButton
+                                        :icon="IconFolderOpen"
+                                        :label="`Browse for source ${index + 1}`"
+                                        size="sm"
+                                        @click="browseSource(index)"
+                                    />
+                                    <AIconButton
+                                        :icon="IconClose"
+                                        :label="`Remove source ${index + 1}`"
+                                        size="sm"
+                                        @click="removeSource(index)"
+                                    />
+                                </div>
+                            </div>
+                            <div
+                                v-if="!expanded.has(source.key) && overrides(source).length"
+                                class="flex flex-wrap gap-1"
+                            >
+                                <AChip v-for="o in overrides(source)" :key="o" size="sm">
+                                    {{ o }}
+                                </AChip>
+                            </div>
+                            <div
+                                v-if="expanded.has(source.key)"
+                                :id="`${formId}-${source.key}`"
+                                class="border-outline-variant ml-3 flex flex-col gap-3 border-l pl-3"
+                            >
+                                <div
+                                    v-for="p in providers"
+                                    :key="p.name"
+                                    class="flex flex-col gap-1"
+                                >
+                                    <span class="text-sm font-semibold">
+                                        Match series automatically with {{ p.label }}
+                                    </span>
+                                    <ASegmented
+                                        size="sm"
+                                        :model-value="overrideOf(source, p.name)"
+                                        :options="overrideOptions(p.name)"
+                                        :label="`${p.label} matching for source ${index + 1}`"
+                                        @update:model-value="v => setOverride(index, p.name, v)"
+                                    />
+                                    <p
+                                        v-if="
+                                            !autoMatchOn(form.values.value, source.settings, p.name)
+                                        "
+                                        class="text-fg-muted text-xs"
+                                    >
+                                        Series that also have files in a source that matches
+                                        automatically are still matched.
+                                    </p>
+                                </div>
+                                <p
+                                    v-if="config.data.value && !providers.length"
+                                    class="text-fg-muted text-sm"
+                                >
+                                    No metadata provider handles this library's type.
+                                </p>
+                            </div>
+                        </div>
+                        <div class="flex flex-wrap gap-2">
+                            <AButton
+                                ref="addSourceButton"
+                                variant="tonal"
+                                size="sm"
+                                :leading-icon="IconFolderOpen"
+                                @click="browseSources"
+                            >
+                                Browse folders…
+                            </AButton>
+                            <AButton
+                                variant="text"
+                                size="sm"
+                                :leading-icon="IconPlus"
+                                @click="addSource"
+                            >
+                                Add path manually
+                            </AButton>
+                        </div>
+                    </fieldset>
+                </template>
+            </ATabs>
             <QueryError :mutation="form.mutation" />
             <QueryError :mutation="deleteLibrary" />
         </form>
@@ -100,20 +224,28 @@
 
 <script setup lang="ts">
 import { refDebounced } from '@vueuse/core'
-import { computed, nextTick, useId, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, reactive, ref, toRaw, useId, useTemplateRef, watch } from 'vue'
 import { z } from 'zod'
 import { showConfirmModal } from '@/components/ConfirmModal.vue'
 import QueryError from '@/components/QueryError.vue'
 import AButton from '@/ui/AButton.vue'
+import AChip from '@/ui/AChip.vue'
 import ADialog from '@/ui/ADialog.vue'
+import AIcon from '@/ui/AIcon.vue'
 import AIconButton from '@/ui/AIconButton.vue'
+import ASegmented from '@/ui/ASegmented.vue'
 import ASelect from '@/ui/ASelect.vue'
+import ASkeleton from '@/ui/ASkeleton.vue'
 import ASwitch from '@/ui/ASwitch.vue'
+import ATabs from '@/ui/ATabs.vue'
 import ATextField from '@/ui/ATextField.vue'
-import { IconClose, IconFolderOpen, IconPlus } from '@/ui/icons'
+import { IconAlert, IconClose, IconFolderOpen, IconPlus, IconTune } from '@/ui/icons'
 import { useToast } from '@/ui/useToast'
 import { librariesApi } from '@/utils/api/libraries'
+import { metadataApi } from '@/utils/api/metadata'
 import { useForm } from '@/utils/forms'
+import { autoMatchOn, overrideCount } from '@/utils/librarySettings'
+import { plural } from '@/utils/misc'
 import { showFolderPicker } from './FolderPickerModal.vue'
 import { useSourceOverlaps } from './useSourceOverlaps'
 
@@ -138,6 +270,12 @@ const inferenceOptions = [
     { value: 'conservative', label: 'Group by volume number in title or filename' },
     { value: 'off', label: 'Keep as standalone books' },
 ] as const
+const tabOptions = [
+    { value: 'general', label: 'General' },
+    { value: 'sources', label: 'Sources' },
+] as const
+type Tab = (typeof tabOptions)[number]['value']
+const tab = ref<Tab>('general')
 const sourcesEl = useTemplateRef('sourcesEl')
 const addSourceButton = useTemplateRef<{ $el: HTMLElement }>('addSourceButton')
 
@@ -150,25 +288,29 @@ const form = useForm({
             .refine(val => val !== null, 'Type is required'),
         sources: z.array(
             z.object({
+                key: z.string(), // local, to key the rows
                 path_uri: z.string(),
+                settings: z.object({ auto_match: z.record(z.string(), z.boolean()).optional() }),
             })
         ),
         book_series_inference: z.enum(['off', 'conservative']),
-        auto_match: z.boolean(),
+        auto_match: z.record(z.string(), z.boolean()),
     }),
     initialValues: {
         name: '',
         type: null,
         sources: [],
         book_series_inference: 'conservative',
-        auto_match: false,
+        auto_match: {},
     },
     onSubmit: async values => {
         await upsert.mutateAsync({
             id: isNew.value ? undefined : props.libraryId,
             name: values.name,
             type: values.type!,
-            sources: values.sources.filter(s => s.path_uri.trim() !== ''),
+            sources: values.sources
+                .filter(s => s.path_uri.trim() !== '')
+                .map(({ path_uri, settings }) => ({ path_uri, settings })),
             settings: {
                 book_series_inference: values.book_series_inference,
                 auto_match: values.auto_match,
@@ -186,12 +328,89 @@ const inferenceHint = computed(() =>
         : undefined
 )
 
+// A field that fails validation may sit in a hidden tab: show it, so the form can focus it.
+function onSubmit(e: Event) {
+    form.onSubmit(e)
+    const field = form.errors.value[0]?.path[0]
+    if (field !== undefined) tab.value = field === 'sources' ? 'sources' : 'general'
+}
+
+const config = metadataApi.useConfig()
+const seriesTypes = { comics: 'comic_series', books: 'book_series' } as const
+// The providers that match this type of library; all of them until a type is picked.
+const providers = computed(() => {
+    const type = form.values.value.type
+    return (config.data.value?.providers ?? []).filter(
+        p => !type || p.content_types.includes(seriesTypes[type])
+    )
+})
+
+type SourceRow = (typeof form.values.value.sources)[number]
+type Override = 'inherit' | 'on' | 'off'
+
+let lastKey = 0
+const newRow = (path_uri: string, settings: SourceRow['settings'] = {}): SourceRow => ({
+    key: String(++lastKey),
+    path_uri,
+    settings,
+})
+
+const expanded = reactive(new Set<string>())
+
+function toggleExpanded(key: string) {
+    if (!expanded.delete(key)) expanded.add(key)
+}
+
+function setLibraryAutoMatch(provider: string, on: boolean) {
+    form.setValue('auto_match', { ...form.values.value.auto_match, [provider]: on })
+}
+
+function overrideOf(source: SourceRow, provider: string): Override {
+    const v = source.settings.auto_match?.[provider]
+    return v === undefined ? 'inherit' : v ? 'on' : 'off'
+}
+
+function overrideOptions(provider: string) {
+    const inherited = form.values.value.auto_match[provider] ? 'on' : 'off'
+    return [
+        { value: 'inherit', label: `Inherit (${inherited})` },
+        { value: 'on', label: 'On' },
+        { value: 'off', label: 'Off' },
+    ] as const
+}
+
+// Immutable, so no edit reaches the libraries query's data the form was loaded from.
+function setOverride(index: number, provider: string, value: Override) {
+    const sources = [...form.values.value.sources]
+    const row = sources[index]!
+    const auto_match = { ...row.settings.auto_match }
+    if (value === 'inherit') delete auto_match[provider]
+    else auto_match[provider] = value === 'on'
+    sources[index] = { ...row, settings: { ...row.settings, auto_match } }
+    form.setValue('sources', sources)
+}
+
+// Of the providers shown; keys of others stay in the form, unseen.
+function overrides(source: SourceRow) {
+    return providers.value.flatMap(p => {
+        const on = source.settings.auto_match?.[p.name]
+        return on === undefined ? [] : [`${p.label}: ${on ? 'on' : 'off'}`]
+    })
+}
+
+function showOverrides(provider: string) {
+    for (const s of form.values.value.sources) {
+        if (s.settings.auto_match?.[provider] !== undefined) expanded.add(s.key)
+    }
+    tab.value = 'sources'
+}
+
 function sourceInputs() {
     return [...(sourcesEl.value?.querySelectorAll('input') ?? [])]
 }
 
 async function addSource() {
-    form.setValue('sources', [...form.values.value.sources, { path_uri: '' }])
+    form.setValue('sources', [...form.values.value.sources, newRow('')])
     await nextTick()
     sourceInputs().at(-1)?.focus()
 }
@@ -211,11 +430,12 @@ async function removeSource(index: number) {
 
 function updateSource(index: number, value: string) {
     const sources = [...form.values.value.sources]
-    sources[index] = { path_uri: value }
+    sources[index] = { ...sources[index]!, path_uri: value }
     form.setValue('sources', sources)
 }
 
 const sourcePaths = computed(() => form.values.value.sources.map(s => s.path_uri.trim()))
+const hasSources = computed(() => sourcePaths.value.some(p => p))
 const otherPaths = (except?: number) => sourcePaths.value.filter((p, i) => p && i !== except)
 const excludeLibraryId = isNew.value ? undefined : props.libraryId
 const overlaps = useSourceOverlaps(excludeLibraryId)
@@ -239,7 +459,7 @@ async function browseSources() {
     })
     if (!paths) return
     const added = paths.filter(p => !sourcePaths.value.includes(p))
-    form.setValue('sources', [...form.values.value.sources, ...added.map(p => ({ path_uri: p }))])
+    form.setValue('sources', [...form.values.value.sources, ...added.map(p => newRow(p))])
 }
 
 function sourceHint(index: number) {
@@ -258,12 +478,14 @@ watch(
     l => {
         if (l && !isNew.value && !initialised) {
             initialised = true
+            // A copy: setValues keeps what it is given, and edits must not reach the query's data.
+            const { name, type, sources, settings } = structuredClone(toRaw(l))
             form.setValues({
-                name: l.name,
-                type: l.type,
-                sources: l.sources,
-                book_series_inference: l.settings.book_series_inference,
-                auto_match: l.settings.auto_match,
+                name,
+                type,
+                sources: sources.map(s => newRow(s.path_uri, s.settings)),
+                book_series_inference: settings.book_series_inference,
+                auto_match: settings.auto_match,
             })
         }
     },

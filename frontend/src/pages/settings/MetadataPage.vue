@@ -73,6 +73,7 @@
                 v-if="tab === 'unmatched' || tab === 'auto'"
                 v-model="failed"
                 label="Errors only"
+                size="sm"
             />
             <ASelect
                 v-model="libraryId"
@@ -318,6 +319,7 @@ import {
     type WorkerPass,
 } from '@/utils/api/metadata'
 import { settingsApi, settingValue } from '@/utils/api/settings'
+import { libraryAutoMatches } from '@/utils/librarySettings'
 import { plural } from '@/utils/misc'
 
 useHead({ title: 'Metadata' })
@@ -455,10 +457,11 @@ function setPaused(on: boolean) {
     mSettings.mutate({ [PAUSED]: on })
 }
 
-// Match now only matches libraries that match automatically.
+// Match now only matches libraries that match automatically. Not off while that is unknown.
 const matchOff = computed(() => {
     const libs = qLibraries.data.value?.filter(l => !libraryId.value || l.id === libraryId.value)
-    return !!libs && !libs.some(l => l.settings.auto_match)
+    const providers = qConfig.data.value?.providers.map(p => p.name)
+    return !!libs && !!providers && !libs.some(l => libraryAutoMatches(l, providers))
 })
 
 const qReview = metadataApi.useReview(() => ({
