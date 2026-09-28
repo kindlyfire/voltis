@@ -27,10 +27,23 @@
             </span>
         </ACover>
 
-        <div v-if="!settings.hideTitle" aria-hidden="true">
-            <div class="content-card__title">{{ title }}</div>
-            <div v-if="subtitle" class="content-card__subtitle">{{ subtitle }}</div>
-        </div>
+        <!-- Above the card link so it can show the full text; the card link names it. -->
+        <ATooltip v-if="!settings.hideTitle" :disabled="selecting || !truncated">
+            <RouterLink
+                :to="to"
+                tabindex="-1"
+                aria-hidden="true"
+                class="content-card__text"
+                @pointerenter="checkTruncated"
+            >
+                <div class="content-card__title">{{ title }}</div>
+                <div v-if="subtitle" class="content-card__subtitle">{{ subtitle }}</div>
+            </RouterLink>
+            <template #content>
+                <div>{{ title }}</div>
+                <div v-if="subtitle" class="content-card__tooltip-subtitle">{{ subtitle }}</div>
+            </template>
+        </ATooltip>
 
         <ACheckbox
             v-if="selecting"
@@ -44,12 +57,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, toRef } from 'vue'
+import { computed, ref, toRef } from 'vue'
 import { RouterLink } from 'vue-router'
 import ABadge from '@/ui/ABadge.vue'
 import ACheckbox from '@/ui/ACheckbox.vue'
 import ACover from '@/ui/ACover.vue'
 import AIconButton from '@/ui/AIconButton.vue'
+import ATooltip from '@/ui/ATooltip.vue'
 import {
     IconBookmarkFilled,
     IconBookOpenFilled,
@@ -103,6 +117,14 @@ const subtitle = computed(() => {
     const p = position.value
     return p ? `${props.content.title} · ${p.read} / ${p.total}` : props.content.title
 })
+
+// Measured on pointerenter, which fires before the pointermove that opens the tooltip.
+const truncated = ref(false)
+function checkTruncated(e: PointerEvent) {
+    truncated.value = [...(e.currentTarget as HTMLElement).children].some(
+        (el) => el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth
+    )
+}
 
 const coverUri = computed(() => coverUrl(props.content))
 
@@ -158,6 +180,22 @@ const linkLabel = computed(() => {
 
     .content-card:hover .content-card__cover {
         box-shadow: 0 6px 16px -6px oklch(0.2 0.02 60 / 0.35);
+    }
+
+    .content-card__text {
+        display: block;
+        position: relative;
+        z-index: 2;
+        color: inherit;
+        text-decoration: none;
+    }
+
+    .selecting .content-card__text {
+        z-index: auto;
+    }
+
+    .content-card__tooltip-subtitle {
+        opacity: 0.75;
     }
 
     .content-card__title {
