@@ -38,10 +38,17 @@
                         Back to reading
                     </AButton>
                 </div>
-                <div v-else-if="session.prevChapter" class="flex justify-center p-4">
-                    <AButton variant="tonal" @click.stop="goChapter($event, -1)">
-                        Previous: {{ session.prevChapter.title }}
+                <div v-else-if="session.prevChapter" class="flex flex-col items-center gap-1 p-4">
+                    <AButton
+                        variant="tonal"
+                        :aria-describedby="prevTitleId"
+                        @click.stop="goChapter($event, -1)"
+                    >
+                        Previous chapter
                     </AButton>
+                    <span :id="prevTitleId" class="text-fg-muted text-center text-sm wrap-anywhere">
+                        {{ session.prevChapter.title }}
+                    </span>
                 </div>
             </template>
 
@@ -62,16 +69,21 @@
 
             <template v-if="ready && !session.standalone && !paged">
                 <ADivider />
-                <div class="flex justify-center p-4">
-                    <AButton v-if="session.nextChapter" @click.stop="goChapter($event, 1)">
-                        Next: {{ session.nextChapter.title }}
-                    </AButton>
-                    <div v-else class="flex flex-col items-center gap-3">
-                        <span class="text-fg-muted text-sm">End of book</span>
-                        <AButton v-if="nextVolume" @click.stop="openVolume(nextVolume.id)">
-                            Next: {{ nextVolume.title }}
+                <div class="flex flex-col items-center gap-1 p-4">
+                    <span v-if="!session.nextChapter" class="text-fg-muted mb-2 text-sm">
+                        End of book
+                    </span>
+                    <template v-if="next">
+                        <AButton :aria-describedby="nextTitleId" @click.stop="next.go">
+                            {{ next.label }}
                         </AButton>
-                    </div>
+                        <span
+                            :id="nextTitleId"
+                            class="text-fg-muted text-center text-sm wrap-anywhere"
+                        >
+                            {{ next.title }}
+                        </span>
+                    </template>
                 </div>
                 <div ref="sentinel" class="h-px" />
             </template>
@@ -123,7 +135,7 @@
 
 <script setup lang="ts">
 import { useStyleTag } from '@vueuse/core'
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, useId, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import AAlert from '@/ui/AAlert.vue'
 import AButton from '@/ui/AButton.vue'
@@ -150,6 +162,8 @@ const paged = computed(() => session.value?.layoutMode === 'paged')
 const host = ref<HTMLDivElement>()
 const sentinel = ref<HTMLDivElement>()
 const nextPageButton = ref<HTMLButtonElement>()
+const prevTitleId = useId()
+const nextTitleId = useId()
 const controls = useBookControls()
 const router = useRouter()
 const chapterProgress = useChapterScrollProgress(host)
@@ -185,6 +199,19 @@ const readerVars = computed(() => ({
     '--reader-max-width': `calc(${store.settings.width}em + 4rem)`,
     '--reader-width': `${store.settings.width}`,
 }))
+
+const next = computed(() => {
+    const chapter = session.value?.nextChapter
+    if (chapter) {
+        return {
+            label: 'Next chapter',
+            title: chapter.title,
+            go: (event: MouseEvent) => goChapter(event, 1),
+        }
+    }
+    const volume = nextVolume.value
+    return volume && { label: 'Next volume', title: volume.title, go: () => openVolume(volume.id) }
+})
 
 /** Blurred: the button survives the route change with focus, where the next
  * Space would re-activate it instead of scrolling. */
@@ -240,6 +267,13 @@ onUnmounted(() => {
 <style scoped>
 .book-reader {
     min-height: calc(100dvh - var(--layout-top, 0px));
+}
+
+/* Nothing may widen the page: on Android Firefox the layout viewport grows with it, pushing
+ * right-anchored fixed elements off screen. `clip` isn't a scroll container, so sticky and
+ * scroll anchoring still work. */
+.book-reader:not(.is-paged) {
+    overflow-x: clip;
 }
 
 /* Each mounted slice's shadow host (see `mountTree`). */

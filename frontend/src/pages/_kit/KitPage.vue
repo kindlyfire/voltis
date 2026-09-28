@@ -806,7 +806,7 @@
 
                 <KitGroup
                     title="ADrawer"
-                    description="Not modal: no focus trap. Esc or the scrim closes it."
+                    description="Not modal: no focus trap. At most 85vw wide. Esc, the scrim or a swipe toward its edge closes it."
                     :min="200"
                 >
                     <KitDemo label="left / right">

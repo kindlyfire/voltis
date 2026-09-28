@@ -38,6 +38,17 @@
                     Chapter {{ session.chapterIndex + 1 }} of {{ session.chapters.length }} &bull;
                     {{ Math.round(session.percent) }}%
                 </div>
+                <ASlider
+                    v-if="pageCount > 1"
+                    class="mt-4"
+                    :model-value="sliderPage"
+                    label="Page"
+                    show-value
+                    :format-value="i => `${i + 1} of ${pageCount}`"
+                    :min="0"
+                    :max="pageCount - 1"
+                    @update:model-value="onSliderChange"
+                />
             </div>
         </div>
 
@@ -58,7 +69,7 @@
                         :active-chapter="session.chapterIndex"
                         :active-href="session.chapter?.target.href ?? null"
                         :fallback="session.fallback"
-                        @select="session?.snapshotPassage()"
+                        @select="onContentsSelect"
                     />
                     <ASkeleton v-else shape="text" :lines="6" />
                 </div>
@@ -88,11 +99,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, useTemplateRef, watch } from 'vue'
+import { useDebounceFn } from '@vueuse/core'
+import { computed, ref, useTemplateRef, watch } from 'vue'
 import { useLayoutStore } from '@/pages/_layout/useLayoutStore'
 import ADrawer from '@/ui/ADrawer.vue'
 import AIconButton from '@/ui/AIconButton.vue'
 import ASkeleton from '@/ui/ASkeleton.vue'
+import ASlider from '@/ui/ASlider.vue'
 import ATabs from '@/ui/ATabs.vue'
 import { IconArrowLeft, IconChevronLeft, IconChevronRight, IconClose } from '@/ui/icons'
 import ReaderHeading from '../ReaderHeading.vue'
@@ -124,6 +137,42 @@ watch(
     open => {
         navbarHidden(open ? false : undefined)
     }
+)
+
+/** The mounted chapter's screens, while paged. */
+const pageCount = computed(() => {
+    const current = session.value
+    return current?.layoutMode === 'paged' && current.firstChapterMounted
+        ? (current.screen?.count ?? 0)
+        : 0
+})
+const sliderPage = ref(session.value?.screen?.index ?? 0)
+watch(
+    () => session.value?.screen?.index,
+    index => {
+        if (index !== undefined) sliderPage.value = index
+    }
+)
+const debouncedGoToScreen = useDebounceFn((index: number) => {
+    session.value?.goToScreen(index)
+}, 200)
+function onSliderChange(index: number) {
+    sliderPage.value = index
+    debouncedGoToScreen(index)
+}
+/** A pending slider jump mustn't override the chosen entry. */
+function onContentsSelect() {
+    debouncedGoToScreen.cancel()
+    session.value?.snapshotPassage()
+}
+// A pending jump mustn't land in the next chapter or book.
+watch(
+    [() => session.value?.chapterIndex, () => session.value?.contentId],
+    () => {
+        debouncedGoToScreen.cancel()
+        sliderPage.value = session.value?.screen?.index ?? 0
+    },
+    { flush: 'post' }
 )
 
 /*

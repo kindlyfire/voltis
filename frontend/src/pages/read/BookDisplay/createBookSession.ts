@@ -899,6 +899,13 @@ export function createBookSession(
         }
     }
 
+    /** Paged: jumps within the chapter, clamped. */
+    function goToScreen(index: number) {
+        if (crossing() || !mounted.length) return
+        if (activity.value.phase === 'book-end') activity.value = { phase: 'ready' }
+        if (layout.value.showScreen(index)) onUserMove()
+    }
+
     function setMode(preferred: LayoutKind) {
         if (activity.value.phase === 'book-end') activity.value = { phase: 'ready' }
         const mode = modeFor(preferred)
@@ -997,6 +1004,7 @@ export function createBookSession(
         goToChapter,
         closeStandalone,
         turn,
+        goToScreen,
 
         dismissNotice() {
             state.notice = null

@@ -154,7 +154,7 @@ describe('BookReader host lifecycle', () => {
         expect(mountedText()).toContain('second chapter')
         // The sentinel comes back with the chapter chrome, so completion can work.
         expect(wrapper.find('.h-px').exists()).toBe(true)
-        expect(wrapper.text()).toContain('Previous: One')
+        expect(wrapper.text()).toContain('Previous chapter')
         expect(wrapper.text()).toContain('End of book')
     })
 })
@@ -214,7 +214,7 @@ describe('BookReader layouts', () => {
         expect(session.layoutMode).toBe('paged')
         expect(wrapper.find('.book-reader').classes()).toContain('is-paged')
         expect(wrapper.find('.book-footer').text()).toContain('Page 1 / 1')
-        expect(wrapper.text()).not.toContain('Next: Two')
+        expect(wrapper.text()).not.toContain('Next chapter')
         expect(wrapper.find('.progress').exists()).toBe(false)
         expect(wrapper.find('.h-px').exists()).toBe(false)
 
@@ -238,7 +238,9 @@ describe('BookReader layouts', () => {
         const store = await open('scroll')
         expect(store.session!.layoutMode).toBe('scroll')
         expect(wrapper.find('.book-footer').exists()).toBe(false)
-        expect(wrapper.text()).toContain('Next: Two')
+        expect(wrapper.text()).toContain('Next chapter')
+        const describedBy = wrapper.find('button').attributes('aria-describedby')
+        expect(wrapper.find(`[id="${describedBy}"]`).text()).toBe('Two')
         expect(wrapper.find('.progress').exists()).toBe(true)
     })
 })

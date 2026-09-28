@@ -3,6 +3,7 @@
         <Transition name="a-drawer-scrim">
             <div
                 v-if="open"
+                ref="scrim"
                 class="a-drawer-scrim"
                 :class="{ nav }"
                 aria-hidden="true"
@@ -34,11 +35,12 @@
 import { useEventListener } from '@vueuse/core'
 import { nextTick, useId, useTemplateRef, watch } from 'vue'
 import { useOverlayLayer } from './overlay'
+import { useDrawerSwipe } from './useDrawerSwipe'
 
 /**
  * A side sheet. Not modal: no focus trap, the header above stays usable, and it stays open across
- * route changes. The scrim closes it, and so does Esc when it's the topmost overlay. Focus moves
- * in on open and back to the opener on close.
+ * route changes. The scrim or a touch swipe toward its edge closes it, and so does Esc when it's
+ * the topmost overlay. Focus moves in on open and back to the opener on close.
  */
 const props = withDefaults(
     defineProps<{
@@ -46,7 +48,7 @@ const props = withDefaults(
          * heading the `titleId` the default slot provides. */
         title?: string
         side?: 'left' | 'right'
-        /** A px number or any CSS width. */
+        /** A px number or any CSS width, capped at 85vw so the scrim stays reachable. */
         width?: number | string
         /** The main navigation: stacks above page drawers (the reader's), below the header. */
         nav?: boolean
@@ -58,6 +60,7 @@ const open = defineModel<boolean>('open', { required: true })
 
 const titleId = useId()
 const panel = useTemplateRef('panel')
+const scrim = useTemplateRef('scrim')
 const layer = useOverlayLayer(props.nav ? 'nav-drawer' : 'drawer', open)
 let opener: HTMLElement | null = null
 
@@ -84,6 +87,8 @@ function restoreFocus() {
     else if (inPanel) (active as HTMLElement).blur()
 }
 
+useDrawerSwipe({ panel, scrim, side: () => props.side, onClose: () => (open.value = false) })
+
 useEventListener(document, 'keydown', (e: KeyboardEvent) => {
     if (e.key !== 'Escape' || e.defaultPrevented || !open.value || !layer.isTop()) return
     e.preventDefault()
@@ -102,6 +107,9 @@ useEventListener(document, 'keydown', (e: KeyboardEvent) => {
         /* iOS scrolls the page under a fixed element otherwise. */
         touch-action: none;
         -webkit-tap-highlight-color: transparent;
+        /* Before the enter and leave rules, which must win. `--drawer-progress` is a swipe's. */
+        opacity: calc(1 - var(--drawer-progress, 0));
+        transition: opacity var(--duration-medium) var(--ease-standard);
     }
 
     .a-drawer {
@@ -111,7 +119,7 @@ useEventListener(document, 'keydown', (e: KeyboardEvent) => {
         z-index: var(--z-drawer);
         display: flex;
         flex-direction: column;
-        width: min(var(--drawer-width), 100vw);
+        width: min(var(--drawer-width), 85vw);
         height: 100dvh;
         /* The header overlaps the drawer's top. */
         padding-top: var(--header-height);
@@ -120,6 +128,14 @@ useEventListener(document, 'keydown', (e: KeyboardEvent) => {
         color: var(--color-fg);
         box-shadow: var(--shadow-overlay);
         outline: none;
+        /* `--drawer-drag` is a swipe's offset. */
+        transform: translateX(var(--drawer-drag, 0px));
+        transition: transform var(--duration-medium) var(--ease-standard);
+    }
+
+    /* After both base rules: scoped, it has their specificity. */
+    .dragging {
+        transition: none;
     }
 
     /* Below the header, so its scrollbar is too. A column: content can fill it with `flex: 1`, or
@@ -151,22 +167,12 @@ useEventListener(document, 'keydown', (e: KeyboardEvent) => {
         padding-right: env(safe-area-inset-right);
     }
 
-    .a-drawer-enter-active,
-    .a-drawer-leave-active {
-        transition: transform var(--duration-medium) var(--ease-standard);
-    }
-
     .side-left:is(.a-drawer-enter-from, .a-drawer-leave-to) {
         transform: translateX(-100%);
     }
 
     .side-right:is(.a-drawer-enter-from, .a-drawer-leave-to) {
         transform: translateX(100%);
-    }
-
-    .a-drawer-scrim-enter-active,
-    .a-drawer-scrim-leave-active {
-        transition: opacity var(--duration-medium) var(--ease-standard);
     }
 
     .a-drawer-scrim-enter-from,

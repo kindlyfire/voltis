@@ -186,7 +186,11 @@ describe('paged session', () => {
         expect(session.screen!.index).toBe(1)
         expect(passage(session, nav).textOffset).toBeGreaterThan(0)
 
-        await turnTo(session, count - 1)
+        session.goToScreen(count - 1)
+        expect(session.screen!.index).toBe(count - 1)
+        session.goToScreen(99)
+        expect(session.screen!.index).toBe(count - 1)
+        await frames()
         const pushes = nav.entries.length
         session.turn('next')
         session.turn('next')

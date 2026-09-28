@@ -122,7 +122,7 @@ const subtitle = computed(() => {
 const truncated = ref(false)
 function checkTruncated(e: PointerEvent) {
     truncated.value = [...(e.currentTarget as HTMLElement).children].some(
-        (el) => el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth
+        el => el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth
     )
 }
 

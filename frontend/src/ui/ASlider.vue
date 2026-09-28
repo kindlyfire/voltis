@@ -6,6 +6,7 @@
         </div>
         <SliderRoot
             class="a-slider__root"
+            data-no-drawer-swipe
             :model-value="[modelValue]"
             :min="min"
             :max="max"

@@ -42,4 +42,42 @@ describe('ADrawer', () => {
         wrapper.unmount()
         expect(locked()).toBe(false)
     })
+
+    it('closes on a horizontal drag toward its edge past 35% of its width', async () => {
+        const wrapper = mount(ADrawer, { props: { open: true, side: 'right' } })
+        await nextTick()
+        const panel = document.querySelector<HTMLElement>('.a-drawer')!
+        panel.getBoundingClientRect = () => ({ width: 300 }) as DOMRect
+
+        function touch(type: string, x: number, y = 100) {
+            const point = [{ clientX: x, clientY: y }] as unknown as Touch[]
+            const e = new TouchEvent(type, {
+                bubbles: true,
+                cancelable: true,
+                touches: type === 'touchend' ? [] : point,
+                changedTouches: point,
+            })
+            panel.dispatchEvent(e)
+            return e
+        }
+        const swipe = (...xs: [number, number][]) => {
+            touch('touchstart', 100)
+            const moves = xs.map(([x, y]) => touch('touchmove', x, y))
+            return { moves, end: touch('touchend', xs.at(-1)![0]) }
+        }
+
+        const vertical = swipe([102, 120], [104, 160])
+        expect(vertical.moves.some(e => e.defaultPrevented)).toBe(false)
+
+        const short = swipe([106, 100], [108, 100])
+        expect(short.moves.map(e => e.defaultPrevented)).toEqual([false, true])
+        expect(short.end.defaultPrevented).toBe(false)
+        expect(panel.style.getPropertyValue('--drawer-drag')).toBe('')
+
+        const far = swipe([120, 100], [250, 100])
+        expect(far.end.defaultPrevented).toBe(true)
+        expect(panel.style.getPropertyValue('--drawer-drag')).toBe('130px')
+        expect(wrapper.emitted('update:open')).toEqual([[false]])
+        wrapper.unmount()
+    })
 })

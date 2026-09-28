@@ -41,6 +41,8 @@ export interface ReadingLayout {
      * end, so a chapter still loading images isn't scrolled into. */
     place(landing: Landing | null, provisional?: boolean): Placed
     turn(direction: 'next' | 'prev'): 'moved' | 'start' | 'end' | 'unavailable'
+    /** Paged: shows the screen at `index`, clamped. False without a paginator. */
+    showScreen(index: number): boolean
     /** The text layout changed: lays out again, keeping the passage. */
     reflow(): void
     dispose(): void
@@ -165,6 +167,7 @@ export function createScrollLayout(options: LayoutOptions): ReadingLayout {
         capture,
         place,
         turn: () => 'unavailable',
+        showScreen: () => false,
         /** Window resizes are left to native scroll anchoring: a height-only
          * one (the mobile address bar) doesn't reflow, and restoring on it
          * would jerk the text. */
@@ -297,6 +300,11 @@ export function createPagedLayout(options: LayoutOptions): ReadingLayout {
             if (index >= screen.count) return 'end'
             show(index)
             return 'moved'
+        },
+        showScreen(index) {
+            if (!paginator) return false
+            show(index)
+            return true
         },
         reflow: schedule,
         dispose() {
