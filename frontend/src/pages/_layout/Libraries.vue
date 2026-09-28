@@ -20,7 +20,10 @@
         :label="activeNonShownLibrary.name"
         active
     />
-    <AMenu v-if="overflowLibraries.length" side="right">
+    <AMenu
+        v-if="overflowLibraries.length"
+        :side="store.sidebarTemporary.value ? 'bottom' : 'right'"
+    >
         <template #trigger>
             <ANavItem :icon="IconDotsHorizontal" label="Others" />
         </template>
@@ -47,8 +50,10 @@ import { IconBookshelf, IconBookshelfFilled, IconDotsHorizontal } from '@/ui/ico
 import { contentApi } from '@/utils/api/content'
 import { librariesApi } from '@/utils/api/libraries'
 import { usersApi } from '@/utils/api/users'
+import { useLayoutStore } from './useLayoutStore'
 
 const route = useRoute()
+const store = useLayoutStore()
 const qMe = usersApi.useMe()
 const qLibraries = librariesApi.useList()
 const libraries = qLibraries.data
