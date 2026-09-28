@@ -2,6 +2,7 @@ import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import { createHead } from '@unhead/vue/client'
 import { flushPromises, mount, RouterLinkStub } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import ASelect from '@/ui/ASelect.vue'
 import type { ReviewAction, ReviewItem } from '@/utils/api/metadata'
 import { apiFetch } from '@/utils/fetch'
@@ -59,7 +60,7 @@ let libraries: {
     sources: { path_uri: string; settings: { auto_match?: Record<string, boolean> } }[]
 }[]
 
-beforeEach(() => {
+beforeEach(async () => {
     addOverlays()
     resolved = []
     requests = []
@@ -135,14 +136,21 @@ beforeEach(() => {
         }
         throw new Error(`unexpected ${url}`)
     })
-    wrapper = mountPage()
+    wrapper = await mountPage()
 })
 
-function mountPage() {
+let router: Router
+
+async function mountPage(path = '/settings/metadata') {
+    router = createRouter({
+        history: createMemoryHistory(),
+        routes: [{ path: '/settings/metadata', component: { template: '<div />' } }],
+    })
+    await router.push(path)
     return mount(MetadataPage, {
         attachTo: document.body,
         global: {
-            plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }], createHead()],
+            plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }], createHead(), router],
             stubs: { RouterLink: RouterLinkStub, ATooltip: { template: '<slot />' } },
         },
     })
@@ -221,6 +229,7 @@ describe('MetadataPage', () => {
             expect(reviewQueries.at(-1)?.get('q')).toBe('frier')
 
             await button('No match (0)').trigger('click')
+            await flushPromises() // the tab goes through the URL
             await wrapper
                 .findAll('input[type="checkbox"]')
                 .find(c => c.element.closest('label')?.textContent?.includes('Errors only'))!
@@ -240,6 +249,36 @@ describe('MetadataPage', () => {
         } finally {
             vi.useRealTimers()
         }
+    })
+
+    it('keeps the list state in the URL', async () => {
+        await flushPromises()
+        await button('Auto-linked').trigger('click')
+        await flushPromises()
+        expect(router.currentRoute.value.query.tab).toBe('auto')
+        await button('Needs review (2)').trigger('click')
+        await flushPromises()
+        expect(router.currentRoute.value.query.tab).toBeUndefined()
+
+        wrapper.unmount()
+        reviewQueries = []
+        wrapper = await mountPage(
+            '/settings/metadata?tab=unmatched&library=l1&q=frier&failed=true&page=3'
+        )
+        await flushPromises()
+        expect(Object.fromEntries(reviewQueries[0]!)).toMatchObject({
+            tab: 'unmatched',
+            library_id: 'l1',
+            q: 'frier',
+            failed: 'true',
+            offset: '100',
+        })
+        expect(wrapper.find<HTMLInputElement>('input[type="search"]').element.value).toBe('frier')
+
+        wrapper.unmount()
+        wrapper = await mountPage('/settings/metadata?tab=bogus')
+        await flushPromises()
+        expect(reviewQueries.at(-1)?.get('tab')).toBe('review')
     })
 
     it('shows what the worker does, matches now, and pauses matching', async () => {
@@ -285,7 +324,7 @@ describe('MetadataPage', () => {
         const enabled = async (lib: (typeof libraries)[number]) => {
             libraries = [lib]
             wrapper.unmount()
-            wrapper = mountPage()
+            wrapper = await mountPage()
             await flushPromises()
             return button('Match now').attributes('aria-disabled') === undefined
         }

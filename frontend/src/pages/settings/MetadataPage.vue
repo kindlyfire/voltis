@@ -320,7 +320,7 @@ import {
 } from '@/utils/api/metadata'
 import { settingsApi, settingValue } from '@/utils/api/settings'
 import { libraryAutoMatches } from '@/utils/librarySettings'
-import { plural } from '@/utils/misc'
+import { plural, useRouteQueryParams } from '@/utils/misc'
 
 useHead({ title: 'Metadata' })
 
@@ -346,19 +346,42 @@ const EMPTY: Record<ReviewTab, string> = {
 }
 
 const toast = useToast()
-const tab = ref<ReviewTab>('review')
-const libraryId = ref<string | null>(null)
-const searchInput = ref('')
-const search = refDebounced(
+const TABS: ReviewTab[] = ['review', 'unmatched', 'auto', 'ignored']
+// The list's state lives in the URL, so going back from an entry returns to the same rows.
+const query = useRouteQueryParams({
+    tab: 'review',
+    library: null as string | null,
+    q: '',
+    failed: null as string | null,
+    page: '1',
+})
+const tab = computed<ReviewTab>({
+    get: () => TABS.find(t => t === query.tab.value) ?? 'review',
+    set: v => (query.tab.value = v),
+})
+const libraryId = computed({
+    get: () => query.library.value,
+    set: v => (query.library.value = v),
+})
+const searchInput = ref(query.q.value)
+const typedSearch = refDebounced(
     computed(() => searchInput.value.trim()),
     300
 )
-const failed = ref(false)
+watch(typedSearch, v => (query.q.value = v))
+const search = computed(() => query.q.value)
+const failed = computed({
+    get: () => query.failed.value === 'true',
+    set: v => (query.failed.value = v ? 'true' : null),
+})
 // Only the tabs whose rows can fail offer the filter.
 const failedFilter = computed(
     () => failed.value && (tab.value === 'unmatched' || tab.value === 'auto')
 )
-const page = ref(1)
+const page = computed({
+    get: () => Math.max(1, Number.parseInt(query.page.value) || 1),
+    set: v => (query.page.value = String(v)),
+})
 
 const qLibraries = librariesApi.useList()
 const qSummary = metadataApi.useSummary()
