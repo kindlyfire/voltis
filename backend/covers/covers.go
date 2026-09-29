@@ -266,6 +266,34 @@ func resize(data []byte) ([]byte, error) {
 	return img.JpegsaveBuffer(jpegOpts)
 }
 
+// EncodeJPEG re-encodes an untrusted image as JPEG at its own size.
+func EncodeJPEG(data []byte) ([]byte, error) {
+	if !isImage(data) {
+		return nil, errors.New("encode jpeg: not an image")
+	}
+	img, err := vips.NewImageFromBuffer(data, nil)
+	if err != nil {
+		return nil, fmt.Errorf("encode jpeg: %w", err)
+	}
+	defer img.Close()
+	// 8-bit sRGB first, so that 16-bit, grey and CMYK images flatten with MaxAlpha 255.
+	if err := img.Colourspace(vips.InterpretationSrgb, nil); err != nil {
+		return nil, fmt.Errorf("encode jpeg: %w", err)
+	}
+	if err := img.Cast(vips.BandFormatUchar, nil); err != nil {
+		return nil, fmt.Errorf("encode jpeg: %w", err)
+	}
+	if img.HasAlpha() { // JPEG has no alpha
+		err := img.Flatten(&vips.FlattenOptions{Background: []float64{255, 255, 255}, MaxAlpha: 255})
+		if err != nil {
+			return nil, fmt.Errorf("encode jpeg: %w", err)
+		}
+	}
+	opts := vips.DefaultJpegsaveBufferOptions()
+	opts.Q = 90
+	return img.JpegsaveBuffer(opts)
+}
+
 // write replaces path atomically, so readers never see a partial file.
 func write(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

@@ -37,6 +37,16 @@ type Session struct {
 	AbsoluteExpiresAt *time.Time `db:"absolute_expires_at"`
 }
 
+// AppKey is a per-user credential carried in the URL path by key-authenticated protocols (OPDS).
+type AppKey struct {
+	ID         string     `db:"id"`
+	UserID     string     `db:"user_id"`
+	Name       string     `db:"name"`
+	Key        string     `db:"key"`
+	CreatedAt  time.Time  `db:"created_at"`
+	LastUsedAt *time.Time `db:"last_used_at"`
+}
+
 type AuthPending struct {
 	ID           string    `db:"id"`
 	Kind         string    `db:"kind"`
@@ -264,3 +274,4 @@ func MakeCustomListContentID() string { return makeID("clc") }
 func MakeTaskID() string              { return makeID("t") }
 func MakeIdentityID() string          { return makeID("ui") }
 func MakeAuthPendingID() string       { return makeID("ap") }
+func MakeAppKeyID() string            { return makeID("ok") }

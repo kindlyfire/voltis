@@ -15,6 +15,7 @@
                 :active-icon="IconAccountFilled"
                 label="Account"
             />
+            <ANavItem to="/settings/opds" :icon="IconRss" label="OPDS" />
             <ANavItem
                 v-if="hasBrokenRefs || route.path === '/settings/broken-refs'"
                 to="/settings/broken-refs"
@@ -137,6 +138,7 @@ import {
     IconLogout,
     IconMonitor,
     IconMonitorFilled,
+    IconRss,
     IconTune,
     IconWeatherNight,
     IconWeatherSunny,

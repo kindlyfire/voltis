@@ -23,6 +23,10 @@ export default defineConfig({
 				link: '/authentication',
 			},
 			{
+				text: 'OPDS',
+				link: '/opds',
+			},
+			{
 				text: 'CLI Reference',
 				link: '/cli',
 			},

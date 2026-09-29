@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- OPDS 1.2 and 2.0 catalogs, with page streaming and progress sync for OPDS-PSE
+  apps
+
 ## [1.0.0-alpha.4] - 2026-09-24
 
 - New UI

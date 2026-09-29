@@ -13,6 +13,8 @@ Everything except the forwarded-auth trust boundary is configured under
 **Settings → General** in the web interface, or with
 [`voltis settings`](/cli#settings).
 
+[OPDS apps](/opds) use per-user keys instead of these methods.
+
 ## Settings
 
 | Key                              | Type   | Default                | Meaning                                                            |

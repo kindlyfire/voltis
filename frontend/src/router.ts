@@ -17,6 +17,7 @@ import SettingsGeneralPage from './pages/settings/GeneralPage.vue'
 import SettingsInterfacePage from './pages/settings/InterfacePage.vue'
 import SettingsLibrariesPage from './pages/settings/LibrariesPage.vue'
 import SettingsMetadataPage from './pages/settings/MetadataPage.vue'
+import SettingsOpdsPage from './pages/settings/OpdsPage.vue'
 import SettingsTasksPage from './pages/settings/TasksPage.vue'
 import SettingsUsersPage from './pages/settings/UsersPage.vue'
 
@@ -85,6 +86,11 @@ const router = createRouter({
                     path: '/settings/account',
                     name: 'settings-account',
                     component: SettingsAccountPage,
+                },
+                {
+                    path: '/settings/opds',
+                    name: 'settings-opds',
+                    component: SettingsOpdsPage,
                 },
                 {
                     path: '/settings/general',

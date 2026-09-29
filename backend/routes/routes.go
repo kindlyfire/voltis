@@ -46,6 +46,7 @@ type Deps struct {
 	Metadata  *metadata.Store
 	Links     *linking.Service
 	Covers    *covers.Cache
+	StaticDir string
 }
 
 // handleError answers an error as JSON. A request its client gave up on is left unanswered: its
@@ -53,19 +54,27 @@ type Deps struct {
 func handleError(err error, c echo.Context) {
 	req := c.Request()
 	if req.Context().Err() != nil {
-		slog.Debug("request canceled", "err", err, "method", req.Method, "path", req.URL.String())
+		slog.Debug("request canceled", "err", err, "method", req.Method, "path", logPath(c))
 		return
 	}
 	if c.Response().Committed {
-		slog.Error("error after the response started", "err", err, "method", req.Method, "path", req.URL.String())
+		slog.Error("error after the response started", "err", err, "method", req.Method, "path", logPath(c))
 		return
 	}
 	if he, ok := errors.AsType[*echo.HTTPError](err); ok {
 		_ = c.JSON(he.Code, map[string]any{"error": he.Message})
 		return
 	}
-	slog.Error("unhandled error", "err", err, "method", req.Method, "path", req.URL.String())
+	slog.Error("unhandled error", "err", err, "method", req.Method, "path", logPath(c))
 	_ = c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+}
+
+// logPath is the request's URL for logs, or its route pattern under /opds/, whose paths carry keys.
+func logPath(c echo.Context) string {
+	if strings.HasPrefix(c.Request().URL.Path, "/opds/") {
+		return c.Path()
+	}
+	return c.Request().URL.String()
 }
 
 func Register(ctx context.Context, e *echo.Echo, pool *pgxpool.Pool, st *settings.Store, proxy config.ProxyAuth, deps Deps) *tasks.Manager {
@@ -102,7 +111,9 @@ func Register(ctx context.Context, e *echo.Echo, pool *pgxpool.Pool, st *setting
 	e.Use(middleware.GzipWithConfig(middleware.GzipConfig{
 		MinLength: 860,
 		Skipper: func(c echo.Context) bool {
-			return strings.HasPrefix(c.Path(), "/api/files/")
+			p := c.Path()
+			return strings.HasPrefix(p, "/api/files/") || strings.HasPrefix(p, "/opds/:key/file/") ||
+				strings.HasPrefix(p, "/opds/:key/pse/") || strings.HasPrefix(p, "/opds/:key/cover/")
 		},
 	}))
 
@@ -115,8 +126,10 @@ func Register(ctx context.Context, e *echo.Echo, pool *pgxpool.Pool, st *setting
 	(&SettingsRoutes{st: st, proxy: proxy}).Register(api.Group("/settings"))
 	(&LibraryRoutes{pool: pool, scanQueue: scanQueue, links: links, reg: deps.Providers, ctx: ctx}).Register(api.Group("/libraries"))
 	(&UserRoutes{pool: pool, hub: hub, st: st}).Register(api.Group("/users"))
+	(&AppKeyRoutes{pool: pool, st: st}).Register(api.Group("/users/me/app-keys"))
 	(&ContentRoutes{pool: pool}).Register(api.Group("/content"))
-	(&FileRoutes{pool: pool, covers: deps.Covers}).Register(api.Group("/files"))
+	fr := &FileRoutes{pool: pool, covers: deps.Covers}
+	fr.Register(api.Group("/files"))
 	(&ContentRefRoutes{pool: pool, links: deps.Links}).Register(api.Group("/content"))
 	(&CustomListRoutes{pool: pool}).Register(api.Group("/custom-lists"))
 	(&TaskRoutes{pool: pool, manager: manager}).Register(api.Group("/tasks"))
@@ -126,6 +139,9 @@ func Register(ctx context.Context, e *echo.Echo, pool *pgxpool.Pool, st *setting
 
 	e.GET("/api/ws", wsHandler(res))
 
-	registerStaticRoutes(e)
+	// Outside /api: keys, never the session cookie or forwarded auth, authenticate OPDS.
+	(&OPDSRoutes{pool: pool, st: st, files: fr}).Register(e.Group("/opds/:key", opdsCache, appKeyAuth(pool)))
+
+	registerStaticRoutes(e, deps.StaticDir)
 	return manager
 }

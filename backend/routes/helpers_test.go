@@ -63,6 +63,11 @@ func newClient(t *testing.T, pool *pgxpool.Pool) *testClient {
 }
 
 func newProxyClient(t *testing.T, pool *pgxpool.Pool, proxy config.ProxyAuth) *testClient {
+	return newServerClient(t, pool, proxy, "")
+}
+
+// newServerClient serves the SPA from staticDir, when set.
+func newServerClient(t *testing.T, pool *pgxpool.Pool, proxy config.ProxyAuth, staticDir string) *testClient {
 	t.Helper()
 
 	st := newStore(t, pool)
@@ -74,7 +79,7 @@ func newProxyClient(t *testing.T, pool *pgxpool.Pool, proxy config.ProxyAuth) *t
 	cov := covers.New(t.TempDir())
 	links := linking.New(pool, store, reg, cov, hub.LibraryChanged)
 	manager := Register(t.Context(), e, pool, st, proxy, Deps{Hub: hub, Providers: reg, Metadata: store, Links: links,
-		Covers: cov})
+		Covers: cov, StaticDir: staticDir})
 	t.Cleanup(manager.Close)
 	t.Cleanup(autoMatching.Wait) // before the database goes; t.Context() has cancelled them
 

@@ -5,13 +5,10 @@ import (
 	"os"
 	"strings"
 
-	"voltis/config"
-
 	"github.com/labstack/echo/v4"
 )
 
-func registerStaticRoutes(e *echo.Echo) {
-	dir := config.Get().StaticDir
+func registerStaticRoutes(e *echo.Echo, dir string) {
 	if dir == "" {
 		return
 	}
@@ -23,7 +20,7 @@ func registerStaticRoutes(e *echo.Echo) {
 
 	e.GET("/*", echo.WrapHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
-		if strings.HasPrefix(path, "/api/") {
+		if strings.HasPrefix(path, "/api/") || path == "/opds" || strings.HasPrefix(path, "/opds/") {
 			http.NotFound(w, r)
 			return
 		}

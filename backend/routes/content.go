@@ -170,7 +170,7 @@ const contentRowColumns = `c.*,
 	utc.status_updated_at AS utc_status_updated_at, utc.notes AS utc_notes,
 	utc.rating AS utc_rating, utc.progress AS utc_progress,
 	utc.progress_updated_at AS utc_progress_updated_at,
-	cm.data AS meta_data`
+	cm.data AS meta_data, cm.updated_at AS meta_updated_at`
 
 func selectContentRows(ctx context.Context, pool *pgxpool.Pool, userID string, ids []string) (map[string]contentListRow, error) {
 	rows, err := db.Select[contentListRow](ctx, pool, `
@@ -327,6 +327,7 @@ type contentListQuery struct {
 	Sort          string   `query:"sort"            validate:"omitempty,oneof=progress_updated_at created_at order rating user_rating unread_children_count release_date title"`
 	SortOrder     string   `query:"sort_order"      validate:"omitempty,oneof=asc desc" default:"desc"`
 	Include       string   `query:"include"`
+	ListID        string   // set by code only
 }
 
 func (cr *ContentRoutes) list(c echo.Context) error {
@@ -334,8 +335,6 @@ func (cr *ContentRoutes) list(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-
-	ctx := reqCtx(c)
 
 	q, err := BindQuery[contentListQuery](c)
 	if err != nil {
@@ -350,114 +349,7 @@ func (cr *ContentRoutes) list(c echo.Context) error {
 		}
 	}
 
-	// Build query
-	args := pgx.NamedArgs{"user_id": user.ID, "valid": q.Valid != "false"}
-	where := []string{"c.valid = @valid"}
-
-	if q.ParentID != "" {
-		if q.ParentID == "null" {
-			where = append(where, "c.parent_id IS NULL")
-		} else {
-			args["parent_id"] = q.ParentID
-			where = append(where, "c.parent_id = @parent_id")
-		}
-	}
-	if q.LibraryID != "" {
-		args["library_id"] = q.LibraryID
-		where = append(where, "c.library_id = @library_id")
-	}
-	if len(q.Type) > 0 {
-		args["types"] = q.Type
-		where = append(where, "c.type = ANY(@types)")
-	}
-	if q.ReadingStatus != "" {
-		args["reading_status"] = q.ReadingStatus
-		where = append(where, "utc.status = @reading_status")
-	}
-	if q.Starred != "" {
-		args["starred"] = q.Starred == "true"
-		where = append(where, "utc.starred = @starred")
-	}
-	switch q.HasStatus {
-	case "true":
-		where = append(where, "utc.status IS NOT NULL")
-	case "false":
-		where = append(where, "(utc.user_id IS NULL OR utc.status IS NULL)")
-	}
-	switch q.HasRating {
-	case "true":
-		where = append(where, "utc.rating IS NOT NULL")
-	case "false":
-		where = append(where, "(utc.user_id IS NULL OR utc.rating IS NULL)")
-	}
-	if q.Search != "" {
-		args["search"] = q.Search
-		where = append(where, metadata.Matches("cm", "search_text", false, q.Search))
-	}
-
-	whereClause := strings.Join(where, " AND ")
-
-	baseFrom := fmt.Sprintf(`
-		FROM content c
-		LEFT JOIN user_to_content utc
-			ON utc.library_id = c.library_id AND utc.uri = c.uri AND utc.user_id = @user_id
-		LEFT JOIN content_metadata cm
-			ON cm.uri = c.uri AND cm.library_id = c.library_id
-		WHERE %s
-	`, whereClause)
-
-	// Count query
-	var total int
-	err = cr.pool.QueryRow(ctx, "SELECT COUNT(*) "+baseFrom, args).Scan(&total)
-	if err != nil {
-		return err
-	}
-
-	// Sorting
-	nullsOrder := "NULLS LAST"
-	if q.SortOrder == "asc" {
-		nullsOrder = "NULLS FIRST"
-	}
-
-	var orderClause string
-	switch q.Sort {
-	case "progress_updated_at":
-		orderClause = fmt.Sprintf("ORDER BY utc.progress_updated_at %s %s", q.SortOrder, nullsOrder)
-	case "created_at":
-		orderClause = fmt.Sprintf("ORDER BY c.created_at %s", q.SortOrder)
-	case "order":
-		orderClause = fmt.Sprintf("ORDER BY c.\"order\" %s", q.SortOrder)
-	case "rating":
-		orderClause = fmt.Sprintf("ORDER BY cm.rating %s %s", q.SortOrder, nullsOrder)
-	case "user_rating":
-		orderClause = fmt.Sprintf("ORDER BY utc.rating %s %s", q.SortOrder, nullsOrder)
-	case "unread_children_count":
-		orderClause = fmt.Sprintf("ORDER BY unread_children_count %s", q.SortOrder)
-	case "release_date":
-		orderClause = fmt.Sprintf("ORDER BY cm.release_date %s %s", q.SortOrder, nullsOrder)
-	case "title":
-		orderClause = fmt.Sprintf("ORDER BY cm.data->>'title' %s %s", q.SortOrder, nullsOrder)
-	default:
-		if q.Search != "" {
-			orderClause = "ORDER BY paradedb.score(cm.id) DESC"
-		}
-	}
-
-	// Data query with children counts
-	dataQuery := fmt.Sprintf(`
-		SELECT %s
-		%s
-		%s
-	`, contentRowColumns, baseFrom, orderClause)
-
-	if q.Limit != nil {
-		dataQuery += fmt.Sprintf(" LIMIT %d", *q.Limit)
-	}
-	if q.Offset > 0 {
-		dataQuery += fmt.Sprintf(" OFFSET %d", q.Offset)
-	}
-
-	items, err := db.Select[contentListRow](ctx, cr.pool, dataQuery, args)
+	items, total, err := queryContent(reqCtx(c), cr.pool, user.ID, q, nil)
 	if err != nil {
 		return err
 	}
@@ -475,6 +367,150 @@ func (cr *ContentRoutes) list(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, PaginatedResponse[ContentDTO]{Data: dtos, Total: total})
+}
+
+type kindCounts struct{ Series, Comics, Books int }
+
+func (k kindCounts) items() int { return k.Comics + k.Books }
+
+// kindCountColumns selects kindCounts over content c.
+const kindCountColumns = `COUNT(*) FILTER (WHERE c.type IN ('comic_series', 'book_series')) AS series,
+	COUNT(*) FILTER (WHERE c.type = 'comic') AS comics,
+	COUNT(*) FILTER (WHERE c.type = 'book') AS books`
+
+// contentFrom builds the FROM and WHERE clauses shared by queryContent and countContentKinds.
+func contentFrom(userID string, f contentListQuery) (string, pgx.NamedArgs) {
+	args := pgx.NamedArgs{"user_id": userID, "valid": f.Valid != "false"}
+	where := []string{"c.valid = @valid"}
+
+	if f.ParentID != "" {
+		if f.ParentID == "null" {
+			where = append(where, "c.parent_id IS NULL")
+		} else {
+			args["parent_id"] = f.ParentID
+			where = append(where, "c.parent_id = @parent_id")
+		}
+	}
+	if f.LibraryID != "" {
+		args["library_id"] = f.LibraryID
+		where = append(where, "c.library_id = @library_id")
+	}
+	if len(f.Type) > 0 {
+		args["types"] = f.Type
+		where = append(where, "c.type = ANY(@types)")
+	}
+	if f.ReadingStatus != "" {
+		args["reading_status"] = f.ReadingStatus
+		where = append(where, "utc.status = @reading_status")
+	}
+	if f.Starred != "" {
+		args["starred"] = f.Starred == "true"
+		where = append(where, "utc.starred = @starred")
+	}
+	switch f.HasStatus {
+	case "true":
+		where = append(where, "utc.status IS NOT NULL")
+	case "false":
+		where = append(where, "(utc.user_id IS NULL OR utc.status IS NULL)")
+	}
+	switch f.HasRating {
+	case "true":
+		where = append(where, "utc.rating IS NOT NULL")
+	case "false":
+		where = append(where, "(utc.user_id IS NULL OR utc.rating IS NULL)")
+	}
+	if f.Search != "" {
+		args["search"] = f.Search
+		where = append(where, metadata.Matches("cm", "search_text", false, f.Search))
+	}
+
+	listJoin := ""
+	if f.ListID != "" {
+		args["list_id"] = f.ListID
+		listJoin = `JOIN custom_list_to_content clc ON clc.custom_list_id = @list_id
+			AND clc.library_id = c.library_id AND clc.uri = c.uri`
+	}
+
+	return fmt.Sprintf(`
+		FROM content c
+		%s
+		LEFT JOIN user_to_content utc
+			ON utc.library_id = c.library_id AND utc.uri = c.uri AND utc.user_id = @user_id
+		LEFT JOIN content_metadata cm
+			ON cm.uri = c.uri AND cm.library_id = c.library_id
+		WHERE %s
+	`, listJoin, strings.Join(where, " AND ")), args
+}
+
+func countContentKinds(ctx context.Context, q db.Querier, userID string, f contentListQuery) (kindCounts, error) {
+	from, args := contentFrom(userID, f)
+	return db.SelectOne[kindCounts](ctx, q, "SELECT "+kindCountColumns+from, args)
+}
+
+// queryContent runs the content list filters for userID. ListID, set only by code, joins the
+// list's entries and orders by list order unless Sort is set. counts, when non-nil, holds
+// countContentKinds for the same filters and saves the count query.
+func queryContent(ctx context.Context, q db.Querier, userID string, f contentListQuery, counts *kindCounts) ([]contentListRow, int, error) {
+	if counts == nil {
+		k, err := countContentKinds(ctx, q, userID, f)
+		if err != nil {
+			return nil, 0, err
+		}
+		counts = &k
+	}
+	total := counts.Series + counts.items()
+
+	from, args := contentFrom(userID, f)
+
+	nullsOrder := "NULLS LAST"
+	if f.SortOrder == "asc" {
+		nullsOrder = "NULLS FIRST"
+	}
+
+	var order string
+	switch f.Sort {
+	case "progress_updated_at":
+		order = fmt.Sprintf("utc.progress_updated_at %s %s", f.SortOrder, nullsOrder)
+	case "created_at":
+		order = fmt.Sprintf("c.created_at %s", f.SortOrder)
+	case "order":
+		order = fmt.Sprintf("c.\"order\" %s", f.SortOrder)
+	case "rating":
+		order = fmt.Sprintf("cm.rating %s %s", f.SortOrder, nullsOrder)
+	case "user_rating":
+		order = fmt.Sprintf("utc.rating %s %s", f.SortOrder, nullsOrder)
+	case "unread_children_count":
+		order = fmt.Sprintf("unread_children_count %s", f.SortOrder)
+	case "release_date":
+		order = fmt.Sprintf("cm.release_date %s %s", f.SortOrder, nullsOrder)
+	case "title":
+		order = fmt.Sprintf("cm.data->>'title' %s %s", f.SortOrder, nullsOrder)
+	default:
+		if f.Search != "" {
+			order = "paradedb.score(cm.id) DESC"
+		} else if f.ListID != "" {
+			order = `(clc."order" IS NULL), clc."order", clc.created_at`
+		}
+	}
+	// The c.id tiebreaker keeps offset pages from repeating or skipping tied rows.
+	orderBy := "ORDER BY c.id"
+	if order != "" {
+		orderBy = "ORDER BY " + order + ", c.id"
+	}
+
+	dataQuery := "SELECT " + contentRowColumns + from + orderBy
+	if f.Limit != nil {
+		dataQuery += fmt.Sprintf(" LIMIT %d", *f.Limit)
+	}
+	if f.Offset > 0 {
+		dataQuery += fmt.Sprintf(" OFFSET %d", f.Offset)
+	}
+
+	rows, err := db.Select[contentListRow](ctx, q, dataQuery, args)
+	if err != nil {
+		return nil, 0, err
+	}
+	return rows, total, nil
 }
 
 type RecentlyReadEntryDTO struct {
@@ -499,9 +535,6 @@ func homePrefs(raw models.JSONB) (ignoreSeriesStatus bool) {
 	return p.Home.IgnoreSeriesStatus
 }
 
-// recentlyRead lists the items in progress, one per series. A series' item is its first eligible
-// (unread, valid, not on hold) child from the anchor onwards, wrapping to the start, where the
-// anchor is the active child with the latest status change or, while eligible, activity.
 func (cr *ContentRoutes) recentlyRead(c echo.Context) error {
 	user, err := requireUser(c)
 	if err != nil {
@@ -511,13 +544,43 @@ func (cr *ContentRoutes) recentlyRead(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	ctx := reqCtx(c)
+	picks, err := continueReading(reqCtx(c), cr.pool, user, q.Limit)
+	if err != nil {
+		return err
+	}
+	toDTO := func(r contentListRow) ContentDTO {
+		return contentToDTO(r.Content, contentDTOOpts{
+			meta:                r.MetaData,
+			childrenCount:       r.ChildrenCount,
+			unreadChildrenCount: r.UnreadChildrenCount,
+			userToContent:       r.utc(),
+		})
+	}
+	entries := make([]RecentlyReadEntryDTO, len(picks))
+	for i, p := range picks {
+		entries[i] = RecentlyReadEntryDTO{Item: toDTO(p.Item)}
+		if p.Series != nil {
+			dto := toDTO(*p.Series)
+			entries[i].Series = &dto
+		}
+	}
+	return c.JSON(http.StatusOK, entries)
+}
 
+type readingPick struct {
+	Item   contentListRow
+	Series *contentListRow // nil for a standalone item
+}
+
+// continueReading lists the items in progress, one per series. A series' item is its first
+// eligible (unread, valid, not on hold) child from the anchor onwards, wrapping to the start,
+// where the anchor is the active child with the latest status change or, while eligible, activity.
+func continueReading(ctx context.Context, pool *pgxpool.Pool, user *models.User, limit int) ([]readingPick, error) {
 	type pickRow struct {
 		ItemID   string  `db:"item_id"`
 		SeriesID *string `db:"series_id"`
 	}
-	picks, err := db.Select[pickRow](ctx, cr.pool, `
+	picks, err := db.Select[pickRow](ctx, pool, `
 		WITH last AS (
 			SELECT DISTINCT ON (c.parent_id)
 				c.parent_id AS series_id, c.id AS last_id,
@@ -568,9 +631,9 @@ func (cr *ContentRoutes) recentlyRead(c echo.Context) error {
 		SELECT item_id, series_id FROM (TABLE series_pick UNION ALL TABLE standalone) g
 		ORDER BY sort_at DESC NULLS LAST, item_id
 		LIMIT @limit
-	`, pgx.NamedArgs{"user_id": user.ID, "limit": q.Limit, "ignore_series_status": homePrefs(user.Preferences)})
+	`, pgx.NamedArgs{"user_id": user.ID, "limit": limit, "ignore_series_status": homePrefs(user.Preferences)})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	ids := make([]string, 0, 2*len(picks))
@@ -580,20 +643,12 @@ func (cr *ContentRoutes) recentlyRead(c echo.Context) error {
 			ids = append(ids, *p.SeriesID)
 		}
 	}
-	rows, err := selectContentRows(ctx, cr.pool, user.ID, ids)
+	rows, err := selectContentRows(ctx, pool, user.ID, ids)
 	if err != nil {
-		return err
-	}
-	toDTO := func(r contentListRow) ContentDTO {
-		return contentToDTO(r.Content, contentDTOOpts{
-			meta:                r.MetaData,
-			childrenCount:       r.ChildrenCount,
-			unreadChildrenCount: r.UnreadChildrenCount,
-			userToContent:       r.utc(),
-		})
+		return nil, err
 	}
 
-	entries := []RecentlyReadEntryDTO{}
+	out := []readingPick{}
 	for _, p := range picks {
 		// A scan may have deleted, invalidated or reparented the item, or deleted the series, since
 		// the pick.
@@ -601,18 +656,17 @@ func (cr *ContentRoutes) recentlyRead(c echo.Context) error {
 		if !ok || !item.Valid || !fp.PtrEq(item.ParentID, p.SeriesID) {
 			continue
 		}
-		entry := RecentlyReadEntryDTO{Item: toDTO(item)}
+		pick := readingPick{Item: item}
 		if p.SeriesID != nil {
 			series, ok := rows[*p.SeriesID]
 			if !ok {
 				continue
 			}
-			dto := toDTO(series)
-			entry.Series = &dto
+			pick.Series = &series
 		}
-		entries = append(entries, entry)
+		out = append(out, pick)
 	}
-	return c.JSON(http.StatusOK, entries)
+	return out, nil
 }
 
 type userToContentRequest struct {
@@ -892,6 +946,7 @@ type contentWithUTCRow struct {
 	UTCProgress          []byte     `db:"utc_progress"`
 	UTCProgressUpdatedAt *time.Time `db:"utc_progress_updated_at"`
 	MetaData             []byte     `db:"meta_data"`
+	MetaUpdatedAt        *time.Time `db:"meta_updated_at"`
 }
 
 func (r *contentWithUTCRow) utc() *models.UserToContent {

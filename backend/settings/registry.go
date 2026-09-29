@@ -41,6 +41,7 @@ const (
 	AuthProxyLogoutURL         = "auth.proxy.logout_url"
 	MetadataMatchingPaused     = "metadata.matching_paused"
 	BootstrapCompleted         = "internal.bootstrap_completed"
+	InstallationID             = "internal.installation_id"
 )
 
 type Def struct {
@@ -98,6 +99,8 @@ var defs = []Def{
 		Help: "Pause matching series with metadata providers automatically. Linked metadata keeps refreshing.",
 	},
 	{Key: BootstrapCompleted, Type: TypeBool, Default: false, Internal: true},
+	// Seeded by migration 011; prefixes globally unique OPDS (Atom) IDs.
+	{Key: InstallationID, Type: TypeString, Default: "", Internal: true},
 }
 
 var byKey = func() map[string]Def {

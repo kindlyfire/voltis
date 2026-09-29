@@ -2,6 +2,7 @@ package routes
 
 import (
 	"archive/zip"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -88,6 +90,9 @@ func (fr *FileRoutes) getCover(c echo.Context) error {
 	return blobCover(c, data, version)
 }
 
+// coverMediaType is the type of every cover, since covers.resize re-encodes them all to JPEG.
+const coverMediaType = "image/jpeg"
+
 // blobCover serves a cover, cached for good only under its own version so that a stale URL cannot
 // pin the cover that replaced it. A nil version marks a fallback, which is not cached at all.
 func blobCover(c echo.Context, data []byte, version *string) error {
@@ -99,7 +104,7 @@ func blobCover(c echo.Context, data []byte, version *string) error {
 		}
 	}
 	c.Response().Header().Set("Cache-Control", cache)
-	return c.Blob(http.StatusOK, "image/jpeg", data)
+	return c.Blob(http.StatusOK, coverMediaType, data)
 }
 
 func (fr *FileRoutes) getComicPage(c echo.Context) error {
@@ -107,48 +112,12 @@ func (fr *FileRoutes) getComicPage(c echo.Context) error {
 		return err
 	}
 
-	ctx := reqCtx(c)
-	contentID := c.Param("content_id")
-
 	var pageIndex int
 	if _, err := fmt.Sscanf(c.Param("page_index"), "%d", &pageIndex); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid page index")
 	}
 
-	content, err := db.SelectOne[models.Content](ctx, fr.pool, "SELECT * FROM content WHERE id = $1", contentID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return echo.NewHTTPError(http.StatusNotFound, "Content not found")
-	}
-	if err != nil {
-		return err
-	}
-
-	if content.FileURI == nil || content.FileData == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "Content has no pages")
-	}
-
-	var fileData struct {
-		Pages []json.RawMessage `json:"pages"`
-	}
-	if err := json.Unmarshal(content.FileData, &fileData); err != nil || len(fileData.Pages) == 0 {
-		return echo.NewHTTPError(http.StatusNotFound, "Content has no pages")
-	}
-
-	if pageIndex < 0 || pageIndex >= len(fileData.Pages) {
-		return echo.NewHTTPError(http.StatusNotFound, "Page index out of range")
-	}
-
-	// Pages are stored as [name, width, height] tuples
-	var pageTuple []json.RawMessage
-	if err := json.Unmarshal(fileData.Pages[pageIndex], &pageTuple); err != nil || len(pageTuple) == 0 {
-		return echo.NewHTTPError(http.StatusNotFound, "Invalid page data")
-	}
-	var pageName string
-	if err := json.Unmarshal(pageTuple[0], &pageName); err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "Invalid page data")
-	}
-
-	data, mediaType, err := readArchiveEntry(*content.FileURI, pageName)
+	_, _, data, mediaType, err := comicPage(reqCtx(c), fr.pool, c.Param("content_id"), pageIndex)
 	if err != nil {
 		return err
 	}
@@ -157,6 +126,49 @@ func (fr *FileRoutes) getComicPage(c echo.Context) error {
 		c.Response().Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	}
 	return c.Blob(http.StatusOK, mediaType, data)
+}
+
+// comicPage reads page index of a comic, and returns the names of all its pages.
+func comicPage(ctx context.Context, pool *pgxpool.Pool, contentID string, index int) (
+	content models.Content, pageNames []string, data []byte, mediaType string, err error,
+) {
+	content, err = getContent(ctx, pool, contentID)
+	if err != nil {
+		return
+	}
+	if content.FileURI != nil {
+		pageNames, err = comicPageNames(content.FileData)
+	}
+	if content.FileURI == nil || err != nil || len(pageNames) == 0 {
+		err = echo.NewHTTPError(http.StatusNotFound, "Content has no pages")
+		return
+	}
+	if index < 0 || index >= len(pageNames) {
+		err = echo.NewHTTPError(http.StatusNotFound, "Page index out of range")
+		return
+	}
+	data, mediaType, err = readArchiveEntry(*content.FileURI, pageNames[index])
+	return
+}
+
+// comicPageNames reads the page names from file_data's [name, width, height] tuples.
+func comicPageNames(fileData []byte) ([]string, error) {
+	var fd struct {
+		Pages [][]json.RawMessage `json:"pages"`
+	}
+	if err := json.Unmarshal(fileData, &fd); err != nil {
+		return nil, err
+	}
+	names := make([]string, len(fd.Pages))
+	for i, p := range fd.Pages {
+		if len(p) == 0 {
+			return nil, errors.New("invalid page data")
+		}
+		if err := json.Unmarshal(p[0], &names[i]); err != nil {
+			return nil, err
+		}
+	}
+	return names, nil
 }
 
 func (fr *FileRoutes) getBookChapters(c echo.Context) error {
@@ -359,7 +371,7 @@ func (fr *FileRoutes) download(c echo.Context) error {
 		if content.FileURI == nil {
 			return echo.NewHTTPError(http.StatusNotFound, "Content has no file")
 		}
-		return c.File(*content.FileURI)
+		return serveContentFile(c, *content.FileURI)
 	}
 
 	// Series: stream a ZIP of all children's files
@@ -491,6 +503,64 @@ func findArchiveAndInnerPath(uri string) (string, string) {
 		}
 	}
 	return "", ""
+}
+
+// opdsMediaType is the type of a content file, with the comic archive types that sniffing and
+// mime.TypeByExtension do not know.
+func opdsMediaType(path string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".epub":
+		return "application/epub+zip"
+	case ".cbz", ".zip":
+		return "application/vnd.comicbook+zip"
+	case ".cbr", ".rar":
+		return "application/vnd.comicbook-rar"
+	case ".pdf":
+		return "application/pdf"
+	}
+	return guessMediaType(path)
+}
+
+// pseMediaType is the one type PSE serves a comic's pages as: PNG or GIF when every page is, else
+// JPEG, which other pages are converted to. PDF pages (p1, p2…) have no extension, so they get
+// JPEG, which readPDFPage renders.
+func pseMediaType(pageNames []string) string {
+	common := ""
+	for i, n := range pageNames {
+		ext := strings.ToLower(filepath.Ext(n))
+		if i > 0 && ext != common {
+			return "image/jpeg"
+		}
+		common = ext
+	}
+	switch common {
+	case ".png":
+		return "image/png"
+	case ".gif":
+		return "image/gif"
+	}
+	return "image/jpeg"
+}
+
+// serveContentFile sends a comic or book file as a named attachment; c.File supports Range.
+func serveContentFile(c echo.Context, path string) error {
+	name := filepath.Base(path)
+	h := c.Response().Header()
+	h.Set(echo.HeaderContentType, opdsMediaType(name))
+	h.Set(echo.HeaderContentDisposition, contentDisposition(name))
+	return c.File(path)
+}
+
+// contentDisposition names an attachment, with an ASCII fallback for clients that ignore filename*.
+func contentDisposition(name string) string {
+	ascii := []byte(name)
+	for i, b := range ascii {
+		if b < 0x20 || b > 0x7e || b == '"' || b == '\\' {
+			ascii[i] = '_'
+		}
+	}
+	enc := strings.ReplaceAll(url.QueryEscape(name), "+", "%20")
+	return `attachment; filename="` + string(ascii) + `"; filename*=UTF-8''` + enc
 }
 
 func guessMediaType(name string) string {

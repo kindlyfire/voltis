@@ -62,6 +62,15 @@ export interface Identity {
     created_at: string
 }
 
+export interface AppKey {
+    id: string
+    name: string
+    key: string
+    created_at: string
+    last_used_at: string | null
+    feeds: { v1: string; v2: string }
+}
+
 export interface IdentityLink {
     provider: IdentityProvider
     issuer: string

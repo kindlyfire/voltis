@@ -49,6 +49,7 @@ export function createComicState(contentId: string, initialPage: number | 'last'
     let navigated = false
     const contentController = new AbortController()
 
+    // Mirrored for OPDS page streaming by recordComicPage (backend/routes/opds_progress.go).
     const updateProgress = useDebounceFn(() => {
         if (!state.content) return
         // Before the write: its response can arrive after the home page has mounted.

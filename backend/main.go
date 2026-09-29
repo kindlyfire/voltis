@@ -225,7 +225,7 @@ func runServer(ctx context.Context) error {
 	cov := covers.New(cfg.CacheDir)
 	links := linking.New(pool, meta, reg, cov, hub.LibraryChanged)
 	routes.Register(ctx, e, pool, store, cfg.ProxyAuth,
-		routes.Deps{Hub: hub, Providers: reg, Metadata: meta, Links: links, Covers: cov})
+		routes.Deps{Hub: hub, Providers: reg, Metadata: meta, Links: links, Covers: cov, StaticDir: cfg.StaticDir})
 
 	slog.Info("starting server", "url", "http://"+net.JoinHostPort(cmp.Or(cfg.Host, "localhost"), cfg.Port))
 	return e.Start(net.JoinHostPort(cfg.Host, cfg.Port))

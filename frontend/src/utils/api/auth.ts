@@ -55,6 +55,8 @@ export const authApi = {
                     body: '{}',
                 }),
             onSuccess: () => {
+                // Invalidating alone would keep the raw keys cached and refetch them.
+                queryClient.removeQueries({ queryKey: ['app-keys'] })
                 queryClient.invalidateQueries()
             },
         })
