@@ -30,6 +30,7 @@ type oidcFlow struct {
 	Nonce    string `json:"nonce"`
 	Verifier string `json:"verifier"`
 	Link     bool   `json:"link"`
+	Redirect string `json:"redirect,omitempty"`
 }
 
 // oidcComplete is a verified identity waiting on the user.
@@ -44,6 +45,7 @@ type oidcComplete struct {
 	HasGroups     bool     `json:"has_groups"`
 	MatchID       string   `json:"match_id"`
 	MatchUsername string   `json:"match_username"`
+	Redirect      string   `json:"redirect,omitempty"`
 }
 
 func (p oidcComplete) identity() ExternalIdentity {

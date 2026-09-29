@@ -22,6 +22,12 @@ export class RequestError extends Error {
     }
 }
 
+/** Network failures (no response) and 5xx are worth retrying; 4xx and parse errors aren't. */
+export function isTransientError(error: unknown): boolean {
+    if (!(error instanceof RequestError)) return false
+    return !error.response || error.response.status >= 500
+}
+
 export async function apiFetch<TData>(
     input: string,
     init?: RequestInit & {
@@ -52,25 +58,32 @@ export async function apiFetchRaw<TData>(
         throw new RequestError(err instanceof Error ? err.message : String(err))
     }
 
-    let text: string | undefined
-    let json: unknown
-
+    let text: string
     try {
         text = await res.text()
+    } catch (err) {
+        // No `response`: a body cut off mid-read is a network failure, so it's retried.
+        throw new RequestError(err instanceof Error ? err.message : String(err))
+    }
+    let json: unknown
+    let parsed = true
+    try {
         json = JSON.parse(text)
     } catch {
-        if (!init?.allowNotJson) {
-            throw new RequestError(`Response wasn't JSON: ${text}`, {
-                response: res,
-                text,
-            })
-        }
+        parsed = false
     }
 
     if (!res.ok) {
-        throw new RequestError(`Request failed: ${res.status} ${res.statusText}`, {
+        // `statusText` is empty over HTTP/2, so it's left out. JSON bodies surface `json.error` anyway.
+        const message =
+            !parsed && res.status >= 500
+                ? `Server error (${res.status})`
+                : `Request failed (${res.status})`
+        throw new RequestError(message, { response: res, json, text })
+    }
+    if (!parsed && !init?.allowNotJson) {
+        throw new RequestError(`Response wasn't JSON: ${text.slice(0, 200)}`, {
             response: res,
-            json,
             text,
         })
     }

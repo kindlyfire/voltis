@@ -3,7 +3,10 @@ import { API_URL, apiFetch } from '../fetch'
 import type { Info } from './misc'
 import type { OidcPending, OkResponse } from './types'
 
-export const OIDC_LOGIN_URL = `${API_URL}/auth/oidc/login`
+export function oidcLoginUrl(redirect?: string | null) {
+    const base = `${API_URL}/auth/oidc/login`
+    return redirect ? `${base}?redirect=${encodeURIComponent(redirect)}` : base
+}
 
 let signedOut: boolean | undefined
 let signOutVersion = 0

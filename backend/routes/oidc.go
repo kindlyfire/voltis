@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"log/slog"
@@ -37,6 +38,29 @@ func (r oidcRejection) Error() string {
 	return r.msg + ": " + r.err.Error()
 }
 
+// safeRedirect returns s when it is a same-origin app path outside /auth, else "".
+func safeRedirect(s string) string {
+	if len(s) > 2048 || !strings.HasPrefix(s, "/") || strings.HasPrefix(s, "//") {
+		return ""
+	}
+	// Browsers strip tabs and newlines and treat `\` as `/`, so "/\t/x" would become "//x".
+	if strings.ContainsFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f || r == '\\' }) {
+		return ""
+	}
+	u, err := url.Parse(s)
+	// The frontend router matches case-insensitively.
+	if p := strings.ToLower(u.Path); err != nil || u.Scheme != "" || u.Host != "" || p == "/auth" || strings.HasPrefix(p, "/auth/") {
+		return ""
+	}
+	// Browsers resolve dot segments, so "/..//x" would become "//x".
+	for seg := range strings.SplitSeq(u.Path, "/") {
+		if seg == "." || seg == ".." {
+			return ""
+		}
+	}
+	return s
+}
+
 func reject(msg string, err error) error { return oidcRejection{msg: msg, err: err} }
 
 func appMessage(err error) string {
@@ -67,7 +91,7 @@ func (o *OIDCRoutes) Register(g *echo.Group) {
 }
 
 func (o *OIDCRoutes) login(c echo.Context) error {
-	target, err := o.start(c, false, nil, nil)
+	target, err := o.start(c, false, nil, nil, safeRedirect(c.QueryParam("redirect")))
 	if err != nil {
 		return o.fail(c, false, err)
 	}
@@ -87,14 +111,14 @@ func (o *OIDCRoutes) link(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
 	}
 
-	target, err := o.start(c, true, &user.ID, &session.Token)
+	target, err := o.start(c, true, &user.ID, &session.Token, "")
 	if err != nil {
 		return err
 	}
 	return c.JSON(http.StatusOK, map[string]string{"url": target})
 }
 
-func (o *OIDCRoutes) start(c echo.Context, isLink bool, userID, sessionToken *string) (string, error) {
+func (o *OIDCRoutes) start(c echo.Context, isLink bool, userID, sessionToken *string, redirect string) (string, error) {
 	ctx := reqCtx(c)
 	conf, _, _, err := o.oidc.oauth(ctx)
 	if err != nil {
@@ -106,6 +130,7 @@ func (o *OIDCRoutes) start(c echo.Context, isLink bool, userID, sessionToken *st
 		Nonce:    randomToken(),
 		Verifier: oauth2.GenerateVerifier(),
 		Link:     isLink,
+		Redirect: redirect,
 	}
 	raw, err := insertPending(ctx, o.res.pool, pendingFlow, flow, userID, sessionToken)
 	if err != nil {
@@ -143,7 +168,7 @@ func (o *OIDCRoutes) callback(c echo.Context) error {
 	if flow.Link {
 		return o.finishLink(c, row, id)
 	}
-	return o.finishLogin(c, id, issuer)
+	return o.finishLogin(c, id, issuer, flow.Redirect)
 }
 
 func (o *OIDCRoutes) verify(ctx context.Context, c echo.Context, flow oidcFlow) (ExternalIdentity, string, error) {
@@ -277,7 +302,7 @@ func (o *OIDCRoutes) finishLink(c echo.Context, row *models.AuthPending, id Exte
 	return c.Redirect(http.StatusFound, accountPath)
 }
 
-func (o *OIDCRoutes) finishLogin(c echo.Context, id ExternalIdentity, issuer string) error {
+func (o *OIDCRoutes) finishLogin(c echo.Context, id ExternalIdentity, issuer, redirect string) error {
 	ctx := reqCtx(c)
 	login, err := o.res.resolveExternalLogin(ctx, id)
 	if err != nil {
@@ -307,12 +332,13 @@ func (o *OIDCRoutes) finishLogin(c echo.Context, id ExternalIdentity, issuer str
 		if err := o.finishSession(c, login.User, id, token); err != nil {
 			return err
 		}
-		return c.Redirect(http.StatusFound, "/")
+		return c.Redirect(http.StatusFound, cmp.Or(redirect, "/"))
 	}
 
 	complete := oidcComplete{
 		Needs: login.Needs, Issuer: issuer, Subject: id.Subject, Username: id.Username,
 		Email: id.Email, EmailVerified: id.EmailVerified, Groups: id.Groups, HasGroups: id.HasGroups,
+		Redirect: redirect,
 	}
 	if login.Match != nil {
 		complete.MatchID, complete.MatchUsername = login.Match.ID, login.Match.Username
@@ -339,6 +365,7 @@ func (o *OIDCRoutes) pending(c echo.Context) error {
 		"username":       data.Username,
 		"email":          data.Email,
 		"match_username": data.MatchUsername,
+		"redirect":       data.Redirect,
 	})
 }
 

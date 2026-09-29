@@ -139,7 +139,7 @@ const form = useForm({
         username: '',
         email: '',
         password: '',
-        isAdmin: true,
+        isAdmin: false,
     },
     onSubmit: async values => {
         await upsert.mutateAsync({

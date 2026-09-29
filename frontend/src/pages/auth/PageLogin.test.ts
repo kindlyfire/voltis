@@ -20,7 +20,7 @@ vi.mock('@/utils/api/auth', () => ({
     authApi: { useLogin: () => ({ mutateAsync: vi.fn() }) },
 }))
 vi.mock('vue-router', () => ({
-    useRouter: () => ({ push: vi.fn() }),
+    useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
     useRoute: () => ({ query: query.value }),
     RouterLink: { template: '<a><slot /></a>' },
 }))
@@ -48,9 +48,11 @@ describe('PageLogin', () => {
     })
 
     it('navigates to the provider when auto-redirect is on', async () => {
+        query.value = { redirect: '/lists' }
         info.value = { oidc_enabled: true, oidc_auto_redirect: true, password_login_enabled: true }
         render()
         expect(window.location.href).toContain('/auth/oidc/login')
+        expect(window.location.href).toContain('redirect=%2Flists')
     })
 
     it('stays on the page when ?error= is present but empty', async () => {

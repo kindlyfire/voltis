@@ -46,7 +46,12 @@
             </AAlert>
         </div>
         <template v-if="passwordLogin && info?.registration_enabled" #footer>
-            <AButton variant="text" to="/auth/register">Don't have an account?</AButton>
+            <AButton
+                variant="text"
+                :to="{ path: '/auth/register', query: redirectQuery(route.query.redirect) }"
+            >
+                Don't have an account?
+            </AButton>
         </template>
     </AuthCard>
 </template>
@@ -65,9 +70,10 @@ import ATextField from '@/ui/ATextField.vue'
 import { IconShieldAccount } from '@/ui/icons'
 import { authApi } from '@/utils/api/auth'
 import { miscApi } from '@/utils/api/misc'
-import { clearSignedOut, isSignedOut, OIDC_LOGIN_URL, shouldAutoRedirect } from '@/utils/api/oidc'
+import { clearSignedOut, isSignedOut, oidcLoginUrl, shouldAutoRedirect } from '@/utils/api/oidc'
 import { usersApi } from '@/utils/api/users'
 import { useForm } from '@/utils/forms'
+import { redirectQuery, safeRedirect } from '@/utils/redirect'
 import AuthCard from './AuthCard.vue'
 
 useHead({
@@ -75,8 +81,9 @@ useHead({
 })
 
 const login = authApi.useLogin()
-const router = useRouter()
 const route = useRoute()
+// Above the immediate auto-redirect watcher, which reads it through `startSso`.
+const redirect = computed(() => safeRedirect(route.query.redirect))
 const queryClient = useQueryClient()
 const qInfo = miscApi.useInfo()
 useAlreadyLoggedInRedirect()
@@ -88,7 +95,7 @@ const passwordLogin = computed(() => info.value?.password_login_enabled !== fals
 
 function startSso() {
     clearSignedOut()
-    window.location.href = OIDC_LOGIN_URL
+    window.location.href = oidcLoginUrl(redirect.value)
 }
 
 watch(
@@ -117,10 +124,10 @@ const { field, onSubmit, mutation } = useForm({
             username: values.username,
             password: values.password,
         })
+        // `useAlreadyLoggedInRedirect` navigates once `me` is refetched.
         await queryClient.refetchQueries({
             queryKey: ['users', 'me'],
         })
-        router.push('/')
     },
 })
 </script>
@@ -128,12 +135,13 @@ const { field, onSubmit, mutation } = useForm({
 <script lang="ts">
 export function useAlreadyLoggedInRedirect() {
     const router = useRouter()
+    const route = useRoute()
     const qMe = usersApi.useMe()
     watch(
         () => qMe.data.value,
         me => {
             if (me) {
-                router.push('/')
+                router.replace(safeRedirect(route.query.redirect) ?? '/')
             }
         },
         { immediate: true }

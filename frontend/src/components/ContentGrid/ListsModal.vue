@@ -13,48 +13,69 @@
                 <ASpinner />
             </div>
 
-            <fieldset v-else-if="qLists.isSuccess.value" class="flex flex-col">
-                <legend class="sr-only">Lists</legend>
-                <ACheckbox
-                    v-for="list in qLists.data.value ?? []"
-                    :key="list.id"
-                    :model-value="selectedListIds.has(list.id)"
-                    :label="list.name"
-                    @update:model-value="toggleList(list.id)"
-                >
-                    {{ list.name }}
-                    <span class="text-fg-muted text-sm capitalize">· {{ list.visibility }}</span>
-                </ACheckbox>
-                <p v-if="!qLists.data.value?.length" class="text-fg-muted">
-                    No lists yet. Create one from the Lists page.
-                </p>
-            </fieldset>
+            <template v-else-if="qLists.isSuccess.value">
+                <fieldset class="flex flex-col">
+                    <legend class="sr-only">Lists</legend>
+                    <ACheckbox
+                        v-for="list in qLists.data.value ?? []"
+                        :key="list.id"
+                        :model-value="selectedListIds.has(list.id)"
+                        :label="list.name"
+                        @update:model-value="toggleList(list.id)"
+                    >
+                        {{ list.name }}
+                        <span class="text-fg-muted text-sm capitalize"
+                            >· {{ list.visibility }}</span
+                        >
+                    </ACheckbox>
+                </fieldset>
+                <NewListForm
+                    v-if="newList.creating.value"
+                    @created="preselect"
+                    @close="newList.stop"
+                />
+            </template>
 
             <QueryError :mutation="mBulk" />
         </div>
         <template #actions>
-            <AButton variant="text" tone="neutral" @click="close()">Cancel</AButton>
             <AButton
-                :loading="mBulk.isPending.value"
-                :disabled="selectedListIds.size === 0"
-                @click="save"
+                v-if="qLists.isSuccess.value && !newList.creating.value"
+                :ref="newList.buttonRef"
+                class="mr-auto"
+                variant="text"
+                :leading-icon="IconPlus"
+                @click="newList.start"
             >
-                Add
+                New list
             </AButton>
+            <!-- Keeps Cancel and Add together when the footer wraps. -->
+            <div class="flex gap-2">
+                <AButton variant="text" tone="neutral" @click="close()">Cancel</AButton>
+                <AButton
+                    :loading="mBulk.isPending.value"
+                    :disabled="selectedListIds.size === 0"
+                    @click="save"
+                >
+                    Add
+                </AButton>
+            </div>
         </template>
     </ADialog>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import NewListForm, { useNewListToggle } from '@/components/NewListForm.vue'
 import QueryError from '@/components/QueryError.vue'
 import AButton from '@/ui/AButton.vue'
 import ACheckbox from '@/ui/ACheckbox.vue'
 import ADialog from '@/ui/ADialog.vue'
 import ASpinner from '@/ui/ASpinner.vue'
+import { IconPlus } from '@/ui/icons'
 import { useToast } from '@/ui/useToast'
 import { customListsApi } from '@/utils/api/custom-lists'
-import type { CustomListBulkCreateEntry } from '@/utils/api/types'
+import type { CustomListBulkCreateEntry, CustomListPartial } from '@/utils/api/types'
 import { plural } from '@/utils/misc'
 
 const props = defineProps<{
@@ -62,6 +83,8 @@ const props = defineProps<{
     close: () => void
     contentIds: string[]
 }>()
+
+const newList = useNewListToggle()
 
 const qLists = customListsApi.useList('me')
 const mBulk = customListsApi.useBulkCreateEntries()
@@ -74,6 +97,11 @@ function toggleList(id: string) {
     if (next.has(id)) next.delete(id)
     else next.add(id)
     selectedListIds.value = next
+}
+
+// Checked once `qLists` refetches; "Add" then adds the items to it.
+function preselect(list: CustomListPartial) {
+    selectedListIds.value = new Set(selectedListIds.value).add(list.id)
 }
 
 async function save() {

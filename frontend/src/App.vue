@@ -14,12 +14,13 @@
 import { useHead } from '@unhead/vue'
 import { TooltipProvider } from 'reka-ui'
 import { watch } from 'vue'
-import { RouterView, useRouter } from 'vue-router'
+import { RouterView, START_LOCATION, useRouter } from 'vue-router'
 import { useLayoutStore } from './pages/_layout/useLayoutStore'
 import { useScanSync } from './stores/scans'
 import ASpinner from './ui/ASpinner.vue'
 import { miscApi } from './utils/api/misc'
 import { usersApi } from './utils/api/users'
+import { redirectQuery } from './utils/redirect'
 import { useSubmitShortcut } from './utils/submitShortcut'
 
 // Created here so the theme applies to every page, the auth pages included.
@@ -36,6 +37,8 @@ watch(
     () =>
         [qMe.data.value, qMe.isLoading.value, router.currentRoute.value, qInfo.data.value] as const,
     ([me, isLoading, route, info]) => {
+        // Wait for the initial navigation, or the redirect below would record `/`.
+        if (route === START_LOCATION) return
         if (!isLoading && !me && info) {
             // The sign-in is verified but unfinished: it owns this page.
             if (route.path === '/auth/oidc/complete') {
@@ -48,8 +51,11 @@ watch(
                 router.replace('/auth/register')
                 return
             }
-            if (!isLoading && !me && !route.path.startsWith('/auth')) {
-                router.replace('/auth/login')
+            if (!['login', 'register'].includes(route.name as string)) {
+                router.replace({
+                    path: '/auth/login',
+                    query: redirectQuery(route.fullPath),
+                })
             }
         }
     },

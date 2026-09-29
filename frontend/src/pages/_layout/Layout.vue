@@ -36,7 +36,10 @@
     </header>
 
     <main id="main" tabindex="-1" class="main outline-none">
-        <RouterView />
+        <RouterView v-slot="{ Component, route: r }">
+            <NotFoundPage v-if="r.meta.admin && !isAdmin" forbidden />
+            <component :is="Component" v-else />
+        </RouterView>
     </main>
 
     <ADrawer
@@ -59,13 +62,15 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, watch } from 'vue'
+import { computed, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import ADrawer from '@/ui/ADrawer.vue'
 import AIconButton from '@/ui/AIconButton.vue'
 import AToastRegion from '@/ui/AToastRegion.vue'
 import { IconMenu } from '@/ui/icons'
+import { usersApi } from '@/utils/api/users'
 import { ModalContainer } from '@/utils/modals'
+import NotFoundPage from '../NotFoundPage.vue'
 import ScanIndicator from './ScanIndicator.vue'
 import SearchBox from './SearchBox.vue'
 import SidebarNav from './SidebarNav.vue'
@@ -73,6 +78,9 @@ import { useLayoutStore } from './useLayoutStore'
 
 const store = useLayoutStore()
 const route = useRoute()
+// App mounts the layout only once `me` has loaded, so this never races the query.
+const qMe = usersApi.useMe()
+const isAdmin = computed(() => !!qMe.data.value?.permissions.includes('ADMIN'))
 
 // The temporary drawer closes on navigation (the reader drawers don't).
 watch(

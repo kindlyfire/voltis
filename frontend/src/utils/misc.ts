@@ -12,8 +12,13 @@ import {
 import { useRouter } from 'vue-router'
 import type { Option } from '@/ui/options'
 import { READING_STATUS_LABELS, type ContentType, type ReadingStatus } from '@/utils/api/types'
+import { isTransientError } from '@/utils/fetch'
 
-export const queryClient = new QueryClient({})
+export const queryClient = new QueryClient({
+    defaultOptions: {
+        queries: { retry: (failureCount, error) => failureCount < 2 && isTransientError(error) },
+    },
+})
 
 /** Height reserved at the top of the page for the header, in px (`--layout-top` on :root). */
 export function getLayoutTop() {

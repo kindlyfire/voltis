@@ -33,7 +33,12 @@
             Registrations are currently disabled. Please contact an administrator for access.
         </p>
         <template v-if="!isFirstUserFlow" #footer>
-            <AButton variant="text" to="/auth/login">Already have an account?</AButton>
+            <AButton
+                variant="text"
+                :to="{ path: '/auth/login', query: redirectQuery(route.query.redirect) }"
+            >
+                Already have an account?
+            </AButton>
         </template>
     </AuthCard>
 </template>
@@ -42,7 +47,7 @@
 import { useQueryClient } from '@tanstack/vue-query'
 import { useHead } from '@unhead/vue'
 import { computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { z } from 'zod'
 import QueryError from '@/components/QueryError.vue'
 import AAlert from '@/ui/AAlert.vue'
@@ -51,6 +56,7 @@ import ATextField from '@/ui/ATextField.vue'
 import { authApi } from '@/utils/api/auth'
 import { miscApi } from '@/utils/api/misc'
 import { useForm } from '@/utils/forms'
+import { redirectQuery } from '@/utils/redirect'
 import AuthCard from './AuthCard.vue'
 import { useAlreadyLoggedInRedirect } from './PageLogin.vue'
 
@@ -59,7 +65,7 @@ useHead({
 })
 
 const register = authApi.useRegister()
-const router = useRouter()
+const route = useRoute()
 const queryClient = useQueryClient()
 useAlreadyLoggedInRedirect()
 
@@ -92,6 +98,7 @@ const { field, onSubmit, mutation } = useForm({
             username: values.username,
             password: values.password,
         })
+        // `useAlreadyLoggedInRedirect` navigates once `me` is refetched.
         await Promise.all([
             queryClient.refetchQueries({
                 queryKey: ['misc', 'info'],
@@ -100,7 +107,6 @@ const { field, onSubmit, mutation } = useForm({
                 queryKey: ['users', 'me'],
             }),
         ])
-        router.push('/')
     },
 })
 </script>

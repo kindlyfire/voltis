@@ -79,6 +79,7 @@ import AButton from '@/ui/AButton.vue'
 import ATextField from '@/ui/ATextField.vue'
 import { oidcApi } from '@/utils/api/oidc'
 import { useForm } from '@/utils/forms'
+import { safeRedirect } from '@/utils/redirect'
 import AuthCard from './AuthCard.vue'
 
 useHead({ title: 'Finish signing in' })
@@ -93,17 +94,21 @@ const pending = computed(() => qPending.data.value)
 const declined = ref(false)
 const showConfirm = computed(() => pending.value?.needs === 'confirm' && !declined.value)
 
-async function signedIn() {
+// The mutations consume the pending row, so callers read the target before awaiting them.
+const redirectTarget = () => safeRedirect(pending.value?.redirect) ?? '/'
+
+async function signedIn(target: string) {
     await queryClient.refetchQueries({ queryKey: ['users', 'me'] })
-    router.push('/')
+    router.replace(target)
 }
 
 const confirmForm = useForm({
     schema: z.object({ password: z.string().min(1, 'Enter your password') }),
     initialValues: { password: '' },
     onSubmit: async values => {
+        const target = redirectTarget()
         await confirm.mutateAsync(values.password)
-        await signedIn()
+        await signedIn(target)
     },
 })
 
@@ -111,8 +116,9 @@ const usernameForm = useForm({
     schema: z.object({ username: z.string().min(2, 'Use at least 2 characters') }),
     initialValues: { username: '' },
     onSubmit: async values => {
+        const target = redirectTarget()
         await chooseUsername.mutateAsync(values.username)
-        await signedIn()
+        await signedIn(target)
     },
 })
 

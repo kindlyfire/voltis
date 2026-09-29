@@ -37,7 +37,8 @@ func countRows(t *testing.T, c *testClient, query string) int {
 func TestOIDCCreatesAUser(t *testing.T) {
 	c, _ := newOIDCPair(t)
 
-	assertRedirect(t, c.oidcLogin(t), "/")
+	// An off-site redirect is dropped.
+	assertRedirect(t, c.callback(c.authorize(t, "/api/auth/oidc/login?redirect=%2F%2Fevil.example")), "/")
 	assertEq(t, s(c.Get("/api/users/me").Assert(t, 200).JSON()["username"]), "idpuser")
 	assertEq(t, countRows(t, c, "SELECT count(*) FROM user_identities WHERE provider = 'oidc'"), 1)
 	assertEq(t, countRows(t, c, "SELECT count(*) FROM sessions WHERE method = 'oidc'"), 1)
@@ -51,7 +52,9 @@ func TestOIDCExistingIdentityLogsIn(t *testing.T) {
 		Provider: models.SessionOIDC, Issuer: idp.server.URL, Subject: "sub-1",
 	})
 
-	assertRedirect(t, c.oidcLogin(t), "/")
+	resp := c.callback(c.authorize(t, "/api/auth/oidc/login?redirect=%2Fc_fixture%3Fpage%3D2"))
+	assertRedirect(t, resp, "/c_fixture")
+	assertEq(t, resp.Headers.Get("Location"), "/c_fixture?page=2")
 	assertEq(t, s(c.Get("/api/users/me").Assert(t, 200).JSON()["id"]), userID)
 	assertEq(t, countRows(t, c, "SELECT count(*) FROM users"), 1)
 }
@@ -207,11 +210,12 @@ func TestOIDCUsernameMatchConfirm(t *testing.T) {
 		t.Fatalf("set password: %v", err)
 	}
 
-	assertRedirect(t, c.oidcLogin(t), "/auth/oidc/complete")
+	assertRedirect(t, c.callback(c.authorize(t, "/api/auth/oidc/login?redirect=%2Flists")), "/auth/oidc/complete")
 
 	waiting := c.Get("/api/auth/oidc/pending").Assert(t, 200).JSON()
 	assertEq(t, s(waiting["needs"]), needsConfirm)
 	assertEq(t, s(waiting["match_username"]), "idpuser")
+	assertEq(t, s(waiting["redirect"]), "/lists")
 
 	c.Post("/api/auth/oidc/confirm", map[string]any{"password": "wrong-password"}).Assert(t, 401)
 	c.Get("/api/auth/oidc/pending").Assert(t, 200)
@@ -710,4 +714,24 @@ func TestOIDCUnlinkRacingTheCallback(t *testing.T) {
 
 	assertRejected(t, <-done, "the account changed during sign-in")
 	assertEq(t, countRows(t, c, "SELECT count(*) FROM sessions"), 0)
+}
+
+func TestSafeRedirect(t *testing.T) {
+	for in, want := range map[string]string{
+		"/x?a=1":        "/x?a=1",
+		"//evil":        "",
+		"/\\evil":       "",
+		"/\t/evil":      "",
+		"https://evil":  "",
+		"/%2e%2e//evil": "",
+		"evil":          "",
+		"/auth/login":   "",
+		"/auth":         "",
+		"/AUTH/login":   "",
+		"":              "",
+	} {
+		if got := safeRedirect(in); got != want {
+			t.Errorf("safeRedirect(%q) = %q, want %q", in, got, want)
+		}
+	}
 }

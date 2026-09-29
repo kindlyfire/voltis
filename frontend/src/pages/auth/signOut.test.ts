@@ -131,8 +131,8 @@ async function render(path = '/') {
                     { path: 'settings/account', component: AccountPage },
                 ],
             },
-            { path: '/auth/login', component: PageLogin },
-            { path: '/auth/register', component: pass },
+            { path: '/auth/login', name: 'login', component: PageLogin },
+            { path: '/auth/register', name: 'register', component: pass },
         ],
     })
     await router.push(path)
@@ -154,15 +154,17 @@ async function render(path = '/') {
 }
 
 const actions = [
-    { action: 'nav logout', path: '/', label: 'Logout' },
+    { action: 'nav logout', path: '/', label: 'Logout', login: '/auth/login' },
     {
         action: 'self-unlink',
         path: '/settings/account',
         label: 'Unlink alice',
+        // An expiry mid-use returns to the current page after signing in.
+        login: '/auth/login?redirect=/settings/account',
     },
 ]
 
-describe.each(actions)('$action with auto-redirect on', ({ path, label }) => {
+describe.each(actions)('$action with auto-redirect on', ({ path, label, login }) => {
     it('survives the login → home → login round trip while the session refetch is pending', async () => {
         const { wrapper, router, paths } = await render(path)
         const response = deferred()
@@ -199,7 +201,7 @@ describe.each(actions)('$action with auto-redirect on', ({ path, label }) => {
 
         await queryClient.invalidateQueries({ queryKey: ['users', 'me'] })
         await flushPromises()
-        expect(router.currentRoute.value.fullPath).toBe('/auth/login')
+        expect(router.currentRoute.value.fullPath).toBe(login)
         expect(window.location.href).toBe('')
 
         response.resolve()
@@ -244,7 +246,7 @@ describe.each(actions)('$action with auto-redirect on', ({ path, label }) => {
 
             await queryClient.invalidateQueries({ queryKey: ['users', 'me'] })
             await flushPromises()
-            expect(router.currentRoute.value.fullPath).toBe('/auth/login')
+            expect(router.currentRoute.value.fullPath).toBe(login)
             expect(wrapper.findComponent(PageLogin).exists()).toBe(true)
             expect(window.location.href).toBe('')
             expect(isSignedOut()).toBe(true)
