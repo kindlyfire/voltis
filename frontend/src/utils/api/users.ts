@@ -51,6 +51,8 @@ export const usersApi = {
                 }
             },
             refetchOnMount: false,
+            // Consumers mount once it loads; an errored one would refetch on each mount (Retry refetches).
+            retryOnMount: false,
         }),
 
     useUpdateMe: () => {

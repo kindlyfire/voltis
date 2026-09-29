@@ -2,6 +2,7 @@ package routes
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -84,7 +85,7 @@ func (ur *UserRoutes) linkIdentity(c echo.Context) error {
 
 	id := ExternalIdentity{Provider: req.Provider, Issuer: req.Issuer, Subject: req.Subject}
 	err := db.WithTx(ctx, ur.pool, func(tx pgx.Tx) error {
-		return linkIdentityTx(ctx, tx, id, userID, "")
+		return attachIdentity(ctx, tx, id, userID)
 	})
 	if err != nil {
 		return err
@@ -100,7 +101,7 @@ func (ur *UserRoutes) unlinkMine(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := ur.unlink(reqCtx(c), user.ID, c.Param("identity_id"), true); err != nil {
+	if err := ur.unlink(reqCtx(c), user.ID, c.Param("identity_id")); err != nil {
 		return err
 	}
 	ur.hub.Drop(user.ID)
@@ -113,22 +114,36 @@ func (ur *UserRoutes) unlinkIdentity(c echo.Context) error {
 		return err
 	}
 	userID := c.Param("user_id")
-	if err := ur.unlink(reqCtx(c), userID, c.Param("identity_id"), false); err != nil {
+	if err := ur.unlink(reqCtx(c), userID, c.Param("identity_id")); err != nil {
 		return err
 	}
 	ur.hub.Drop(userID)
 	return ur.listIdentities(c, userID)
 }
 
-// Revokes every session, the caller's own included.
-func (ur *UserRoutes) unlink(ctx context.Context, userID, identityID string, selfService bool) error {
+// Revokes every session, the caller's own included. Lock order matches
+// finalize: settings version, identity, user row, sessions.
+func (ur *UserRoutes) unlink(ctx context.Context, userID, identityID string) error {
 	return db.WithTx(ctx, ur.pool, func(tx pgx.Tx) error {
-		if selfService {
-			// Before any row work: a settings write holds the same version row
-			// while its transition deletes sessions.
-			if err := settings.LockVersion(ctx, tx); err != nil {
-				return err
-			}
+		if err := settings.LockVersion(ctx, tx); err != nil {
+			return err
+		}
+		// Only set-issuer changes the key columns, and it holds the version lock
+		// for writing, so reading them before the identity lock is safe.
+		key, err := db.SelectOne[models.UserIdentity](ctx, tx,
+			"SELECT * FROM user_identities WHERE id = $1 AND user_id = $2", identityID, userID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return echo.NewHTTPError(http.StatusNotFound, "Identity not found")
+		}
+		if err != nil {
+			return err
+		}
+		if err := db.LockIdentity(ctx, tx, key.Provider, key.Issuer, key.Subject); err != nil {
+			return err
+		}
+		// Before the delete: account deletion locks the user row, then its identities.
+		if err := lockUser(ctx, tx, userID); err != nil {
+			return err
 		}
 		tag, err := tx.Exec(ctx,
 			"DELETE FROM user_identities WHERE id = $1 AND user_id = $2", identityID, userID)
@@ -138,10 +153,8 @@ func (ur *UserRoutes) unlink(ctx context.Context, userID, identityID string, sel
 		if tag.RowsAffected() == 0 {
 			return echo.NewHTTPError(http.StatusNotFound, "Identity not found")
 		}
-		if selfService {
-			if err := requireLoginMethod(ctx, tx, userID); err != nil {
-				return err
-			}
+		if err := requireLoginMethod(ctx, tx, userID, ur.proxyEnabled); err != nil {
+			return err
 		}
 		_, err = tx.Exec(ctx, "DELETE FROM sessions WHERE user_id = $1", userID)
 		return err

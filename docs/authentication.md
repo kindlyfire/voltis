@@ -64,11 +64,35 @@ that `auth.oidc.groups_claim` names the emitted claim, then sign in again:
   requested in `auth.oidc.scopes`.
   :::
 
-::: warning
-If `auth.admin_group` is set and the ID token carries no groups claim, Voltis
-must reach `userinfo` to know whether the user is still an admin. When that
-request fails the sign-in is refused.
+::: warning Missing groups demote
+When `auth.admin_group` is set, groups missing from both the ID token and
+`userinfo` count as no groups, and the sign-in demotes the user, even the last
+admin. Only a failed `userinfo` request refuses the sign-in instead. Check the
+claim before setting the group, and see [Losing access](#losing-access).
 :::
+
+### Changing the provider
+
+Disabling single sign-on, or changing the issuer or client ID, signs out every
+OIDC session and cancels sign-ins in progress.
+
+Identities are keyed by issuer and subject. To move to a new issuer URL for the
+same provider, where subjects stay the same, set `auth.oidc.issuer` and then
+run [`voltis identities set-issuer`](/cli#identities-set-issuer) before users
+sign in again:
+
+```bash
+./voltis settings set auth.oidc.issuer https://new.example.com
+./voltis identities set-issuer https://old.example.com https://new.example.com
+```
+
+A user who signs in between the two steps gets an identity under the new
+issuer, often on a new account. The command then changes nothing and lists
+each conflict: the account with the old-issuer identity, the subject, and the
+account holding the new-issuer identity. Inspect each pair. If the new-issuer
+owner is a throwaway duplicate, delete that account. Otherwise unlink the
+redundant identity, making sure its account keeps a usable way to log in. Then
+run the command again.
 
 ## Forwarded authentication
 
@@ -128,20 +152,50 @@ When an external login arrives that Voltis has not seen before, it resolves in
 this order:
 
 1. An identity already linked to an account: sign in as that account.
-2. `auth.link.match_email`, if the address is verified and one account has it.
-3. `auth.link.match_username`, if one account has that username. Through OIDC
-   the user must confirm with that account's password, unless the account has
-   no password and no identities yet — an account an admin pre-created for
-   them. Through a proxy the link is automatic.
+2. `auth.link.match_email`, if one account has the address. OIDC addresses
+   count only when the provider marks them `email_verified`; the proxy's email
+   header is trusted as sent.
+3. `auth.link.match_username`, if one account has that username.
 4. `auth.external_auto_create`: create a new account. This is not governed by
-   `auth.registration_enabled`.
+   `auth.registration_enabled`. When the username is taken, OIDC users pick
+   another one and proxy requests are refused.
+
+What a match in steps 2 and 3 does depends on the account:
+
+| Matched account                     | OIDC                         | Proxy       |
+| ----------------------------------- | ---------------------------- | ----------- |
+| No password and no linked identity  | Linked                       | Linked      |
+| Has a password                      | Linked after password prompt | Not matched |
+| No password, already has identities | Not matched                  | Not matched |
+
+An account that is not matched falls through to the next step. The first kind
+is one an admin pre-created for this user, with
+[`users create --no-password`](/cli#users-create) or from the web interface.
+
+The password prompt allows five wrong passwords per sign-in. A new login at the
+provider starts a new sign-in, so this slows guessing down rather than bounding
+it.
+
+Through a proxy, an existing account with a password is never linked
+automatically. Before enabling forwarded auth on a server with password
+accounts, link each one with [`voltis users link`](/cli#users-link):
+
+```bash
+./voltis users link alice --provider proxy --subject alice
+```
+
+The subject is the username the proxy sends. To prepare accounts for proxy
+users instead, create them with `./voltis users create <name> --no-password`
+and set `auth.link.match_username` to `true`, or link them as above.
+An account missed here locks its user out; see [Losing access](#losing-access).
 
 ::: warning Email matching trusts the provider
 `auth.link.match_email` is off by default, and enabling it means trusting the
 identity provider.
 
 Local addresses are never verified by Voltis. Anyone who can register a matching
-verified address at the provider can claim the local account that uses it.
+verified address at the provider can claim a pre-created account that uses it,
+or be asked for the password of an account that has one.
 :::
 
 ## Losing access
@@ -152,8 +206,19 @@ Everything needed to recover is available from the CLI:
 # Password login was disabled and the provider is unreachable
 ./voltis settings set auth.password_login_enabled true
 
-# The last admin was demoted by a group mapping
+# The last admin was demoted by a group mapping, for example after
+# auth.admin_group was set but the provider sends no groups. Fix the groups
+# claim first, or clear the mapping, or the next login demotes again
+./voltis settings set auth.admin_group ""
 ./voltis users update myuser --admin
+
+# Forwarded auth: every request fails with "the username myuser is already
+# taken", because a password account has that name
+./voltis users link myuser --provider proxy --subject myuser
+
+# Forwarded auth under a different username: the proxy user got a new account
+# without admin. If the proxy sends groups, they must include auth.admin_group
+./voltis users update proxy-name --admin
 ```
 
 Public registration of the first admin closes for good once any admin exists,

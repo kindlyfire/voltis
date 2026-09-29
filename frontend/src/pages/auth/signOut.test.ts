@@ -154,17 +154,19 @@ async function render(path = '/') {
 }
 
 const actions = [
-    { action: 'nav logout', path: '/', label: 'Logout', login: '/auth/login' },
+    // Nav logout leaves a failed request to the global error handler.
+    { action: 'nav logout', path: '/', label: 'Logout', login: '/auth/login', reports: true },
     {
         action: 'self-unlink',
         path: '/settings/account',
         label: 'Unlink alice',
         // An expiry mid-use returns to the current page after signing in.
         login: '/auth/login?redirect=/settings/account',
+        reports: false,
     },
 ]
 
-describe.each(actions)('$action with auto-redirect on', ({ path, label, login }) => {
+describe.each(actions)('$action with auto-redirect on', ({ path, label, login, reports }) => {
     it('survives the login → home → login round trip while the session refetch is pending', async () => {
         const { wrapper, router, paths } = await render(path)
         const response = deferred()
@@ -242,7 +244,7 @@ describe.each(actions)('$action with auto-redirect on', ({ path, label, login })
                 .trigger('click')
             await flushPromises()
             expect(signedIn).toBe(false)
-            expect(errors).toHaveBeenCalled()
+            expect(errors).toHaveBeenCalledTimes(reports ? 1 : 0)
 
             await queryClient.invalidateQueries({ queryKey: ['users', 'me'] })
             await flushPromises()
@@ -262,7 +264,7 @@ describe.each(actions)('$action with auto-redirect on', ({ path, label, login })
             .find(button => button.text() === label || button.attributes('aria-label') === label)!
             .trigger('click')
         await flushPromises()
-        expect(errors).toHaveBeenCalled()
+        expect(errors).toHaveBeenCalledTimes(reports ? 1 : 0)
         expect(isSignedOut()).toBe(true)
 
         await queryClient.invalidateQueries({ queryKey: ['users', 'me'] })

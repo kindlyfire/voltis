@@ -53,12 +53,29 @@ Starts the HTTP server. This is what the container runs by default.
 Creates a new user.
 
 ```bash
-./voltis users create <username> --password <password> [--admin]
+./voltis users create <username> (--password <password> | --no-password) [--admin]
 ```
 
-- `--password` is required. Use `-` to read from stdin
+- `--password` sets the password. Use `-` to read from stdin
+- `--no-password` creates an account without one. The first OIDC or proxy login
+  matched to it [claims it](/authentication#linking-external-logins-to-existing-accounts)
 - `--admin` grants admin permissions
 - Passwords must be at least 8 characters
+
+### `users link`
+
+Links an external identity to an existing user, so that login signs in as that
+user.
+
+```bash
+./voltis users link <username> --provider proxy --subject <proxy-username>
+./voltis users link <username> --provider oidc --issuer <issuer-url> --subject <sub>
+```
+
+- For `proxy`, the subject is the username the proxy sends
+- For `oidc`, the issuer must equal `auth.oidc.issuer` and the subject is the
+  ID token's `sub` claim
+- Fails if the identity is already linked to another user
 
 ### `settings list`
 
@@ -95,3 +112,16 @@ Updates an existing user.
 ```
 
 All flags are optional.
+
+### `identities set-issuer`
+
+Moves every OIDC identity from one issuer URL to another, for a provider whose
+URL changed but whose subjects did not.
+
+```bash
+./voltis identities set-issuer <old-issuer> <new-issuer>
+```
+
+If any subject already exists under the new issuer, it changes nothing and lists
+the affected users. See
+[Changing the provider](/authentication#changing-the-provider).

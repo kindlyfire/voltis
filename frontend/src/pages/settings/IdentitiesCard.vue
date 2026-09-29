@@ -122,7 +122,11 @@ async function handleUnlink(identity: Identity, index: number) {
         { focusFallback: () => refocusTarget(index) }
     )
     if (!confirmed) return
-    await unlink.mutateAsync(identity.id)
+    try {
+        await unlink.mutateAsync(identity.id)
+    } catch {
+        return // Shown by QueryError.
+    }
     refocusIndex = index
     toast.show({ message: `Unlinked ${accountLabel(identity)}` })
     emit('unlinked')

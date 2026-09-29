@@ -3,7 +3,6 @@ package routes
 import (
 	"context"
 	"net/http"
-	"slices"
 	"testing"
 	"time"
 
@@ -54,10 +53,21 @@ func TestIdentitiesListAndUnlink(t *testing.T) {
 	assertEq(t, countRows(t, c, "SELECT count(*) FROM user_identities"), 1)
 }
 
+// Call before seeding sessions: the issuer transition revokes oidc sessions.
+func enableOIDC(t *testing.T, st *settings.Store, issuer string) {
+	t.Helper()
+	setSetting(t, st, settings.AppPublicURL, "http://voltis.example")
+	setSetting(t, st, settings.OIDCIssuer, issuer)
+	setSetting(t, st, settings.OIDCClientID, "voltis")
+	setSetting(t, st, settings.OIDCEnabled, true)
+}
+
 func TestUnlinkKeepsALoginMethod(t *testing.T) {
 	pool := newTestPool(t)
 	c := newAdminClient(t, pool)
+	enableOIDC(t, c.st, "https://idp.example")
 	userID := meID(t, c)
+	ctx := context.Background()
 	only := seedIdentity(t, c, userID, "sub-1")
 
 	// A password is still a way in, so the last identity may go.
@@ -68,35 +78,48 @@ func TestUnlinkKeepsALoginMethod(t *testing.T) {
 		"username": "admin", "password": "adminpass123",
 	}).Assert(t, 200)
 	again := seedIdentity(t, c, userID, "sub-2")
-	if _, err := pool.Exec(context.Background(),
-		"UPDATE users SET password_hash = NULL WHERE id = $1", userID); err != nil {
+	if _, err := pool.Exec(ctx, "UPDATE users SET password_hash = NULL WHERE id = $1", userID); err != nil {
 		t.Fatalf("clear password: %v", err)
 	}
 
 	c.Delete("/api/users/me/identities/"+again).Assert(t, 400)
 	assertEq(t, countRows(t, c, "SELECT count(*) FROM user_identities"), 1)
 	c.Get("/api/users/me").Assert(t, 200)
-}
 
-func TestUnlinkWithPasswordLoginDisabled(t *testing.T) {
-	pool := newTestPool(t)
-	c := newAdminClient(t, pool)
-	userID := meID(t, c)
-	only := seedIdentity(t, c, userID, "sub-1")
+	// An identity from an old issuer can no longer log in.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO user_identities (id, provider, issuer, subject, user_id)
+		VALUES ($1, 'oidc', 'https://old-idp.example', 'sub-3', $2)
+	`, models.MakeIdentityID(), userID); err != nil {
+		t.Fatalf("seed identity: %v", err)
+	}
+	c.Delete("/api/users/me/identities/"+again).Assert(t, 400)
 
+	// Nor can one while the OIDC configuration is incomplete.
+	current := seedIdentity(t, c, userID, "sub-4")
+	setSetting(t, c.st, settings.AppPublicURL, "")
+	c.Delete("/api/users/me/identities/"+again).Assert(t, 400)
+	setSetting(t, c.st, settings.AppPublicURL, "http://voltis.example")
+	c.Delete("/api/users/me/identities/"+current).Assert(t, 200)
+
+	// Nor can a password while password login is disabled.
+	if _, err := pool.Exec(ctx,
+		"UPDATE users SET password_hash = $1 WHERE id = $2", hashOf(t, "adminpass123"), userID); err != nil {
+		t.Fatalf("set password: %v", err)
+	}
 	external := c.newSession(t)
 	external.SetCookie("voltis_session",
 		insertSession(t, pool, userID, models.SessionOIDC, time.Now().Add(time.Hour), nil))
 	setSetting(t, c.st, settings.AuthPasswordLoginEnabled, false)
 
-	// The password is unusable, so this identity is the only way in.
-	external.Delete("/api/users/me/identities/"+only).Assert(t, 400)
-	assertEq(t, countRows(t, c, "SELECT count(*) FROM user_identities"), 1)
+	external.Delete("/api/users/me/identities/"+again).Assert(t, 400)
+	assertEq(t, countRows(t, c, "SELECT count(*) FROM user_identities"), 2)
 }
 
 func TestConcurrentUnlinksKeepOne(t *testing.T) {
 	pool := newTestPool(t)
 	c := newAdminClient(t, pool)
+	enableOIDC(t, c.st, "https://idp.example")
 	userID := meID(t, c)
 	first := seedIdentity(t, c, userID, "sub-1")
 	second := seedIdentity(t, c, userID, "sub-2")
@@ -104,47 +127,119 @@ func TestConcurrentUnlinksKeepOne(t *testing.T) {
 	if _, err := pool.Exec(ctx, "UPDATE users SET password_hash = NULL WHERE id = $1", userID); err != nil {
 		t.Fatalf("clear password: %v", err)
 	}
+	external := c.newSession(t)
+	external.SetCookie("voltis_session",
+		insertSession(t, pool, userID, models.SessionOIDC, time.Now().Add(time.Hour), nil))
 
-	// Sessions first: their own foreign key waits would otherwise satisfy the
-	// barrier before either unlink reached the user row.
-	clients := []*testClient{c.newSession(t), c.newSession(t)}
-	for _, client := range clients {
-		client.SetCookie("voltis_session",
-			insertSession(t, pool, userID, models.SessionOIDC, time.Now().Add(time.Hour), nil))
+	// The first unlink, held open after its check passed on the second identity.
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockUser(ctx, tx, userID); err != nil {
+		t.Fatalf("lock user: %v", err)
+	}
+	if _, err := tx.Exec(ctx, "DELETE FROM user_identities WHERE id = $1", first); err != nil {
+		t.Fatalf("unlink: %v", err)
+	}
+	if err := requireLoginMethod(ctx, tx, userID, false); err != nil {
+		t.Fatalf("first check: %v", err)
 	}
 
+	done := make(chan int, 1)
+	go func() { done <- external.Delete("/api/users/me/identities/" + second).StatusCode }()
+
+	waitBlockedOn(t, pool, "FROM users WHERE id = $1 FOR UPDATE")
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	assertEq(t, <-done, 400)
+	assertEq(t, countRows(t, c, "SELECT count(*) FROM user_identities"), 1)
+}
+
+// A callback that resolved the identity before the unlink must not leave a
+// session behind it.
+func TestUnlinkRevokesARacingOIDCLogin(t *testing.T) {
+	pool := newTestPool(t)
+	c := newAdminClient(t, pool)
+	enableOIDC(t, c.st, "https://idp.example")
+	userID := meID(t, c)
+	identity := seedIdentity(t, c, userID, "sub-1")
+	ctx := context.Background()
+
+	// Holds the callback at its session insert, after it resolved the identity.
 	hold, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
 	defer func() { _ = hold.Rollback(ctx) }()
-	if _, err := hold.Exec(ctx, "SELECT id FROM users WHERE id = $1 FOR UPDATE", userID); err != nil {
-		t.Fatalf("hold row: %v", err)
+	if _, err := hold.Exec(ctx, "LOCK TABLE sessions IN SHARE MODE"); err != nil {
+		t.Fatalf("lock sessions: %v", err)
 	}
 
-	results := make(chan int, 2)
-	for i, identity := range []string{first, second} {
-		go func() {
-			results <- clients[i].Delete("/api/users/me/identities/" + identity).StatusCode
-		}()
+	o := &OIDCRoutes{res: &resolver{pool: pool, st: c.st, hub: c.hub}}
+	login := make(chan error, 1)
+	go func() {
+		_, err := o.finalize(ctx, finalizeRequest{Op: finalizeLogin, ID: oidcIdentity("sub-1"), ClientID: "voltis"})
+		login <- err
+	}()
+	waitBlockedOn(t, pool, "INSERT INTO sessions")
+
+	ur := &UserRoutes{pool: pool, hub: c.hub, st: c.st}
+	unlink := make(chan error, 1)
+	go func() { unlink <- ur.unlink(ctx, userID, identity) }()
+	waitBlockedOn(t, pool, "FROM settings_version FOR SHARE")
+	if err := hold.Rollback(ctx); err != nil {
+		t.Fatalf("release: %v", err)
 	}
 
-	waitBlockedN(t, pool, 2)
-	if err := hold.Commit(ctx); err != nil {
+	if err := <-login; err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if err := <-unlink; err != nil {
+		t.Fatalf("unlink: %v", err)
+	}
+	assertEq(t, countRows(t, c, "SELECT count(*) FROM sessions"), 0)
+	assertEq(t, countRows(t, c, "SELECT count(*) FROM user_identities"), 0)
+}
+
+func TestLoginPolicyLockOrderSurvivesAConcurrentDisable(t *testing.T) {
+	pool := newTestPool(t)
+	c := newAdminClient(t, pool)
+	userID := meID(t, c)
+	identity := seedIdentity(t, c, userID, "sub-1")
+	ctx := context.Background()
+	external := c.newSession(t)
+	external.SetCookie("voltis_session",
+		insertSession(t, pool, userID, models.SessionOIDC, time.Now().Add(time.Hour), nil))
+
+	disable, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = disable.Rollback(ctx) }()
+	if err := settings.WriteTx(ctx, disable, settings.AuthPasswordLoginEnabled, false); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+
+	result := make(chan int, 1)
+	go func() { result <- external.Delete("/api/users/me/identities/" + identity).StatusCode }()
+
+	waitBlockedOn(t, pool, "FROM settings_version FOR SHARE")
+	if err := disable.Commit(ctx); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
 
-	statuses := []int{<-results, <-results}
-	slices.Sort(statuses)
-	if statuses[0] != 200 || statuses[1] != 400 {
-		t.Fatalf("got %v, want one unlink accepted and one refused", statuses)
-	}
+	// The unlink waited for the disable and then saw the password as unusable.
+	assertEq(t, <-result, 400)
 	assertEq(t, countRows(t, c, "SELECT count(*) FROM user_identities"), 1)
 }
 
 func TestAdminManagesIdentities(t *testing.T) {
 	pool := newTestPool(t)
 	admin := newAdminClient(t, pool)
+	enableOIDC(t, admin.st, "https://idp.example")
 	member := admin.Post("/api/users/new", map[string]any{
 		"username": "member", "permissions": []string{},
 	}).Assert(t, 200).JSON()
@@ -165,8 +260,14 @@ func TestAdminManagesIdentities(t *testing.T) {
 		"provider": "nonsense", "subject": "x",
 	}).Assert(t, 400)
 
-	// An admin may leave an account with no way in: it is theirs to fix.
+	// Not even an admin may leave an account with no way in.
 	ids := identityIDs(t, admin, "/api/users/"+memberID+"/identities")
+	admin.Delete("/api/users/"+memberID+"/identities/"+ids[0]).Assert(t, 400)
+	assertEq(t, countRows(t, admin, "SELECT count(*) FROM user_identities"), 1)
+
+	admin.Post("/api/users/"+memberID, map[string]any{
+		"username": "member", "password": "memberpass123", "permissions": []string{},
+	}).Assert(t, 200)
 	admin.Delete("/api/users/"+memberID+"/identities/"+ids[0]).Assert(t, 200)
 	assertEq(t, countRows(t, admin, "SELECT count(*) FROM user_identities"), 0)
 	admin.Get("/api/users/me").Assert(t, 200)
@@ -256,39 +357,6 @@ func TestDisablingPasswordLoginIsEndToEnd(t *testing.T) {
 	}).Assert(t, 403)
 }
 
-func TestLoginPolicyLockOrderSurvivesAConcurrentDisable(t *testing.T) {
-	pool := newTestPool(t)
-	c := newAdminClient(t, pool)
-	userID := meID(t, c)
-	identity := seedIdentity(t, c, userID, "sub-1")
-	ctx := context.Background()
-
-	disable, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	defer func() { _ = disable.Rollback(ctx) }()
-	if err := settings.WriteTx(ctx, disable, settings.AuthPasswordLoginEnabled, false); err != nil {
-		t.Fatalf("disable: %v", err)
-	}
-
-	external := c.newSession(t)
-	external.SetCookie("voltis_session",
-		insertSession(t, pool, userID, models.SessionOIDC, time.Now().Add(time.Hour), nil))
-
-	result := make(chan int, 1)
-	go func() { result <- external.Delete("/api/users/me/identities/" + identity).StatusCode }()
-
-	waitBlocked(t, pool)
-	if err := disable.Commit(ctx); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-
-	// The unlink serialized behind the disable and then saw the new policy.
-	assertEq(t, <-result, 400)
-	assertEq(t, countRows(t, c, "SELECT count(*) FROM user_identities"), 1)
-}
-
 func TestIdentityAuthorization(t *testing.T) {
 	pool := newTestPool(t)
 	admin := newAdminClient(t, pool)
@@ -371,7 +439,7 @@ func TestProfileSaveKeepsAConcurrentPassword(t *testing.T) {
 		done <- external.Post("/api/users/me", map[string]any{"username": "renamed"}).StatusCode
 	}()
 
-	waitBlocked(t, pool)
+	waitBlockedOn(t, pool, "username = COALESCE($1::text, username)")
 	if err := hold.Commit(ctx); err != nil {
 		t.Fatalf("commit: %v", err)
 	}

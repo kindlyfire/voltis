@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/netip"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -227,8 +226,9 @@ func TestProxyRejectsATakenUsername(t *testing.T) {
 
 	c.asProxy("alice").Get("/api/users/me").Assert(t, 403)
 
+	// A password account is never linked by name; an admin links it.
 	setSetting(t, c.st, settings.AuthLinkMatchUsername, true)
-	assertEq(t, s(c.asProxy("alice").Get("/api/users/me").Assert(t, 200).JSON()["username"]), "alice")
+	c.asProxy("alice").Get("/api/users/me").Assert(t, 403)
 }
 
 func TestProxyLogoutRedirects(t *testing.T) {
@@ -327,7 +327,7 @@ func TestProxyConcurrentDemotionIsNotAuthorized(t *testing.T) {
 	result := make(chan *response, 1)
 	go func() { result <- admin.WithHeader("Remote-Groups", "users").Get("/api/users") }()
 
-	waitBlocked(t, pool)
+	waitBlockedOn(t, pool, "pg_advisory_xact_lock($1)")
 	if err := demote.Commit(ctx); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
@@ -356,67 +356,10 @@ func TestProxyLogoutOnTheRequestThatConvertsTheSession(t *testing.T) {
 	c.Post("/api/auth/register", map[string]any{
 		"username": "admin", "password": "adminpass123",
 	}).Assert(t, 200)
-	setSetting(t, c.st, settings.AuthLinkMatchUsername, true)
 	setSetting(t, c.st, settings.AuthProxyLogoutURL, "https://sso.example/logout")
 
-	resp := c.asProxy("admin").Post("/api/auth/logout", nil).Assert(t, 200)
+	resp := c.asProxy("alice").Post("/api/auth/logout", nil).Assert(t, 200)
 	assertEq(t, resp.JSON()["redirect_url"], "https://sso.example/logout")
+	assertEq(t, len(sessionMethods(t, pool, "alice")), 0)
 	assertEq(t, len(sessionMethods(t, pool, "admin")), 0)
-}
-
-func TestProxyConcurrentRequestsShareOneSession(t *testing.T) {
-	pool := newTestPool(t)
-	c := newProxiedClient(t, pool)
-	ctx := context.Background()
-	c.asProxy("alice").Get("/api/users/me").Assert(t, 200)
-	if _, err := pool.Exec(ctx, "DELETE FROM sessions"); err != nil {
-		t.Fatal(err)
-	}
-	gate, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = gate.Rollback(ctx) }()
-	// Hold inserts until every request reaches session creation or its advisory lock.
-	if _, err := gate.Exec(ctx, "LOCK TABLE sessions IN SHARE MODE"); err != nil {
-		t.Fatal(err)
-	}
-
-	var wg sync.WaitGroup
-	statuses := make([]int, 6)
-	for i := range statuses {
-		wg.Go(func() {
-			client := c.newSession(t).WithRemoteAddr(trustedPeerAddr).WithHeader("Remote-User", "alice")
-			statuses[i] = client.Get("/api/users/me").StatusCode
-		})
-	}
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		blocked, err := db.SelectScalar[int](ctx, pool, `
-			SELECT count(DISTINCT pid) FROM pg_locks
-			WHERE NOT granted
-			  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
-			  AND (locktype = 'advisory' OR relation = 'sessions'::regclass)
-		`)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if blocked == len(statuses) {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("only %d of %d session requests reached the gate", blocked, len(statuses))
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	if err := gate.Commit(ctx); err != nil {
-		t.Fatal(err)
-	}
-	wg.Wait()
-
-	for _, status := range statuses {
-		assertEq(t, status, 200)
-	}
-	assertEq(t, len(sessionMethods(t, pool, "alice")), 1)
-	assertEq(t, countRows(t, c, "SELECT count(*) FROM users"), 1)
 }

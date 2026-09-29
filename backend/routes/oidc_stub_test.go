@@ -43,7 +43,9 @@ type stubIdP struct {
 	expiry        time.Time
 	nonceOverride string
 	tamper        bool
+	noUserinfo    bool
 	tokenError    string
+	onToken       func()
 }
 
 func newStubIdP(t *testing.T) *stubIdP {
@@ -72,14 +74,18 @@ func newStubIdP(t *testing.T) *stubIdP {
 }
 
 func (s *stubIdP) discovery(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, map[string]any{
+	doc := map[string]any{
 		"issuer":                                s.server.URL,
 		"authorization_endpoint":                s.server.URL + "/authorize",
 		"token_endpoint":                        s.server.URL + "/token",
 		"jwks_uri":                              s.server.URL + "/keys",
 		"userinfo_endpoint":                     s.server.URL + "/userinfo",
 		"id_token_signing_alg_values_supported": []string{"RS256"},
-	})
+	}
+	if s.noUserinfo {
+		delete(doc, "userinfo_endpoint")
+	}
+	writeJSON(w, doc)
 }
 
 func (s *stubIdP) jwks(w http.ResponseWriter, _ *http.Request) {
@@ -111,6 +117,9 @@ func (s *stubIdP) authorize(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *stubIdP) token(w http.ResponseWriter, r *http.Request) {
+	if s.onToken != nil {
+		s.onToken()
+	}
 	_ = r.ParseForm()
 	code := r.Form.Get("code")
 

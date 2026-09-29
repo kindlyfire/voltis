@@ -25,6 +25,8 @@ type UserRoutes struct {
 	pool *pgxpool.Pool
 	hub  *WebSocketHub
 	st   *settings.Store
+
+	proxyEnabled bool
 }
 
 func (ur *UserRoutes) Register(g *echo.Group) {

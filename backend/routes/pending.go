@@ -23,6 +23,8 @@ const (
 	pendingTTL      = 10 * time.Minute
 	pendingFlow     = "oidc_flow"
 	pendingComplete = "oidc_complete"
+
+	maxConfirmAttempts = 5
 )
 
 type oidcFlow struct {
@@ -40,24 +42,23 @@ type oidcComplete struct {
 	Subject       string   `json:"subject"`
 	Username      string   `json:"username"`
 	Email         string   `json:"email"`
-	EmailVerified bool     `json:"email_verified"`
 	Groups        []string `json:"groups"`
 	HasGroups     bool     `json:"has_groups"`
 	MatchID       string   `json:"match_id"`
 	MatchUsername string   `json:"match_username"`
+	MatchBy       string   `json:"match_by"`
 	Redirect      string   `json:"redirect,omitempty"`
 }
 
 func (p oidcComplete) identity() ExternalIdentity {
 	return ExternalIdentity{
-		Provider:      models.SessionOIDC,
-		Issuer:        p.Issuer,
-		Subject:       p.Subject,
-		Username:      p.Username,
-		Email:         p.Email,
-		EmailVerified: p.EmailVerified,
-		Groups:        p.Groups,
-		HasGroups:     p.HasGroups,
+		Provider:  models.SessionOIDC,
+		Issuer:    p.Issuer,
+		Subject:   p.Subject,
+		Username:  p.Username,
+		Email:     p.Email,
+		Groups:    p.Groups,
+		HasGroups: p.HasGroups,
 	}
 }
 
@@ -98,10 +99,24 @@ func readPending(ctx context.Context, q db.Querier, raw, kind string) (*models.A
 		"SELECT * FROM auth_pending WHERE id = $1 AND kind = $2 AND expires_at > NOW()", pendingKey(raw), kind)
 }
 
-// Deletes as it reads: a callback or pending ID is single use.
-func consumePending(ctx context.Context, q db.Querier, raw, kind string) (*models.AuthPending, error) {
-	return selectPending(ctx, q,
-		"DELETE FROM auth_pending WHERE id = $1 AND kind = $2 AND expires_at > NOW() RETURNING *", pendingKey(raw), kind)
+// consumeFlow deletes the flow only for its own state, so a forged callback
+// cannot cancel a sign-in in progress.
+func consumeFlow(ctx context.Context, q db.Querier, raw, state string) (*models.AuthPending, error) {
+	return selectPending(ctx, q, `
+		DELETE FROM auth_pending
+		WHERE id = $1 AND kind = $2 AND expires_at > NOW() AND data->>'state' = $3
+		RETURNING *
+	`, pendingKey(raw), pendingFlow, state)
+}
+
+// reserveAttempt counts a password attempt before it is checked, so concurrent
+// guesses cannot exceed the cap.
+func reserveAttempt(ctx context.Context, q db.Querier, raw string) (*models.AuthPending, error) {
+	return selectPending(ctx, q, `
+		UPDATE auth_pending SET attempts = attempts + 1
+		WHERE id = $1 AND kind = $2 AND expires_at > NOW() AND attempts < $3
+		RETURNING *
+	`, pendingKey(raw), pendingComplete, maxConfirmAttempts)
 }
 
 func selectPending(ctx context.Context, q db.Querier, query string, args ...any) (*models.AuthPending, error) {

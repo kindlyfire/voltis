@@ -229,7 +229,7 @@ func TestAppKeys(t *testing.T) {
 	}
 	created := make(chan *response, 1)
 	go func() { created <- member.Post("/api/users/me/app-keys", map[string]any{"name": "Late"}) }()
-	waitBlocked(t, pool)
+	waitBlockedOn(t, pool, "FROM users WHERE id = $1 FOR UPDATE")
 	mustExec(t, pool, "DELETE FROM sessions WHERE user_id = $1", memberID)
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatal(err)
@@ -538,7 +538,7 @@ func TestOPDSFeeds(t *testing.T) {
 	}
 	fetched := make(chan *response, 1)
 	go func() { fetched <- fetchPage(fx.Vol1, 2) }()
-	waitBlocked(t, pool)
+	waitBlockedOn(t, pool, "'metadata:'")
 	c.Delete("/api/users/me/app-keys/"+s(k["id"])).Assert(t, 200)
 	if err := tx.Rollback(ctx); err != nil {
 		t.Fatal(err)

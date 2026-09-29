@@ -112,9 +112,12 @@ func main() {
 						ArgsUsage: "<username>",
 						Flags: []cli.Flag{
 							&cli.StringFlag{
-								Name:     "password",
-								Usage:    "Password for the user (use - to read from stdin)",
-								Required: true,
+								Name:  "password",
+								Usage: "Password for the user (use - to read from stdin)",
+							},
+							&cli.BoolFlag{
+								Name:  "no-password",
+								Usage: "Create the user without a password, for an external login to claim",
 							},
 							&cli.BoolFlag{
 								Name:  "admin",
@@ -126,9 +129,35 @@ func main() {
 							if username == "" {
 								return errors.New("username is required")
 							}
+							if c.IsSet("password") == c.Bool("no-password") {
+								return errors.New("pass exactly one of --password and --no-password")
+							}
+							var password *string
+							if c.IsSet("password") {
+								password = new(c.String("password"))
+							}
 							pool := connectDB(ctx)
 							defer pool.Close()
-							return cmd.CreateUser(ctx, pool, username, c.String("password"), c.Bool("admin"))
+							return cmd.CreateUser(ctx, pool, username, password, c.Bool("admin"))
+						},
+					},
+					{
+						Name:      "link",
+						Usage:     "Link an external identity to a user",
+						ArgsUsage: "<username>",
+						Flags: []cli.Flag{
+							&cli.StringFlag{Name: "provider", Usage: "proxy or oidc", Required: true},
+							&cli.StringFlag{Name: "issuer", Usage: "OIDC issuer URL (oidc only)"},
+							&cli.StringFlag{Name: "subject", Usage: "Proxy username or OIDC subject", Required: true},
+						},
+						Action: func(ctx context.Context, c *cli.Command) error {
+							username := c.Args().First()
+							if username == "" {
+								return errors.New("username is required")
+							}
+							pool := connectDB(ctx)
+							defer pool.Close()
+							return cmd.LinkIdentity(ctx, pool, username, c.String("provider"), c.String("issuer"), c.String("subject"))
 						},
 					},
 					{
@@ -168,6 +197,29 @@ func main() {
 							pool := connectDB(ctx)
 							defer pool.Close()
 							return cmd.UpdateUser(ctx, pool, name, usernamePtr, passwordPtr, adminPtr)
+						},
+					},
+				},
+			},
+			{
+				Name:  "identities",
+				Usage: "External identity commands",
+				Commands: []*cli.Command{
+					{
+						Name:      "set-issuer",
+						Usage:     "Move OIDC identities to a new issuer URL",
+						ArgsUsage: "<old> <new>",
+						Action: func(ctx context.Context, c *cli.Command) error {
+							from, to := c.Args().Get(0), c.Args().Get(1)
+							if from == "" || to == "" {
+								return errors.New("old and new issuer are required")
+							}
+							if from == to {
+								return errors.New("old and new issuer are the same")
+							}
+							pool := connectDB(ctx)
+							defer pool.Close()
+							return cmd.SetIssuer(ctx, pool, from, to)
 						},
 					},
 				},

@@ -60,7 +60,7 @@ var defs = []Def{
 	{
 		Key: AppPublicURL, Type: TypeString, Default: "",
 		Help:      "Externally reachable base URL of this server. Required for OIDC.",
-		normalize: normalizeURL, validate: optionalURL,
+		normalize: normalizeURL, validate: baseURL,
 	},
 	{Key: AuthRegistrationEnabled, Type: TypeBool, Default: false, Help: "Allow anyone to create an account."},
 	{Key: AuthPasswordLoginEnabled, Type: TypeBool, Default: true, Help: "Allow logging in with a username and password."},
@@ -91,7 +91,7 @@ var defs = []Def{
 	},
 	{
 		Key: AuthLinkMatchEmail, Type: TypeBool, Default: false,
-		Help: "Link an external login to the local account with the same email. The identity provider is trusted to own that address: anyone who can register it there can claim the local account.",
+		Help: "Link an external login to the local account with the same verified email. Only accounts with no password and no linked logins link automatically. Through single sign-on, an account with a password links after its password is confirmed.",
 	},
 	{Key: AuthProxyLogoutURL, Type: TypeString, Default: "", Help: "Where to send proxy users on logout. Empty hides the logout button.", validate: optionalURL},
 	{
@@ -219,6 +219,18 @@ func optionalURL(v any) error {
 	u, err := url.Parse(s)
 	if err != nil || u.Host == "" || !slices.Contains([]string{"http", "https"}, strings.ToLower(u.Scheme)) {
 		return fmt.Errorf("must be an http or https URL")
+	}
+	return nil
+}
+
+// baseURL is an optionalURL that paths can be appended to.
+func baseURL(v any) error {
+	if err := optionalURL(v); err != nil {
+		return err
+	}
+	u, _ := url.Parse(v.(string))
+	if u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+		return fmt.Errorf("must not contain credentials, a query or a fragment")
 	}
 	return nil
 }

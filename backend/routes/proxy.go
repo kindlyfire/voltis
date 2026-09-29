@@ -40,10 +40,9 @@ func (r *resolver) proxyIdentity(c echo.Context) (ExternalIdentity, bool, error)
 	}
 
 	id := ExternalIdentity{
-		Provider:      models.SessionProxy,
-		Subject:       name,
-		Username:      name,
-		EmailVerified: true,
+		Provider: models.SessionProxy,
+		Subject:  name,
+		Username: name,
 	}
 	if r.proxy.EmailHeader != "" {
 		id.Email = strings.TrimSpace(header.Get(r.proxy.EmailHeader))

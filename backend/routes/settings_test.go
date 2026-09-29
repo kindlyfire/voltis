@@ -2,10 +2,13 @@ package routes
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"voltis/cmd"
+	"voltis/db"
+	"voltis/models"
 	"voltis/settings"
 
 	"github.com/labstack/echo/v4"
@@ -139,6 +142,40 @@ func TestCLIWriteReachesRunningServer(t *testing.T) {
 	if err := cmd.SetSetting(context.Background(), pool, settings.AuthExternalSessionMaxDays, "0"); err == nil {
 		t.Fatal("the CLI must not accept invalid values")
 	}
+}
+
+func TestCLISetIssuer(t *testing.T) {
+	pool := newTestPool(t)
+	ctx := context.Background()
+	const from, to = "https://old.example", "https://new.example"
+	ann := makeUser(t, pool, "ann", "", "")
+	ben := makeUser(t, pool, "ben", "", "")
+	makeIdentity(t, pool, ann, ExternalIdentity{Provider: models.SessionOIDC, Issuer: from, Subject: "sub-ann"})
+	makeIdentity(t, pool, ben, ExternalIdentity{Provider: models.SessionOIDC, Issuer: from, Subject: "sub-ben"})
+	cal := makeUser(t, pool, "cal", "", "")
+	makeIdentity(t, pool, cal, ExternalIdentity{Provider: models.SessionOIDC, Issuer: to, Subject: "sub-ben"})
+	count := func(issuer string) int {
+		n, err := db.SelectScalar[int](ctx, pool, "SELECT count(*) FROM user_identities WHERE issuer = $1", issuer)
+		if err != nil {
+			t.Fatalf("count: %v", err)
+		}
+		return n
+	}
+
+	err := cmd.SetIssuer(ctx, pool, from, to)
+	if err == nil || !strings.Contains(err.Error(), "ben (sub-ben): new identity on cal") || strings.Contains(err.Error(), "ann") {
+		t.Fatalf("set-issuer with a conflict: %v", err)
+	}
+	assertEq(t, count(from), 2)
+
+	if _, err := pool.Exec(ctx, "DELETE FROM user_identities WHERE issuer = $1", to); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if err := cmd.SetIssuer(ctx, pool, from, to); err != nil {
+		t.Fatalf("set-issuer: %v", err)
+	}
+	assertEq(t, count(from), 0)
+	assertEq(t, count(to), 2)
 }
 
 func TestBootstrapStaysClosedAfterRestart(t *testing.T) {

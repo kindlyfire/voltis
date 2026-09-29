@@ -96,8 +96,8 @@
                 </div>
                 <AAlert v-if="form.values.value.matchEmail" tone="warning">
                     Email matching trusts the provider to own the address. Anyone who can register a
-                    matching verified email there can claim the local account that uses it, and
-                    local addresses are not verified.
+                    matching verified email there can claim a local account that has no password and
+                    no linked logins. Accounts with a password must confirm it first.
                 </AAlert>
                 <ATextField
                     v-bind="form.field('adminGroup')"

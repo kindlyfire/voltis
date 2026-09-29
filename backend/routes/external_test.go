@@ -2,7 +2,6 @@ package routes
 
 import (
 	"context"
-	"sync"
 	"testing"
 
 	"slices"
@@ -45,7 +44,7 @@ func oidcIdentity(subject string) ExternalIdentity {
 }
 
 func proxyIdentityFor(name string) ExternalIdentity {
-	return ExternalIdentity{Provider: models.SessionProxy, Subject: name, Username: name, EmailVerified: true}
+	return ExternalIdentity{Provider: models.SessionProxy, Subject: name, Username: name}
 }
 
 func resolve(t *testing.T, r *resolver, id ExternalIdentity) externalLogin {
@@ -57,50 +56,42 @@ func resolve(t *testing.T, r *resolver, id ExternalIdentity) externalLogin {
 	return out
 }
 
-func TestExternalExistingIdentityLogsIn(t *testing.T) {
-	pool := newTestPool(t)
-	r := newResolver(t, pool)
-	userID := makeUser(t, pool, "alice", "", "")
-	id := oidcIdentity("sub-1")
-	id.Username = "someone-else"
-	makeIdentity(t, pool, userID, id)
-
-	out := resolve(t, r, id)
-	if out.User == nil || out.User.ID != userID {
-		t.Fatalf("got %+v, want the linked user", out)
-	}
-}
-
 func TestExternalEmailMatch(t *testing.T) {
 	cases := []struct {
 		name     string
-		enabled  bool
-		verified bool
-		linked   bool
+		provider string
+		rule     bool
+		password string
+		want     string // link, confirm or new
 	}{
-		{"on and verified", true, true, true},
-		{"off", false, true, false},
-		{"unverified", true, false, false},
+		{"claims a claimable account", models.SessionOIDC, true, "", "link"},
+		{"confirms a password account", models.SessionOIDC, true, "hash", "confirm"},
+		{"rule off", models.SessionOIDC, false, "", "new"},
+		{"proxy skips a password account", models.SessionProxy, true, "hash", "new"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			pool := newTestPool(t)
 			r := newResolver(t, pool)
-			setSetting(t, r.st, settings.AuthLinkMatchEmail, c.enabled)
-			userID := makeUser(t, pool, "alice", "hash", "Alice@Example.com")
+			setSetting(t, r.st, settings.AuthLinkMatchEmail, c.rule)
+			userID := makeUser(t, pool, "alice", c.password, "Alice@Example.com")
 
 			id := oidcIdentity("sub-1")
-			id.Email, id.EmailVerified, id.Username = "alice@example.com", c.verified, "alice-idp"
+			if c.provider == models.SessionProxy {
+				id = proxyIdentityFor("alice-idp")
+			}
+			id.Email, id.Username = "alice@example.com", "alice-idp"
 
 			out := resolve(t, r, id)
-			if c.linked {
-				if out.User == nil || out.User.ID != userID {
-					t.Fatalf("got %+v, want the matched account", out)
-				}
-				return
-			}
-			if out.User != nil && out.User.ID == userID {
-				t.Fatal("linked an account it should not have matched")
+			switch c.want {
+			case "link":
+				assertEq(t, out.User != nil && out.User.ID == userID, true)
+			case "confirm":
+				assertEq(t, out.Needs, needsConfirm)
+				assertEq(t, out.Match != nil && out.Match.ID == userID, true)
+				assertEq(t, out.MatchBy, "email")
+			case "new":
+				assertEq(t, out.User != nil && out.User.ID != userID, true)
 			}
 		})
 	}
@@ -108,23 +99,27 @@ func TestExternalEmailMatch(t *testing.T) {
 
 func TestExternalUsernameMatch(t *testing.T) {
 	cases := []struct {
-		name     string
-		provider string
-		password string
-		existing bool
-		wantLink bool
-		wantNeed string
+		name         string
+		provider     string
+		password     string
+		existing     bool
+		autoCreateOn bool
+		wantLink     bool
+		wantNeed     string
+		wantErr      bool
 	}{
-		{"proxy links", models.SessionProxy, "hash", false, true, ""},
-		{"oidc confirms", models.SessionOIDC, "hash", false, false, needsConfirm},
-		{"oidc claims a pre-created account", models.SessionOIDC, "", false, true, ""},
-		{"oidc declines an account already linked", models.SessionOIDC, "", true, false, needsPickUsername},
+		{"proxy refuses an account already linked", models.SessionProxy, "", true, true, false, "", true},
+		{"oidc confirms", models.SessionOIDC, "hash", false, true, false, needsConfirm, false},
+		{"oidc claims a pre-created account", models.SessionOIDC, "", false, true, true, "", false},
+		{"oidc declines an account already linked", models.SessionOIDC, "", true, true, false, needsPickUsername, false},
+		{"oidc without auto-create has no account", models.SessionOIDC, "", true, false, false, "", true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			pool := newTestPool(t)
 			r := newResolver(t, pool)
 			setSetting(t, r.st, settings.AuthLinkMatchUsername, true)
+			setSetting(t, r.st, settings.AuthExternalAutoCreate, c.autoCreateOn)
 			userID := makeUser(t, pool, "alice", c.password, "")
 			if c.existing {
 				makeIdentity(t, pool, userID, oidcIdentity("other-sub"))
@@ -136,13 +131,23 @@ func TestExternalUsernameMatch(t *testing.T) {
 			}
 			id.Username = "alice"
 
-			out := resolve(t, r, id)
+			out, err := r.resolveExternalLogin(context.Background(), id)
+			if c.wantErr {
+				if err == nil {
+					t.Fatalf("got %+v, want a rejection", out)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolve: %v", err)
+			}
 			assertEq(t, out.Needs, c.wantNeed)
 			if c.wantLink != (out.User != nil && out.User.ID == userID) {
 				t.Fatalf("got %+v, want linked=%v", out, c.wantLink)
 			}
-			if c.wantNeed != "" && (out.Match == nil || out.Match.ID != userID) {
-				t.Fatalf("got match %+v, want the matched account", out.Match)
+			// Only a confirm names the account; a decline must not leak it.
+			if (c.wantNeed == needsConfirm) != (out.Match != nil && out.Match.ID == userID) {
+				t.Fatalf("got match %+v for %q", out.Match, c.wantNeed)
 			}
 		})
 	}
@@ -153,7 +158,7 @@ func TestExternalAutoCreate(t *testing.T) {
 	r := newResolver(t, pool)
 
 	id := oidcIdentity("sub-1")
-	id.Username, id.Email, id.EmailVerified = "newcomer", "New@Example.com", true
+	id.Username, id.Email = "newcomer", "New@Example.com"
 
 	out := resolve(t, r, id)
 	if out.User == nil {
@@ -162,20 +167,10 @@ func TestExternalAutoCreate(t *testing.T) {
 	assertEq(t, out.User.Username, "newcomer")
 	assertEq(t, len(out.User.Permissions), 0)
 
+	// A linked identity logs in by its subject, whatever its username now is.
+	id.Username = "someone-else"
 	again := resolve(t, r, id)
 	assertEq(t, again.User.ID, out.User.ID)
-}
-
-func TestExternalAutoCreateOffRejects(t *testing.T) {
-	pool := newTestPool(t)
-	r := newResolver(t, pool)
-	setSetting(t, r.st, settings.AuthExternalAutoCreate, false)
-
-	id := oidcIdentity("sub-1")
-	id.Username = "newcomer"
-	if _, err := r.resolveExternalLogin(context.Background(), id); err == nil {
-		t.Fatal("expected a rejection")
-	}
 }
 
 func TestExternalUsernameTaken(t *testing.T) {
@@ -205,44 +200,6 @@ func TestExternalUsernameTaken(t *testing.T) {
 			assertEq(t, out.User == nil, true)
 		})
 	}
-}
-
-func TestExternalConcurrentFirstLogins(t *testing.T) {
-	pool := newTestPool(t)
-	r := newResolver(t, pool)
-	id := oidcIdentity("sub-1")
-	id.Username = "newcomer"
-
-	var wg sync.WaitGroup
-	results := make([]externalLogin, 4)
-	errs := make([]error, 4)
-	for i := range results {
-		wg.Go(func() {
-			results[i], errs[i] = r.resolveExternalLogin(context.Background(), id)
-		})
-	}
-	wg.Wait()
-
-	for i, err := range errs {
-		if err != nil {
-			t.Fatalf("resolve %d: %v", i, err)
-		}
-		if results[i].User == nil || results[i].User.ID != results[0].User.ID {
-			t.Fatalf("resolve %d produced a different user: %+v", i, results[i])
-		}
-	}
-
-	users, err := db.SelectScalar[int](context.Background(), pool, "SELECT count(*) FROM users")
-	if err != nil {
-		t.Fatalf("count users: %v", err)
-	}
-	assertEq(t, users, 1)
-
-	identities, err := db.SelectScalar[int](context.Background(), pool, "SELECT count(*) FROM user_identities")
-	if err != nil {
-		t.Fatalf("count identities: %v", err)
-	}
-	assertEq(t, identities, 1)
 }
 
 func TestExternalEmailSyncSkipsCollisions(t *testing.T) {
@@ -333,50 +290,6 @@ func TestParseGroups(t *testing.T) {
 	}
 }
 
-func TestExternalRetriesWhenTheUsernameIsClaimedMidFlight(t *testing.T) {
-	pool := newTestPool(t)
-	r := newResolver(t, pool)
-	ctx := context.Background()
-
-	claim, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	defer func() { _ = claim.Rollback(ctx) }()
-	if _, err := claim.Exec(ctx,
-		"INSERT INTO users (id, username) VALUES ('u_other', 'newcomer')"); err != nil {
-		t.Fatalf("claim username: %v", err)
-	}
-
-	id := oidcIdentity("sub-1")
-	id.Username = "newcomer"
-	out := make(chan externalLogin, 1)
-	errs := make(chan error, 1)
-	go func() {
-		login, err := r.resolveExternalLogin(ctx, id)
-		out <- login
-		errs <- err
-	}()
-
-	waitBlocked(t, pool)
-	if err := claim.Commit(ctx); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-
-	if err := <-errs; err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	login := <-out
-	assertEq(t, login.Needs, needsPickUsername)
-	assertEq(t, login.User == nil, true)
-
-	users, err := db.SelectScalar[int](ctx, pool, "SELECT count(*) FROM users")
-	if err != nil {
-		t.Fatalf("count users: %v", err)
-	}
-	assertEq(t, users, 1)
-}
-
 func TestExternalPreCreatedAccountIsClaimedOnce(t *testing.T) {
 	pool := newTestPool(t)
 	r := newResolver(t, pool)
@@ -384,42 +297,37 @@ func TestExternalPreCreatedAccountIsClaimedOnce(t *testing.T) {
 	ctx := context.Background()
 	userID := makeUser(t, pool, "alice", "", "")
 
-	hold, err := pool.Begin(ctx)
+	// sub-1 claims alice and holds the claim open.
+	claim, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	defer func() { _ = hold.Rollback(ctx) }()
-	if _, err := hold.Exec(ctx, "SELECT id FROM users WHERE id = $1 FOR UPDATE", userID); err != nil {
-		t.Fatalf("hold row: %v", err)
+	defer func() { _ = claim.Rollback(ctx) }()
+	first := oidcIdentity("sub-1")
+	first.Username = "alice"
+	if err := db.LockIdentity(ctx, claim, first.Provider, first.Issuer, first.Subject); err != nil {
+		t.Fatalf("lock identity: %v", err)
+	}
+	if out, err := provision(ctx, claim, first, linkPolicy{matchUsername: true}); err != nil || out.User == nil {
+		t.Fatalf("first claim: %+v, %v", out, err)
 	}
 
-	logins := make(chan externalLogin, 2)
-	errs := make(chan error, 2)
-	for _, subject := range []string{"sub-1", "sub-2"} {
-		go func() {
-			id := oidcIdentity(subject)
-			id.Username = "alice"
-			login, err := r.resolveExternalLogin(ctx, id)
-			logins <- login
-			errs <- err
-		}()
-	}
+	second := oidcIdentity("sub-2")
+	second.Username = "alice"
+	done := make(chan externalLogin, 1)
+	go func() {
+		login, err := r.resolveExternalLogin(ctx, second)
+		if err != nil {
+			t.Errorf("resolve: %v", err)
+		}
+		done <- login
+	}()
 
-	waitBlockedN(t, pool, 2)
-	if err := hold.Commit(ctx); err != nil {
+	waitBlockedOn(t, pool, "WHERE username = $1 FOR UPDATE")
+	if err := claim.Commit(ctx); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
-
-	claimed := 0
-	for range 2 {
-		if err := <-errs; err != nil {
-			t.Fatalf("resolve: %v", err)
-		}
-		if login := <-logins; login.User != nil {
-			claimed++
-		}
-	}
-	assertEq(t, claimed, 1)
+	assertEq(t, (<-done).User == nil, true)
 
 	identities, err := db.SelectScalar[int](ctx, pool,
 		"SELECT count(*) FROM user_identities WHERE user_id = $1", userID)

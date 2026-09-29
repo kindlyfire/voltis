@@ -11,7 +11,6 @@ import (
 	"voltis/settings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 	"golang.org/x/crypto/bcrypt"
@@ -126,7 +125,7 @@ func (a *AuthRoutes) register(c echo.Context) error {
 		return err
 	})
 	if err != nil {
-		if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == "23505" {
+		if db.IsDuplicate(err) {
 			return echo.NewHTTPError(http.StatusBadRequest, "username already exists")
 		}
 		return err
@@ -257,26 +256,38 @@ func isFirstUserFlow(ctx context.Context, q db.Querier, st *settings.Store) (boo
 	return !done, nil
 }
 
-// Call after the change, with settings.LockVersion held. Lock and check are
-// separate statements so the check sees what a racing unlink committed.
-func requireLoginMethod(ctx context.Context, tx pgx.Tx, userID string) error {
-	passwords, err := settings.Read(ctx, tx, settings.AuthPasswordLoginEnabled)
-	if err != nil {
-		return err
-	}
-	_, err = db.SelectScalar[string](ctx, tx, "SELECT id FROM users WHERE id = $1 FOR UPDATE", userID)
+// lockUser takes the row lock that serializes changes to an account's login
+// methods. It comes after any identity lock.
+func lockUser(ctx context.Context, tx pgx.Tx, userID string) error {
+	_, err := db.SelectScalar[string](ctx, tx, "SELECT id FROM users WHERE id = $1 FOR UPDATE", userID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return echo.NewHTTPError(http.StatusNotFound, "User not found")
 	}
+	return err
+}
+
+// Call after the change, with settings.LockVersion and lockUser held. The check
+// is a later statement than the lock, so it sees what a racing unlink committed.
+// Only methods that can log in today count: an identity for a disabled provider,
+// an incomplete OIDC configuration or an old issuer does not.
+func requireLoginMethod(ctx context.Context, tx pgx.Tx, userID string, proxyEnabled bool) error {
+	vals, err := readSettings(ctx, tx, settings.AuthPasswordLoginEnabled,
+		settings.OIDCEnabled, settings.OIDCIssuer, settings.OIDCClientID, settings.AppPublicURL)
 	if err != nil {
 		return err
+	}
+	str := func(key string) string { v, _ := vals[key].(string); return v }
+	oidcCfg := oidcConfig{
+		enabled: vals[settings.OIDCEnabled] == true, issuer: str(settings.OIDCIssuer),
+		clientID: str(settings.OIDCClientID), publicURL: str(settings.AppPublicURL),
 	}
 
 	ok, err := db.SelectScalar[bool](ctx, tx, `
 		SELECT ($2 AND password_hash IS NOT NULL)
-		    OR EXISTS (SELECT 1 FROM user_identities WHERE user_id = $1)
+		    OR EXISTS (SELECT 1 FROM user_identities WHERE user_id = $1 AND (
+		         (provider = 'oidc' AND $3 AND issuer = $4) OR (provider = 'proxy' AND $5)))
 		FROM users WHERE id = $1
-	`, userID, passwords == true)
+	`, userID, vals[settings.AuthPasswordLoginEnabled] == true, oidcCfg.usable(), oidcCfg.issuer, proxyEnabled)
 	if err != nil {
 		return err
 	}

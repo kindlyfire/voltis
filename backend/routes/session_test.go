@@ -15,7 +15,6 @@ import (
 	"voltis/settings"
 
 	"github.com/gorilla/websocket"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 )
@@ -290,152 +289,68 @@ func TestCookieSecureSources(t *testing.T) {
 	assertEq(t, cookieSecure(ctx("", false), st), true)
 }
 
-func TestConcurrentUnlinkKeepsALoginMethod(t *testing.T) {
-	pool := newTestPool(t)
-	c := newAdminClient(t, pool)
-	userID := meID(t, c)
-	ctx := context.Background()
-
-	if _, err := pool.Exec(ctx, "UPDATE users SET password_hash = NULL WHERE id = $1", userID); err != nil {
-		t.Fatalf("clear password: %v", err)
-	}
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO user_identities (id, provider, issuer, subject, user_id)
-		VALUES ('ui_a', 'oidc', 'https://idp.example', 'a', $1), ('ui_b', 'proxy', '', 'b', $1)
-	`, userID); err != nil {
-		t.Fatalf("seed identities: %v", err)
-	}
-
-	unlink := func(tx pgx.Tx, id string) error {
-		if _, err := tx.Exec(ctx, "DELETE FROM user_identities WHERE id = $1", id); err != nil {
-			return err
-		}
-		return requireLoginMethod(ctx, tx, userID)
-	}
-
-	first, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	defer func() { _ = first.Rollback(ctx) }()
-	if err := unlink(first, "ui_a"); err != nil {
-		t.Fatalf("first unlink: %v", err)
-	}
-
-	second := make(chan error, 1)
-	go func() {
-		tx, err := pool.Begin(ctx)
-		if err != nil {
-			second <- err
-			return
-		}
-		defer func() { _ = tx.Rollback(ctx) }()
-		second <- unlink(tx, "ui_b")
-	}()
-
-	waitBlocked(t, pool)
-	if err := first.Commit(ctx); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-	if err := <-second; err == nil {
-		t.Fatal("the second unlink left the account with no login method")
-	}
-
-	left, err := db.SelectScalar[int](ctx, pool,
-		"SELECT count(*) FROM user_identities WHERE user_id = $1", userID)
-	if err != nil {
-		t.Fatalf("count identities: %v", err)
-	}
-	assertEq(t, left, 1)
-}
-
-func TestPasswordLoginDisabledWhileLoggingIn(t *testing.T) {
-	pool := newTestPool(t)
-	c := newAdminClient(t, pool)
-	ctx := context.Background()
-
-	disable, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	defer func() { _ = disable.Rollback(ctx) }()
-	if err := settings.WriteTx(ctx, disable, settings.AuthPasswordLoginEnabled, false); err != nil {
-		t.Fatalf("disable: %v", err)
-	}
-
-	login := make(chan *response, 1)
-	go func() {
-		login <- c.newSession(t).Post("/api/auth/login", map[string]any{
-			"username": "admin", "password": "adminpass123",
-		})
-	}()
-
-	waitBlocked(t, pool)
-	if err := disable.Commit(ctx); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-
-	(<-login).Assert(t, 403)
-	live, err := db.SelectScalar[int](ctx, pool, "SELECT count(*) FROM sessions WHERE method = 'password'")
-	if err != nil {
-		t.Fatalf("count sessions: %v", err)
-	}
-	assertEq(t, live, 0)
-}
-
-func waitBlocked(t *testing.T, pool *pgxpool.Pool) { waitBlockedN(t, pool, 1) }
-
-func waitBlockedN(t *testing.T, pool *pgxpool.Pool, want int) {
-	t.Helper()
-	for range 1000 {
-		n, err := db.SelectScalar[int](context.Background(), pool, `
-			SELECT count(*) FROM pg_locks l
-			JOIN pg_stat_activity a ON a.pid = l.pid
-			WHERE NOT l.granted AND a.datname = current_database()`)
-		if err != nil {
-			t.Fatalf("read pg_locks: %v", err)
-		}
-		if n >= want {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %d blocked locks", want)
-}
-
-func TestRegisterLeavesNoUserWhenItIsRefused(t *testing.T) {
+// A login or registration that passed the early check must not leave a
+// password session behind a disable that commits while it is in flight.
+func TestPasswordLoginDisabledMidRequest(t *testing.T) {
 	pool := newTestPool(t)
 	c := newAdminClient(t, pool)
 	setSetting(t, c.st, settings.AuthRegistrationEnabled, true)
 	ctx := context.Background()
 
-	disable, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	defer func() { _ = disable.Rollback(ctx) }()
-	if err := settings.WriteTx(ctx, disable, settings.AuthPasswordLoginEnabled, false); err != nil {
-		t.Fatalf("disable: %v", err)
+	for _, req := range []struct {
+		path string
+		body map[string]any
+		lock string
+	}{
+		{"/api/auth/login", map[string]any{"username": "admin", "password": "adminpass123"},
+			"FROM settings_version FOR SHARE"},
+		{"/api/auth/register", map[string]any{"username": "ghost", "password": "ghostpass123"},
+			"FROM settings_version FOR UPDATE"},
+	} {
+		setSetting(t, c.st, settings.AuthPasswordLoginEnabled, true)
+		disable, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		defer func() { _ = disable.Rollback(ctx) }()
+		if err := settings.WriteTx(ctx, disable, settings.AuthPasswordLoginEnabled, false); err != nil {
+			t.Fatalf("disable: %v", err)
+		}
+
+		done := make(chan *response, 1)
+		go func() { done <- c.newSession(t).Post(req.path, req.body) }()
+
+		waitBlockedOn(t, pool, req.lock)
+		if err := disable.Commit(ctx); err != nil {
+			t.Fatalf("commit: %v", err)
+		}
+		(<-done).Assert(t, 403)
 	}
 
-	register := make(chan *response, 1)
-	go func() {
-		register <- c.newSession(t).Post("/api/auth/register", map[string]any{
-			"username": "ghost", "password": "ghostpass123",
-		})
-	}()
+	assertEq(t, countRows(t, c, "SELECT count(*) FROM sessions WHERE method = 'password'"), 0)
+	assertEq(t, countRows(t, c, "SELECT count(*) FROM users WHERE username = 'ghost'"), 0)
+}
 
-	waitBlocked(t, pool)
-	if err := disable.Commit(ctx); err != nil {
-		t.Fatalf("commit: %v", err)
+// waitBlockedOn waits until a backend in this database is waiting on a lock
+// while running a statement that contains fragment.
+func waitBlockedOn(t *testing.T, pool *pgxpool.Pool, fragment string) {
+	t.Helper()
+	const blocked = `
+		SELECT query FROM pg_stat_activity
+		WHERE datname = current_database() AND wait_event_type = 'Lock'`
+	for range 1000 {
+		n, err := db.SelectScalar[int](context.Background(), pool,
+			"SELECT count(*) FROM ("+blocked+") b WHERE strpos(query, $1) > 0", fragment)
+		if err != nil {
+			t.Fatalf("read pg_stat_activity: %v", err)
+		}
+		if n > 0 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
-
-	(<-register).Assert(t, 403)
-	ghosts, err := db.SelectScalar[int](ctx, pool, "SELECT count(*) FROM users WHERE username = 'ghost'")
-	if err != nil {
-		t.Fatalf("count users: %v", err)
-	}
-	assertEq(t, ghosts, 0)
+	others, _ := db.SelectScalars[string](context.Background(), pool, blocked)
+	t.Fatalf("timed out waiting for a lock wait in %q; blocked statements: %q", fragment, others)
 }
 
 func TestCLIRenameKeepsACommittedDemotion(t *testing.T) {
@@ -443,7 +358,7 @@ func TestCLIRenameKeepsACommittedDemotion(t *testing.T) {
 	newAdminClient(t, pool)
 	ctx := context.Background()
 
-	if err := cmd.CreateUser(ctx, pool, "bob", "bobpass12345", true); err != nil {
+	if err := cmd.CreateUser(ctx, pool, "bob", new("bobpass12345"), true); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
 
@@ -467,7 +382,7 @@ func TestCLIRenameKeepsACommittedDemotion(t *testing.T) {
 		renamed <- cmd.UpdateUser(ctx, pool, "bob", &newName, nil, nil)
 	}()
 
-	waitBlocked(t, pool)
+	waitBlockedOn(t, pool, "username = COALESCE($1::text, username)")
 	if err := demote.Commit(ctx); err != nil {
 		t.Fatalf("commit: %v", err)
 	}

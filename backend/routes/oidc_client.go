@@ -3,7 +3,9 @@ package routes
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"sync"
+	"time"
 
 	"voltis/settings"
 
@@ -27,17 +29,21 @@ func (c oidcConfig) usable() bool {
 	return c.enabled && c.issuer != "" && c.clientID != "" && c.publicURL != ""
 }
 
-func (c oidcConfig) redirectURL() string { return c.publicURL + oidcCallbackPath }
+func (c oidcConfig) redirectURL() string {
+	u, _ := url.JoinPath(c.publicURL, oidcCallbackPath)
+	return u
+}
 
 type oidcClient struct {
 	st     *settings.Store
+	http   *http.Client
 	mu     sync.Mutex
 	cfg    oidcConfig
 	loaded *oidc.Provider
 }
 
 func newOIDCClient(st *settings.Store) *oidcClient {
-	client := &oidcClient{st: st}
+	client := &oidcClient{st: st, http: &http.Client{Timeout: 10 * time.Second}}
 	st.OnChange(func([]string) { client.invalidate() })
 	return client
 }
@@ -85,7 +91,8 @@ func (o *oidcClient) provider(ctx context.Context) (*oidc.Provider, oidcConfig, 
 			return cached, cfg, nil
 		}
 
-		provider, err := oidc.NewProvider(ctx, cfg.issuer)
+		// The provider's key set keeps this client for its JWKS fetches.
+		provider, err := oidc.NewProvider(oidc.ClientContext(ctx, o.http), cfg.issuer)
 		if err != nil {
 			return nil, cfg, reject("the identity provider could not be reached", err)
 		}

@@ -20,6 +20,7 @@ export const miscApi = {
             queryFn: () => miscApi.info(),
             enabled: isEnabled(enabled),
             refetchOnMount: false,
+            retryOnMount: false,
         }),
 
     info: async (): Promise<Info> => {

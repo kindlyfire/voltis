@@ -13,20 +13,18 @@ import (
 	"voltis/settings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 )
 
 type ExternalIdentity struct {
-	Provider      string
-	Issuer        string
-	Subject       string
-	Username      string
-	Email         string
-	EmailVerified bool
-	Groups        []string
-	HasGroups     bool
+	Provider  string
+	Issuer    string
+	Subject   string
+	Username  string
+	Email     string // verified, or empty
+	Groups    []string
+	HasGroups bool
 }
 
 const (
@@ -35,11 +33,39 @@ const (
 )
 
 // externalLogin is a finished login, or the interaction OIDC needs to finish
-// one. Match is the account a confirm or decline applies to.
+// one. Match is the account a confirm applies to, found by the MatchBy rule.
 type externalLogin struct {
-	User  *models.User
-	Needs string
-	Match *models.User
+	User    *models.User
+	Needs   string
+	Match   *models.User
+	MatchBy string
+}
+
+// linkPolicy is read in the provisioning transaction, under the settings version lock.
+type linkPolicy struct {
+	matchEmail, matchUsername, autoCreate bool
+}
+
+func readSettings(ctx context.Context, q db.Querier, keys ...string) (map[string]any, error) {
+	values := make(map[string]any, len(keys))
+	for _, key := range keys {
+		v, err := settings.Read(ctx, q, key)
+		if err != nil {
+			return nil, err
+		}
+		values[key] = v
+	}
+	return values, nil
+}
+
+var linkPolicyKeys = []string{settings.AuthLinkMatchEmail, settings.AuthLinkMatchUsername, settings.AuthExternalAutoCreate}
+
+func linkPolicyOf(values map[string]any) linkPolicy {
+	return linkPolicy{
+		matchEmail:    values[settings.AuthLinkMatchEmail] == true,
+		matchUsername: values[settings.AuthLinkMatchUsername] == true,
+		autoCreate:    values[settings.AuthExternalAutoCreate] == true,
+	}
 }
 
 func (r *resolver) resolveExternalLogin(ctx context.Context, id ExternalIdentity) (externalLogin, error) {
@@ -50,8 +76,8 @@ func (r *resolver) resolveExternalLogin(ctx context.Context, id ExternalIdentity
 
 	// The second pass sees the row whose unique violation lost the first.
 	out, err := r.provisionTx(ctx, id)
-	if isDuplicate(err) {
-		if out, err = r.provisionTx(ctx, id); isDuplicate(err) {
+	if db.IsDuplicate(err) {
+		if out, err = r.provisionTx(ctx, id); db.IsDuplicate(err) {
 			return pickUsername(id, "the username "+id.Username+" is already taken")
 		}
 	}
@@ -61,11 +87,20 @@ func (r *resolver) resolveExternalLogin(ctx context.Context, id ExternalIdentity
 func (r *resolver) provisionTx(ctx context.Context, id ExternalIdentity) (externalLogin, error) {
 	var out externalLogin
 	err := db.WithTx(ctx, r.pool, func(tx pgx.Tx) error {
+		// Write mode, like finalize: provisioning serializes, so two logins
+		// cannot lock an email match and a username match in opposite orders.
+		// It runs only for an identity without an owner.
+		if err := settings.LockVersionWrite(ctx, tx); err != nil {
+			return err
+		}
+		values, err := readSettings(ctx, tx, linkPolicyKeys...)
+		if err != nil {
+			return err
+		}
 		if err := db.LockIdentity(ctx, tx, id.Provider, id.Issuer, id.Subject); err != nil {
 			return err
 		}
-		var err error
-		out, err = r.provision(ctx, tx, id)
+		out, err = provision(ctx, tx, id, linkPolicyOf(values))
 		return err
 	})
 	if err != nil {
@@ -74,38 +109,38 @@ func (r *resolver) provisionTx(ctx context.Context, id ExternalIdentity) (extern
 	return out, nil
 }
 
-func isDuplicate(err error) bool {
-	pgErr, ok := errors.AsType[*pgconn.PgError](err)
-	return ok && pgErr.Code == "23505"
-}
-
-func (r *resolver) provision(ctx context.Context, tx pgx.Tx, id ExternalIdentity) (externalLogin, error) {
+// provision runs under the identity lock.
+func provision(ctx context.Context, tx pgx.Tx, id ExternalIdentity, policy linkPolicy) (externalLogin, error) {
 	user, err := identityUser(ctx, tx, id)
 	if err != nil || user != nil {
 		return externalLogin{User: user}, err
 	}
 
-	if r.st.Bool(settings.AuthLinkMatchEmail) && id.EmailVerified && normalizeEmail(id.Email) != "" {
+	if policy.matchEmail && id.Email != "" {
 		match, err := userByEmail(ctx, tx, normalizeEmail(id.Email))
 		if err != nil {
 			return externalLogin{}, err
 		}
 		if match != nil {
-			return link(ctx, tx, id, match)
+			if out, ok, err := matchAccount(ctx, tx, id, match, "email"); err != nil || ok {
+				return out, err
+			}
 		}
 	}
 
-	if r.st.Bool(settings.AuthLinkMatchUsername) && id.Username != "" {
+	if policy.matchUsername && id.Username != "" {
 		match, err := userByName(ctx, tx, id.Username)
 		if err != nil {
 			return externalLogin{}, err
 		}
 		if match != nil {
-			return r.matchedUsername(ctx, tx, id, match)
+			if out, ok, err := matchAccount(ctx, tx, id, match, "username"); err != nil || ok {
+				return out, err
+			}
 		}
 	}
 
-	if !r.st.Bool(settings.AuthExternalAutoCreate) {
+	if !policy.autoCreate {
 		return externalLogin{}, echo.NewHTTPError(http.StatusForbidden, "no account for this login; ask an administrator")
 	}
 
@@ -123,24 +158,23 @@ func (r *resolver) provision(ctx context.Context, tx pgx.Tx, id ExternalIdentity
 	return create(ctx, tx, id, name)
 }
 
-// userByName locked match, so these checks cannot be invalidated mid-flight.
-func (r *resolver) matchedUsername(ctx context.Context, tx pgx.Tx, id ExternalIdentity, match *models.User) (externalLogin, error) {
-	if id.Provider == models.SessionProxy {
-		return link(ctx, tx, id, match)
-	}
+// matchAccount returns matched=false when the rule must fall through. Only an
+// account nobody has signed into yet is claimed; OIDC may confirm one with a
+// password. The caller locked match, so these checks cannot go stale.
+func matchAccount(ctx context.Context, tx pgx.Tx, id ExternalIdentity, match *models.User, by string) (externalLogin, bool, error) {
 	if match.PasswordHash != nil {
-		return externalLogin{Needs: needsConfirm, Match: match}, nil
+		if id.Provider == models.SessionProxy {
+			return externalLogin{}, false, nil
+		}
+		return externalLogin{Needs: needsConfirm, Match: match, MatchBy: by}, true, nil
 	}
 
 	used, err := db.SelectScalar[bool](ctx, tx,
 		"SELECT EXISTS (SELECT 1 FROM user_identities WHERE user_id = $1)", match.ID)
-	if err != nil {
-		return externalLogin{}, err
+	if err != nil || used {
+		return externalLogin{}, false, err
 	}
-	if used {
-		return externalLogin{Needs: needsPickUsername, Match: match}, nil
-	}
-	return link(ctx, tx, id, match)
+	return externalLogin{User: match}, true, attachIdentity(ctx, tx, id, match.ID)
 }
 
 func pickUsername(id ExternalIdentity, reason string) (externalLogin, error) {
@@ -150,15 +184,13 @@ func pickUsername(id ExternalIdentity, reason string) (externalLogin, error) {
 	return externalLogin{Needs: needsPickUsername}, nil
 }
 
-func link(ctx context.Context, tx pgx.Tx, id ExternalIdentity, user *models.User) (externalLogin, error) {
-	_, err := tx.Exec(ctx, `
-		INSERT INTO user_identities (id, provider, issuer, subject, user_id, email)
-		VALUES ($1, $2, $3, $4, $5, $6)
-	`, models.MakeIdentityID(), id.Provider, id.Issuer, id.Subject, user.ID, nullable(normalizeEmail(id.Email)))
-	if err != nil {
-		return externalLogin{}, err
+// attachIdentity is db.AttachIdentity with the conflict mapped to a response.
+func attachIdentity(ctx context.Context, tx pgx.Tx, id ExternalIdentity, userID string) error {
+	err := db.AttachIdentity(ctx, tx, id.Provider, id.Issuer, id.Subject, userID, normalizeEmail(id.Email))
+	if errors.Is(err, db.ErrIdentityTaken) {
+		return echo.NewHTTPError(http.StatusConflict, err.Error())
 	}
-	return externalLogin{User: user}, nil
+	return err
 }
 
 func create(ctx context.Context, tx pgx.Tx, id ExternalIdentity, name string) (externalLogin, error) {
@@ -171,7 +203,7 @@ func create(ctx context.Context, tx pgx.Tx, id ExternalIdentity, name string) (e
 	if err != nil {
 		return externalLogin{}, err
 	}
-	return link(ctx, tx, id, &user)
+	return externalLogin{User: &user}, attachIdentity(ctx, tx, id, userID)
 }
 
 func identityUser(ctx context.Context, q db.Querier, id ExternalIdentity) (*models.User, error) {
@@ -187,14 +219,8 @@ func userByName(ctx context.Context, tx pgx.Tx, username string) (*models.User, 
 	return selectUser(ctx, tx, "SELECT * FROM users WHERE username = $1 FOR UPDATE", username)
 }
 
-// An address held by two rows differing only in case matches nothing.
 func userByEmail(ctx context.Context, tx pgx.Tx, email string) (*models.User, error) {
-	users, err := db.Select[models.User](ctx, tx,
-		"SELECT * FROM users WHERE lower(email) = $1 LIMIT 2 FOR UPDATE", email)
-	if err != nil || len(users) != 1 {
-		return nil, err
-	}
-	return &users[0], nil
+	return selectUser(ctx, tx, "SELECT * FROM users WHERE lower(email) = $1 FOR UPDATE", email)
 }
 
 func selectUser(ctx context.Context, q db.Querier, query string, args ...any) (*models.User, error) {
@@ -243,17 +269,35 @@ func syncIdentityEmail(ctx context.Context, pool *pgxpool.Pool, id ExternalIdent
 	}
 }
 
-func (r *resolver) syncAdmin(ctx context.Context, user *models.User, id ExternalIdentity) error {
-	group := r.st.String(settings.AuthAdminGroup)
+// adminWanted reports whether the groups grant ADMIN. ok is false when there
+// is no mapping or the login carried no groups.
+func adminWanted(group string, id ExternalIdentity) (want, ok bool) {
 	if group == "" || !id.HasGroups {
-		return nil
+		return false, false
 	}
-	want := slices.Contains(id.Groups, group)
-	if want == slices.Contains(user.Permissions, "ADMIN") {
+	return slices.Contains(id.Groups, group), true
+}
+
+func (r *resolver) syncAdmin(ctx context.Context, user *models.User, id ExternalIdentity) error {
+	want, ok := adminWanted(r.st.String(settings.AuthAdminGroup), id)
+	if !ok || want == slices.Contains(user.Permissions, "ADMIN") {
 		return nil
 	}
 
-	changed, err := r.setAdmin(ctx, user.ID, want)
+	var changed bool
+	err := db.WithTx(ctx, r.pool, func(tx pgx.Tx) error {
+		if err := db.LockAdminMutation(ctx, tx); err != nil {
+			return err
+		}
+		if want {
+			if err := settings.LockVersionWrite(ctx, tx); err != nil {
+				return err
+			}
+		}
+		var err error
+		changed, err = setAdminTx(ctx, tx, user.ID, want)
+		return err
+	})
 	if err != nil {
 		return err
 	}
@@ -270,34 +314,26 @@ func (r *resolver) syncAdmin(ctx context.Context, user *models.User, id External
 	return nil
 }
 
-func (r *resolver) setAdmin(ctx context.Context, userID string, admin bool) (bool, error) {
+// setAdminTx needs LockAdminMutation, and LockVersionWrite when granting.
+func setAdminTx(ctx context.Context, tx pgx.Tx, userID string, admin bool) (bool, error) {
 	query := "UPDATE users SET permissions = array_remove(permissions, 'ADMIN'), updated_at = NOW() WHERE id = $1 AND permissions @> ARRAY['ADMIN']"
 	if admin {
 		query = "UPDATE users SET permissions = array_append(permissions, 'ADMIN'), updated_at = NOW() WHERE id = $1 AND NOT permissions @> ARRAY['ADMIN']"
 	}
-
-	var changed bool
-	err := db.WithTx(ctx, r.pool, func(tx pgx.Tx) error {
-		if err := db.LockAdminMutation(ctx, tx); err != nil {
-			return err
-		}
-		if admin {
-			if err := settings.LockVersionWrite(ctx, tx); err != nil {
-				return err
-			}
-		}
-		tag, err := tx.Exec(ctx, query, userID)
-		if err != nil {
-			return err
-		}
-		changed = tag.RowsAffected() > 0
-		if !admin {
-			return nil
-		}
-		// An admin now exists, so public bootstrap registration must close.
-		return settings.WriteTx(ctx, tx, settings.BootstrapCompleted, true)
-	})
-	return changed, err
+	tag, err := tx.Exec(ctx, query, userID)
+	if err != nil {
+		return false, err
+	}
+	changed := tag.RowsAffected() > 0
+	if !admin || !changed {
+		return changed, nil
+	}
+	// An admin now exists, so public bootstrap registration must close.
+	done, err := settings.Read(ctx, tx, settings.BootstrapCompleted)
+	if err != nil || done == true {
+		return changed, err
+	}
+	return changed, settings.WriteTx(ctx, tx, settings.BootstrapCompleted, true)
 }
 
 func parseGroups(v any) ([]string, bool) {

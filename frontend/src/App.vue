@@ -6,6 +6,14 @@
         >
             <ASpinner size="lg" />
         </div>
+        <div v-else-if="failed" class="flex min-h-screen items-center justify-center p-4">
+            <div class="flex w-full max-w-md flex-col items-start gap-3">
+                <AAlert tone="danger" title="Voltis couldn't load" class="w-full">
+                    {{ RequestError.getMessage(failed.error.value) }}
+                </AAlert>
+                <AButton @click="failed.refetch()">Retry</AButton>
+            </div>
+        </div>
         <RouterView v-else />
     </TooltipProvider>
 </template>
@@ -13,13 +21,16 @@
 <script setup lang="ts">
 import { useHead } from '@unhead/vue'
 import { TooltipProvider } from 'reka-ui'
-import { watch } from 'vue'
+import { computed, watch } from 'vue'
 import { RouterView, START_LOCATION, useRouter } from 'vue-router'
 import { useLayoutStore } from './pages/_layout/useLayoutStore'
 import { useScanSync } from './stores/scans'
+import AAlert from './ui/AAlert.vue'
+import AButton from './ui/AButton.vue'
 import ASpinner from './ui/ASpinner.vue'
 import { miscApi } from './utils/api/misc'
 import { usersApi } from './utils/api/users'
+import { RequestError } from './utils/fetch'
 import { redirectQuery } from './utils/redirect'
 import { useSubmitShortcut } from './utils/submitShortcut'
 
@@ -29,6 +40,8 @@ useLayoutStore()
 const router = useRouter()
 const qMe = usersApi.useMe()
 const qInfo = miscApi.useInfo()
+// Only a failure with nothing loaded: the app can't start without these.
+const failed = computed(() => [qMe, qInfo].find(q => q.isError.value && q.data.value === undefined))
 
 useScanSync()
 useSubmitShortcut()
@@ -39,7 +52,8 @@ watch(
     ([me, isLoading, route, info]) => {
         // Wait for the initial navigation, or the redirect below would record `/`.
         if (route === START_LOCATION) return
-        if (!isLoading && !me && info) {
+        // `null` is signed out; `undefined` is an error, shown above.
+        if (!isLoading && me === null && info) {
             // The sign-in is verified but unfinished: it owns this page.
             if (route.path === '/auth/oidc/complete') {
                 return

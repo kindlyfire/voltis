@@ -2,6 +2,9 @@ package db
 
 import (
 	"context"
+	"errors"
+
+	"voltis/models"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -89,5 +92,37 @@ func LockProvider(ctx context.Context, tx pgx.Tx, provider string) error {
 
 func LockMetadata(ctx context.Context, tx pgx.Tx, libraryID string) error {
 	_, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtext('metadata:' || $1))", libraryID)
+	return err
+}
+
+// IsDuplicate reports a unique violation.
+func IsDuplicate(err error) bool {
+	pgErr, ok := errors.AsType[*pgconn.PgError](err)
+	return ok && pgErr.Code == "23505"
+}
+
+var ErrIdentityTaken = errors.New("that identity is already linked to another account")
+
+// AttachIdentity links an identity to userID.
+func AttachIdentity(ctx context.Context, tx pgx.Tx, provider, issuer, subject, userID, email string) error {
+	// Reentrant: callers that already hold it lose nothing.
+	if err := LockIdentity(ctx, tx, provider, issuer, subject); err != nil {
+		return err
+	}
+	owner, err := SelectScalar[string](ctx, tx,
+		"SELECT user_id FROM user_identities WHERE provider = $1 AND issuer = $2 AND subject = $3",
+		provider, issuer, subject)
+	switch {
+	case err == nil && owner == userID:
+		return nil
+	case err == nil:
+		return ErrIdentityTaken
+	case !errors.Is(err, pgx.ErrNoRows):
+		return err
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO user_identities (id, provider, issuer, subject, user_id, email)
+		VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''))
+	`, models.MakeIdentityID(), provider, issuer, subject, userID, email)
 	return err
 }

@@ -1,14 +1,17 @@
 <template>
     <AuthCard
-        :title="qPending.isLoading.value || pending ? 'Finish signing in' : 'Nothing to finish'"
-        :loading="qPending.isLoading.value"
+        :title="
+            state === 'expired' || state === 'unavailable'
+                ? 'Nothing to finish'
+                : 'Finish signing in'
+        "
+        :loading="state === 'loading'"
     >
-        <template v-if="pending">
+        <template v-if="active">
             <div v-if="showConfirm" class="flex flex-col gap-4">
                 <p class="text-fg-muted text-sm leading-normal">
-                    An account named <strong class="text-fg">{{ pending.match_username }}</strong>
-                    already exists. Enter its password to link it to your provider account, or
-                    choose a different username.
+                    The account <strong class="text-fg">{{ active.match_username }}</strong>
+                    matches this sign-in. Enter its password to link them.
                 </p>
                 <form novalidate class="flex flex-col gap-4" @submit="confirmForm.onSubmit">
                     <ATextField
@@ -20,8 +23,16 @@
                     />
                     <QueryError :mutation="confirmForm.mutation" />
                     <div class="flex flex-wrap justify-end gap-2">
-                        <AButton variant="text" tone="neutral" @click="declined = true">
+                        <AButton
+                            v-if="active.can_create"
+                            variant="text"
+                            tone="neutral"
+                            @click="declined = true"
+                        >
                             Not my account
+                        </AButton>
+                        <AButton v-else variant="text" tone="neutral" to="/auth/login?local=1">
+                            Back to login
                         </AButton>
                         <AButton type="submit" :loading="confirmForm.mutation.isPending.value">
                             Link account
@@ -44,7 +55,7 @@
                     <QueryError :mutation="usernameForm.mutation" />
                     <div class="flex flex-wrap justify-end gap-2">
                         <AButton
-                            v-if="pending.needs === 'confirm'"
+                            v-if="active.needs === 'confirm'"
                             variant="text"
                             tone="neutral"
                             @click="declined = false"
@@ -59,11 +70,27 @@
             </div>
         </template>
 
-        <p v-else class="text-fg-muted text-sm leading-normal">
-            This sign-in is no longer waiting. Start again from the login page.
+        <p
+            v-else-if="state !== 'loading' && state !== 'active'"
+            class="text-fg-muted text-sm leading-normal"
+        >
+            {{ messages[state] }}
         </p>
-        <template v-if="!qPending.isLoading.value && !pending" #footer>
-            <AButton to="/auth/login?local=1">Back to login</AButton>
+        <template v-if="ended" #footer>
+            <AButton
+                :variant="state === 'failed' ? 'text' : undefined"
+                :tone="state === 'failed' ? 'neutral' : undefined"
+                to="/auth/login?local=1"
+            >
+                Back to login
+            </AButton>
+            <AButton
+                v-if="state === 'failed'"
+                :loading="qPending.isFetching.value"
+                @click="qPending.refetch()"
+            >
+                Retry
+            </AButton>
         </template>
     </AuthCard>
 </template>
@@ -78,6 +105,7 @@ import QueryError from '@/components/QueryError.vue'
 import AButton from '@/ui/AButton.vue'
 import ATextField from '@/ui/ATextField.vue'
 import { oidcApi } from '@/utils/api/oidc'
+import { RequestError } from '@/utils/fetch'
 import { useForm } from '@/utils/forms'
 import { safeRedirect } from '@/utils/redirect'
 import AuthCard from './AuthCard.vue'
@@ -90,12 +118,34 @@ const qPending = oidcApi.usePending()
 const confirm = oidcApi.useConfirm()
 const chooseUsername = oidcApi.useChooseUsername()
 
-const pending = computed(() => qPending.data.value)
+const state = computed(() => {
+    const { data, error, isLoading } = qPending
+    if (isLoading.value) return 'loading'
+    // TanStack Query keeps stale data when a refetch fails, so a 404 must override it.
+    if (error.value instanceof RequestError && error.value.response?.status === 404)
+        return 'expired'
+    // Any other failed refetch gets Retry rather than a form built on stale data.
+    if (error.value) return 'failed'
+    // The picker is gone once auto-create is turned off after the callback.
+    if (data.value) {
+        return data.value.can_create || data.value.needs === 'confirm' ? 'active' : 'unavailable'
+    }
+    return 'expired'
+})
+const messages = {
+    failed: "Couldn't load this sign-in.",
+    unavailable: 'This sign-in is no longer available.',
+    expired: 'This sign-in is no longer waiting. Start again from the login page.',
+}
+const ended = computed(() => state.value !== 'loading' && state.value !== 'active')
+const active = computed(() => (state.value === 'active' ? qPending.data.value : undefined))
 const declined = ref(false)
-const showConfirm = computed(() => pending.value?.needs === 'confirm' && !declined.value)
+const showConfirm = computed(
+    () => active.value?.needs === 'confirm' && !(declined.value && active.value.can_create)
+)
 
 // The mutations consume the pending row, so callers read the target before awaiting them.
-const redirectTarget = () => safeRedirect(pending.value?.redirect) ?? '/'
+const redirectTarget = () => safeRedirect(active.value?.redirect) ?? '/'
 
 async function signedIn(target: string) {
     await queryClient.refetchQueries({ queryKey: ['users', 'me'] })
@@ -107,7 +157,13 @@ const confirmForm = useForm({
     initialValues: { password: '' },
     onSubmit: async values => {
         const target = redirectTarget()
-        await confirm.mutateAsync(values.password)
+        try {
+            await confirm.mutateAsync(values.password)
+        } catch (err) {
+            // A wrong password can use up the row; refetching shows the expired state.
+            qPending.refetch()
+            throw err
+        }
         await signedIn(target)
     },
 })
@@ -123,7 +179,7 @@ const usernameForm = useForm({
 })
 
 watch(
-    () => pending.value?.username,
+    () => active.value?.username,
     suggested => {
         if (suggested && !usernameForm.values.value.username) {
             usernameForm.setValues({ username: suggested })

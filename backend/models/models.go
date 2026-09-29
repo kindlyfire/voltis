@@ -54,6 +54,7 @@ type AuthPending struct {
 	UserID       *string   `db:"user_id"`
 	SessionToken *string   `db:"session_token"`
 	ExpiresAt    time.Time `db:"expires_at"`
+	Attempts     int       `db:"attempts"`
 }
 
 type UserIdentity struct {

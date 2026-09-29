@@ -13,7 +13,6 @@ import (
 	"voltis/settings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -35,15 +34,20 @@ func readPassword(password string) (string, error) {
 	return password, nil
 }
 
-func CreateUser(ctx context.Context, pool *pgxpool.Pool, username, password string, admin bool) error {
-	password, err := readPassword(password)
-	if err != nil {
-		return err
-	}
-
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return fmt.Errorf("hash password: %w", err)
+// CreateUser creates a user. A nil password creates a passwordless account, which the first
+// external login that matches it claims.
+func CreateUser(ctx context.Context, pool *pgxpool.Pool, username string, password *string, admin bool) error {
+	var hash *string
+	if password != nil {
+		pw, err := readPassword(*password)
+		if err != nil {
+			return err
+		}
+		raw, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.DefaultCost)
+		if err != nil {
+			return fmt.Errorf("hash password: %w", err)
+		}
+		hash = new(string(raw))
 	}
 
 	permissions := []string{}
@@ -52,7 +56,7 @@ func CreateUser(ctx context.Context, pool *pgxpool.Pool, username, password stri
 	}
 
 	id := models.MakeUserID()
-	err = db.WithTx(ctx, pool, func(tx pgx.Tx) error {
+	err := db.WithTx(ctx, pool, func(tx pgx.Tx) error {
 		if admin {
 			if err := lockForBootstrap(ctx, tx); err != nil {
 				return err
@@ -60,7 +64,7 @@ func CreateUser(ctx context.Context, pool *pgxpool.Pool, username, password stri
 		}
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO users (id, username, password_hash, permissions) VALUES ($1, $2, $3, $4)`,
-			id, username, string(hash), permissions); err != nil {
+			id, username, hash, permissions); err != nil {
 			return err
 		}
 		if !admin {
@@ -69,8 +73,7 @@ func CreateUser(ctx context.Context, pool *pgxpool.Pool, username, password stri
 		return settings.WriteTx(ctx, tx, settings.BootstrapCompleted, true)
 	})
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		if db.IsDuplicate(err) {
 			return fmt.Errorf("user '%s' already exists", username)
 		}
 		return err
@@ -100,8 +103,7 @@ func UpdateUser(ctx context.Context, pool *pgxpool.Pool, name string, username, 
 		return updateUserTx(ctx, tx, name, username, hash, admin)
 	})
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		if db.IsDuplicate(err) {
 			return fmt.Errorf("username '%s' already exists", *username)
 		}
 		return err

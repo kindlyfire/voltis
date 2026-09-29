@@ -9,6 +9,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - OPDS 1.2 and 2.0 catalogs, with page streaming and progress sync for OPDS-PSE
   apps
 
+### Upgrade notes
+
+- Setting `auth.admin_group` now demotes users whose OIDC login carries no
+  groups. To restore an admin, fix the groups claim or clear the mapping with
+  `voltis settings set auth.admin_group ""`, then run
+  `voltis users update <name> --admin`. Without that, the next login demotes
+  them again
+- Forwarded auth no longer links accounts with a password by username or
+  email. Link them with
+  `voltis users link <name> --provider proxy --subject <name>`
+- Email matching needs a verified email, and asks for the password of an
+  account that has one
+
 ## [1.0.0-alpha.4] - 2026-09-24
 
 - New UI

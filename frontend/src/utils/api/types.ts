@@ -102,6 +102,7 @@ export interface OidcPending {
     email: string
     match_username: string
     redirect?: string
+    can_create: boolean
 }
 
 export interface LogoutResponse {
