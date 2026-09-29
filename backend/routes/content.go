@@ -143,19 +143,20 @@ func contentToDTO(c models.Content, opts contentDTOOpts) ContentDTO {
 	}
 }
 
+// unfinishedChildren selects the children of content c that @user_id hasn't completed or dropped.
+const unfinishedChildren = `FROM content child
+	LEFT JOIN user_to_content child_utc
+		ON child_utc.library_id = child.library_id
+		AND child_utc.uri = child.uri
+		AND child_utc.user_id = @user_id
+	WHERE child.parent_id = c.id
+		AND (child_utc.status IS NULL OR child_utc.status NOT IN ('completed', 'dropped'))`
+
 // contentRowColumns selects a contentListRow from content c, user_to_content utc (for @user_id)
 // and content_metadata cm.
 const contentRowColumns = `c.*,
 	(SELECT COUNT(*) FROM content child WHERE child.parent_id = c.id) AS children_count,
-	(SELECT COUNT(*) FROM content child
-		LEFT JOIN user_to_content child_utc
-			ON child_utc.library_id = child.library_id
-			AND child_utc.uri = child.uri
-			AND child_utc.user_id = @user_id
-		WHERE child.parent_id = c.id
-			AND (child_utc.id IS NULL OR child_utc.status IS NULL
-				OR child_utc.status NOT IN ('completed', 'dropped'))
-	) AS unread_children_count,
+	(SELECT COUNT(*) ` + unfinishedChildren + `) AS unread_children_count,
 	utc.id AS utc_id, utc.user_id AS utc_user_id, utc.library_id AS utc_library_id,
 	utc.uri AS utc_uri, utc.starred AS utc_starred, utc.status AS utc_status,
 	utc.status_updated_at AS utc_status_updated_at, utc.notes AS utc_notes,
@@ -648,13 +649,33 @@ func (cr *ContentRoutes) updateUserData(c echo.Context) error {
 			return err
 		}
 		args["library_id"], args["uri"] = libraryID, uri
+		var parentID, prevStatus *string
+		if req.Status != nil {
+			err = tx.QueryRow(ctx, `
+				SELECT c.parent_id, utc.status FROM content c
+				LEFT JOIN user_to_content utc
+					ON utc.library_id = c.library_id AND utc.uri = c.uri AND utc.user_id = $2
+				WHERE c.id = $1
+			`, contentID, user.ID).Scan(&parentID, &prevStatus)
+			if err != nil {
+				return err
+			}
+		}
 		utc, err = db.SelectOne[models.UserToContent](ctx, tx, fmt.Sprintf(`
 			INSERT INTO user_to_content (%s)
 			VALUES (%s)
 			ON CONFLICT (user_id, library_id, uri) DO UPDATE SET %s
 			RETURNING *
 		`, strings.Join(cols, ", "), strings.Join(vals, ", "), strings.Join(sets, ", ")), args)
-		return err
+		if err != nil {
+			return err
+		}
+		// Only a change propagates: readers resend 'reading' on every progress save, which
+		// would otherwise restore a series status the user cleared.
+		if parentID != nil && (prevStatus == nil || *prevStatus != *req.Status) {
+			return propagateSeriesStatus(ctx, tx, user.ID, *parentID, *req.Status, now)
+		}
+		return nil
 	})
 	if err != nil {
 		return err
@@ -762,6 +783,9 @@ func (cr *ContentRoutes) setSeriesItemStatuses(c echo.Context) error {
 				return err
 			}
 		}
+		if err := propagateSeriesStatus(ctx, tx, user.ID, contentID, *req.Status, now); err != nil {
+			return err
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -769,6 +793,34 @@ func (cr *ContentRoutes) setSeriesItemStatuses(c echo.Context) error {
 	}
 
 	return okResponse(c)
+}
+
+// propagateSeriesStatus applies a child's new status to its series: a 'reading' or 'completed'
+// child starts a series without a status, and completing the last unfinished child completes a
+// 'reading' series. Other series statuses are the user's choice and stay untouched.
+func propagateSeriesStatus(ctx context.Context, tx pgx.Tx, userID, seriesID, childStatus string, now time.Time) error {
+	if childStatus != "reading" && childStatus != "completed" {
+		return nil
+	}
+	args := pgx.NamedArgs{"utc_id": models.MakeUserToContentID(), "user_id": userID, "series_id": seriesID, "now": now}
+	_, err := tx.Exec(ctx, `
+		INSERT INTO user_to_content (id, user_id, library_id, uri, status, status_updated_at)
+		SELECT @utc_id, @user_id, library_id, uri, 'reading', @now FROM content WHERE id = @series_id
+		ON CONFLICT (user_id, library_id, uri) DO UPDATE
+			SET status = 'reading', status_updated_at = EXCLUDED.status_updated_at
+			WHERE user_to_content.status IS NULL
+	`, args)
+	if err != nil || childStatus != "completed" {
+		return err
+	}
+	_, err = tx.Exec(ctx, `
+		UPDATE user_to_content utc SET status = 'completed', status_updated_at = @now
+		FROM content c
+		WHERE c.id = @series_id AND utc.user_id = @user_id
+			AND utc.library_id = c.library_id AND utc.uri = c.uri AND utc.status = 'reading'
+			AND NOT EXISTS (SELECT 1 `+unfinishedChildren+`)
+	`, args)
+	return err
 }
 
 type contentWithUTCRow struct {

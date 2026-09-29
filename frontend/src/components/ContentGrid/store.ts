@@ -11,6 +11,7 @@ export interface GridSettings {
     hideStatus: boolean
     hideTitle: boolean
     hideProgress: boolean
+    hideReadingHighlight: boolean
 }
 
 const DEFAULTS: GridSettings = {
@@ -20,6 +21,7 @@ const DEFAULTS: GridSettings = {
     hideStatus: false,
     hideTitle: false,
     hideProgress: false,
+    hideReadingHighlight: false,
 }
 
 export const useContentGridStore = defineStore('contentGrid', () => {

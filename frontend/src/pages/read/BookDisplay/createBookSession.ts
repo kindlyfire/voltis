@@ -11,7 +11,7 @@ import {
     type Ref,
 } from 'vue'
 import { isNavigationFailure, type NavigationFailure } from 'vue-router'
-import { contentApi, invalidateRecentlyRead } from '@/utils/api/content'
+import { contentApi, invalidateRecentlyRead, invalidateStatusChange } from '@/utils/api/content'
 import type {
     BookLocator,
     BookStructure,
@@ -178,6 +178,8 @@ export function createBookSession(
     let writeChain = Promise.resolve()
     let closing = false
     let completed = false
+    // Opening or restoring a passage isn't reading: only the user's own moves set a status.
+    let navigated = false
     let inputSinceChapter = false
     let currentEntryKey = entryKey(entry)
     let lastStamp = 0
@@ -665,14 +667,18 @@ export function createBookSession(
 
     function nextStatus(): ReadingStatus | undefined {
         if (userData?.status && userData.status !== 'reading') return undefined
-        return completed ? 'completed' : 'reading'
+        if (completed) return 'completed'
+        return navigated ? 'reading' : undefined
     }
 
     function write(final = false) {
         if (!state.content || !pendingLocator || closing) return
         const locator = pendingLocator
+        const status = nextStatus()
+        const statusChanged = !!status && status !== userData?.status
+        const parentId = state.content.parent_id
         const payload = {
-            status: nextStatus(),
+            status,
             progress: {
                 ...(userData?.progress ?? {}),
                 book: locator,
@@ -686,7 +692,11 @@ export function createBookSession(
             writeController?.abort()
             const request = contentApi
                 .updateUserData(contentId, payload, { keepalive: true })
-                .then(() => void invalidateRecentlyRead())
+                .then(() => {
+                    void (statusChanged
+                        ? invalidateStatusChange(parentId)
+                        : invalidateRecentlyRead())
+                })
                 .catch(err => {
                     console.error('Failed to update reading progress', err)
                 })
@@ -703,6 +713,7 @@ export function createBookSession(
                 })
                 writeController = null
                 queryClient.invalidateQueries({ queryKey: ['content', contentId] })
+                if (statusChanged) void invalidateStatusChange(parentId)
             })
             .catch(err => {
                 if (!closing) console.error('Failed to update reading progress', err)
@@ -733,6 +744,7 @@ export function createBookSession(
     }
 
     function onUserMove() {
+        navigated = true
         const current = activity.value
         if (current.phase === 'settling') current.landing = null
         if (!canCapture()) return
@@ -785,6 +797,7 @@ export function createBookSession(
     /** Routes through the target's own index: the same href can live on
      * another chapter than the one the link sits on. */
     async function followLink(href: string, fragment: string) {
+        navigated = true
         const mine = start('resolving')
         const source = structure()
         const index = spineIndexOf(source, href)
@@ -985,7 +998,9 @@ export function createBookSession(
 
         setEntry(next: BookEntry) {
             const key = entryKey(next)
+            // A restore's canonicalized entry comes back here with the same key.
             if (key === currentEntryKey) return
+            navigated = true
             currentEntryKey = key
             // The history entry has already moved, so this passage belongs to
             // the one we are leaving and must not be stamped onto it.

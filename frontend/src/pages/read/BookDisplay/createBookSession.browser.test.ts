@@ -18,6 +18,7 @@ vi.mock('@/utils/api/content', () => ({
         updateUserData: vi.fn(),
     },
     invalidateRecentlyRead: vi.fn(),
+    invalidateStatusChange: vi.fn(),
 }))
 
 const STRUCTURE: BookStructure = {

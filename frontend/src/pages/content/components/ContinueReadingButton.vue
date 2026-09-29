@@ -80,13 +80,6 @@ async function onClick() {
         targetId = firstUnread.id
     }
 
-    const userData = qContent.data.value?.user_data
-    if (!userData?.status) {
-        contentApi.updateUserData(props.contentId, {
-            status: 'reading',
-        })
-    }
-
     if (ctrlModifier.value) {
         window.open(`/r/${targetId}?page=resume`, '_blank')
     } else {

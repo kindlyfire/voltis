@@ -1,5 +1,5 @@
 <template>
-    <div class="content-card" :class="{ selecting, selected }">
+    <div class="content-card" :class="{ selecting, selected, reading: highlighted }">
         <!-- First, so the progress bar is read after it. -->
         <RouterLink v-if="!selecting" :to="to" class="content-card__link" :aria-label="linkLabel" />
         <ACover
@@ -87,6 +87,8 @@ const props = withDefaults(
         storeKey?: string
         selecting?: boolean
         selected?: boolean
+        /** Glows the cover while the item is being read. */
+        highlightReading?: boolean
     }>(),
     { storeKey: 'default' }
 )
@@ -141,6 +143,13 @@ const childrenCount = computed(() => {
 const progress = computed(() => contentProgress(props.content))
 
 const status = computed(() => props.content.user_data?.status)
+const highlighted = computed(
+    () =>
+        props.highlightReading &&
+        !props.selecting &&
+        !settings.value.hideReadingHighlight &&
+        status.value === 'reading'
+)
 const statusIcon = computed(() => (status.value ? STATUS_ICONS[status.value] : undefined))
 const statusLabel = computed(() => (status.value ? READING_STATUS_LABELS[status.value] : undefined))
 
@@ -179,7 +188,14 @@ const linkLabel = computed(() => {
     }
 
     .content-card:hover .content-card__cover {
-        box-shadow: 0 6px 16px -6px oklch(0.2 0.02 60 / 0.35);
+        box-shadow:
+            var(--cover-glow, 0 0 #0000),
+            0 6px 16px -6px oklch(0.2 0.02 60 / 0.35);
+    }
+
+    .reading .content-card__cover {
+        --cover-glow: var(--shadow-reading);
+        box-shadow: var(--cover-glow);
     }
 
     .content-card__text {

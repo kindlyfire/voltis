@@ -17,6 +17,7 @@ vi.mock('@/utils/api/content', () => ({
         updateUserData: vi.fn(),
     },
     invalidateRecentlyRead: vi.fn(),
+    invalidateStatusChange: vi.fn(),
 }))
 
 const STRUCTURE: BookStructure = {
@@ -77,7 +78,10 @@ function serve(structure: BookStructure, docs: Record<string, Served>) {
     })
 }
 
-function content(progress: Record<string, unknown> = {}, status = 'reading'): Content {
+function content(
+    progress: Record<string, unknown> = {},
+    status: string | null = 'reading'
+): Content {
     return {
         id: 'c_1',
         file_mtime: '2026-01-01',
@@ -748,8 +752,8 @@ describe('failed navigations', () => {
 
 describe('progress', () => {
     it('merges the block the reader scrolled to into the existing progress', async () => {
-        const { session } = start()
-        await flush()
+        vi.mocked(contentApi.get).mockResolvedValue(content({ current_page: 7 }, null))
+        const { session } = await startTimed()
         scrollTo(150)
         await flush()
         await session.dispose()
@@ -789,13 +793,16 @@ describe('progress', () => {
         expect(writes().length).toBeGreaterThan(1)
     })
 
-    it('keeps a non-reading status untouched', async () => {
-        vi.mocked(contentApi.get).mockResolvedValue(content({}, 'dropped'))
-        const { session } = start()
-        await flush()
-        await session.dispose()
-        expect(writes()[0]![1].status).toBeUndefined()
-    })
+    it.each(['dropped', null])(
+        'leaves the status alone until the reader moves (%s)',
+        async status => {
+            vi.mocked(contentApi.get).mockResolvedValue(content({}, status))
+            const { session } = start()
+            await flush()
+            await session.dispose()
+            expect(writes()[0]![1].status).toBeUndefined()
+        }
+    )
 })
 
 describe('completion', () => {

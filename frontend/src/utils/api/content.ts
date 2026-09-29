@@ -55,6 +55,14 @@ export async function invalidateRecentlyRead() {
     await queryClient.invalidateQueries(filters)
 }
 
+/** A status write can change its series' status too (backend propagation), and a reader's last
+ * write can land after the grid it returns to has fetched. */
+export async function invalidateStatusChange(parentId: string | null) {
+    const keys = [['content', 'list'], ...(parentId ? [['content', parentId]] : [])]
+    await Promise.all(keys.map(queryKey => queryClient.cancelQueries({ queryKey })))
+    await Promise.all(keys.map(queryKey => queryClient.invalidateQueries({ queryKey })))
+}
+
 export const contentApi = {
     useGet: (
         id: MaybeRefOrGetter<string | undefined | null>,

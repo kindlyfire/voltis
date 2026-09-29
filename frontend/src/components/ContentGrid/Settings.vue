@@ -57,6 +57,7 @@
         <div class="flex flex-col">
             <ACheckbox v-model="hideItemCount" label="Hide item count" />
             <ACheckbox v-model="hideStatus" label="Hide reading status" />
+            <ACheckbox v-model="hideReadingHighlight" label="Hide reading highlight" />
             <ACheckbox v-model="hideTitle" label="Hide title" />
             <ACheckbox v-model="hideProgress" label="Hide progress" />
         </div>
@@ -163,6 +164,7 @@ function showAll() {
         hideStatus: false,
         hideTitle: false,
         hideProgress: false,
+        hideReadingHighlight: false,
         itemCountMode: 'unread',
     }
 }
@@ -180,6 +182,7 @@ function setting<K extends keyof GridSettings>(key: K) {
 const hideItemCount = setting('hideItemCount')
 const itemCountMode = setting('itemCountMode')
 const hideStatus = setting('hideStatus')
+const hideReadingHighlight = setting('hideReadingHighlight')
 const hideTitle = setting('hideTitle')
 const hideProgress = setting('hideProgress')
 </script>

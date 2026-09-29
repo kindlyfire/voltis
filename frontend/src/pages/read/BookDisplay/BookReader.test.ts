@@ -16,6 +16,7 @@ vi.mock('@/utils/api/content', () => ({
         useGet: () => ({ data: { value: undefined } }),
     },
     invalidateRecentlyRead: vi.fn(),
+    invalidateStatusChange: vi.fn(),
 }))
 
 // Real, it would pull in Vue Query with no provider.

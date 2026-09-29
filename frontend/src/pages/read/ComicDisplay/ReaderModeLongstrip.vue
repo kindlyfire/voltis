@@ -71,7 +71,7 @@ const updateCurrentPage = useDebounceFn(
         for (let i = children.length - 1; i >= 0; i--) {
             const el = children[i]!
             if (el.offsetTop <= viewportCenter) {
-                reader.setPage(i)
+                reader.setPage(i, { restore: reader.restoring })
                 break
             }
         }
@@ -81,6 +81,12 @@ const updateCurrentPage = useDebounceFn(
 )
 
 useEventListener(window, 'scroll', updateCurrentPage)
+useEventListener(
+    window,
+    ['wheel', 'touchstart', 'keydown', 'pointerdown'],
+    () => (reader.restoring = false),
+    { passive: true }
+)
 
 onMounted(() => {
     reader.goToPage()

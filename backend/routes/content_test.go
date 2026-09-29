@@ -492,6 +492,48 @@ func TestRecentlyRead(t *testing.T) {
 		f.exec("UPDATE users SET preferences = '{}' WHERE id = $1", f.userID)
 	})
 
+	run("series status follows its children", func(t *testing.T) {
+		status := func(id string) any {
+			t.Helper()
+			ud, _ := c.Get("/api/content/"+id).Assert(t, 200).JSON()["user_data"].(map[string]any)
+			return ud["status"]
+		}
+		post := func(id string, st any) {
+			t.Helper()
+			c.Post("/api/content/"+id+"/user-data", map[string]any{"status": st}).Assert(t, 200)
+		}
+		bulk := func(id string, body map[string]any) {
+			t.Helper()
+			c.Post("/api/content/"+id+"/series-item-statuses", body).Assert(t, 200)
+		}
+
+		a, aKids := f.series(3)
+		post(aKids[0], "reading")
+		assertEq[any](t, status(a), "reading")
+		post(a, nil)
+		post(aKids[0], "reading") // unchanged child: the cleared series stays cleared
+		assertNil(t, "series status", status(a))
+		post(aKids[0], "completed")
+		assertEq[any](t, status(a), "reading")
+		f.set(aKids[1], "dropped", nil, f.at(0))
+		post(aKids[2], "completed")
+		assertEq[any](t, status(a), "completed")
+
+		b, bKids := f.series(2)
+		f.set(b, "plan_to_read", nil, f.at(0))
+		post(bKids[0], "reading")
+		bulk(b, map[string]any{"status": "completed"})
+		assertEq[any](t, status(b), "plan_to_read")
+
+		cs, cKids := f.series(3)
+		bulk(cs, map[string]any{"status": "completed", "until_id": cKids[0]})
+		assertEq[any](t, status(cs), "reading")
+		bulk(cs, map[string]any{"status": nil})
+		assertEq[any](t, status(cs), "reading")
+		bulk(cs, map[string]any{"status": "completed"})
+		assertEq[any](t, status(cs), "completed")
+	})
+
 	run("standalone", func(t *testing.T) {
 		reading, completed := f.content("comic", nil, 0), f.content("comic", nil, 0)
 		f.set(reading, "reading", nil, f.at(1))

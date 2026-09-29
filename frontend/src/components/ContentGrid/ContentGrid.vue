@@ -152,6 +152,7 @@
                     :store-key="storeKey"
                     :selecting="selectMode"
                     :selected="selectedIds.has(item.id)"
+                    highlight-reading
                     @toggle-select="(shiftKey: boolean) => toggleSelect(item.id, shiftKey)"
                 />
                 <p

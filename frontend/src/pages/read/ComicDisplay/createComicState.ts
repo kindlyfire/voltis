@@ -1,6 +1,6 @@
 import { useDebounceFn } from '@vueuse/core'
 import { reactive, readonly, toRefs } from 'vue'
-import { contentApi, invalidateRecentlyRead } from '@/utils/api/content'
+import { contentApi, invalidateRecentlyRead, invalidateStatusChange } from '@/utils/api/content'
 import type { Content, ReadingStatus, UserToContent } from '@/utils/api/types'
 import { API_URL } from '@/utils/fetch'
 import type { PageDimensions } from './types'
@@ -40,6 +40,8 @@ export function createComicState(contentId: string, initialPage: number | 'last'
     let userData: UserToContent | null = null
     let updateProgressPromise = Promise.resolve()
     let disposed = false
+    // Opening or restoring a position isn't reading: only a page change by the user sets a status.
+    let navigated = false
     const contentController = new AbortController()
 
     const updateProgress = useDebounceFn(() => {
@@ -48,17 +50,14 @@ export function createComicState(contentId: string, initialPage: number | 'last'
         updateProgressPromise = updateProgressPromise
             .then(async () => {
                 const pages = state.pageDimensions.length
-                // Only update status if it's not set or is 'reading', so we don't
-                // switch it back from 'completed' or other statuses
-                let status: ReadingStatus | undefined = undefined
-                if (!userData?.status || userData.status === 'reading') {
-                    if (state.page === pages - 1) {
-                        status = 'completed'
-                    } else {
-                        status = 'reading'
-                    }
-                }
+                const status: ReadingStatus | undefined =
+                    navigated && (!userData?.status || userData.status === 'reading')
+                        ? state.page === pages - 1
+                            ? 'completed'
+                            : 'reading'
+                        : undefined
 
+                const previous = userData?.status ?? null
                 userData = await contentApi.updateUserData(state.content!.id, {
                     status,
                     progress: {
@@ -69,7 +68,8 @@ export function createComicState(contentId: string, initialPage: number | 'last'
                         }),
                     },
                 })
-                invalidateRecentlyRead()
+                if (status && status !== previous) invalidateStatusChange(state.content!.parent_id)
+                else invalidateRecentlyRead()
             })
             .catch(err => {
                 console.error('Failed to update reading progress', err)
@@ -107,7 +107,7 @@ export function createComicState(contentId: string, initialPage: number | 'last'
             } else {
                 initialPage = state.initialPage
             }
-            setPage(initialPage)
+            setPage(initialPage, { restore: true })
             state.handlers.onReady()
         })
         .catch(e => {
@@ -117,7 +117,9 @@ export function createComicState(contentId: string, initialPage: number | 'last'
             state.loading = false
         })
 
-    function setPage(page: number) {
+    /** `restore` places the reader without counting as navigation. */
+    function setPage(page: number, { restore = false } = {}) {
+        if (!restore) navigated = true
         state.page = Math.min(Math.max(0, page), state.pageDimensions.length - 1)
         cleanupDistantLoaders()
         preloadPages()

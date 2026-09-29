@@ -63,6 +63,8 @@ export const useReaderStore = defineStore('reader', () => {
     })
 
     const state: Ref<ComicState | null> = ref(null)
+    // Scrolls that place a longstrip on its restored page, until the first user input.
+    const restoring = ref(false)
     const content = computed(() => state.value?.content || null)
 
     const qSiblings = contentApi.useList(
@@ -127,11 +129,14 @@ export const useReaderStore = defineStore('reader', () => {
         state.value?.dispose()
         const s = createComicState(options.contentId, options.initialPage)
         state.value = s
+        restoring.value = true
         s.setHandlers({
             onReady: () => {
                 if (state.value !== s) return
 
                 if (mode.value === 'longstrip') {
+                    // Input during the load must not let this scroll count as navigation.
+                    restoring.value = true
                     requestAnimationFrame(() => {
                         if (state.value !== s) return
 
@@ -154,12 +159,12 @@ export const useReaderStore = defineStore('reader', () => {
         })
     }
 
-    function setPage(page: number) {
+    function setPage(page: number, options?: { restore?: boolean }) {
         if (page === state.value?.page) {
             return
         }
         router.replace({ query: page === 0 ? {} : { page: page + 1 } })
-        state.value?.setPage(page)
+        state.value?.setPage(page, options)
     }
 
     function goToPage(page: number | null = null, behavior: ScrollBehavior = 'instant') {
@@ -210,6 +215,7 @@ export const useReaderStore = defineStore('reader', () => {
         qSiblings,
         siblings,
         progress,
+        restoring,
 
         // Actions
         setContent,
