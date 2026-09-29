@@ -57,6 +57,22 @@ func TestOIDCExistingIdentityLogsIn(t *testing.T) {
 	assertEq(t, resp.Headers.Get("Location"), "/c_fixture?page=2")
 	assertEq(t, s(c.Get("/api/users/me").Assert(t, 200).JSON()["id"]), userID)
 	assertEq(t, countRows(t, c, "SELECT count(*) FROM users"), 1)
+
+	// Each login refreshes the identity email; a login without one keeps it.
+	identityEmail := func() string {
+		email, err := db.SelectScalar[string](context.Background(), c.pool(),
+			"SELECT email FROM user_identities WHERE subject = 'sub-1'")
+		if err != nil {
+			t.Fatalf("read identity email: %v", err)
+		}
+		return email
+	}
+	idp.claims["email"] = " Someone@Example.test "
+	assertRedirect(t, c.oidcLogin(t), "/")
+	assertEq(t, identityEmail(), "someone@example.test")
+	delete(idp.claims, "email")
+	assertRedirect(t, c.oidcLogin(t), "/")
+	assertEq(t, identityEmail(), "someone@example.test")
 }
 
 func TestOIDCAutoCreateOff(t *testing.T) {

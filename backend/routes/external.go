@@ -229,6 +229,20 @@ func syncEmail(ctx context.Context, pool *pgxpool.Pool, user *models.User, email
 	user.Email = &email
 }
 
+// Keeps the identity's email current. An empty email keeps the last known one.
+func syncIdentityEmail(ctx context.Context, pool *pgxpool.Pool, id ExternalIdentity) {
+	email := normalizeEmail(id.Email)
+	if email == "" {
+		return
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE user_identities SET email = $4
+		WHERE provider = $1 AND issuer = $2 AND subject = $3 AND email IS DISTINCT FROM $4
+	`, id.Provider, id.Issuer, id.Subject, email); err != nil {
+		slog.Warn("[auth] failed to refresh the identity email", "provider", id.Provider, "subject", id.Subject, "err", err)
+	}
+}
+
 func (r *resolver) syncAdmin(ctx context.Context, user *models.User, id ExternalIdentity) error {
 	group := r.st.String(settings.AuthAdminGroup)
 	if group == "" || !id.HasGroups {

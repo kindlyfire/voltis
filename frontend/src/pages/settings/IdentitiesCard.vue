@@ -23,9 +23,12 @@
                 <tr v-for="(identity, index) in identities" :key="identity.id">
                     <td>{{ identity.provider === 'oidc' ? 'SSO' : 'Proxy' }}</td>
                     <td class="py-1.5">
-                        <div class="[overflow-wrap:anywhere]">{{ identity.subject }}</div>
-                        <div v-if="identity.issuer" class="text-fg-muted text-xs">
-                            {{ identity.issuer }}
+                        <div class="break-words">{{ accountLabel(identity) }}</div>
+                        <div
+                            v-if="accountDetail(identity)"
+                            class="text-fg-muted text-xs [overflow-wrap:anywhere]"
+                        >
+                            {{ accountDetail(identity) }}
                         </div>
                     </td>
                     <td class="whitespace-nowrap">
@@ -34,7 +37,7 @@
                     <td class="text-end">
                         <AIconButton
                             :icon="IconLinkOff"
-                            :label="`Unlink ${identity.subject}`"
+                            :label="`Unlink ${accountLabel(identity)}`"
                             size="sm"
                             :loading="
                                 unlink.isPending.value && unlink.variables.value === identity.id
@@ -80,6 +83,16 @@ const identities = computed(() => qIdentities.data.value ?? [])
 const toast = useToast()
 const card = useTemplateRef<{ $el: HTMLElement }>('card')
 
+// OIDC subjects can be opaque (Dex), so the email names the account when there is one.
+function accountLabel(identity: Identity) {
+    return identity.provider === 'proxy' ? identity.subject : identity.email || identity.subject
+}
+
+function accountDetail(identity: Identity) {
+    const subject = identity.subject === accountLabel(identity) ? '' : identity.subject
+    return [subject, identity.issuer].filter(Boolean).join(' · ')
+}
+
 // An unlinked row's button disappears: focus the next row's, else the card (a dialog around this
 // card would otherwise lose focus). The row goes either before or after the confirm dialog's
 // focus return, so both paths use this.
@@ -101,8 +114,8 @@ async function handleUnlink(identity: Identity, index: number) {
         {
             title: 'Unlink account',
             message: props.self
-                ? `Unlink ${identity.subject}? This signs you out of every device.`
-                : `Unlink ${identity.subject} from this user? Their sessions end immediately.`,
+                ? `Unlink ${accountLabel(identity)}? This signs you out of every device.`
+                : `Unlink ${accountLabel(identity)} from this user? Their sessions end immediately.`,
             confirmText: 'Unlink',
             tone: 'danger',
         },
@@ -111,7 +124,7 @@ async function handleUnlink(identity: Identity, index: number) {
     if (!confirmed) return
     await unlink.mutateAsync(identity.id)
     refocusIndex = index
-    toast.show({ message: `Unlinked ${identity.subject}` })
+    toast.show({ message: `Unlinked ${accountLabel(identity)}` })
     emit('unlinked')
 }
 </script>

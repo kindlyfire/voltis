@@ -207,6 +207,7 @@ func (r *resolver) resolveForwarded(c echo.Context, id ExternalIdentity, row *us
 			r.hub.Drop(row.ID)
 		}
 		setSessionCookie(c, r.st, token)
+		syncIdentityEmail(ctx, r.pool, id)
 	}
 	c.Set(contextKeySession, &sessionInfo{Token: token, Method: models.SessionProxy})
 

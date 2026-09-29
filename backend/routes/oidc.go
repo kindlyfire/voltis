@@ -521,6 +521,7 @@ func consumeComplete(ctx context.Context, tx pgx.Tx, raw string) error {
 func (o *OIDCRoutes) finishSession(c echo.Context, user *models.User, id ExternalIdentity, token string) error {
 	ctx := reqCtx(c)
 	syncEmail(ctx, o.res.pool, user, id.Email)
+	syncIdentityEmail(ctx, o.res.pool, id)
 	if err := o.res.syncAdmin(ctx, user, id); err != nil {
 		return err
 	}
