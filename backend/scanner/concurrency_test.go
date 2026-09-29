@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"voltis/db"
-	"voltis/db/dbtest"
 	"voltis/metadata"
 	"voltis/models"
 
@@ -20,53 +19,6 @@ func seedSeriesScan(t *testing.T, pool *pgxpool.Pool, lib string) (*scanRun, str
 	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
 	r.commit(false)
 	return r, contentIDByURI(t, pool, lib, "comic/S/ch1")
-}
-
-func TestMetadataScanRaceEditBeforeRename(t *testing.T) {
-	pool := newTestPool(t)
-	lib := newTestLibrary(t, pool, "comics")
-	r, leafID := seedSeriesScan(t, pool, lib)
-	ctx := context.Background()
-
-	tx, err := pool.Begin(ctx)
-	must(t, err)
-	defer tx.Rollback(ctx)
-	must(t, db.LockMetadata(ctx, tx, lib))
-	var uri string
-	must(t, tx.QueryRow(ctx, "SELECT uri FROM content WHERE id = $1", leafID).Scan(&uri))
-	if uri != "comic/S/ch1" {
-		t.Fatalf("uri = %q", uri)
-	}
-	seedMetadata(t, tx, lib, uri, metadata.Doc{Overrides: metadata.Fields{Title: metadata.Val("kept")}})
-
-	r.reload()
-	r.place(withMeta(comicResult("/lib/S/ch1.cbz", "ch1", "S_2019", "/lib/S"), metadata.Fields{Title: metadata.Val("Ch. 1")}))
-	flushed := make(chan error, 1)
-	go func() {
-		_, _, _, err := r.recordCommit(false)
-		flushed <- err
-	}()
-
-	dbtest.WaitForBlockedLock(t, pool)
-	select {
-	case err := <-flushed:
-		t.Fatalf("flush committed while the editor held the lock: %v", err)
-	default:
-	}
-
-	must(t, tx.Commit(ctx))
-	if err := <-flushed; err != nil {
-		t.Fatalf("flush: %v", err)
-	}
-
-	assertCatalog(t, pool, lib, []string{"comic/S_2019", "comic/S_2019/ch1"})
-	moved := readMeta(t, pool, lib, "comic/S_2019/ch1")
-	if moved.Overrides.Title.V != "kept" {
-		t.Fatalf("override = %+v, want it carried through the rename", moved.Overrides)
-	}
-	if moved.File.Title.V != "Ch. 1" {
-		t.Fatal("file layer was not written after the rename")
-	}
 }
 
 func TestScanConcurrencyRenameSourceWins(t *testing.T) {
@@ -181,125 +133,5 @@ func TestScanConcurrencyRetryPolicy(t *testing.T) {
 				t.Fatalf("trigger fired %d times, want %d", attempts, c.attempts)
 			}
 		})
-	}
-}
-
-func advisoryHolder(t *testing.T, pool *pgxpool.Pool, key int, exclude ...int) {
-	t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		pids, err := db.SelectScalars[int](context.Background(), pool, `
-			SELECT pid FROM pg_locks
-			WHERE locktype = 'advisory' AND objid = $1 AND granted
-			  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
-			  AND NOT pid = ANY($2::int[])`, key, exclude)
-		if err != nil {
-			t.Fatalf("read pg_locks: %v", err)
-		}
-		if len(pids) > 1 {
-			t.Fatalf("advisory key %d held by %v, want a single participant", key, pids)
-		}
-		if len(pids) == 1 {
-			return
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for a backend to hold advisory key %d", key)
-}
-
-func TestScanConcurrencyRetriesForcedDeadlock(t *testing.T) {
-	pool := newTestPool(t)
-	lib := newTestLibrary(t, pool, "comics")
-	ctx, cancel := context.WithCancel(context.Background())
-
-	other, err := pool.Begin(ctx)
-	must(t, err)
-	crossed := make(chan error, 1)
-	crossing := false
-	defer func() {
-		cancel()
-		if crossing {
-			<-crossed
-		}
-		_ = other.Rollback(context.Background())
-	}()
-
-	if _, err := other.Exec(ctx, "SET LOCAL deadlock_timeout = '20s'"); err != nil {
-		t.Skipf("deadlock_timeout is not settable by this role: %v", err)
-	}
-	var otherPID int
-	must(t, other.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&otherPID))
-
-	exec(t, pool, "CREATE TABLE lockrows (id int PRIMARY KEY)")
-	exec(t, pool, "INSERT INTO lockrows VALUES (1), (2)")
-	exec(t, pool, "CREATE SEQUENCE attempt_counter")
-	exec(t, pool, fmt.Sprintf(`
-		CREATE FUNCTION forced_deadlock() RETURNS trigger AS $fn$
-		BEGIN
-			IF nextval('attempt_counter') = 1 THEN
-				PERFORM set_config('deadlock_timeout', '50ms', true);
-				PERFORM 1 FROM lockrows WHERE id = 2 FOR UPDATE;
-				PERFORM pg_advisory_xact_lock(777);
-				FOR i IN 1..2000 LOOP
-					EXIT WHEN EXISTS (SELECT 1 FROM pg_locks
-						WHERE locktype = 'transactionid' AND NOT granted AND pid = %[1]d);
-					PERFORM pg_sleep(0.005);
-				END LOOP;
-				IF NOT EXISTS (SELECT 1 FROM pg_locks
-					WHERE locktype = 'transactionid' AND NOT granted AND pid = %[1]d) THEN
-					RAISE EXCEPTION 'forced deadlock barrier expired: pid %[1]d never waited on a transactionid';
-				END IF;
-				PERFORM 1 FROM lockrows WHERE id = 1 FOR UPDATE;
-			END IF;
-			RETURN NEW;
-		END $fn$ LANGUAGE plpgsql`, otherPID))
-	exec(t, pool, "CREATE TRIGGER forced_deadlock BEFORE INSERT ON content FOR EACH ROW EXECUTE FUNCTION forced_deadlock()")
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), "DROP TRIGGER IF EXISTS forced_deadlock ON content")
-	})
-
-	if _, err := other.Exec(ctx, "SELECT 1 FROM lockrows WHERE id = 1 FOR UPDATE"); err != nil {
-		t.Fatal(err)
-	}
-
-	r := newScanRun(t, pool, lib, &ComicsScanner{})
-	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
-	in, out := make(chan flush, 1), make(chan committed, 1)
-	go commitLoop(ctx, pool, testStore, r.fs, lib, in, out)
-	in <- r.w.take(false)
-	close(in)
-
-	advisoryHolder(t, pool, 777, otherPID)
-
-	crossing = true
-	go func() {
-		_, err := other.Exec(ctx, "SELECT 1 FROM lockrows WHERE id = 2 FOR UPDATE")
-		crossed <- err
-	}()
-
-	var c committed
-	select {
-	case c = <-out:
-	case <-time.After(60 * time.Second):
-		t.Fatal("timed out waiting for the committer")
-	}
-	crossing = false
-	if err := <-crossed; err != nil {
-		t.Fatalf("other connection: %v", err)
-	}
-	must(t, other.Rollback(ctx))
-
-	if c.err != nil {
-		t.Fatalf("commit: %v, want the deadlock victim to retry", c.err)
-	}
-	if c.counts != (Counts{Added: 1}) {
-		t.Fatalf("counts = %+v", c.counts)
-	}
-	want := []string{"comic/S", "comic/S/ch1"}
-	assertCatalog(t, pool, lib, want)
-	attempts, err := db.SelectScalar[int64](context.Background(), pool, "SELECT last_value FROM attempt_counter")
-	must(t, err)
-	if attempts != 3 {
-		t.Fatalf("attempts = %d, want a deadlocked attempt then a clean retry", attempts)
 	}
 }

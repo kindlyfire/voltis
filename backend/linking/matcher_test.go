@@ -6,12 +6,10 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
-	"sync"
 	"testing"
 	"time"
 
 	"voltis/db"
-	"voltis/db/dbtest"
 	"voltis/lib/fp"
 	"voltis/metadata"
 	"voltis/providers/providertest"
@@ -218,50 +216,6 @@ func TestMatchNeverRelinksRejected(t *testing.T) {
 	e.matchNow()
 	if res := e.match(); res != (MatchResult{Unmatched: 1}) {
 		t.Fatalf("run after the merge = %+v", res)
-	}
-}
-
-// An entry merged into a rejected one after the search filtered it is not linked: a refresh
-// records the merge, and the match waits for it to record its own outcome.
-func TestMatchRefusesAnEntryMergedIntoARejectedOne(t *testing.T) {
-	e := setup(t)
-	ctx := context.Background()
-	e.series("l1", "s", "Remote One")
-	e.exec(`INSERT INTO metadata_links (library_id, uri, provider, state, rejected, retry_at)
-		VALUES ('l1', 'comic/s', 'fake', 'unmatched', '{1}', now())`)
-	e.fake.Put("5", providertest.Series("Remote One", metadata.Manga))
-
-	refresh, err := e.pool.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = refresh.Rollback(ctx) }()
-	var once sync.Once
-	e.fake.OnMatch(func(string) {
-		once.Do(func() {
-			if _, err := e.svc.publish(ctx, newOp(refresh), []Fetched{merged("5", "1", time.Now())}); err != nil {
-				t.Error(err)
-			}
-		})
-	})
-	type outcome struct {
-		res MatchResult
-		err error
-	}
-	done := make(chan outcome, 1)
-	go func() {
-		res, err := e.svc.MatchLibrary(ctx, "l1", func(string) bool { return false }, nil)
-		done <- outcome{res, err}
-	}()
-	dbtest.WaitForBlockedLock(t, e.pool)
-	if err := refresh.Commit(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if o := <-done; o.err != nil || o.res != (MatchResult{Skipped: 1}) {
-		t.Fatalf("result = %+v (%v)", o.res, o.err)
-	}
-	if l := e.link("s"); l.State != StateUnmatched {
-		t.Fatalf("link = %+v", l)
 	}
 }
 

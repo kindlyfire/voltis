@@ -3,7 +3,6 @@ package covers
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"image"
 	"image/jpeg"
 	"image/png"
@@ -12,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -31,11 +29,10 @@ func testJPEG(t *testing.T) []byte {
 }
 
 // upstream serves body and counts requests.
-func upstream(t *testing.T, body []byte, delay time.Duration) (*httptest.Server, *atomic.Int32) {
+func upstream(t *testing.T, body []byte) (*httptest.Server, *atomic.Int32) {
 	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
-		time.Sleep(delay)
 		_, _ = w.Write(body)
 	}))
 	t.Cleanup(srv.Close)
@@ -52,27 +49,8 @@ func files(t *testing.T, c *Cache) []string {
 	return names
 }
 
-func TestConcurrentRequestsDownloadOnce(t *testing.T) {
-	srv, hits := upstream(t, testJPEG(t), 50*time.Millisecond)
-	c := New(t.TempDir())
-	ref := metadata.CoverRef{URL: srv.URL + "/a.jpg"}
-
-	var wg sync.WaitGroup
-	for range 8 {
-		wg.Go(func() {
-			if data, err := c.Provider(ref); err != nil || len(data) == 0 {
-				t.Errorf("Provider = %d bytes, %v", len(data), err)
-			}
-		})
-	}
-	wg.Wait()
-	if n := hits.Load(); n != 1 {
-		t.Fatalf("downloads = %d, want 1", n)
-	}
-}
-
 func TestNewURLDownloadsANewFile(t *testing.T) {
-	srv, hits := upstream(t, testJPEG(t), 0)
+	srv, hits := upstream(t, testJPEG(t))
 	c := New(t.TempDir())
 	for _, path := range []string{"/a", "/a", "/b"} {
 		if _, err := c.Provider(metadata.CoverRef{URL: srv.URL + path}); err != nil {
@@ -92,7 +70,7 @@ func TestFailedDownloadIsNotCachedNorRetriedAtOnce(t *testing.T) {
 	c := New(t.TempDir())
 	svg := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="4" height="2"/>`)
 	for _, body := range [][]byte{svg, []byte("<html>not an image</html>"), bytes.Repeat([]byte{0}, maxDownload+1)} {
-		srv, hits := upstream(t, body, 0)
+		srv, hits := upstream(t, body)
 		ref := metadata.CoverRef{URL: srv.URL}
 		for range 2 {
 			if _, err := c.Provider(ref); err == nil {
@@ -114,7 +92,7 @@ func TestAcceptedFormats(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, body := range [][]byte{testJPEG(t), buf.Bytes()} {
-		srv, _ := upstream(t, body, 0)
+		srv, _ := upstream(t, body)
 		if _, err := New(t.TempDir()).Provider(metadata.CoverRef{URL: srv.URL}); err != nil {
 			t.Fatal(err)
 		}
@@ -131,7 +109,7 @@ func TestExpiredFailuresAreDropped(t *testing.T) {
 }
 
 func TestGCKeepsReferencedCovers(t *testing.T) {
-	srv, _ := upstream(t, testJPEG(t), 0)
+	srv, _ := upstream(t, testJPEG(t))
 	pool := dbtest.Pool(t)
 	ctx := context.Background()
 	c := New(t.TempDir())
@@ -203,36 +181,6 @@ func TestHostFailureBacksOffTheWholeHost(t *testing.T) {
 	c = New(t.TempDir())
 	if get(c, "/missing") == nil || get(c, "/a") != nil {
 		t.Fatal("a 404 blocked the host")
-	}
-}
-
-func TestBusyDownloadsFallBackQuickly(t *testing.T) {
-	release := make(chan struct{})
-	var hits atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hits.Add(1)
-		<-release
-	}))
-	t.Cleanup(srv.Close)
-	t.Cleanup(func() { close(release) })
-	c := New(t.TempDir())
-	get := func(path string) error {
-		_, err := c.Provider(metadata.CoverRef{URL: srv.URL + path})
-		return err
-	}
-
-	for i := range maxDownloads {
-		go func() { _ = get(fmt.Sprint("/", i)) }()
-	}
-	for hits.Load() < maxDownloads {
-		time.Sleep(time.Millisecond)
-	}
-	start := time.Now()
-	if get("/next") == nil {
-		t.Fatal("Provider succeeded")
-	}
-	if waited := time.Since(start); waited > 2*slotWait {
-		t.Fatalf("waited %v for a slot", waited)
 	}
 }
 

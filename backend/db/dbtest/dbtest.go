@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"os"
 	"testing"
-	"time"
 
 	"voltis/db"
 
@@ -67,29 +66,4 @@ func drop(t *testing.T, adminURL, name string) {
 	if _, err := admin.Exec(ctx, "DROP DATABASE "+name+" WITH (FORCE)"); err != nil {
 		t.Logf("cleanup drop database: %v", err)
 	}
-}
-
-func WaitForBlockedLock(t *testing.T, pool *pgxpool.Pool) {
-	t.Helper()
-	WaitForBlockedLocks(t, pool, 1)
-}
-
-// WaitForBlockedLocks waits until at least n advisory lock requests in this database are blocked.
-func WaitForBlockedLocks(t *testing.T, pool *pgxpool.Pool, n int) {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		blocked, err := db.SelectScalar[int](context.Background(), pool, `
-			SELECT count(*) FROM pg_locks
-			WHERE locktype = 'advisory' AND NOT granted
-			  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`)
-		if err != nil {
-			t.Fatalf("read pg_locks: %v", err)
-		}
-		if blocked >= n {
-			return
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	t.Fatal("timed out waiting for a blocked advisory lock")
 }

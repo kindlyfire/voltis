@@ -1,12 +1,16 @@
 package routes
 
 import (
+	"context"
 	"errors"
 	"net/url"
 	"testing"
 
+	"voltis/db"
 	"voltis/metadata"
 	"voltis/providers/providertest"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // newTestSeries adds a comic series whose file layer has a title and a description.
@@ -306,4 +310,21 @@ func TestMetadataReview(t *testing.T) {
 		t.Fatalf("rejected = %v", l)
 	}
 	assertEq(t, c.Get("/api/metadata/review?tab=unmatched&q=loc").Assert(t, 200).JSON()["total"], any(1.0))
+}
+
+func mustExec(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), sql, args...); err != nil {
+		t.Fatalf("exec %s: %v", sql, err)
+	}
+}
+
+func contentLibrary(t *testing.T, pool *pgxpool.Pool, contentID string) string {
+	t.Helper()
+	lib, err := db.SelectScalar[string](context.Background(), pool,
+		"SELECT library_id FROM content WHERE id = $1", contentID)
+	if err != nil {
+		t.Fatalf("read library: %v", err)
+	}
+	return lib
 }

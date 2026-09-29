@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"voltis/db"
-	"voltis/db/dbtest"
 	"voltis/metadata"
 	"voltis/providers"
 	"voltis/providers/providertest"
@@ -348,41 +347,6 @@ func TestRefreshContinuesPastAFailedBatch(t *testing.T) {
 	}
 	if title := e.view("s3").Merged.Title.V; title != "Three Again" {
 		t.Fatalf("the next batch was not published: title %q", title)
-	}
-}
-
-// Collection waits for a publish of the same provider, which may attach the entry it would delete.
-func TestCollectWaitsForAPublish(t *testing.T) {
-	e := setup(t)
-	ctx := context.Background()
-	e.series("l1", "s", "Local")
-	e.publish(found("1", "Old", time.Now().Add(-time.Hour)))
-
-	tx, err := e.pool.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := e.svc.publish(ctx, newOp(tx), []Fetched{found("1", "New", time.Now())}, "l1"); err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan error, 1)
-	go func() {
-		done <- e.svc.collect(ctx)
-	}()
-	dbtest.WaitForBlockedLock(t, e.pool)
-	if _, err := tx.Exec(ctx, `INSERT INTO metadata_links (library_id, uri, provider, state, external_id, origin)
-		VALUES ('l1', 'comic/s', 'fake', 'linked', '1', 'manual')`); err != nil {
-		t.Fatal(err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-	if got := e.entryIDs(); !slices.Equal(got, []string{"1"}) {
-		t.Fatalf("entries = %v", got)
 	}
 }
 

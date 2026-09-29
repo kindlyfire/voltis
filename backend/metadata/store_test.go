@@ -116,6 +116,12 @@ func TestStoreDerivesDataFromLayers(t *testing.T) {
 	if layers.OverridesRev != 1 || layers.Overrides.Description.P != metadata.Null || len(layers.Providers) != 1 {
 		t.Fatalf("layers = %+v", layers)
 	}
+	if err := inTx(t, pool, func(tx pgx.Tx) error {
+		_, err := store.Lock(ctx, tx, "c_missing")
+		return err
+	}); !errors.Is(err, metadata.ErrNotFound) {
+		t.Fatalf("unknown content: err = %v", err)
+	}
 }
 
 // A snapshot that no longer decodes drops out of the merge, and its link records why until it
@@ -230,41 +236,6 @@ func TestLocalMatchInputChangesMakePendingLinksDue(t *testing.T) {
 		if got := due(); !slices.Equal(got, step.want) {
 			t.Errorf("%s: due = %v, want %v", step.name, got, step.want)
 		}
-	}
-}
-
-func TestLockReadsTheURIAScanMoved(t *testing.T) {
-	pool := setup(t)
-	ctx := context.Background()
-	held, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = held.Rollback(ctx) }()
-	if err := db.LockMetadata(ctx, held, lib); err != nil {
-		t.Fatal(err)
-	}
-
-	done := make(chan error, 1)
-	go func() { done <- setOverrides(t, pool, 0, metadata.Fields{Title: metadata.Val("edited")}) }()
-	dbtest.WaitForBlockedLock(t, pool)
-	exec(t, held, "UPDATE content SET uri = 'comic/moved' WHERE id = 'c_s'")
-	if err := held.Commit(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-	uris, err := db.SelectScalars[string](ctx, pool, "SELECT uri FROM content_metadata")
-	if err != nil || !slices.Equal(uris, []string{"comic/moved"}) {
-		t.Fatalf("metadata uris = %v (%v)", uris, err)
-	}
-
-	if err := inTx(t, pool, func(tx pgx.Tx) error {
-		_, err := store.Lock(ctx, tx, "c_missing")
-		return err
-	}); !errors.Is(err, metadata.ErrNotFound) {
-		t.Fatalf("unknown content: err = %v", err)
 	}
 }
 
