@@ -56,6 +56,7 @@ import ADialog from '@/ui/ADialog.vue'
 import ARadioGroup from '@/ui/ARadioGroup.vue'
 import ASpinner from '@/ui/ASpinner.vue'
 import { useToast } from '@/ui/useToast'
+import { invalidateMatching } from '@/utils/api/catalog'
 import { contentApi } from '@/utils/api/content'
 
 const props = defineProps<{
@@ -103,7 +104,7 @@ const mUpdate = useMutation({
                 selectedChildId.value
             )
         }
-        queryClient.invalidateQueries()
+        invalidateMatching(queryClient, () => true)
     },
     onSuccess() {
         toast.show({ message: 'Updated the reading progress' })

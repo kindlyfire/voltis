@@ -15,12 +15,6 @@
                 placeholder="No status"
                 clearable
             />
-            <AProgressBar
-                v-if="mBulk.isPending.value"
-                :value="completed / contentIds.length"
-                label="Updating"
-                :value-text="`${completed} of ${contentIds.length}`"
-            />
             <QueryError :mutation="mBulk" />
         </div>
         <template #actions>
@@ -32,18 +26,17 @@
             >
                 Cancel
             </AButton>
-            <AButton :loading="mBulk.isPending.value" @click="mBulk.mutate()">Save</AButton>
+            <AButton :loading="mBulk.isPending.value" @click="mBulk.mutate(status)">Save</AButton>
         </template>
     </ADialog>
 </template>
 
 <script setup lang="ts">
-import { useMutation, useQueryClient } from '@tanstack/vue-query'
+import { useMutation } from '@tanstack/vue-query'
 import { ref } from 'vue'
 import QueryError from '@/components/QueryError.vue'
 import AButton from '@/ui/AButton.vue'
 import ADialog from '@/ui/ADialog.vue'
-import AProgressBar from '@/ui/AProgressBar.vue'
 import ASelect from '@/ui/ASelect.vue'
 import { useToast } from '@/ui/useToast'
 import { contentApi } from '@/utils/api/content'
@@ -52,32 +45,24 @@ import { plural, readingStatusOptions } from '@/utils/misc'
 
 const props = defineProps<{
     open: boolean
-    close: () => void
+    close: (done?: boolean) => void
     contentIds: string[]
 }>()
 
 const status = ref<ReadingStatus | null>(null)
-const completed = ref(0)
-const queryClient = useQueryClient()
 const toast = useToast()
 
 const mBulk = useMutation({
-    mutationFn: async () => {
-        completed.value = 0
-        for (const id of props.contentIds) {
-            await contentApi.updateUserData(id, { status: status.value })
-            completed.value++
-        }
-        await queryClient.invalidateQueries({ queryKey: ['content'] })
-    },
-    onSuccess: () => {
-        const items = plural(props.contentIds.length, 'item')
+    mutationFn: (status: ReadingStatus | null) =>
+        contentApi.bulkUserData({ ids: props.contentIds, action: 'set_status', status }),
+    onSuccess: ({ count }, status) => {
+        const items = plural(count, 'item')
         toast.show({
-            message: status.value
-                ? `Set ${items} to ${READING_STATUS_LABELS[status.value]}`
+            message: status
+                ? `Set ${items} to ${READING_STATUS_LABELS[status]}`
                 : `Cleared the status of ${items}`,
         })
-        props.close()
+        props.close(true)
     },
 })
 </script>
@@ -86,7 +71,8 @@ const mBulk = useMutation({
 import { Modals } from '@/utils/modals'
 import Self from './BulkStatusModal.vue'
 
-export function showBulkStatusModal(contentIds: string[]): Promise<void> {
-    return Modals.show(Self, { contentIds })
+/** Resolves true once the statuses were set. */
+export function showBulkStatusModal(contentIds: string[]): Promise<boolean> {
+    return Modals.show<boolean | undefined>(Self, { contentIds }).then(done => done === true)
 }
 </script>

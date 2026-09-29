@@ -4,6 +4,7 @@
         title="Add to lists"
         :description="`${plural(contentIds.length, 'item')} selected`"
         size="sm"
+        :dismissible="!mBulk.isPending.value"
         @update:open="v => !v && close()"
     >
         <div class="flex flex-col gap-4">
@@ -51,7 +52,14 @@
             </AButton>
             <!-- Keeps Cancel and Add together when the footer wraps. -->
             <div class="flex gap-2">
-                <AButton variant="text" tone="neutral" @click="close()">Cancel</AButton>
+                <AButton
+                    variant="text"
+                    tone="neutral"
+                    :disabled="mBulk.isPending.value"
+                    @click="close()"
+                >
+                    Cancel
+                </AButton>
                 <AButton
                     :loading="mBulk.isPending.value"
                     :disabled="selectedListIds.size === 0"
@@ -75,12 +83,12 @@ import ASpinner from '@/ui/ASpinner.vue'
 import { IconPlus } from '@/ui/icons'
 import { useToast } from '@/ui/useToast'
 import { customListsApi } from '@/utils/api/custom-lists'
-import type { CustomListBulkCreateEntry, CustomListPartial } from '@/utils/api/types'
+import type { CustomListPartial } from '@/utils/api/types'
 import { plural } from '@/utils/misc'
 
 const props = defineProps<{
     open: boolean
-    close: () => void
+    close: (added?: boolean) => void
     contentIds: string[]
 }>()
 
@@ -104,18 +112,17 @@ function preselect(list: CustomListPartial) {
     selectedListIds.value = new Set(selectedListIds.value).add(list.id)
 }
 
-async function save() {
-    const entries: CustomListBulkCreateEntry[] = []
-    for (const listId of selectedListIds.value) {
-        for (const contentId of props.contentIds) {
-            entries.push({ list_id: listId, content_id: contentId })
+function save() {
+    const lists = plural(selectedListIds.value.size, 'list')
+    mBulk.mutate(
+        { list_ids: [...selectedListIds.value], ids: props.contentIds },
+        {
+            onSuccess: ({ count }) => {
+                toast.show({ message: `Added ${plural(count, 'entry', 'entries')} to ${lists}` })
+                props.close(true)
+            },
         }
-    }
-    await mBulk.mutateAsync(entries)
-    toast.show({
-        message: `Added ${plural(props.contentIds.length, 'item')} to ${plural(selectedListIds.value.size, 'list')}`,
-    })
-    props.close()
+    )
 }
 </script>
 
@@ -123,7 +130,8 @@ async function save() {
 import { Modals } from '@/utils/modals'
 import Self from './ListsModal.vue'
 
-export function showBulkListsModal(contentIds: string[]): Promise<void> {
-    return Modals.show(Self, { contentIds })
+/** Resolves true once the entries were added. */
+export function showBulkListsModal(contentIds: string[]): Promise<boolean> {
+    return Modals.show<boolean | undefined>(Self, { contentIds }).then(added => added === true)
 }
 </script>

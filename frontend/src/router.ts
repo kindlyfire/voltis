@@ -20,6 +20,8 @@ import SettingsMetadataPage from './pages/settings/MetadataPage.vue'
 import SettingsOpdsPage from './pages/settings/OpdsPage.vue'
 import SettingsTasksPage from './pages/settings/TasksPage.vue'
 import SettingsUsersPage from './pages/settings/UsersPage.vue'
+import { savedTop, trackSavedScroll } from './utils/savedScroll'
+import { pendingRestoreTop, whenReachable } from './utils/whenReachable'
 
 declare module 'vue-router' {
     interface RouteMeta {
@@ -38,7 +40,11 @@ const router = createRouter({
         if (savedPosition) {
             // The readers restore their own position from ?page= or the history locator.
             if (to.name === 'read-content') return false
-            return whenReachable(to.fullPath, savedPosition)
+            // The mirror wins: the router's copies can hold the position from before a restore.
+            return whenReachable(
+                { left: savedPosition.left, top: savedTop() ?? savedPosition.top },
+                () => router.currentRoute.value.fullPath === to.fullPath
+            )
         }
         return { top: 0 }
     },
@@ -153,28 +159,11 @@ const router = createRouter({
     ],
 })
 
-/** Resolves once the page is tall enough to reach `pos` and its height held for a frame (grids
- * render a single column for their first frame), after ~1s at most, or `false` if the user
- * navigated meanwhile. */
-function whenReachable(fullPath: string, pos: { left: number; top: number }) {
-    return new Promise<typeof pos | false>(resolve => {
-        const deadline = performance.now() + 1000
-        let lastHeight = -1
-        const tick = () => {
-            if (router.currentRoute.value.fullPath !== fullPath) return resolve(false)
-            const height = document.documentElement.scrollHeight
-            const settled = height === lastHeight && height - window.innerHeight >= pos.top
-            if (settled || performance.now() >= deadline) return resolve(pos)
-            lastHeight = height
-            requestAnimationFrame(tick)
-        }
-        tick()
-    })
-}
-
 // `scrollBehavior` turns off native restoration, and vue-router's save on page hide doesn't
 // survive a reload in Chrome, so keep the entry's `scroll` (read back on reload) current.
 const saveScroll = useDebounceFn(() => {
+    // Until the restore lands, `scrollY` is the position from before it.
+    if (pendingRestoreTop() !== null) return
     history.replaceState({ ...history.state, scroll: { left: scrollX, top: scrollY } }, '')
 }, 200)
 window.addEventListener('scroll', saveScroll, { passive: true })
@@ -182,5 +171,14 @@ window.addEventListener('scroll', saveScroll, { passive: true })
 router.beforeEach(() => saveScroll.cancel())
 // Navigations (including query-only `replace`s) reset the entry's `scroll`.
 router.afterEach(() => saveScroll())
+
+// After vue-router's own `pagehide` save, which records the position from before a pending
+// restore. Best-effort: Chrome may drop it, as noted above.
+window.addEventListener('pagehide', () => {
+    const top = pendingRestoreTop()
+    if (top !== null) history.replaceState({ ...history.state, scroll: { left: 0, top } }, '')
+})
+
+trackSavedScroll(router, pendingRestoreTop)
 
 export default router

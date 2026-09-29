@@ -2,6 +2,7 @@
     <TooltipProvider :delay-duration="400">
         <div
             v-if="qMe.isLoading.value || qInfo.isLoading.value"
+            id="app-loading"
             class="flex h-screen w-screen items-center justify-center"
         >
             <ASpinner size="lg" />

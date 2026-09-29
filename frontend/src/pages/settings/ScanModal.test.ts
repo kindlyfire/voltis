@@ -103,6 +103,7 @@ beforeEach(() => {
         mutateAsync: scanMock,
         isPending: ref(false),
         isError: ref(false),
+        error: ref(null),
     } as any)
 })
 

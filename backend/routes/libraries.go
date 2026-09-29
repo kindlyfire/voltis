@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"voltis/db"
+	"voltis/lib/fp"
 	"voltis/linking"
 	"voltis/models"
 	"voltis/providers"
@@ -123,8 +125,12 @@ func (lr *LibraryRoutes) scan(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "ids and content_ids are mutually exclusive")
 	}
 
-	if len(req.ContentIDs) > 0 {
-		ids, err := lr.scanContentIDs(ctx, req.ContentIDs)
+	// An explicit empty list must not fall through to scanning every library.
+	if req.ContentIDs != nil {
+		if len(req.ContentIDs) == 0 {
+			return echo.NewHTTPError(http.StatusBadRequest, "content_ids is empty")
+		}
+		ids, err := lr.scanContentIDs(ctx, fp.Dedup(req.ContentIDs))
 		if err != nil {
 			return err
 		}
@@ -156,6 +162,10 @@ func (lr *LibraryRoutes) scan(c echo.Context) error {
 	return c.JSON(http.StatusOK, scanResponse{TaskIDs: taskIDs})
 }
 
+// maxScanFileURIs caps a content scan, which lists each file, children included, as an explicit
+// URI in a forced scan.
+const maxScanFileURIs = 5000
+
 func (lr *LibraryRoutes) scanContentIDs(ctx context.Context, contentIDs []string) ([]string, error) {
 	rows, err := db.Select[models.Content](ctx, lr.pool, "SELECT * FROM content WHERE id = ANY($1)", contentIDs)
 	if err != nil {
@@ -186,6 +196,10 @@ func (lr *LibraryRoutes) scanContentIDs(ctx context.Context, contentIDs []string
 
 	if len(fileURIs) == 0 {
 		return nil, echo.NewHTTPError(http.StatusBadRequest, "No files to scan")
+	}
+	if len(fileURIs) > maxScanFileURIs {
+		return nil, echo.NewHTTPError(http.StatusBadRequest,
+			fmt.Sprintf("Too many files to scan (%d, at most %d)", len(fileURIs), maxScanFileURIs))
 	}
 
 	taskID, err := lr.scanQueue.Enqueue(libraryID, true, fileURIs)

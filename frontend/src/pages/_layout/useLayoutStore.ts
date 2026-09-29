@@ -48,7 +48,9 @@ export const useLayoutStore = defineStore('layout', () => {
         temporary => {
             document.documentElement.style.setProperty('--layout-top', temporary ? '0px' : '')
         },
-        { immediate: true }
+        // Sync (as is `--layout-left` below), so a page mounting in the same flush measures the
+        // new geometry.
+        { immediate: true, flush: 'sync' }
     )
 
     /** Temporary: the sidebar is a drawer over the page instead of a column beside it. True on
@@ -87,7 +89,7 @@ export const useLayoutStore = defineStore('layout', () => {
                 persistent ? 'var(--sidebar-width)' : ''
             )
         },
-        { immediate: true }
+        { immediate: true, flush: 'sync' }
     )
 
     // Theme

@@ -2,12 +2,13 @@
     <ADialog
         :open="open"
         title="Reset reading progress"
-        :description="`This clears the reading status and progress of ${plural(contentIds.length, 'item')}:`"
+        :description="`This clears the reading status and progress of ${plural(contentIds.length, 'item')}${contentTitles ? ':' : '.'}`"
         :dismissible="!mBulk.isPending.value"
         @update:open="v => !v && close()"
     >
         <div class="flex flex-col gap-4">
             <ul
+                v-if="contentTitles"
                 class="bg-surface-2 rounded-field max-h-60 overflow-y-auto px-4 py-2"
                 tabindex="0"
                 aria-label="Selected items"
@@ -20,12 +21,6 @@
                     {{ title }}
                 </li>
             </ul>
-            <AProgressBar
-                v-if="mBulk.isPending.value"
-                :value="completed / contentIds.length"
-                label="Resetting"
-                :value-text="`${completed} of ${contentIds.length}`"
-            />
             <QueryError :mutation="mBulk" />
         </div>
         <template #actions>
@@ -45,43 +40,29 @@
 </template>
 
 <script setup lang="ts">
-import { useMutation, useQueryClient } from '@tanstack/vue-query'
-import { ref } from 'vue'
+import { useMutation } from '@tanstack/vue-query'
 import QueryError from '@/components/QueryError.vue'
 import AButton from '@/ui/AButton.vue'
 import ADialog from '@/ui/ADialog.vue'
-import AProgressBar from '@/ui/AProgressBar.vue'
 import { useToast } from '@/ui/useToast'
 import { contentApi } from '@/utils/api/content'
 import { plural } from '@/utils/misc'
 
 const props = defineProps<{
     open: boolean
-    close: () => void
+    close: (done?: boolean) => void
     contentIds: string[]
-    contentTitles: string[]
-    seriesIds: Set<string>
+    /** In `contentIds` order; without them the dialog shows only the count. */
+    contentTitles?: string[]
 }>()
 
-const completed = ref(0)
-const queryClient = useQueryClient()
 const toast = useToast()
 
 const mBulk = useMutation({
-    mutationFn: async () => {
-        completed.value = 0
-        for (const id of props.contentIds) {
-            if (props.seriesIds.has(id)) {
-                await contentApi.setSeriesItemStatuses(id, null)
-            }
-            await contentApi.updateUserData(id, { status: null, progress: {} })
-            completed.value++
-        }
-        await queryClient.invalidateQueries({ queryKey: ['content'] })
-    },
-    onSuccess: () => {
-        toast.show({ message: `Reset the progress of ${plural(props.contentIds.length, 'item')}` })
-        props.close()
+    mutationFn: () => contentApi.bulkUserData({ ids: props.contentIds, action: 'reset' }),
+    onSuccess: ({ count }) => {
+        toast.show({ message: `Reset the progress of ${plural(count, 'item')}` })
+        props.close(true)
     },
 })
 </script>
@@ -90,11 +71,13 @@ const mBulk = useMutation({
 import { Modals } from '@/utils/modals'
 import Self from './BulkResetProgressModal.vue'
 
+/** Resolves true once the progress was reset. */
 export function showBulkResetProgressModal(
     contentIds: string[],
-    contentTitles: string[],
-    seriesIds: Set<string>
-): Promise<void> {
-    return Modals.show(Self, { contentIds, contentTitles, seriesIds })
+    contentTitles?: string[]
+): Promise<boolean> {
+    return Modals.show<boolean | undefined>(Self, { contentIds, contentTitles }).then(
+        done => done === true
+    )
 }
 </script>

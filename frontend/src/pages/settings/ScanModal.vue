@@ -1,18 +1,24 @@
 <template>
-    <ADialog :open="open" :title="title" size="lg" @update:open="v => !v && close()">
-        <ACheckbox
-            v-if="!scanning"
-            v-model="forceScan"
-            :disabled="isContentScan"
-            label="Force scan"
-            hint="Re-scans every file, even the ones that have not changed since the last scan."
-        />
+    <ADialog
+        :open="open"
+        :title="title"
+        size="lg"
+        :dismissible="!mScan.isPending.value"
+        @update:open="v => !v && close(scanning)"
+    >
+        <div v-if="!scanning" class="flex flex-col gap-4">
+            <ACheckbox
+                v-model="forceScan"
+                :disabled="isContentScan"
+                label="Force scan"
+                hint="Re-scans every file, even the ones that have not changed since the last scan."
+            />
+            <QueryError :mutation="mScan" />
+        </div>
 
         <p v-else-if="!isAdmin" class="text-fg-muted py-4 text-center">
             Scan progress is no longer available.
         </p>
-
-        <QueryError v-else-if="mScan.isError.value" :mutation="mScan" />
 
         <div v-else-if="rows.length === 0" class="flex flex-col items-center gap-3 py-4">
             <ASpinner decorative />
@@ -40,10 +46,17 @@
 
         <template #actions>
             <template v-if="!scanning">
-                <AButton variant="text" tone="neutral" @click="close()">Cancel</AButton>
+                <AButton
+                    variant="text"
+                    tone="neutral"
+                    :disabled="mScan.isPending.value"
+                    @click="close()"
+                >
+                    Cancel
+                </AButton>
                 <AButton :loading="mScan.isPending.value" @click="startScan">Start scan</AButton>
             </template>
-            <AButton v-else ref="closeButton" variant="text" tone="neutral" @click="close()">
+            <AButton v-else ref="closeButton" variant="text" tone="neutral" @click="close(true)">
                 Close
             </AButton>
         </template>
@@ -64,7 +77,7 @@ import ScanStrip from './ScanStrip.vue'
 
 const props = defineProps<{
     open: boolean
-    close: () => void
+    close: (started?: boolean) => void
     libraryIds: string[]
     contentIds?: string[]
 }>()
@@ -148,8 +161,8 @@ function getLibraryName(id: string): string {
 }
 
 async function startScan() {
-    try {
-        const res = await mScan.mutateAsync(
+    const res = await mScan
+        .mutateAsync(
             isContentScan.value
                 ? { contentIds: props.contentIds }
                 : {
@@ -157,14 +170,14 @@ async function startScan() {
                       force: forceScan.value,
                   }
         )
-        taskIds.value = res.task_ids
-        void store.reconcile(res.task_ids).catch(() => {})
-    } finally {
-        scanning.value = true
-        // Start scan is gone: keep focus on the dialog's remaining action.
-        await nextTick()
-        closeButton.value?.$el.focus()
-    }
+        .catch(() => null) // QueryError shows it, and the form stays for a retry.
+    if (!res) return
+    taskIds.value = res.task_ids
+    scanning.value = true
+    void store.reconcile(res.task_ids).catch(() => {})
+    // Start scan is gone: keep focus on the dialog's remaining action.
+    await nextTick()
+    closeButton.value?.$el.focus()
 }
 </script>
 
@@ -172,12 +185,13 @@ async function startScan() {
 import { Modals } from '@/utils/modals'
 import Self from './ScanModal.vue'
 
-export function showScanModal(libraryIds: string[]): Promise<void>
-export function showScanModal(opts: { contentIds: string[] }): Promise<void>
-export function showScanModal(arg: string[] | { contentIds: string[] }): Promise<void> {
-    if (Array.isArray(arg)) {
-        return Modals.show(Self, { libraryIds: arg })
-    }
-    return Modals.show(Self, { libraryIds: [], contentIds: arg.contentIds })
+/** Resolves true once the scan started. */
+export function showScanModal(libraryIds: string[]): Promise<boolean>
+export function showScanModal(opts: { contentIds: string[] }): Promise<boolean>
+export function showScanModal(arg: string[] | { contentIds: string[] }): Promise<boolean> {
+    const props = Array.isArray(arg)
+        ? { libraryIds: arg }
+        : { libraryIds: [], contentIds: arg.contentIds }
+    return Modals.show<boolean | undefined>(Self, props).then(started => started === true)
 }
 </script>

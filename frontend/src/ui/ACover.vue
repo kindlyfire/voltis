@@ -2,9 +2,10 @@
     <div class="a-cover">
         <img
             v-if="src && !failed"
+            ref="img"
             :src="src"
             :alt="alt"
-            :class="{ loaded }"
+            :class="{ loaded, instant }"
             loading="lazy"
             decoding="async"
             @load="loaded = true"
@@ -37,7 +38,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { nextTick, ref, useTemplateRef, watch } from 'vue'
 import AIcon from './AIcon.vue'
 import AProgressBar from './AProgressBar.vue'
 import ASkeleton from './ASkeleton.vue'
@@ -59,12 +60,18 @@ const props = withDefaults(
 
 const loaded = ref(false)
 const failed = ref(false)
+const instant = ref(false)
+const img = useTemplateRef('img')
+// A cached image shows without the fade, on mount and when a reused cover gets a new `src`.
+// `transition: none`, since a layout read before the check may already have started the fade.
 watch(
     () => props.src,
-    () => {
-        loaded.value = false
-        failed.value = false
-    }
+    async () => {
+        loaded.value = failed.value = instant.value = false
+        await nextTick()
+        if (img.value?.complete && img.value.naturalWidth > 0) loaded.value = instant.value = true
+    },
+    { immediate: true }
 )
 </script>
 
@@ -88,6 +95,10 @@ watch(
 
         &.loaded {
             opacity: 1;
+        }
+
+        &.instant {
+            transition: none;
         }
     }
 

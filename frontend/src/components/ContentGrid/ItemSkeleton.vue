@@ -3,7 +3,7 @@
         <div class="rounded-cover aspect-2/3 overflow-hidden">
             <ASkeleton class="h-full" />
         </div>
-        <div>
+        <div v-if="!hideTitle">
             <ASkeleton shape="text" width="70%" class="text-sm" />
             <ASkeleton v-if="subtitle" shape="text" width="45%" class="text-[13px]" />
         </div>
@@ -13,5 +13,5 @@
 <script setup lang="ts">
 import ASkeleton from '@/ui/ASkeleton.vue'
 
-defineProps<{ subtitle?: boolean }>()
+defineProps<{ subtitle?: boolean; hideTitle?: boolean }>()
 </script>

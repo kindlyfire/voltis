@@ -29,26 +29,24 @@
                     Actions
                 </AButton>
             </template>
-            <AMenuItem :leading-icon="IconSelectAll" @select="selectAll">Select all</AMenuItem>
-            <AMenuSeparator />
             <AMenuItem
                 :leading-icon="IconPlaylistAdd"
                 :disabled="selectedIds.size === 0"
-                @select="showBulkListsModal([...selectedIds])"
+                @select="bulk(showBulkListsModal)"
             >
                 Add to list
             </AMenuItem>
             <AMenuItem
                 :leading-icon="IconBookOpen"
                 :disabled="selectedIds.size === 0"
-                @select="showBulkStatusModal([...selectedIds])"
+                @select="bulk(showBulkStatusModal)"
             >
                 Set reading status
             </AMenuItem>
             <AMenuItem
                 :leading-icon="IconMagnifyScan"
                 :disabled="selectedIds.size === 0"
-                @select="showScanModal({ contentIds: [...selectedIds] })"
+                @select="bulk(ids => showScanModal({ contentIds: ids }))"
             >
                 Scan
             </AMenuItem>
@@ -57,9 +55,7 @@
                 :leading-icon="IconRestart"
                 tone="danger"
                 :disabled="selectedIds.size === 0"
-                @select="
-                    showBulkResetProgressModal([...selectedIds], selectedTitles, selectedSeriesIds)
-                "
+                @select="bulk(ids => showBulkResetProgressModal(ids, selectedTitles()))"
             >
                 Reset reading progress
             </AMenuItem>
@@ -68,11 +64,9 @@
 
     <DefineMeta>
         <span aria-live="polite">
-            <ASpinner v-if="loading" size="sm" class="align-middle" />
+            <ASpinner v-if="qBuckets.isPending.value" size="sm" class="align-middle" />
             <template v-else-if="selectMode">{{ selectedIds.size }} selected</template>
-            <template v-else-if="qContents.isSuccess.value">
-                {{ plural(items.length, 'item') }}
-            </template>
+            <template v-else-if="qBuckets.isSuccess.value">{{ plural(total, 'item') }}</template>
         </span>
     </DefineMeta>
 
@@ -131,49 +125,94 @@
             />
         </div>
 
-        <QueryError :query="qContents" />
+        <QueryError :query="error" />
 
         <div
             ref="gridRef"
-            class="grid gap-x-[18px] gap-y-6"
-            :style="gridStyle"
-            :aria-busy="loading || undefined"
+            :aria-busy="pending || undefined"
+            @focusin="onFocusin"
+            @focusout="onFocusout"
         >
-            <template v-if="loading">
-                <ItemSkeleton v-for="i in Math.max(cols, 3)" :key="i" />
-            </template>
-
-            <template v-else>
-                <Item
-                    v-for="item in items"
-                    :key="item.id"
-                    :content="item"
-                    :to-read-route="toReadRoute"
-                    :store-key="storeKey"
-                    :selecting="selectMode"
-                    :selected="selectedIds.has(item.id)"
-                    highlight-reading
-                    @toggle-select="(shiftKey: boolean) => toggleSelect(item.id, shiftKey)"
-                />
-                <p
-                    v-if="!items.length && qContents.isSuccess.value"
-                    class="text-fg-muted col-span-full py-12 text-center text-sm"
+            <div v-if="loading" class="grid gap-x-[18px] gap-y-6" :style="gridStyle">
+                <ItemSkeleton v-for="i in cols" :key="i" :hide-title="settings.hideTitle" />
+            </div>
+            <p
+                v-else-if="total === 0 && qBuckets.isSuccess.value"
+                class="text-fg-muted py-12 text-center text-sm"
+            >
+                {{ hasFilters || starred ? 'Nothing matches these filters.' : 'Nothing here yet.' }}
+            </p>
+            <div v-else class="relative" :style="{ height: `${totalSize}px` }">
+                <div
+                    v-for="row in rows"
+                    :key="row.index"
+                    class="absolute inset-x-0 top-0 grid gap-x-[18px]"
+                    :style="{
+                        ...gridStyle,
+                        height: `${rowHeight - ROW_GAP}px`,
+                        transform: `translateY(${row.start - scrollMargin}px)`,
+                    }"
                 >
-                    {{
-                        hasFilters || starred
-                            ? 'Nothing matches these filters.'
-                            : 'Nothing here yet.'
-                    }}
-                </p>
-            </template>
+                    <template v-for="i in rowItems(row.index)" :key="i">
+                        <Item
+                            v-if="itemAt(i)"
+                            :data-index="i"
+                            :content="itemAt(i)!"
+                            :to-read-route="toReadRoute"
+                            :store-key="storeKey"
+                            :selecting="selectMode"
+                            :selected="selectedIds.has(itemAt(i)!.id)"
+                            highlight-reading
+                            @toggle-select="
+                                (shiftKey: boolean) => toggle(itemAt(i)!.id, i, shiftKey)
+                            "
+                        />
+                        <ItemSkeleton v-else :hide-title="settings.hideTitle" />
+                    </template>
+                </div>
+            </div>
         </div>
+    </div>
+
+    <!-- Fixed over the frame's right padding, so it never changes the columns. -->
+    <div
+        v-if="railShown"
+        class="pointer-events-none fixed right-0 bottom-0 z-1 py-2"
+        :style="{ top: 'var(--layout-top)', left: `${gridRight}px` }"
+    >
+        <AScrubber
+            :segments="segments"
+            :model-value="railValue"
+            label="Jump to"
+            :tolerance="2 / scrollRange"
+            @seek="seek"
+            @dragstart="onDragStart"
+            @dragend="onDragEnd"
+        />
     </div>
 </template>
 
 <script setup lang="ts">
-import { hashKey, keepPreviousData } from '@tanstack/vue-query'
-import { createReusableTemplate, useElementSize } from '@vueuse/core'
-import { computed, ref, toRef, useId, watch } from 'vue'
+import { hashKey, useQueryClient } from '@tanstack/vue-query'
+import { defaultRangeExtractor, useWindowVirtualizer, type Range } from '@tanstack/vue-virtual'
+import {
+    createReusableTemplate,
+    useResizeObserver,
+    useTimeoutFn,
+    useWindowScroll,
+    useWindowSize,
+} from '@vueuse/core'
+import {
+    computed,
+    nextTick,
+    onMounted,
+    ref,
+    shallowRef,
+    toRef,
+    useId,
+    watch,
+    watchEffect,
+} from 'vue'
 import QueryError from '@/components/QueryError.vue'
 import { showScanModal } from '@/pages/settings/ScanModal.vue'
 import AButton from '@/ui/AButton.vue'
@@ -182,6 +221,7 @@ import AMenu from '@/ui/AMenu.vue'
 import AMenuItem from '@/ui/AMenuItem.vue'
 import AMenuSeparator from '@/ui/AMenuSeparator.vue'
 import APageHeader from '@/ui/APageHeader.vue'
+import AScrubber from '@/ui/AScrubber.vue'
 import ASelect from '@/ui/ASelect.vue'
 import ASpinner from '@/ui/ASpinner.vue'
 import {
@@ -191,7 +231,6 @@ import {
     IconMagnifyScan,
     IconPlaylistAdd,
     IconRestart,
-    IconSelectAll,
     IconSelectMode,
     IconSelectModeFilled,
     IconSortAscending,
@@ -199,13 +238,15 @@ import {
     IconStar,
     IconStarFilled,
 } from '@/ui/icons'
-import { contentApi } from '@/utils/api/content'
+import { contentWindowKey, PAGE_SIZE } from '@/utils/api/content'
 import {
     READING_STATUS_LABELS,
+    type Content,
     type ContentListParams,
     type ReadingStatus,
 } from '@/utils/api/types'
-import { plural, readingStatusOptions, useRouteQueryParams } from '@/utils/misc'
+import { getLayoutTop, plural, readingStatusOptions, useRouteQueryParams } from '@/utils/misc'
+import { useRestoreReady } from '@/utils/whenReachable'
 import { showBulkResetProgressModal } from './BulkResetProgressModal.vue'
 import { showBulkStatusModal } from './BulkStatusModal.vue'
 import Item from './Item.vue'
@@ -213,6 +254,8 @@ import ItemSkeleton from './ItemSkeleton.vue'
 import { showBulkListsModal } from './ListsModal.vue'
 import Settings from './Settings.vue'
 import { useContentGridStore } from './store'
+import { useContentWindow } from './useContentWindow'
+import { useGridSelection } from './useGridSelection'
 
 const props = withDefaults(
     defineProps<{
@@ -322,87 +365,250 @@ const queryParams = computed<ContentListParams>(() => {
     return { ...props.params, ...p }
 })
 
-const qContents = contentApi.useList(queryParams, {
-    placeholderData: keepPreviousData,
-})
-const items = computed(() => qContents.data.value?.data ?? [])
-const loading = qContents.isLoading
-
-const selectMode = ref(false)
-const selectedIds = ref(new Set<string>())
-const lastSelectedIndex = ref<number | null>(null)
-
-function setSelectMode(on: boolean) {
-    selectMode.value = on
-    selectedIds.value = new Set()
-    lastSelectedIndex.value = null
-}
-
-watch(
-    () => hashKey([props.params]),
-    () => setSelectMode(false)
+const paused = ref(false)
+const focusedIndex = ref<number | null>(null)
+const viewRange = shallowRef({ start: 0, end: 0 })
+const { qBuckets, error, total, itemAt, pending } = useContentWindow(
+    queryParams,
+    viewRange,
+    paused,
+    focusedIndex
 )
+// Longer lists render skeletons at full height instead, which keeps the scroll restorable.
+const loading = computed(() => pending.value && total.value <= PAGE_SIZE)
 
-function toggleSelect(id: string, shiftKey: boolean) {
-    const next = new Set(selectedIds.value)
-    const currentIndex = items.value.findIndex(item => item.id === id)
+const {
+    selectMode,
+    setSelectMode,
+    ids: selectedIds,
+    toggle,
+    clear: clearSelection,
+} = useGridSelection(queryParams)
 
-    if (shiftKey && lastSelectedIndex.value != null && currentIndex !== -1) {
-        const lo = Math.min(lastSelectedIndex.value, currentIndex)
-        const hi = Math.max(lastSelectedIndex.value, currentIndex)
-        for (let i = lo; i <= hi; i++) {
-            next.add(items.value[i]!.id)
-        }
-    } else {
-        if (next.has(id)) next.delete(id)
-        else next.add(id)
-    }
-
-    selectedIds.value = next
-    if (currentIndex !== -1) lastSelectedIndex.value = currentIndex
+async function bulk(action: (ids: string[]) => Promise<boolean>) {
+    if (await action([...selectedIds.value])) clearSelection()
 }
 
-function selectAll() {
-    selectedIds.value = new Set(items.value.map(item => item.id))
+const queryClient = useQueryClient()
+
+// From the cached pages, for a short selection; otherwise the modal shows only the count.
+function selectedTitles(): string[] | undefined {
+    if (selectedIds.value.size > 50) return
+    const titles = new Map<string, string>()
+    const key = contentWindowKey(queryParams.value)
+    for (const [, page] of queryClient.getQueriesData<{ data?: Content[] }>({ queryKey: key })) {
+        for (const c of page?.data ?? []) titles.set(c.id, c.title)
+    }
+    const out = [...selectedIds.value].map(id => titles.get(id))
+    return out.every(t => t !== undefined) ? out : undefined
 }
 
-const selectedTitles = computed(() => {
-    const titleMap = new Map(items.value.map(item => [item.id, item.title]))
-    return [...selectedIds.value].map(id => titleMap.get(id) ?? id)
-})
-
-const SERIES_TYPES = new Set(['comic_series', 'book_series'])
-
-const selectedSeriesIds = computed(() => {
-    const result = new Set<string>()
-    for (const item of items.value) {
-        if (selectedIds.value.has(item.id) && SERIES_TYPES.has(item.type)) {
-            result.add(item.id)
-        }
-    }
-    return result
-})
-
-watch(items, items => {
-    const newSelectedIds = new Set<string>()
-    for (const item of items) {
-        if (selectedIds.value.has(item.id)) {
-            newSelectedIds.add(item.id)
-        }
-    }
-    selectedIds.value = newSelectedIds
-    lastSelectedIndex.value = null
-})
+const COL_GAP = 18
+const ROW_GAP = 24
+// The caption's 10px gap and two 14px × 1.35 title lines.
+const CAPTION = 48
+// Below Chromium's ~33.5M px layout limit.
+const MAX_HEIGHT = 30_000_000
+const OVERSCAN = 3
 
 const gridRef = ref<HTMLElement>()
-const { width } = useElementSize(gridRef)
+const { height: windowHeight } = useWindowSize()
+const { y: scrollY } = useWindowScroll()
 
+function rowHeightFor(cols: number) {
+    if (width.value <= 0) return 0
+    const colWidth = (width.value - (cols - 1) * COL_GAP) / cols
+    return Math.ceil(colWidth * 1.5) + (settings.value.hideTitle ? 0 : CAPTION) + ROW_GAP
+}
+
+// More columns than the setting asks for when the rows would exceed MAX_HEIGHT.
 const cols = computed(() => {
     if (width.value <= 0) return 1
-    return Math.max(1, Math.round(width.value / settings.value.itemSize))
+    let n = Math.max(1, Math.round(width.value / settings.value.itemSize))
+    while (Math.ceil(total.value / n) * rowHeightFor(n) > MAX_HEIGHT) n++
+    return n
 })
+const rowHeight = computed(() => rowHeightFor(cols.value))
 
 const gridStyle = computed(() => ({
-    gridTemplateColumns: `repeat(${cols.value}, 1fr)`,
+    gridTemplateColumns: `repeat(${cols.value}, minmax(0, 1fr))`,
 }))
+
+// The grid's width, document top and right edge, and the page height.
+const width = ref(0)
+const scrollMargin = ref(0)
+const gridRight = ref(0)
+const pageHeight = ref(0)
+function measureGrid() {
+    const rect = gridRef.value?.getBoundingClientRect()
+    if (!rect) return
+    width.value = rect.width
+    scrollMargin.value = Math.round(rect.top + window.scrollY)
+    gridRight.value = rect.right
+    pageHeight.value = document.documentElement.scrollHeight
+}
+// Measured before the first paint, so back navigation can restore the position in that frame.
+onMounted(measureGrid)
+// The grid moves with anything above it, and sideways with the sidebar.
+useResizeObserver([document.body, gridRef], measureGrid)
+watch(showFilters, () => nextTick(measureGrid))
+
+const rowCount = computed(() => (width.value > 0 ? Math.ceil(total.value / cols.value) : 0))
+
+const virtualizer = useWindowVirtualizer(
+    computed(() => {
+        const focusedRow =
+            focusedIndex.value === null ? null : Math.floor(focusedIndex.value / cols.value)
+        return {
+            count: rowCount.value,
+            estimateSize: () => rowHeight.value,
+            overscan: OVERSCAN,
+            scrollMargin: scrollMargin.value,
+            scrollPaddingStart: getLayoutTop(),
+            // Keeps the focused card rendered, so Tab and Enter still work after scrolling away.
+            rangeExtractor: (range: Range) => {
+                const out = defaultRangeExtractor(range)
+                if (focusedRow === null || focusedRow >= range.count || out.includes(focusedRow)) {
+                    return out
+                }
+                return [...out, focusedRow].sort((a, b) => a - b)
+            },
+        }
+    })
+)
+// Back/Forward waits for the rows at the target, which the virtualizer starts away from: it
+// starts at `scrollY`, a reused grid keeps its offset, and the width narrows once the scrollbar
+// appears.
+useRestoreReady(
+    target => {
+        if (width.value <= 0 || qBuckets.isPending.value || loading.value) return false
+        const v = virtualizer.value
+        let changed = false
+        if (gridRef.value!.getBoundingClientRect().width !== width.value) {
+            measureGrid()
+            changed = true
+        }
+        // Until reachable, `scrollY` can't be the target, and the restore waits anyway.
+        const reachable = target <= document.documentElement.scrollHeight - window.innerHeight
+        if (v.scrollOffset !== target && reachable) {
+            v.scrollOffset = target
+            changed = true
+        }
+        if (changed) v.measure()
+        return !changed
+    },
+    // The window didn't move, so rows rendered for the target would show blank.
+    () => {
+        const v = virtualizer.value
+        if (v.scrollOffset === window.scrollY) return
+        v.scrollOffset = window.scrollY
+        v.measure()
+    }
+)
+
+const rows = computed(() => virtualizer.value.getVirtualItems())
+const totalSize = computed(() => virtualizer.value.getTotalSize())
+
+// The viewport rows plus overscan: the rendered rows also hold the focused one, whose page
+// `useContentWindow` keeps through `pinned`.
+watchEffect(() => {
+    void rows.value
+    const r = virtualizer.value.range
+    viewRange.value = r
+        ? {
+              start: Math.max(0, r.startIndex - OVERSCAN) * cols.value,
+              end: (Math.min(rowCount.value - 1, r.endIndex + OVERSCAN) + 1) * cols.value - 1,
+          }
+        : { start: 0, end: 0 }
+})
+
+function rowItems(row: number) {
+    const start = row * cols.value
+    const end = Math.min(total.value, start + cols.value)
+    return Array.from({ length: end - start }, (_, i) => start + i)
+}
+
+function onFocusin(e: FocusEvent) {
+    const cell = (e.target as HTMLElement).closest<HTMLElement>('[data-index]')
+    focusedIndex.value = cell ? Number(cell.dataset.index) : null
+}
+
+function onFocusout(e: FocusEvent) {
+    if (!gridRef.value?.contains(e.relatedTarget as Node | null)) focusedIndex.value = null
+}
+
+// Keeps the first visible item at the top when the columns or row height change. Not on mount,
+// and not while the grid top is visible: the scrollbar appearing narrows the grid on first load.
+watch([cols, rowHeight], (_, [oldCols, oldRowHeight]) => {
+    virtualizer.value.measure() // rows are never measured, so a new estimate needs this
+    const top = window.scrollY + getLayoutTop() - scrollMargin.value
+    if (!oldRowHeight || top <= 0) return
+    const index = Math.floor(top / oldRowHeight) * oldCols
+    void nextTick(() =>
+        virtualizer.value.scrollToIndex(Math.floor(index / cols.value), { align: 'start' })
+    )
+})
+
+// The router keeps the position on query-only changes, which would open a new filter mid-list.
+watch(
+    () => hashKey([queryParams.value]),
+    () => {
+        const layoutTop = getLayoutTop()
+        if (window.scrollY + layoutTop > scrollMargin.value) {
+            window.scrollTo({ top: scrollMargin.value - layoutTop - 16, behavior: 'instant' })
+        }
+    }
+)
+
+// Rail: 0–1 maps the whole page scroll.
+const scrollRange = computed(() => Math.max(1, pageHeight.value - windowHeight.value))
+const railValue = computed(() => Math.min(1, Math.max(0, scrollY.value / scrollRange.value)))
+
+const NULL_LABELS: Partial<Record<string, [label: string, bubble: string]>> = {
+    progress_updated_at: ['–', 'Never'],
+    release_date: ['?', 'Unknown'],
+}
+
+const segments = computed(() => {
+    const nullLabels = NULL_LABELS[queryParams.value.sort ?? ''] ?? ['?', 'Unknown']
+    const gridTop = scrollMargin.value - getLayoutTop()
+    let index = 0
+    return (qBuckets.data.value?.buckets ?? []).map(({ key, count }) => {
+        const [label, bubble] = key === null ? nullLabels : [key.toUpperCase(), key.toUpperCase()]
+        const rowTop = gridTop + Math.floor(index / cols.value) * rowHeight.value
+        // The first segment also covers the header, so it starts at the page top.
+        const start = index === 0 ? 0 : Math.min(1, rowTop / scrollRange.value)
+        index += count
+        return { label, bubble, start }
+    })
+})
+
+const railShown = computed(
+    () => segments.value.length >= 2 && totalSize.value > 3 * windowHeight.value
+)
+
+// Pages load once the drag ends or rests for 150ms.
+let dragging = false
+const { start: resume, stop: stopResume } = useTimeoutFn(() => (paused.value = false), 150, {
+    immediate: false,
+})
+
+function seek(position: number) {
+    window.scrollTo({ top: Math.round(position * scrollRange.value), behavior: 'instant' })
+    if (dragging) {
+        paused.value = true
+        resume()
+    }
+}
+
+function onDragStart() {
+    dragging = true
+    paused.value = true
+}
+
+function onDragEnd() {
+    dragging = false
+    stopResume()
+    paused.value = false
+}
 </script>

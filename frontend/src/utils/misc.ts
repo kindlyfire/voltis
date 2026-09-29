@@ -3,7 +3,7 @@ import { useEventListener } from '@vueuse/core'
 import {
     computed,
     onMounted,
-    onUnmounted,
+    onBeforeUnmount,
     ref,
     toValue,
     type MaybeRefOrGetter,
@@ -75,7 +75,8 @@ export function createOverridableValue<TValue, const TLayer extends string>(
                     obj.setLayer(layer, value)
                 }
             })
-            onUnmounted(() => {
+            // Before unmount, so the page that replaces this one mounts without the override.
+            onBeforeUnmount(() => {
                 obj.setLayer(layer, undefined)
             })
             return (v: TValue | undefined) => {

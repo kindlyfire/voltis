@@ -426,16 +426,12 @@ func (cr *CustomListRoutes) createEntry(c echo.Context) error {
 	return okResponse(c)
 }
 
-type bulkCreateEntry struct {
-	ListID    string  `json:"list_id"    validate:"required"`
-	ContentID string  `json:"content_id" validate:"required"`
-	Notes     *string `json:"notes"`
-}
-
 type bulkCreateEntriesRequest struct {
-	Entries []bulkCreateEntry `json:"entries" validate:"required,min=1,dive"`
+	ListIDs []string `json:"list_ids" validate:"required,min=1"`
+	IDs     []string `json:"ids"      validate:"required,min=1"`
 }
 
+// bulkCreateEntries appends the content to the end of each list, skipping entries it already has.
 func (cr *CustomListRoutes) bulkCreateEntries(c echo.Context) error {
 	user, err := requireUser(c)
 	if err != nil {
@@ -451,11 +447,7 @@ func (cr *CustomListRoutes) bulkCreateEntries(c echo.Context) error {
 	}
 
 	ctx := reqCtx(c)
-
-	// Collect unique list IDs and verify ownership
-	listIDs := fp.Dedup(
-		fp.Map(req.Entries, func(e bulkCreateEntry) string { return e.ListID }),
-	)
+	listIDs, ids := fp.Dedup(req.ListIDs), fp.Dedup(req.IDs)
 	ownedCount, err := db.SelectScalar[int](ctx, cr.pool,
 		"SELECT COUNT(*) FROM custom_lists WHERE id = ANY($1) AND user_id = $2", listIDs, user.ID)
 	if err != nil {
@@ -465,23 +457,40 @@ func (cr *CustomListRoutes) bulkCreateEntries(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "Not allowed")
 	}
 
-	err = db.WithTx(ctx, cr.pool, func(q pgx.Tx) error {
-		ids := fp.Map(req.Entries, func(e bulkCreateEntry) string { return e.ContentID })
-		if err := lockContentLibraries(ctx, q, ids...); err != nil {
+	var count int64
+	err = db.WithTx(ctx, cr.pool, func(tx pgx.Tx) error {
+		if err := lockContentLibraries(ctx, tx, ids...); err != nil {
 			return err
 		}
-		for _, e := range req.Entries {
-			if err := createEntryInner(ctx, q, e.ListID, e.ContentID, e.Notes); err != nil {
+		args := pgx.NamedArgs{"ids": ids, "now": time.Now().UTC(), "list_ids": listIDs}
+		for _, listID := range listIDs {
+			entryIDs := make([]string, len(ids))
+			for i := range entryIDs {
+				entryIDs[i] = models.MakeCustomListContentID()
+			}
+			args["list_id"], args["entry_ids"] = listID, entryIDs
+			tag, err := tx.Exec(ctx, `
+				INSERT INTO custom_list_to_content (id, created_at, updated_at, custom_list_id, library_id, uri, "order")
+				SELECT r.eid, @now, @now, @list_id, c.library_id, c.uri,
+					COALESCE((SELECT MAX("order") FROM custom_list_to_content WHERE custom_list_id = @list_id), 0)
+						+ row_number() OVER (ORDER BY r.n)
+				FROM unnest(@ids::text[], @entry_ids::text[]) WITH ORDINALITY r(cid, eid, n)
+				JOIN content c ON c.id = r.cid
+				ON CONFLICT (custom_list_id, library_id, uri) DO NOTHING
+			`, args)
+			if err != nil {
 				return err
 			}
+			count += tag.RowsAffected()
 		}
-		return nil
+		_, err := tx.Exec(ctx, "UPDATE custom_lists SET updated_at = @now WHERE id = ANY(@list_ids)", args)
+		return err
 	})
 	if err != nil {
 		return err
 	}
 
-	return okResponse(c)
+	return c.JSON(http.StatusOK, map[string]int64{"count": count})
 }
 
 type reorderEntriesRequest struct {

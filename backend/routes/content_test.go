@@ -3,11 +3,14 @@ package routes
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"voltis/db"
+	"voltis/lib/fp"
 	"voltis/models"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -213,53 +216,160 @@ func TestUserData(t *testing.T) {
 	})
 }
 
-func TestListSortReleaseDate(t *testing.T) {
+func TestContentListWindow(t *testing.T) {
 	pool := newTestPool(t)
 	c := newAdminClient(t, pool)
-	ctx := context.Background()
 
 	libID := models.MakeLibraryID()
-	if _, err := pool.Exec(ctx,
-		"INSERT INTO libraries (id, name, type) VALUES ($1, 'lib', 'comics')", libID); err != nil {
-		t.Fatalf("insert library: %v", err)
-	}
+	mustExec(t, pool, "INSERT INTO libraries (id, name, type) VALUES ($1, 'lib', 'comics')", libID)
 
-	// A year-only date broke the old `::date` cast.
-	dates := []string{"2015-03-01", "2014", "2014-06-15T00:00:00Z", ""}
-	ids := make([]string, len(dates))
-	for i, date := range dates {
-		ids[i] = models.MakeContentID()
-		if _, err := pool.Exec(ctx, `
-			INSERT INTO content (id, uri_part, uri, type, library_id)
-			VALUES ($1, $1, 'file:///lib/' || $1, 'comic', $2)
-		`, ids[i], libID); err != nil {
-			t.Fatalf("insert content: %v", err)
-		}
-		if date == "" {
-			continue
-		}
-		if _, err := pool.Exec(ctx, `
-			INSERT INTO content_metadata (uri, library_id, data)
-			VALUES ('file:///lib/' || $1, $2, jsonb_build_object('publication_date', $3::text))
-		`, ids[i], libID, date); err != nil {
-			t.Fatalf("insert metadata: %v", err)
-		}
-	}
-
-	for _, tc := range []struct {
-		order string
-		want  []string
+	// An empty title is a row without metadata. A year-only date broke the old `::date` cast.
+	for _, it := range []struct {
+		title, date string
+		year        int
 	}{
-		{"asc", []string{ids[3], ids[1], ids[2], ids[0]}},
-		{"desc", []string{ids[0], ids[2], ids[1], ids[3]}},
+		{"Vol 10", "2015-03-01", 2020},
+		{"Émile and the Kite", "2014", 2021},
+		{"", "", 2022},
+		{"Echo Park", "2014-06-15T00:00:00Z", 2023},
+		{"Amber Road", "", 2020},
+		{"3 Tales", "1999-12", 2021},
+		{"Vol 2", "2015", 2022},
+		{"かたな", "", 2023},
+		{`"Quiet Hours"`, "2014", 2020},
+		{"Amber Road", "1999", 2021},
+		{"Zephyr", "", 2022},
+		{"Ezra Vale", "2015-01", 2023},
+		{"Moss", "", 2020},
+		{"Amber Road", "2014", 2021},
 	} {
-		res := c.Get("/api/content?library_id="+libID+"&sort=release_date&sort_order="+tc.order).
-			Assert(t, 200).JSON()
-		var got []string
-		for _, item := range res["data"].([]any) {
-			got = append(got, s(item.(map[string]any)["id"]))
+		id := models.MakeContentID()
+		mustExec(t, pool, `
+			INSERT INTO content (id, uri_part, uri, type, library_id, created_at)
+			VALUES ($1, $1, 'file:///lib/' || $1, 'comic_series', $2, make_timestamptz($3, 6, 1, 0, 0, 0, 'UTC'))
+		`, id, libID, it.year)
+		if it.title != "" {
+			mustExec(t, pool, `
+				INSERT INTO content_metadata (uri, library_id, data)
+				VALUES ('file:///lib/' || $1, $2,
+					jsonb_strip_nulls(jsonb_build_object('title', $3::text, 'publication_date', NULLIF($4, ''))))
+			`, id, libID, it.title, it.date)
 		}
-		assertEq(t, strings.Join(got, ","), strings.Join(tc.want, ","))
+	}
+
+	dataIDs := func(res map[string]any) []string {
+		var ids []string
+		for _, item := range res["data"].([]any) {
+			ids = append(ids, s(item.(map[string]any)["id"]))
+		}
+		return ids
+	}
+
+	// Keys and values are listed ascending; "" is the null key. value reads an item's sort value.
+	for _, tc := range []struct {
+		sort   string
+		value  func(item map[string]any) string
+		keys   []string
+		values []string
+	}{
+		{"title", func(item map[string]any) string { return s(item["title"]) },
+			[]string{"#", "a", "e", "m", "q", "v", "z"}, []string{
+				"", "3 Tales", "かたな", "Amber Road", "Amber Road", "Amber Road", "Echo Park",
+				"Émile and the Kite", "Ezra Vale", "Moss", `"Quiet Hours"`, "Vol 2", "Vol 10", "Zephyr",
+			}},
+		{"created_at", func(item map[string]any) string { return s(item["created_at"]) },
+			[]string{"2020", "2021", "2022", "2023"}, nil},
+		{"release_date", func(item map[string]any) string {
+			date, _ := item["meta"].(map[string]any)["publication_date"].(string)
+			return date
+		}, []string{"", "1999", "2014", "2015"}, []string{
+			"", "", "", "", "", "1999", "1999-12", "2014", "2014", "2014", "2014-06-15T00:00:00Z",
+			"2015", "2015-01", "2015-03-01",
+		}},
+	} {
+		for _, dir := range []string{"asc", "desc"} {
+			t.Run(tc.sort+" "+dir, func(t *testing.T) {
+				keys, values := slices.Clone(tc.keys), slices.Clone(tc.values)
+				if dir == "desc" {
+					slices.Reverse(keys)
+					slices.Reverse(values)
+				}
+				query := "?library_id=" + libID + "&sort=" + tc.sort + "&sort_order=" + dir
+
+				full := c.Get("/api/content"+query+"&include=meta").Assert(t, 200).JSON()
+				all := dataIDs(full)
+				assertEq(t, s(full["total"]), s(len(all)))
+				var got []string
+				for i, item := range full["data"].([]any) {
+					got = append(got, tc.value(item.(map[string]any)))
+					// Equal sort values are ordered by id (under the database collation), in the
+					// list's direction.
+					if i > 0 && got[i] == got[i-1] {
+						less, err := db.SelectScalar[bool](context.Background(), pool, "SELECT $1::text < $2", all[i-1], all[i])
+						if err != nil {
+							t.Fatal(err)
+						}
+						assertEq(t, less, dir == "asc")
+					}
+				}
+				if values != nil {
+					assertEq(t, strings.Join(got, "|"), strings.Join(values, "|"))
+				}
+
+				var paged []string
+				for offset := 0; offset < len(all); offset += 4 {
+					page := c.Get(fmt.Sprintf("/api/content%s&count=false&limit=4&offset=%d", query, offset)).
+						Assert(t, 200).JSON()
+					assertNil(t, "total", page["total"])
+					paged = append(paged, dataIDs(page)...)
+				}
+				assertEq(t, strings.Join(paged, ","), strings.Join(all, ","))
+				assertEq(t, len(fp.Dedup(all)), len(all))
+
+				ids := c.Get("/api/content/ids"+query+"&limit=1000").Assert(t, 200).JSON()["ids"]
+				assertEq(t, s(ids), s(all))
+
+				// The run-length encoding of the ordered ids' keys is the buckets.
+				type run struct {
+					key   string
+					count int
+				}
+				key, _, _ := bucketKey(tc.sort)
+				rows, err := db.Select[struct {
+					ID  string `db:"id"`
+					Key string `db:"key"`
+				}](context.Background(), pool, "SELECT c.id, COALESCE("+key+", '') AS key FROM content c"+cmJoin+
+					" WHERE c.id = ANY($1)", all)
+				if err != nil {
+					t.Fatal(err)
+				}
+				keyOf := map[string]string{}
+				for _, r := range rows {
+					keyOf[r.ID] = r.Key
+				}
+				var runs []run
+				for _, id := range all {
+					if n := len(runs); n > 0 && runs[n-1].key == keyOf[id] {
+						runs[n-1].count++
+					} else {
+						runs = append(runs, run{keyOf[id], 1})
+					}
+				}
+
+				res := c.Get("/api/content/buckets"+query).Assert(t, 200).JSON()
+				assertEq(t, s(res["total"]), s(len(all)))
+				var buckets []run
+				var bucketKeys []string
+				for _, b := range res["buckets"].([]any) {
+					b := b.(map[string]any)
+					k, _ := b["key"].(string)
+					buckets = append(buckets, run{k, int(b["count"].(float64))})
+					bucketKeys = append(bucketKeys, k)
+				}
+				assertEq(t, s(buckets), s(runs))
+				assertEq(t, s(bucketKeys), s(keys))
+			})
+		}
 	}
 }
 
@@ -323,6 +433,68 @@ func (f *recentFixture) setFor(userID, id, status string, progressAt, statusAt *
 			status_updated_at = EXCLUDED.status_updated_at, progress = EXCLUDED.progress,
 			progress_updated_at = EXCLUDED.progress_updated_at
 	`, models.MakeUserToContentID(), userID, status, statusAt, progressAt, id)
+}
+
+func TestBulkActions(t *testing.T) {
+	pool := newTestPool(t)
+	c := newAdminClient(t, pool)
+	me := c.Get("/api/users/me").Assert(t, 200).JSON()
+	f := &recentFixture{t: t, pool: pool, libID: models.MakeLibraryID(), userID: s(me["id"]),
+		base: time.Now().Add(-time.Hour).UTC()}
+	f.exec("INSERT INTO libraries (id, name, type) VALUES ($1, 'lib', 'comics')", f.libID)
+
+	a, b, other := f.content("comic", nil, 0), f.content("comic", nil, 1), f.content("comic", nil, 2)
+	series, kids := f.series(2)
+	f.set(a, "reading", f.at(0), f.at(0))
+	f.set(series, "reading", f.at(0), f.at(0))
+	f.set(kids[0], "completed", f.at(0), f.at(0))
+
+	// userData is "<status or -> <progress>", plus " t" when progress_updated_at is set, or "-"
+	// without a row.
+	userData := func(id string) string {
+		t.Helper()
+		v, err := db.SelectScalar[string](context.Background(), pool, `
+			SELECT concat_ws(' ', COALESCE(utc.status, '-'), utc.progress::text,
+				NULLIF(utc.progress_updated_at IS NOT NULL, false))
+			FROM content c LEFT JOIN user_to_content utc
+				ON utc.library_id = c.library_id AND utc.uri = c.uri AND utc.user_id = $2
+			WHERE c.id = $1
+		`, id, f.userID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	bulk := func(path string, body map[string]any) string {
+		t.Helper()
+		return s(c.Post(path, body).Assert(t, 200).JSON()["count"])
+	}
+
+	assertEq(t, bulk("/api/content/bulk/user-data", map[string]any{
+		"ids": []string{a, b, a, "c_unknown"}, "action": "set_status", "status": "completed",
+	}), "2")
+	assertEq(t, userData(a), `completed {"current_page": 1} t`)
+	assertEq(t, userData(b), "completed {}")
+	assertEq(t, userData(other), "-")
+	c.Post("/api/content/bulk/user-data", map[string]any{"ids": []string{}, "action": "set_status"}).Assert(t, 400)
+
+	assertEq(t, bulk("/api/content/bulk/user-data", map[string]any{"ids": []string{series}, "action": "reset"}), "1")
+	assertEq(t, userData(series), "- {}")
+	assertEq(t, userData(kids[0]), "- {}")
+	assertEq(t, userData(a), `completed {"current_page": 1} t`)
+	// Completing every child completes the series.
+	assertEq(t, bulk("/api/content/bulk/user-data", map[string]any{
+		"ids": kids, "action": "set_status", "status": "completed",
+	}), "2")
+	assertEq(t, userData(series), "completed {}")
+
+	lists := make([]string, 2)
+	for i := range lists {
+		lists[i] = s(c.Post("/api/custom-lists", map[string]any{"name": "l", "visibility": "private"}).Assert(t, 200).JSON()["id"])
+	}
+	entries := map[string]any{"list_ids": lists, "ids": []string{a, b, a}}
+	assertEq(t, bulk("/api/custom-lists/entries", entries), "4")
+	assertEq(t, bulk("/api/custom-lists/entries", entries), "0")
 }
 
 func TestRecentlyRead(t *testing.T) {

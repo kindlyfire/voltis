@@ -414,7 +414,7 @@ func (o *OPDSRoutes) mixable(c echo.Context, user *models.User, l opdsLinks, q o
 	kind := q.Kind
 	var counts *kindCounts
 	if kind == "" {
-		k, err := countContentKinds(ctx, o.pool, user.ID, base)
+		k, err := countContentKinds(ctx, o.pool, user.ID, base.filter())
 		if err != nil {
 			return opdsFeed{}, err
 		}

@@ -920,6 +920,24 @@
                         </nav>
                     </KitDemo>
                 </KitGroup>
+
+                <KitGroup
+                    title="AScrubber"
+                    description="Below the nav breakpoint or on touch it becomes a handle that shows on scroll."
+                    :min="200"
+                >
+                    <KitDemo :label="`letters, skewed (${scrub.toFixed(3)})`">
+                        <div class="ml-auto h-80 w-10">
+                            <AScrubber
+                                :model-value="scrub"
+                                :segments="SCRUB_SEGMENTS"
+                                label="Jump to"
+                                :tolerance="1e-3"
+                                @seek="p => (scrub = p)"
+                            />
+                        </div>
+                    </KitDemo>
+                </KitGroup>
             </KitSection>
 
             <!-- Data -->
@@ -1185,6 +1203,7 @@ import APopover from '@/ui/APopover.vue'
 import AProgressBar from '@/ui/AProgressBar.vue'
 import ARadioGroup from '@/ui/ARadioGroup.vue'
 import AScrollRow from '@/ui/AScrollRow.vue'
+import AScrubber from '@/ui/AScrubber.vue'
 import ASegmented from '@/ui/ASegmented.vue'
 import ASelect from '@/ui/ASelect.vue'
 import ASkeleton from '@/ui/ASkeleton.vue'
@@ -1403,6 +1422,16 @@ const action = ref<string | null>('reset')
 const page = ref(12)
 const width = ref(60)
 const committed = ref<number | null>(null)
+
+// Letter buckets with skewed counts, each starting at its share of the items before it.
+const SCRUB_COUNTS = [80, 6, 50, 2, 2, 4, 36, 12, 1, 18, 60, 8, 24]
+const SCRUB_TOTAL = SCRUB_COUNTS.reduce((a, b) => a + b)
+const SCRUB_SEGMENTS = SCRUB_COUNTS.map((_, i) => {
+    const letter = String.fromCharCode(65 + i)
+    const before = SCRUB_COUNTS.slice(0, i).reduce((a, b) => a + b, 0)
+    return { label: letter, bubble: letter, start: before / SCRUB_TOTAL }
+})
+const scrub = ref(0)
 
 const alertDismissed = ref(false)
 const chipOn = ref(false)

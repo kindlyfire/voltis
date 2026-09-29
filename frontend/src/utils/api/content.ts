@@ -1,16 +1,18 @@
 import { keepPreviousData, useMutation, useQuery, type Query } from '@tanstack/vue-query'
 import { promiseTimeout } from '@vueuse/core'
-import { toValue, type MaybeRefOrGetter } from 'vue'
+import { computed, toValue, type MaybeRefOrGetter } from 'vue'
 import { API_URL, apiFetch } from '../fetch'
 import { queryClient } from '../misc'
 import { isEnabled, type QueryOptions } from './_utils'
-import { libraryScope } from './catalog'
+import { invalidateMatching, isContentWindow, libraryScope } from './catalog'
 import type {
     BookStructure,
     BrokenRefsFixRequest,
     BrokenRefsSummaryItem,
     BrokenUserToContent,
+    CountResponse,
     Content,
+    ContentBuckets,
     ContentListParams,
     Cover,
     DownloadInfo,
@@ -85,6 +87,32 @@ export async function invalidateStatusChange(parentId: string | null) {
     await Promise.all(keys.map(queryKey => queryClient.invalidateQueries({ queryKey })))
 }
 
+export const invalidateContentWindow = () => invalidateMatching(queryClient, isContentWindow)
+
+/** Items per page of the content window. Divisible by 1–6, 8, 10 and 12 columns. */
+export const PAGE_SIZE = 120
+
+export const contentWindowKey = (p: ContentListParams) =>
+    ['content', 'list', libraryScope(p.library_id), 'window', p] as const
+
+export function listSearchParams(p: ContentListParams): URLSearchParams {
+    const searchParams = new URLSearchParams()
+    if (p.parent_id) searchParams.append('parent_id', p.parent_id)
+    if (p.library_id) searchParams.append('library_id', p.library_id)
+    for (const t of p.type ?? []) searchParams.append('type', t)
+    if (p.valid !== undefined) searchParams.append('valid', String(p.valid))
+    if (p.reading_status) searchParams.append('reading_status', p.reading_status)
+    if (p.starred !== undefined) searchParams.append('starred', String(p.starred))
+    if (p.has_status !== undefined) searchParams.append('has_status', String(p.has_status))
+    if (p.has_rating !== undefined) searchParams.append('has_rating', String(p.has_rating))
+    if (p.search) searchParams.append('search', p.search)
+    if (p.limit !== undefined) searchParams.append('limit', String(p.limit))
+    if (p.offset !== undefined) searchParams.append('offset', String(p.offset))
+    if (p.sort) searchParams.append('sort', p.sort)
+    if (p.sort_order) searchParams.append('sort_order', p.sort_order)
+    return searchParams
+}
+
 export const contentApi = {
     useGet: (
         id: MaybeRefOrGetter<string | undefined | null>,
@@ -108,34 +136,47 @@ export const contentApi = {
         useQuery({
             queryKey: ['content', 'list', libraryScope(() => toValue(params)?.library_id), params],
             queryFn: async () => {
-                const p = toValue(params)!
-                const searchParams = new URLSearchParams()
-                if (p.parent_id) searchParams.append('parent_id', p.parent_id)
-                if (p.library_id) searchParams.append('library_id', p.library_id)
-                if (p.type) {
-                    for (const t of p.type) {
-                        searchParams.append('type', t)
-                    }
-                }
-                if (p.valid !== undefined) searchParams.append('valid', String(p.valid))
-                if (p.reading_status) searchParams.append('reading_status', p.reading_status)
-                if (p.starred !== undefined) searchParams.append('starred', String(p.starred))
-                if (p.has_status !== undefined)
-                    searchParams.append('has_status', String(p.has_status))
-                if (p.has_rating !== undefined)
-                    searchParams.append('has_rating', String(p.has_rating))
-                if (p.search) searchParams.append('search', p.search)
-                if (p.limit !== undefined) searchParams.append('limit', String(p.limit))
-                if (p.offset !== undefined) searchParams.append('offset', String(p.offset))
-                if (p.sort) searchParams.append('sort', p.sort)
-                if (p.sort_order) searchParams.append('sort_order', p.sort_order)
-
-                const query = searchParams.toString()
+                const query = listSearchParams(toValue(params)!).toString()
                 return apiFetch<Paginated<Content>>(`/content${query ? `?${query}` : ''}`)
             },
             enabled: isEnabled(params),
             ...options,
         }),
+
+    useBuckets: (params: MaybeRefOrGetter<ContentListParams>) =>
+        useQuery({
+            queryKey: computed(() => [...contentWindowKey(toValue(params)), 'buckets'] as const),
+            queryFn: async ({ queryKey }) =>
+                apiFetch<ContentBuckets>(`/content/buckets?${listSearchParams(queryKey[4])}`),
+        }),
+
+    /** Page `page` of the window, without the total, which comes from the buckets. */
+    listPage: async (params: ContentListParams, page: number) => {
+        const q = listSearchParams({ ...params, limit: PAGE_SIZE, offset: page * PAGE_SIZE })
+        q.set('count', 'false')
+        return apiFetch<{ data: Content[] }>(`/content?${q}`)
+    },
+
+    /** The ids at `offset`..`offset + limit - 1` of the list, in its order. */
+    ids: async (params: ContentListParams, offset: number, limit: number) => {
+        const q = listSearchParams({ ...params, offset, limit })
+        return apiFetch<{ ids: string[] }>(`/content/ids?${q}`)
+    },
+
+    /** Returns how many items changed, once the content queries have refetched. */
+    bulkUserData: async (
+        body: { ids: string[] } & (
+            | { action: 'set_status'; status: ReadingStatus | null }
+            | { action: 'reset' }
+        )
+    ) => {
+        const res = await apiFetch<CountResponse>('/content/bulk/user-data', {
+            method: 'POST',
+            body: JSON.stringify(body),
+        })
+        await invalidateMatching(queryClient, key => key[0] === 'content')
+        return res
+    },
 
     useRecentlyRead: (limit = 10) =>
         useQuery({
@@ -198,7 +239,10 @@ export const contentApi = {
             onSuccess: (_data, variables) =>
                 Promise.all([
                     queryClient.invalidateQueries({ queryKey: ['content', variables.contentId] }),
-                    queryClient.invalidateQueries({ queryKey: ['content', 'list'] }),
+                    invalidateMatching(
+                        queryClient,
+                        key => key[0] === 'content' && key[1] === 'list'
+                    ),
                 ]),
         }),
 

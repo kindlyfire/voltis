@@ -335,6 +335,11 @@ export interface Paginated<T> {
     total: number
 }
 
+export interface ContentBuckets {
+    total: number
+    buckets: { key: string | null; count: number }[]
+}
+
 export interface ContentListParams {
     parent_id?: string
     library_id?: string
@@ -425,12 +430,6 @@ export interface CustomListEntryCreate {
     notes?: string | null
 }
 
-export interface CustomListBulkCreateEntry {
-    list_id: string
-    content_id: string
-    notes?: string | null
-}
-
 export interface CustomListEntryUpdate {
     notes?: string | null
     order?: number | null
@@ -440,8 +439,17 @@ export interface CustomListReorderRequest {
     ctc_ids: string[]
 }
 
+export interface CustomListBulkCreateEntries {
+    list_ids: string[]
+    ids: string[]
+}
+
 export interface OkResponse {
     ok: boolean
+}
+
+export interface CountResponse {
+    count: number
 }
 
 export interface ErrorResponse {
