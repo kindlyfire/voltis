@@ -1,6 +1,11 @@
 import { useDebounceFn } from '@vueuse/core'
 import { reactive, readonly, toRefs } from 'vue'
-import { contentApi, invalidateRecentlyRead, invalidateStatusChange } from '@/utils/api/content'
+import {
+    bumpRecentlyRead,
+    contentApi,
+    invalidateRecentlyRead,
+    invalidateStatusChange,
+} from '@/utils/api/content'
 import type { Content, ReadingStatus, UserToContent } from '@/utils/api/types'
 import { API_URL } from '@/utils/fetch'
 import type { PageDimensions } from './types'
@@ -46,6 +51,8 @@ export function createComicState(contentId: string, initialPage: number | 'last'
 
     const updateProgress = useDebounceFn(() => {
         if (!state.content) return
+        // Before the write: its response can arrive after the home page has mounted.
+        bumpRecentlyRead(state.content)
 
         updateProgressPromise = updateProgressPromise
             .then(async () => {
@@ -156,6 +163,11 @@ export function createComicState(contentId: string, initialPage: number | 'last'
         setPage,
         setHandlers(handlers: ComicStateValues['handlers']) {
             state.handlers = handlers
+        },
+        /** Bumps and starts the exit write; the returned promise settles when it lands. */
+        leave() {
+            updateProgress.flush()
+            return updateProgressPromise
         },
         dispose() {
             disposed = true

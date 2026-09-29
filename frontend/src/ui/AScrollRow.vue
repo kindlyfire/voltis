@@ -26,12 +26,11 @@
         <div
             ref="track"
             class="a-scroll-row__track a-focus"
-            :class="{ dragging }"
+            :class="{ dragging, unsnapped }"
             :style="{ '--item-width': `${itemWidth}px` }"
             role="region"
             :aria-labelledby="titleId"
             tabindex="0"
-            @scroll.passive="measure"
             @pointerdown="onPointerdown"
             @pointermove="onPointermove"
             @lostpointercapture="endDrag"
@@ -43,8 +42,8 @@
 </template>
 
 <script setup lang="ts">
-import { useEventListener, useMutationObserver, useResizeObserver } from '@vueuse/core'
-import { onMounted, ref, useId, useTemplateRef } from 'vue'
+import { useDebounceFn, useEventListener, useResizeObserver } from '@vueuse/core'
+import { onMounted, onUpdated, ref, useId, useTemplateRef } from 'vue'
 import AIconButton from './AIconButton.vue'
 import { IconChevronLeft, IconChevronRight } from './icons'
 
@@ -72,7 +71,39 @@ function measure() {
 
 onMounted(measure)
 useResizeObserver(track, measure)
-useMutationObserver(track, measure, { childList: true, subtree: true })
+
+// Snap is off while the row is pinned to the start, so nothing can re-snap it to the old first
+// card when the items reorder. It stays off until the scroll that unpins it ends, so a swipe
+// doesn't snap mid-gesture.
+const pinned = ref(true)
+const unsnapped = ref(true)
+
+function unpin() {
+    pinned.value = false
+    unsnapped.value = true
+}
+
+function onScroll() {
+    measure()
+    if (pinned.value && !atStart.value) unpin()
+}
+
+function settle() {
+    // A pending debounce can outlive the row.
+    if (drag || !track.value) return
+    unsnapped.value = pinned.value = track.value.scrollLeft <= 1
+}
+
+useEventListener(track, 'scroll', onScroll, { passive: true })
+if ('onscrollend' in window) useEventListener(track, 'scrollend', settle)
+else useEventListener(track, 'scroll', useDebounceFn(settle, 150), { passive: true }) // Safari < 26.2 has no scrollend
+
+onUpdated(() => {
+    // Undoes scroll anchoring after a reorder. This runs before the scroll event, so onScroll
+    // doesn't take it for a user scroll.
+    if (pinned.value && !drag) track.value!.scrollTo({ left: 0, behavior: 'instant' })
+    measure()
+})
 
 // Mouse drag scrolls the row (touch scrolls natively).
 const DRAG_THRESHOLD = 5
@@ -100,8 +131,12 @@ function onPointermove(e: PointerEvent) {
 }
 
 function endDrag() {
+    const active = drag !== null
     drag = null
     dragging.value = false
+    // Not on a touch pan's pointercancel, which mustn't snap a row still flinging. A release may
+    // not scroll, so scrollend alone won't settle it.
+    if (active) settle()
 }
 
 // On window: the button may come up outside the row before the drag starts capturing.
@@ -124,6 +159,8 @@ useEventListener(window, 'pointerup', (e: PointerEvent) => {
 function scroll(direction: 1 | -1) {
     const el = track.value
     if (!el) return
+    // An item change during the smooth scroll must not reset it.
+    if (direction === 1) unpin()
     el.scrollBy({ left: el.clientWidth * 0.8 * direction })
 }
 </script>
@@ -186,6 +223,10 @@ function scroll(direction: 1 | -1) {
 
         @media (pointer: fine) {
             cursor: grab;
+        }
+
+        &.unsnapped {
+            scroll-snap-type: none;
         }
 
         /* Snapping resumes on release, which settles the row on a card. */

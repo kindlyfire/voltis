@@ -25,7 +25,7 @@
                 <ContentGridItem
                     v-for="e in lastRead"
                     v-else
-                    :key="e.item.id"
+                    :key="e.series?.id ?? e.item.id"
                     :content="e.item"
                     :series="e.series"
                     to-read-route

@@ -97,6 +97,10 @@ export const useReaderStore = defineStore('reader', () => {
         return (((state.value?.page ?? 0) + 1) / pagesVal.length) * 100
     })
 
+    function leave() {
+        return state.value?.leave()
+    }
+
     function dispose() {
         sidebarOpen.value = false
         const s = state.value
@@ -221,6 +225,7 @@ export const useReaderStore = defineStore('reader', () => {
         setContent,
         goToPage,
         goToSibling,
+        leave,
         dispose,
         setPage,
     }

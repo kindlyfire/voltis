@@ -17,9 +17,10 @@
 <script setup lang="ts">
 import { useScroll, useWindowSize } from '@vueuse/core'
 import { watch, computed, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import { useLayoutStore } from '@/pages/_layout/useLayoutStore'
 import AProgressBar from '@/ui/AProgressBar.vue'
+import { trackRecentlyReadWrite } from '@/utils/api/content'
 import { useReaderTutorial } from '../useReaderTutorial'
 import ReaderModeLongstrip from './ReaderModeLongstrip.vue'
 import ReaderModePaged from './ReaderModePaged.vue'
@@ -55,6 +56,10 @@ watch(
     { immediate: true }
 )
 
+// Not in dispose: unmounting runs after the next page has rendered the old order.
+onBeforeRouteLeave(() => {
+    trackRecentlyReadWrite(reader.leave())
+})
 onUnmounted(() => {
     reader.dispose()
 })

@@ -11,7 +11,12 @@ import {
     type Ref,
 } from 'vue'
 import { isNavigationFailure, type NavigationFailure } from 'vue-router'
-import { contentApi, invalidateRecentlyRead, invalidateStatusChange } from '@/utils/api/content'
+import {
+    bumpRecentlyRead,
+    contentApi,
+    invalidateRecentlyRead,
+    invalidateStatusChange,
+} from '@/utils/api/content'
 import type {
     BookLocator,
     BookStructure,
@@ -674,6 +679,8 @@ export function createBookSession(
     function write(final = false) {
         if (!state.content || !pendingLocator || closing) return
         const locator = pendingLocator
+        // Before the write: its response can arrive after the home page has mounted.
+        bumpRecentlyRead(state.content)
         const status = nextStatus()
         const statusChanged = !!status && status !== userData?.status
         const parentId = state.content.parent_id
@@ -1023,6 +1030,12 @@ export function createBookSession(
 
         dismissNotice() {
             state.notice = null
+        },
+
+        // Unstamped: Back has already moved the entry.
+        leave() {
+            flushProgress(true, false)
+            return writeChain
         },
 
         dispose() {

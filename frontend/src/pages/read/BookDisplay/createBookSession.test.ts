@@ -16,6 +16,7 @@ vi.mock('@/utils/api/content', () => ({
         bookDocument: vi.fn(),
         updateUserData: vi.fn(),
     },
+    bumpRecentlyRead: vi.fn(),
     invalidateRecentlyRead: vi.fn(),
     invalidateStatusChange: vi.fn(),
 }))
@@ -756,6 +757,7 @@ describe('progress', () => {
         const { session } = await startTimed()
         scrollTo(150)
         await flush()
+        await session.leave()
         await session.dispose()
 
         expect(writes()).toHaveLength(1)

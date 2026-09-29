@@ -5,6 +5,7 @@ import { createComicState } from './createComicState'
 
 vi.mock('@/utils/api/content', () => ({
     contentApi: { get: vi.fn(), updateUserData: vi.fn() },
+    bumpRecentlyRead: vi.fn(),
     invalidateRecentlyRead: vi.fn(),
     invalidateStatusChange: vi.fn(),
 }))
@@ -49,6 +50,7 @@ it('sets a status only after the reader changes page', async () => {
     expect(writes()[1]!.status).toBe('reading')
 
     comic.setPage(2)
+    await comic.leave()
     await comic.dispose()
     expect(writes()[2]!.status).toBe('completed')
     expect(vi.mocked(invalidateStatusChange).mock.calls).toEqual([['s_1'], ['s_1']])

@@ -17,6 +17,7 @@ vi.mock('@/utils/api/content', () => ({
         bookDocument: vi.fn(),
         updateUserData: vi.fn(),
     },
+    bumpRecentlyRead: vi.fn(),
     invalidateRecentlyRead: vi.fn(),
     invalidateStatusChange: vi.fn(),
 }))

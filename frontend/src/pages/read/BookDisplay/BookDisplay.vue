@@ -5,8 +5,9 @@
 <script setup lang="ts">
 import { useHead } from '@unhead/vue'
 import { onUnmounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import { useLayoutStore } from '@/pages/_layout/useLayoutStore'
+import { trackRecentlyReadWrite } from '@/utils/api/content'
 import { parseBookEntry } from './bookEntry'
 import BookReader from './BookReader.vue'
 import { setReaderDark } from './prepareDocument'
@@ -35,6 +36,10 @@ watch(
     { immediate: true }
 )
 
+// Not in dispose: unmounting runs after the next page has rendered the old order.
+onBeforeRouteLeave(() => {
+    trackRecentlyReadWrite(store.session?.leave())
+})
 onUnmounted(() => {
     store.dispose()
 })
