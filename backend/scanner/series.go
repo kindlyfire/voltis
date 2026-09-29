@@ -165,6 +165,8 @@ func leafRow(id, libraryID, uri string, p ParsedItem, parentID *string, old *mod
 		OrderParts: p.OrderParts,
 		FileData:   p.FileData,
 		ParentID:   parentID,
+		WordCount:  p.WordCount,
+		PageCount:  p.PageCount,
 	}
 	if old != nil {
 		c.CreatedAt = old.CreatedAt

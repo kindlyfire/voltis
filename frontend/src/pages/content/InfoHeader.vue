@@ -178,6 +178,7 @@ import { metadataApi, ownTitle, type MetadataLinkRef } from '@/utils/api/metadat
 import type { Content } from '@/utils/api/types'
 import { usersApi } from '@/utils/api/users'
 import { displayContentType, plural } from '@/utils/misc'
+import { lengthSummary, readingSpeed } from '@/utils/readingTime'
 import ContinueReadingButton from './components/ContinueReadingButton.vue'
 import CoverProgress from './components/CoverProgress.vue'
 import OptionsButton from './components/OptionsButton.vue'
@@ -240,6 +241,12 @@ const details = computed(() => {
     if (m.publishers?.length) rows.push({ label: 'Publishers', value: m.publishers.join(', ') })
     if (m.publication_date) {
         rows.push({ label: 'Published', value: formatDate(m.publication_date) })
+    }
+    if (props.content.length) {
+        rows.push({
+            label: 'Length',
+            value: lengthSummary(props.content.length, readingSpeed(qMe.data.value?.preferences)),
+        })
     }
     if (m.genres?.length) {
         rows.push({

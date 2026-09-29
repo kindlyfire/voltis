@@ -330,7 +330,7 @@ func TestComicFallbackSeriesLeavesTheInferredNameOffTheChild(t *testing.T) {
 
 func TestClassifyBookWords(t *testing.T) {
 	item := classifyBook(FSFile{Path: "/lib/Books/x.epub", Mtime: baseTime, Size: 10},
-		epub.Metadata{Title: "X"}, false, map[string]int{"OEBPS/b.xhtml": 7, "OEBPS/a.xhtml": 120}, false)
+		epub.Metadata{Title: "X"}, false, &epub.WordCounts{Docs: map[string]int{"OEBPS/b.xhtml": 7, "OEBPS/a.xhtml": 120}}, false)
 
 	if got := string(item.FileData); got != `{"words":{"OEBPS/a.xhtml":120,"OEBPS/b.xhtml":7}}` {
 		t.Errorf("file data = %s", got)

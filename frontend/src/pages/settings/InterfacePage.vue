@@ -43,6 +43,44 @@
             <QueryError :mutation="homeMutation" />
         </ACard>
 
+        <ACard title="Reading speed">
+            <form
+                :id="speedFormId"
+                novalidate
+                class="flex flex-col gap-3"
+                @submit="speedForm.onSubmit"
+            >
+                <ATextField
+                    v-bind="speedForm.field('wordsPerMinute')"
+                    label="Books"
+                    type="number"
+                    inputmode="numeric"
+                    min="50"
+                    max="2000"
+                    suffix="words/min"
+                />
+                <ATextField
+                    v-bind="speedForm.field('secondsPerPage')"
+                    label="Comics"
+                    type="number"
+                    inputmode="numeric"
+                    min="1"
+                    max="600"
+                    suffix="s/page"
+                />
+                <QueryError :mutation="speedForm.mutation" />
+            </form>
+            <template #actions>
+                <AButton
+                    type="submit"
+                    :form="speedFormId"
+                    :loading="speedForm.mutation.isPending.value"
+                >
+                    Save
+                </AButton>
+            </template>
+        </ACard>
+
         <ACard title="Reader">
             <div class="flex flex-wrap gap-3">
                 <AButton
@@ -66,7 +104,8 @@
 
 <script setup lang="ts">
 import { useHead } from '@unhead/vue'
-import { computed, ref, watch } from 'vue'
+import { computed, ref, useId, watch } from 'vue'
+import { z } from 'zod'
 import QueryError from '@/components/QueryError.vue'
 import { showReaderTutorial } from '@/pages/read/ReaderTutorialModal.vue'
 import AButton from '@/ui/AButton.vue'
@@ -76,13 +115,20 @@ import APageHeader from '@/ui/APageHeader.vue'
 import ASegmented from '@/ui/ASegmented.vue'
 import ASpinner from '@/ui/ASpinner.vue'
 import ASwitch from '@/ui/ASwitch.vue'
+import ATextField from '@/ui/ATextField.vue'
 import { IconAutoStories, IconBookOpen, IconBookshelf } from '@/ui/icons'
 import { useToast } from '@/ui/useToast'
 import { invalidateRecentlyRead } from '@/utils/api/content'
 import { librariesApi } from '@/utils/api/libraries'
 import type { LibraryPreference, PreferencesPatch } from '@/utils/api/types'
 import { usersApi } from '@/utils/api/users'
+import { useForm } from '@/utils/forms'
 import { jsonClone } from '@/utils/misc'
+import {
+    DEFAULT_SECONDS_PER_PAGE,
+    DEFAULT_WORDS_PER_MINUTE,
+    readingSpeed,
+} from '@/utils/readingTime'
 
 useHead({ title: 'Interface' })
 
@@ -169,4 +215,46 @@ async function saveHome(v: boolean) {
     invalidateRecentlyRead()
     toast.show({ message: 'Saved Home preferences' })
 }
+
+const speedPatch = usersApi.usePatchPreferences()
+const speedFormId = useId()
+
+// The fields emit null when emptied.
+const wholeNumber = (min: number, max: number) =>
+    z
+        .number()
+        .nullable()
+        .pipe(
+            z
+                .number({ error: 'Enter a number' })
+                .int('Enter a whole number')
+                .min(min, `Use at least ${min}`)
+                .max(max, `Use at most ${max}`)
+        )
+
+// Defaults are stored as absent, so they follow future default changes.
+const unlessDefault = (v: number, d: number) => (v === d ? null : v)
+
+const speedForm = useForm({
+    schema: z.object({
+        wordsPerMinute: wholeNumber(50, 2000),
+        secondsPerPage: wholeNumber(1, 600),
+    }),
+    initialValues: readingSpeed(),
+    onSubmit: async values => {
+        await speedPatch.mutateAsync({
+            reading: {
+                wordsPerMinute: unlessDefault(values.wordsPerMinute, DEFAULT_WORDS_PER_MINUTE),
+                secondsPerPage: unlessDefault(values.secondsPerPage, DEFAULT_SECONDS_PER_PAGE),
+            },
+        })
+        toast.show({ message: 'Saved reading speed' })
+    },
+})
+
+watch(
+    () => qMe.data.value?.preferences.reading,
+    reading => speedForm.setValues(readingSpeed({ reading })),
+    { immediate: true }
+)
 </script>

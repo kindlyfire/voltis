@@ -38,6 +38,8 @@ type ParsedItem struct {
 	CoverSuffix *string
 	FileData    json.RawMessage
 	MetaRaw     metadata.Fields
+	WordCount   *int
+	PageCount   *int
 }
 
 type Result struct {

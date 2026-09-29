@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"cmp"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -33,9 +34,19 @@ var separatorElements = map[atom.Atom]bool{
 	atom.Tfoot: true, atom.Th: true, atom.Thead: true, atom.Tr: true, atom.Ul: true,
 }
 
-// CountWords returns the body-text word count of every spine document, keyed by
-// its ZIP entry name.
-func CountWords(filePath string) (map[string]int, error) {
+// WordCounts holds the body-text word counts of an EPUB's spine documents.
+type WordCounts struct {
+	// Docs is keyed by ZIP entry name; textless documents carry minSpineWords so reader weights
+	// stay non-zero.
+	Docs map[string]int
+	// Linear sums the raw counts of documents referenced by a linear itemref.
+	Linear int
+	// FixedLayout is set for pre-paginated books, whose word count is not a useful length.
+	FixedLayout bool
+}
+
+// CountWords counts the body-text words of every spine document.
+func CountWords(filePath string) (*WordCounts, error) {
 	zr, err := zip.OpenReader(filePath)
 	if err != nil {
 		return nil, err
@@ -48,7 +59,13 @@ func CountWords(filePath string) (map[string]int, error) {
 	}
 	manifest := manifestByID(pkg)
 
-	counts := map[string]int{}
+	wc := &WordCounts{
+		Docs: map[string]int{},
+		FixedLayout: slices.ContainsFunc(pkg.Metadata.Metas, func(m opfMeta) bool {
+			return m.Property == "rendition:layout" && strings.TrimSpace(m.Value) == "pre-paginated"
+		}),
+	}
+	linear := map[string]bool{}
 	for _, ref := range pkg.Spine.ItemRefs {
 		item, ok := manifest[ref.IDRef]
 		if !ok {
@@ -58,16 +75,25 @@ func CountWords(filePath string) (map[string]int, error) {
 		if err != nil {
 			continue
 		}
-		if _, done := counts[target.Href]; done {
+		if ref.Linear != "no" {
+			linear[target.Href] = true
+		}
+		if _, done := wc.Docs[target.Href]; done {
 			continue
 		}
 		data, err := readZipFile(zr, target.Href)
 		if err != nil {
 			continue
 		}
-		counts[target.Href] = cmp.Or(countWords(normalizedText(data)), minSpineWords)
+		wc.Docs[target.Href] = countWords(normalizedText(data))
 	}
-	return counts, nil
+	for href, n := range wc.Docs {
+		if linear[href] {
+			wc.Linear += n
+		}
+		wc.Docs[href] = cmp.Or(n, minSpineWords)
+	}
+	return wc, nil
 }
 
 // countWords counts UAX #29 word tokens holding at least one letter or digit.

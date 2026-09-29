@@ -176,6 +176,8 @@ type Content struct {
 	FileData   JSONB      `db:"file_data" json:"file_data"`
 	ParentID   *string    `db:"parent_id" json:"parent_id"`
 	LibraryID  string     `db:"library_id" json:"library_id"`
+	WordCount  *int       `db:"word_count" json:"word_count"`
+	PageCount  *int       `db:"page_count" json:"page_count"`
 }
 
 type ContentMetadata struct {

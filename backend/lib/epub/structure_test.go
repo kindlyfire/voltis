@@ -316,7 +316,7 @@ func countingBook(t *testing.T, docs map[string]string) map[string]int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return counts
+	return counts.Docs
 }
 
 func assertCounts(t *testing.T, got, want map[string]int) {
@@ -331,10 +331,11 @@ func assertCounts(t *testing.T, got, want map[string]int) {
 func words(s string) int { return len(strings.Fields(s)) }
 
 func TestCountWords(t *testing.T) {
-	counts, err := CountWords(nestedBook(t))
+	wc, err := CountWords(nestedBook(t))
 	if err != nil {
 		t.Fatal(err)
 	}
+	counts := wc.Docs
 	text := "One Hello there. This paragraph is long enough to clear the floor."
 	if got := counts["OPS/text/chapter 1.xhtml"]; got != words(text) {
 		t.Errorf("chapter 1 words = %d, want %d", got, words(text))
@@ -344,6 +345,30 @@ func TestCountWords(t *testing.T) {
 	}
 	if len(counts) != 4 {
 		t.Errorf("counts = %v, want one entry per spine document", counts)
+	}
+	// The textless cover adds nothing and the non-linear notes are left out.
+	if want := words(text) + 1; wc.Linear != want {
+		t.Errorf("linear = %d, want %d", wc.Linear, want)
+	}
+	if wc.FixedLayout {
+		t.Error("reflowable book reported as fixed-layout")
+	}
+}
+
+func TestCountWordsFixedLayout(t *testing.T) {
+	wc, err := CountWords(writeEPUB(t, map[string]string{
+		"META-INF/container.xml": container("content.opf"),
+		"content.opf": `<?xml version="1.0"?><package><metadata>
+			<meta property="rendition:layout"> pre-paginated </meta></metadata>
+			<manifest><item id="p1" href="p1.xhtml" media-type="application/xhtml+xml"/></manifest>
+			<spine><itemref idref="p1"/></spine></package>`,
+		"p1.xhtml": doc(`<p>Overlay</p>`),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !wc.FixedLayout || wc.Docs["p1.xhtml"] != 1 {
+		t.Errorf("counts = %+v, want fixed-layout with docs filled", wc)
 	}
 }
 

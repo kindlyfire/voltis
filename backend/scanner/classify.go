@@ -16,7 +16,7 @@ import (
 	"voltis/scanner/keys"
 )
 
-func classifyBook(file FSFile, meta epub.Metadata, coverValid bool, words map[string]int, infer bool) ParsedItem {
+func classifyBook(file FSFile, meta epub.Metadata, coverValid bool, words *epub.WordCounts, infer bool) ParsedItem {
 	stem := strings.TrimSuffix(filepath.Base(file.Path), filepath.Ext(file.Path))
 
 	var order *float32
@@ -56,8 +56,11 @@ func classifyBook(file FSFile, meta epub.Metadata, coverValid bool, words map[st
 	if coverValid {
 		item.CoverSuffix = new(meta.CoverPath)
 	}
-	if len(words) > 0 {
-		item.FileData, _ = json.Marshal(map[string]any{"words": words})
+	if words != nil && len(words.Docs) > 0 {
+		item.FileData, _ = json.Marshal(map[string]any{"words": words.Docs})
+		if !words.FixedLayout {
+			item.WordCount = &words.Linear
+		}
 	}
 	item.MetaRaw.Staff = metadata.SetList(fp.Map(meta.Authors, func(a string) metadata.Staff {
 		return metadata.Staff{Name: a, Role: "author"}
@@ -171,6 +174,7 @@ func classifyComic(file FSFile, meta metadata.Fields, year *int, pages []comic.P
 		CoverSuffix: new(pages[0].Name),
 		FileData:    fd,
 		MetaRaw:     meta,
+		PageCount:   new(len(pages)),
 		Series: &ParsedSeries{
 			URIPrefix:   "comic",
 			URIPart:     sanitizeURIPart(seriesURIPart),

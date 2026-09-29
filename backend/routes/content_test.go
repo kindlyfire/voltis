@@ -159,6 +159,58 @@ func TestUserData(t *testing.T) {
 		assertEq(t, s(res["status_updated_at"]), s(first["status_updated_at"]))
 		assertEq(t, s(res["progress_updated_at"]), s(first["progress_updated_at"]))
 	})
+
+	t.Run("length", func(t *testing.T) {
+		ctx := context.Background()
+		libID := models.MakeLibraryID()
+		if _, err := pool.Exec(ctx,
+			"INSERT INTO libraries (id, name, type) VALUES ($1, 'lib', 'comics')", libID); err != nil {
+			t.Fatalf("insert library: %v", err)
+		}
+		insert := func(typ string, parentID *string, words, pages *int) string {
+			id := models.MakeContentID()
+			if _, err := pool.Exec(ctx, `
+				INSERT INTO content (id, uri_part, uri, type, library_id, parent_id, word_count, page_count)
+				VALUES ($1, $1, 'file:///lib/' || $1, $2, $3, $4, $5, $6)
+			`, id, typ, libID, parentID, words, pages); err != nil {
+				t.Fatalf("insert content: %v", err)
+			}
+			return id
+		}
+		length := func(id string) map[string]any {
+			l, _ := c.Get("/api/content/"+id).Assert(t, 200).JSON()["length"].(map[string]any)
+			return l
+		}
+
+		comics := insert("comic_series", nil, nil, nil)
+		comic1 := insert("comic", &comics, nil, new(10))
+		comic2 := insert("comic", &comics, nil, new(20))
+		comic3 := insert("comic", &comics, nil, new(30))
+		books := insert("book_series", nil, nil, nil)
+		insert("book", &books, new(100), nil)
+		insert("book", &books, nil, nil)
+		book := insert("book", nil, new(200), nil)
+
+		post(t, comic1, map[string]any{"status": "completed"}, 200)
+		post(t, comic2, map[string]any{"progress": map[string]any{"current_page": 5}}, 200)
+		post(t, comic3, map[string]any{"progress": map[string]any{"current_page": 0, "progress_percent": 10}}, 200)
+		post(t, book, map[string]any{"progress": map[string]any{"progress_percent": 50}}, 200)
+
+		want := func(l map[string]any, unit string, total, remaining int) {
+			t.Helper()
+			assertEq(t, s(l), s(map[string]any{"unit": unit, "total": total, "remaining": remaining}))
+		}
+		want(length(comics), "pages", 60, 45)
+		want(length(comic3), "pages", 30, 30)
+		want(length(book), "words", 200, 100)
+		if l := length(books); l != nil {
+			t.Errorf("book series length = %v, want none with an uncounted child", l)
+		}
+		for _, status := range []string{"completed", "dropped"} {
+			post(t, comics, map[string]any{"status": status}, 200)
+			want(length(comics), "pages", 60, 0)
+		}
+	})
 }
 
 func TestListSortReleaseDate(t *testing.T) {

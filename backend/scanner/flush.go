@@ -26,12 +26,12 @@ type rename struct{ Old, New string }
 const contentUpsert = `
 	INSERT INTO content (id, created_at, updated_at, uri_part, uri, valid, file_uri,
 		file_mtime, file_size, cover_uri, type, "order", order_parts, file_data,
-		parent_id, library_id)
-	VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+		parent_id, library_id, word_count, page_count)
+	VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
 	ON CONFLICT (id) DO UPDATE SET
 		uri_part = $4, uri = $5, valid = $6, file_uri = $7, file_mtime = $8,
 		file_size = $9, cover_uri = $10, type = $11, "order" = $12, order_parts = $13,
-		file_data = $14, parent_id = $15, updated_at = $3`
+		file_data = $14, parent_id = $15, updated_at = $3, word_count = $17, page_count = $18`
 
 func commitLoop(ctx context.Context, pool *pgxpool.Pool, store *metadata.Store, s FileScanner, libraryID string,
 	in <-chan flush, out chan<- committed) {
@@ -489,7 +489,7 @@ func upsertContent(ctx context.Context, tx pgx.Tx, c models.Content) error {
 		parts = []*float32{}
 	}
 	_, err := tx.Exec(ctx, contentUpsert, c.ID, c.CreatedAt, c.UpdatedAt, c.URIPart, c.URI, c.Valid,
-		c.FileURI, c.FileMtime, c.FileSize, c.CoverURI, c.Type, c.Order, parts, data, c.ParentID, c.LibraryID)
+		c.FileURI, c.FileMtime, c.FileSize, c.CoverURI, c.Type, c.Order, parts, data, c.ParentID, c.LibraryID, c.WordCount, c.PageCount)
 	return err
 }
 

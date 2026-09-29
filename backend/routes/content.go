@@ -84,6 +84,14 @@ type ContentDTO struct {
 	ChildrenCount       *int              `json:"children_count"`
 	UnreadChildrenCount *int              `json:"unread_children_count"`
 	UserData            *UserToContentDTO `json:"user_data"`
+	Length              *ContentLength    `json:"length,omitempty"`
+}
+
+// ContentLength is in words for books and pages for comics; the frontend converts it to time.
+type ContentLength struct {
+	Unit      string `json:"unit"`
+	Total     int64  `json:"total"`
+	Remaining int64  `json:"remaining"`
 }
 
 type contentDTOOpts struct {
@@ -209,14 +217,61 @@ func (cr *ContentRoutes) get(c echo.Context) error {
 		return err
 	}
 
-	return c.JSON(http.StatusOK, contentToDTO(r.Content, contentDTOOpts{
+	length, err := contentLength(ctx, cr.pool, user.ID, r.Content, r.UTCStatus)
+	if err != nil {
+		return err
+	}
+
+	dto := contentToDTO(r.Content, contentDTOOpts{
 		meta:                r.MetaData,
 		childrenCount:       r.ChildrenCount,
 		unreadChildrenCount: r.UnreadChildrenCount,
 		userToContent:       r.utc(),
 		includeFileData:     true,
 		includeMeta:         true,
-	}))
+	})
+	dto.Length = length
+	return c.JSON(http.StatusOK, dto)
+}
+
+// contentLength sums the length of a leaf, or of a series' valid children, and what the user has
+// left of it given the item's own status. It returns nil when any counted item lacks a count.
+func contentLength(ctx context.Context, pool *pgxpool.Pool, userID string, c models.Content,
+	status *string) (*ContentLength, error) {
+	row, err := db.SelectOne[struct {
+		Missing   int64 `db:"missing"`
+		Total     int64 `db:"total"`
+		Remaining int64 `db:"remaining"`
+	}](ctx, pool, `
+		SELECT
+			COUNT(*) FILTER (WHERE l.n IS NULL) AS missing,
+			COALESCE(SUM(l.n), 0)::bigint AS total,
+			COALESCE(ROUND(SUM(CASE
+				WHEN utc.status IN ('completed', 'dropped') THEN 0
+				WHEN x.type = 'comic' AND jsonb_typeof(utc.progress->'current_page') = 'number' THEN
+					GREATEST(x.page_count - (utc.progress->>'current_page')::float8, 0)
+				WHEN x.type = 'book' AND jsonb_typeof(utc.progress->'progress_percent') = 'number' THEN
+					l.n * (1 - LEAST(GREATEST((utc.progress->>'progress_percent')::float8, 0), 100) / 100)
+				ELSE l.n
+			END)), 0)::bigint AS remaining
+		FROM content x
+		CROSS JOIN LATERAL (SELECT COALESCE(x.word_count, x.page_count) AS n) l
+		LEFT JOIN user_to_content utc
+			ON utc.library_id = x.library_id AND utc.uri = x.uri AND utc.user_id = @user_id
+		WHERE x.valid AND x.type IN ('book', 'comic') AND (x.id = @id OR x.parent_id = @id)
+	`, pgx.NamedArgs{"user_id": userID, "id": c.ID})
+	if err != nil || row.Missing > 0 || row.Total == 0 {
+		return nil, err
+	}
+	unit := "words"
+	if c.Type == "comic" || c.Type == "comic_series" {
+		unit = "pages"
+	}
+	// A series' own status is set without touching its children.
+	if status != nil && (*status == "completed" || *status == "dropped") {
+		row.Remaining = 0
+	}
+	return &ContentLength{Unit: unit, Total: row.Total, Remaining: row.Remaining}, nil
 }
 
 func (cr *ContentRoutes) listsForContent(c echo.Context) error {

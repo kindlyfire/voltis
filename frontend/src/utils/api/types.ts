@@ -8,6 +8,7 @@ export interface UserPreferences {
     libraries?: Record<string, LibraryPreference>
     tutorials?: { comicReader?: boolean; bookReader?: boolean }
     home?: { ignoreSeriesStatus?: boolean }
+    reading?: { wordsPerMinute?: number; secondsPerPage?: number }
 }
 
 /** RFC 7396 merge patch over `UserPreferences`: `null` deletes a member. */
@@ -15,6 +16,7 @@ export interface PreferencesPatch {
     libraries?: Record<string, { visibility?: LibraryPreference['visibility'] | null } | null>
     tutorials?: { comicReader?: boolean | null; bookReader?: boolean | null }
     home?: { ignoreSeriesStatus?: boolean | null } | null
+    reading?: { wordsPerMinute?: number | null; secondsPerPage?: number | null } | null
 }
 
 export interface User {
@@ -301,6 +303,15 @@ export interface Content {
     children_count: number | null
     unread_children_count: number | null
     user_data: UserToContent | null
+    /** Only on a single-item fetch. */
+    length?: ContentLength
+}
+
+/** Words for books, pages for comics; `remaining` is what the user has left. */
+export interface ContentLength {
+    unit: 'words' | 'pages'
+    total: number
+    remaining: number
 }
 
 /** A "Recently Read" card: the item to read next, and its series unless standalone. */
