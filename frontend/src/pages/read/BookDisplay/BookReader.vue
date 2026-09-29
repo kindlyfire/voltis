@@ -59,7 +59,7 @@
                 <div ref="host" class="book-host" :inert="paged && session.atBookEnd" />
                 <BookEndScreen
                     v-if="paged && session.atBookEnd"
-                    :content-id="contentId"
+                    :exit="exit"
                     :next="nextVolume"
                     @open="openVolume"
                     @leave="session.snapshotPassage()"
@@ -84,6 +84,15 @@
                             {{ next.title }}
                         </span>
                     </template>
+                    <AButton
+                        v-if="!session.nextChapter"
+                        variant="tonal"
+                        class="mt-2"
+                        :to="exit.to"
+                        @click.stop="session.snapshotPassage()"
+                    >
+                        {{ exit.label }}
+                    </AButton>
                 </div>
                 <div ref="sentinel" class="h-px" />
             </template>
@@ -123,7 +132,7 @@
         </template>
     </div>
 
-    <BookReaderDrawer :content-id="contentId" />
+    <BookReaderDrawer :exit="exit" />
 
     <AProgressBar
         v-if="session?.layoutMode === 'scroll' && session.firstChapterMounted"
@@ -143,6 +152,8 @@ import ADivider from '@/ui/ADivider.vue'
 import AProgressBar from '@/ui/AProgressBar.vue'
 import ASpinner from '@/ui/ASpinner.vue'
 import { IconArrowLeft } from '@/ui/icons'
+import { contentApi } from '@/utils/api/content'
+import { readerExit } from '../readerExit'
 import { useReaderTutorial } from '../useReaderTutorial'
 import BookEndScreen from './BookEndScreen.vue'
 import BookReaderDrawer from './BookReaderDrawer.vue'
@@ -153,7 +164,7 @@ import { useBookDisplayStore } from './useBookDisplayStore'
 import { useChapterScrollProgress } from './useChapterScrollProgress'
 import { useNextVolume } from './useNextVolume'
 
-defineProps<{ contentId: string }>()
+const props = defineProps<{ contentId: string }>()
 
 const store = useBookDisplayStore()
 const session = computed(() => store.session)
@@ -167,6 +178,10 @@ const nextTitleId = useId()
 const controls = useBookControls()
 const router = useRouter()
 const chapterProgress = useChapterScrollProgress(host)
+const qContent = contentApi.useGet(() => props.contentId)
+const exit = computed(() =>
+    readerExit(qContent.data.value?.parent_id, props.contentId, 'Back to the book')
+)
 const nextVolume = useNextVolume(
     () => session.value?.content ?? null,
     () => ready.value && !!session.value?.chapters.length && !session.value.nextChapter

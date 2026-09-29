@@ -6,10 +6,11 @@ import BookEndScreen from './BookEndScreen.vue'
 
 const stubs = { AButton: { template: '<button v-bind="$attrs"><slot /></button>' } }
 const NEXT = { id: 'c_2', title: 'Volume 2' } as Content
+const EXIT = { to: '/c_1', label: 'Back to the book' }
 
 function render(next: Content | null) {
     return mount(BookEndScreen, {
-        props: { contentId: 'c_1', next },
+        props: { exit: EXIT, next },
         global: { stubs },
         attachTo: document.body,
     })
@@ -40,7 +41,7 @@ describe('BookEndScreen', () => {
         const wrapper = mount(
             defineComponent({
                 setup: () => () =>
-                    shown.value ? h(BookEndScreen, { contentId: 'c_1', next: NEXT, onBlur }) : null,
+                    shown.value ? h(BookEndScreen, { exit: EXIT, next: NEXT, onBlur }) : null,
             }),
             { global: { stubs }, attachTo: document.body }
         )

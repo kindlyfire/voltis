@@ -4,8 +4,8 @@
             <div class="mb-2 flex h-16 items-center gap-2">
                 <AIconButton
                     :icon="IconArrowLeft"
-                    label="Back to the book"
-                    :to="`/${contentId}`"
+                    :label="exit.label"
+                    :to="exit.to"
                     @click="onLeave"
                 />
                 <h2 :id="titleId" class="font-display min-w-0 grow truncate text-xl font-semibold">
@@ -108,13 +108,14 @@ import ASkeleton from '@/ui/ASkeleton.vue'
 import ASlider from '@/ui/ASlider.vue'
 import ATabs from '@/ui/ATabs.vue'
 import { IconArrowLeft, IconChevronLeft, IconChevronRight, IconClose } from '@/ui/icons'
+import type { ReaderExit } from '../readerExit'
 import ReaderHeading from '../ReaderHeading.vue'
 import { bookShortcuts, type Shortcut } from '../shortcuts'
 import BookContents from './BookContents.vue'
 import BookSettings from './BookSettings.vue'
 import { useBookDisplayStore, type DrawerTab } from './useBookDisplayStore'
 
-defineProps<{ contentId: string }>()
+defineProps<{ exit: ReaderExit }>()
 
 const TABS: { value: DrawerTab; label: string }[] = [
     { value: 'contents', label: 'Contents' },

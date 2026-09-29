@@ -73,7 +73,7 @@ function fakeSession(structure: BookStructure | null = STRUCTURE) {
 
 function render(session = fakeSession()) {
     const wrapper = mount(BookReaderDrawer, {
-        props: { contentId: 'c_1' },
+        props: { exit: { to: '/c_1', label: 'Back to the book' } },
         global: {
             plugins: [pinia, router],
             stubs: { BookSettings: true, AIconButton: { template: '<button />' } },

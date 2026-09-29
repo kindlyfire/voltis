@@ -6,8 +6,8 @@
         <AButton v-if="next" class="book-end__next" @click.stop="emit('open', next.id)">
             Next: {{ next.title }}
         </AButton>
-        <AButton variant="tonal" :to="`/${contentId}`" @click.stop="emit('leave')">
-            Back to the book
+        <AButton variant="tonal" :to="exit.to" @click.stop="emit('leave')">
+            {{ exit.label }}
         </AButton>
     </div>
 </template>
@@ -16,8 +16,9 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AButton from '@/ui/AButton.vue'
 import type { Content } from '@/utils/api/types'
+import type { ReaderExit } from '../readerExit'
 
-const props = defineProps<{ contentId: string; next: Content | null }>()
+const props = defineProps<{ exit: ReaderExit; next: Content | null }>()
 const emit = defineEmits<{
     open: [id: string]
     leave: []

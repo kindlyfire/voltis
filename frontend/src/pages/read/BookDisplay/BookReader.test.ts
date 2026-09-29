@@ -13,6 +13,7 @@ vi.mock('@/utils/api/content', () => ({
         bookStructure: vi.fn(),
         bookDocument: vi.fn(),
         updateUserData: vi.fn(),
+        useGet: () => ({ data: { value: undefined } }),
     },
     invalidateRecentlyRead: vi.fn(),
 }))

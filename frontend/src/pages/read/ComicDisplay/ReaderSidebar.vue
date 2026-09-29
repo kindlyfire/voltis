@@ -1,23 +1,14 @@
 <template>
     <ADrawer v-slot="{ titleId }" v-model:open="reader.sidebarOpen" side="right" :width="350">
-        <div class="space-y-4 p-4 pt-0" v-if="reader.state">
+        <div class="space-y-4 p-4 pt-0" v-if="reader.state && exit">
             <!-- mb-2: The spacing of 4 with the element below feels kinda wrong,
             because of how much empty space there is in this element. -->
-            <div class="mb-2 flex h-16 items-center justify-between">
-                <h2 :id="titleId" class="font-display text-xl font-semibold">Reader</h2>
+            <div class="mb-2 flex h-16 items-center gap-2">
+                <AIconButton :icon="IconArrowLeft" :label="exit.label" :to="exit.to" />
+                <h2 :id="titleId" class="font-display min-w-0 grow truncate text-xl font-semibold">
+                    {{ heading }}
+                </h2>
                 <AIconButton :icon="IconClose" label="Close" @click="reader.sidebarOpen = false" />
-            </div>
-
-            <div class="flex items-center justify-center">
-                <ASkeleton v-if="!parent" width="80%" height="1.5rem" />
-                <template v-else>
-                    <RouterLink
-                        :to="`/${parent.id}`"
-                        class="text-primary font-medium hover:underline"
-                    >
-                        {{ parent.title }}
-                    </RouterLink>
-                </template>
             </div>
 
             <div v-if="reader.siblings">
@@ -107,19 +98,19 @@
 </template>
 
 <script setup lang="ts">
+import { keepPreviousData } from '@tanstack/vue-query'
 import { useDebounceFn } from '@vueuse/core'
-import { computed, onUnmounted, ref, watch, type Ref } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { useLayoutStore } from '@/pages/_layout/useLayoutStore'
 import ACombobox from '@/ui/ACombobox.vue'
 import ADrawer from '@/ui/ADrawer.vue'
 import AIconButton from '@/ui/AIconButton.vue'
 import ASegmented from '@/ui/ASegmented.vue'
-import ASkeleton from '@/ui/ASkeleton.vue'
 import ASlider from '@/ui/ASlider.vue'
-import { IconChevronLeft, IconChevronRight, IconClose } from '@/ui/icons'
+import { IconArrowLeft, IconChevronLeft, IconChevronRight, IconClose } from '@/ui/icons'
 import type { Option } from '@/ui/options'
 import { contentApi } from '@/utils/api/content'
-import type { Content } from '@/utils/api/types'
+import { readerExit } from '../readerExit'
 import ReaderHeading from '../ReaderHeading.vue'
 import { COMIC_SHORTCUTS as kbShortcuts } from '../shortcuts'
 import type { ReaderMode } from './types'
@@ -163,22 +154,20 @@ function onSliderChange(page: number) {
     debouncedGoToPage(page)
 }
 
-/** Parent content. Since this involves another fetch, when the content changes,
- * we keep the old parent around while the new one is loaded. */
-const parent = ref(null) as Ref<Content | null>
-watch(
-    () => reader.state?.content,
-    async content => {
-        if (!content) return
-        if (content.parent_id) {
-            parent.value = await contentApi.get(content.parent_id)
-        } else {
-            parent.value = null
-        }
-    },
-    {
-        immediate: true,
-    }
+/** Kept through chapter switches, while the new chapter's content is null. */
+const qParent = contentApi.useGet(() => reader.state?.content?.parent_id, {
+    placeholderData: keepPreviousData,
+})
+const parentId = computed(() => {
+    const c = reader.state?.content
+    return c ? c.parent_id : qParent.data.value?.id
+})
+const heading = computed(() => {
+    const c = reader.state?.content
+    return (c && !c.parent_id ? c.title : qParent.data.value?.title) || 'Comic'
+})
+const exit = computed(
+    () => reader.state && readerExit(parentId.value, reader.state.contentId, 'Back to the comic')
 )
 
 // Changing the width will change the scroll position, which means it changes
