@@ -123,7 +123,7 @@ func seedContent(t *testing.T, pool *pgxpool.Pool, rows ...models.Content) {
 				c.CreatedAt = baseTime
 			}
 			c.UpdatedAt = c.CreatedAt
-			if err := upsertContent(context.Background(), tx, c); err != nil {
+			if err := upsertContent(context.Background(), tx, c, nil); err != nil {
 				return err
 			}
 		}
@@ -134,21 +134,24 @@ func seedContent(t *testing.T, pool *pgxpool.Pool, rows ...models.Content) {
 	}
 }
 
+// seedMetadata sets the layers of the content at uri, and the data they derive without providers.
 func seedMetadata(t *testing.T, q db.Querier, libraryID, uri string, doc metadata.Doc) {
 	t.Helper()
 	doc.V = 2
 	data, _ := json.Marshal(doc.Local())
 	raw, _ := json.Marshal(doc)
-	exec(t, q, `
-		INSERT INTO content_metadata (uri, library_id, data, data_raw, updated_at)
-		VALUES ($1, $2, $3, $4, now())
-		ON CONFLICT (uri, library_id) DO UPDATE SET data = EXCLUDED.data, data_raw = EXCLUDED.data_raw
-	`, uri, libraryID, data, raw)
+	tag, err := q.Exec(context.Background(), `
+		UPDATE content SET data = $3, data_raw = $4, data_version = $5, meta_updated_at = now()
+		WHERE library_id = $1 AND uri = $2
+	`, libraryID, uri, data, raw, metadata.DataVersion)
+	if err != nil || tag.RowsAffected() != 1 {
+		t.Fatalf("seed metadata %s: %v (%d rows)", uri, err, tag.RowsAffected())
+	}
 }
 
 func readContent(t *testing.T, pool *pgxpool.Pool, id string) models.Content {
 	t.Helper()
-	c, err := db.SelectOne[models.Content](context.Background(), pool, "SELECT * FROM content WHERE id = $1", id)
+	c, err := db.SelectOne[models.Content](context.Background(), pool, "SELECT "+models.ContentColumns("")+" FROM content WHERE id = $1", id)
 	if err != nil {
 		t.Fatalf("read content %s: %v", id, err)
 	}
@@ -159,7 +162,7 @@ func readMeta(t *testing.T, pool *pgxpool.Pool, libraryID, uri string) metadata.
 	t.Helper()
 	var doc metadata.Doc
 	err := pool.QueryRow(context.Background(),
-		"SELECT data_raw FROM content_metadata WHERE library_id = $1 AND uri = $2", libraryID, uri).Scan(&doc)
+		"SELECT data_raw FROM content WHERE library_id = $1 AND uri = $2", libraryID, uri).Scan(&doc)
 	if err != nil {
 		t.Fatalf("read metadata %s: %v", uri, err)
 	}
@@ -170,7 +173,7 @@ func readData(t *testing.T, pool *pgxpool.Pool, libraryID, uri string) metadata.
 	t.Helper()
 	var data metadata.Fields
 	err := pool.QueryRow(context.Background(),
-		"SELECT data FROM content_metadata WHERE library_id = $1 AND uri = $2", libraryID, uri).Scan(&data)
+		"SELECT data FROM content WHERE library_id = $1 AND uri = $2", libraryID, uri).Scan(&data)
 	if err != nil {
 		t.Fatalf("read data %s: %v", uri, err)
 	}

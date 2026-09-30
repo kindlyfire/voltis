@@ -54,10 +54,7 @@ func (fr *FileRoutes) getCover(c echo.Context) error {
 		Cover *metadata.CoverRef `db:"cover"`
 	}
 	r, err := db.SelectOne[coverRow](reqCtx(c), fr.pool, `
-		SELECT c.*, cm.data->'cover' AS cover
-		FROM content c
-		LEFT JOIN content_metadata cm ON cm.library_id = c.library_id AND cm.uri = c.uri
-		WHERE c.id = $1
+		SELECT `+models.ContentColumns("")+`, data->'cover' AS cover FROM content WHERE id = $1
 	`, c.Param("content_id"))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return echo.NewHTTPError(http.StatusNotFound, "Content not found")
@@ -179,10 +176,7 @@ func (fr *FileRoutes) getBookChapters(c echo.Context) error {
 	ctx := reqCtx(c)
 	contentID := c.Param("content_id")
 
-	content, err := db.SelectOne[models.Content](ctx, fr.pool, "SELECT * FROM content WHERE id = $1", contentID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return echo.NewHTTPError(http.StatusNotFound, "Content not found")
-	}
+	content, err := getContent(ctx, fr.pool, contentID)
 	if err != nil {
 		return err
 	}
@@ -220,10 +214,7 @@ func (fr *FileRoutes) getBookChapter(c echo.Context) error {
 	contentID := c.Param("content_id")
 	href := c.QueryParam("href")
 
-	content, err := db.SelectOne[models.Content](ctx, fr.pool, "SELECT * FROM content WHERE id = $1", contentID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return echo.NewHTTPError(http.StatusNotFound, "Content not found")
-	}
+	content, err := getContent(ctx, fr.pool, contentID)
 	if err != nil {
 		return err
 	}
@@ -254,10 +245,7 @@ func (fr *FileRoutes) getBookResource(c echo.Context) error {
 	contentID := c.Param("content_id")
 	resourcePath := c.QueryParam("path")
 
-	content, err := db.SelectOne[models.Content](ctx, fr.pool, "SELECT * FROM content WHERE id = $1", contentID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return echo.NewHTTPError(http.StatusNotFound, "Content not found")
-	}
+	content, err := getContent(ctx, fr.pool, contentID)
 	if err != nil {
 		return err
 	}
@@ -311,10 +299,7 @@ func (fr *FileRoutes) getDownloadInfo(c echo.Context) error {
 	ctx := reqCtx(c)
 	contentID := c.Param("content_id")
 
-	content, err := db.SelectOne[models.Content](ctx, fr.pool, "SELECT * FROM content WHERE id = $1", contentID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return echo.NewHTTPError(http.StatusNotFound, "Content not found")
-	}
+	content, err := getContent(ctx, fr.pool, contentID)
 	if err != nil {
 		return err
 	}
@@ -359,10 +344,7 @@ func (fr *FileRoutes) download(c echo.Context) error {
 	ctx := reqCtx(c)
 	contentID := c.Param("content_id")
 
-	content, err := db.SelectOne[models.Content](ctx, fr.pool, "SELECT * FROM content WHERE id = $1", contentID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return echo.NewHTTPError(http.StatusNotFound, "Content not found")
-	}
+	content, err := getContent(ctx, fr.pool, contentID)
 	if err != nil {
 		return err
 	}

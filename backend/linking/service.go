@@ -110,7 +110,7 @@ func (s *Service) View(ctx context.Context, q db.Querier, contentID string) (Met
 	}
 
 	for _, p := range s.reg.For(t.Type) {
-		l, err := readLink(ctx, q, t.LibraryID, t.URI, p.Name())
+		l, err := readLink(ctx, q, t, p.Name())
 		if err != nil {
 			return MetadataView{}, err
 		}
@@ -407,7 +407,7 @@ func (s *Service) Refresh(ctx context.Context, contentID, provider string) error
 	if err != nil {
 		return err
 	}
-	l, err := readLink(ctx, s.pool, t.LibraryID, t.URI, provider)
+	l, err := readLink(ctx, s.pool, t, provider)
 	if err != nil {
 		return err
 	}

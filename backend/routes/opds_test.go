@@ -74,10 +74,9 @@ func seedOPDS(t *testing.T, pool *pgxpool.Pool, userID string) opdsFixture {
 		}
 		mustExec(t, pool, `
 			INSERT INTO content (id, created_at, uri_part, uri, type, library_id, parent_id, "order", file_uri,
-				file_size, file_data)
-			VALUES ($1, $2, $3, $3, $4, $5, $6, $7, $8, $9, $10)
-		`, id, created, uri, typ, f.LibraryID, parent, order, fileURI, size, fileData)
-		mustExec(t, pool, "INSERT INTO content_metadata (uri, library_id, data) VALUES ($1, $2, $3)", uri, f.LibraryID, meta)
+				file_size, file_data, data, meta_updated_at)
+			VALUES ($1, $2, $3, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
+		`, id, created, uri, typ, f.LibraryID, parent, order, fileURI, size, fileData, meta)
 	}
 	insert(f.SeriesID, "moonlit-harbor", "comic_series", nil, nil, t0, nil,
 		`{"title": "Moonlit Harbor", "description": "Boats at night."}`)

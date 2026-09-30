@@ -134,9 +134,9 @@ func TestGCKeepsReferencedCovers(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO content_metadata (library_id, uri, data_raw, data) VALUES
-			('l_test', 'a', '{}', jsonb_build_object('cover', jsonb_build_object('url', $1::text))),
-			('l_test', 'b', '{}', '{"title": "No cover"}')
+		INSERT INTO content (id, uri_part, uri, type, library_id, data) VALUES
+			('c_a', 'a', 'a', 'comic_series', 'l_test', jsonb_build_object('cover', jsonb_build_object('url', $1::text))),
+			('c_b', 'b', 'b', 'comic_series', 'l_test', '{"title": "No cover"}')
 	`, kept.URL); err != nil {
 		t.Fatal(err)
 	}

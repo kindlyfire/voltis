@@ -327,7 +327,7 @@ func TestFlushRanksTiedChildrenByURIPart(t *testing.T) {
 	r.commit(false)
 
 	kids, err := db.Select[models.Content](context.Background(), r.pool,
-		`SELECT * FROM content WHERE parent_id = $1 ORDER BY "order"`, r.w.byURI["comic/S"])
+		`SELECT `+models.ContentColumns("")+` FROM content WHERE parent_id = $1 ORDER BY "order"`, r.w.byURI["comic/S"])
 	must(t, err)
 	if len(kids) != len(parts) {
 		t.Fatalf("persisted children = %+v, want %d", kids, len(parts))
@@ -386,7 +386,7 @@ func TestFlushStandaloneKeyReleasedBeforeSeriesInsert(t *testing.T) {
 	want := []string{"comic/Foo", "comic/Foo/ch1", "comic/X", "comic/X/ch1", "comic/X/Foo"}
 	assertCatalog(t, r.pool, r.lib, want)
 	newSeries, err := db.SelectOne[models.Content](context.Background(), r.pool,
-		"SELECT * FROM content WHERE library_id = $1 AND uri = 'comic/Foo'", r.lib)
+		"SELECT "+models.ContentColumns("")+" FROM content WHERE library_id = $1 AND uri = 'comic/Foo'", r.lib)
 	must(t, err)
 	if newSeries.Type != "comic_series" {
 		t.Fatalf("comic/Foo = %+v, want the new series", newSeries)
@@ -401,6 +401,11 @@ func TestFlushRenameMovesAnnotationsWithChildKeyChange(t *testing.T) {
 	r.commit(false)
 
 	seedRefs(t, r, "comic/S", "comic/S/ch1")
+	series := r.w.byURI["comic/S"]
+	leaf := r.w.keys[Key{series, "ch1"}]
+	exec(t, r.pool, "INSERT INTO metadata_links (library_id, content_id, provider, state) VALUES ($1, $2, 'p', 'review')", r.lib, series)
+	// A stale user row at the destination gives way to the source's.
+	exec(t, r.pool, "INSERT INTO user_to_content (id, user_id, library_id, uri, notes) VALUES ('dst', 'u1', $1, 'comic/S_2019/ch2', 'destination')", r.lib)
 
 	r.reload()
 	r.place(comicResult("/lib/S/ch1.cbz", "ch2", "S_2019", "/lib/S"))
@@ -410,6 +415,39 @@ func TestFlushRenameMovesAnnotationsWithChildKeyChange(t *testing.T) {
 	assertCatalog(t, r.pool, r.lib, want)
 
 	assertRefs(t, r, map[string]string{"comic/S_2019": "comic/S", "comic/S_2019/ch2": "comic/S/ch1"})
+	if id := contentIDByURI(t, r.pool, r.lib, "comic/S_2019/ch2"); id != leaf {
+		t.Fatalf("leaf id = %s, want %s", id, leaf)
+	}
+	links, err := db.SelectScalars[string](context.Background(), r.pool,
+		"SELECT c.uri || ':' || l.state FROM metadata_links l JOIN content c ON c.id = l.content_id")
+	if must(t, err); !slices.Equal(links, []string{"comic/S_2019:review"}) {
+		t.Fatalf("links = %v, want the series' link on its renamed row", links)
+	}
+	if got := readData(t, r.pool, r.lib, "comic/S_2019").Title.V; got != "comic/S" {
+		t.Fatalf("series title = %q, want its override", got)
+	}
+
+	// A leaf's new match inputs make its series' pending link due. The leaf gets its metadata in
+	// its own upsert, so it is written once.
+	exec(t, r.pool, `UPDATE metadata_links SET retry_at = NULL;
+		CREATE TABLE writes (id TEXT);
+		CREATE FUNCTION log_write() RETURNS trigger LANGUAGE plpgsql AS $$
+			BEGIN INSERT INTO writes VALUES (NEW.id); RETURN NULL; END $$;
+		CREATE TRIGGER log_write AFTER UPDATE ON content FOR EACH ROW EXECUTE FUNCTION log_write()`)
+	r.reload()
+	r.place(withMeta(comicResult("/lib/S/ch1.cbz", "ch2", "S_2019", "/lib/S"), metadata.Fields{Volume: metadata.Val("7")}))
+	r.commit(false)
+	due, err := db.SelectScalars[string](context.Background(), r.pool,
+		"SELECT content_id FROM metadata_links WHERE retry_at IS NOT NULL")
+	if must(t, err); !slices.Equal(due, []string{series}) {
+		t.Fatalf("due links = %v, want the series' link", due)
+	}
+	if n, err := db.SelectScalar[int](context.Background(), r.pool, "SELECT count(*) FROM writes WHERE id = $1", leaf); err != nil || n != 1 {
+		t.Fatalf("leaf writes = %d (%v), want 1", n, err)
+	}
+	if got := readData(t, r.pool, r.lib, "comic/S_2019/ch2"); got.Title.V != "comic/S/ch1" || got.Volume.V != "7" {
+		t.Fatalf("leaf data = %+v, want the file layer under its override", got)
+	}
 }
 
 func TestFlushDeletesOrphansAndStampsScannedAt(t *testing.T) {
@@ -435,85 +473,40 @@ func TestFlushDeletesOrphansAndStampsScannedAt(t *testing.T) {
 	}
 }
 
-// orphanRows lists a library's metadata and link rows as uri, or uri:provider for links.
-func orphanRows(t *testing.T, r *scanRun) []string {
-	t.Helper()
-	rows, err := db.SelectScalars[string](context.Background(), r.pool, `
-		SELECT uri FROM content_metadata WHERE library_id = $1
-		UNION ALL SELECT uri || ':' || provider FROM metadata_links WHERE library_id = $1`, r.lib)
-	must(t, err)
-	slices.Sort(rows)
-	return rows
-}
-
-func TestFlushFinalCollectsOrphansWithoutDecisions(t *testing.T) {
-	r := newTestScan(t, "comics")
-	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
-	r.commit(false)
-	seedMetadata(t, r.pool, r.lib, "comic/gone", metadata.Doc{File: metadata.Fields{Title: metadata.Val("file only")}})
-	seedMetadata(t, r.pool, r.lib, "comic/kept", metadata.Doc{Overrides: metadata.Fields{Title: metadata.Val("mine")}})
-	exec(t, r.pool, "INSERT INTO provider_entries (provider, external_id, canonical_id, raw, fetched_at, refresh_at) VALUES ('linked', '1', '1', '{}', now(), now())")
-	exec(t, r.pool, `INSERT INTO metadata_links (library_id, uri, provider, state, external_id, origin, rejected) VALUES
-		($1, 'comic/gone', 'review', 'review', NULL, NULL, '{}'),
-		($1, 'comic/gone', 'unmatched', 'unmatched', NULL, NULL, '{}'),
-		($1, 'comic/gone', 'rejected', 'unmatched', NULL, NULL, '{x}'),
-		($1, 'comic/gone', 'ignored', 'ignored', NULL, NULL, '{}'),
-		($1, 'comic/gone', 'linked', 'linked', '1', 'manual', '{}'),
-		($1, 'comic/S', 'live', 'review', NULL, NULL, '{}')`, r.lib)
-	all := orphanRows(t, r)
-
-	r.reload()
-	r.commit(false)
-	if got := orphanRows(t, r); !slices.Equal(got, all) {
-		t.Fatalf("rows = %v, want all kept until the final flush", got)
-	}
-
-	r.reload()
-	r.commit(true)
-	want := []string{"comic/S", "comic/S/ch1", "comic/S:live", "comic/gone:ignored", "comic/gone:linked",
-		"comic/gone:rejected", "comic/kept"}
-	if got := orphanRows(t, r); !slices.Equal(got, want) {
-		t.Fatalf("rows = %v, want %v", got, want)
-	}
-}
-
-// A moving source replaces the links at its destination even where it has none of its own.
-func TestFlushRenameDropsDestinationOrphans(t *testing.T) {
-	r := newTestScan(t, "comics")
-	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
-	r.commit(false)
-	exec(t, r.pool, "INSERT INTO metadata_links (library_id, uri, provider, state) VALUES ($1, 'comic/S_2019', 'p', 'ignored')", r.lib)
-
-	r.reload()
-	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S_2019", "/lib/S"))
-	r.commit(false)
-	if got, want := orphanRows(t, r), []string{"comic/S_2019", "comic/S_2019/ch1"}; !slices.Equal(got, want) {
-		t.Fatalf("rows = %v, want %v", got, want)
-	}
-}
-
-func TestFlushReaddedSeriesGetsItsMetadataBack(t *testing.T) {
+// Deleted content takes its metadata and links with it, and its recent entry keeps its title.
+// Re-added, it starts fresh.
+func TestFlushDeletedContentTakesItsMetadata(t *testing.T) {
 	r := newTestScan(t, "comics")
 	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
 	r.place(comicResult("/lib/T/ch1.cbz", "ch1", "T", "/lib/T"))
 	r.commit(false)
+	series := r.w.byURI["comic/S"]
 	seedMetadata(t, r.pool, r.lib, "comic/S", metadata.Doc{Overrides: metadata.Fields{Title: metadata.Val("Mine")}})
-	exec(t, r.pool, "INSERT INTO metadata_links (library_id, uri, provider, state) VALUES ($1, 'comic/S', 'p', 'ignored')", r.lib)
+	seedMetadata(t, r.pool, r.lib, "comic/S/ch1", metadata.Doc{Overrides: metadata.Fields{Title: metadata.Val("Chapter")}})
+	exec(t, r.pool, "INSERT INTO provider_entries (provider, external_id, canonical_id, raw, fetched_at, refresh_at) VALUES ('p', '1', '1', '{}', now(), now())")
+	exec(t, r.pool, `INSERT INTO metadata_links (library_id, content_id, provider, state, external_id, origin)
+		VALUES ($1, $2, 'p', 'linked', '1', 'manual')`, r.lib, series)
 
 	r.reload()
 	r.w.event(listedEvent(t, r.w, "/lib/S"))
-	r.commit(true)
-	assertCatalog(t, r.pool, r.lib, []string{"comic/T", "comic/T/ch1"})
+	_, recent := r.commitRecent(true)
 
+	assertCatalog(t, r.pool, r.lib, []string{"comic/T", "comic/T/ch1"})
+	if n, err := db.SelectScalar[int](context.Background(), r.pool, "SELECT count(*) FROM metadata_links"); err != nil || n != 0 {
+		t.Fatalf("links = %d (%v), want the series' link gone with it", n, err)
+	}
+	if got := recentByID(recent)[series]; got.Title != "Mine" || !got.Deleted || got.Removed != 1 {
+		t.Fatalf("deleted series entry = %+v, want its title from the deleted row", got)
+	}
+
+	// Added again, it is new content without the old one's metadata.
 	r.reload()
 	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
 	r.commit(true)
 	assertCatalog(t, r.pool, r.lib, []string{"comic/S", "comic/S/ch1", "comic/T", "comic/T/ch1"})
-	if doc := readMeta(t, r.pool, r.lib, "comic/S"); doc.File.Title.V != "S" || readData(t, r.pool, r.lib, "comic/S").Title.V != "Mine" {
-		t.Fatalf("metadata = %+v, want the overrides over a new file layer", doc)
-	}
-	if got := orphanRows(t, r); !slices.Contains(got, "comic/S:p") {
-		t.Fatalf("rows = %v, want the link back on the series", got)
+	if doc := readMeta(t, r.pool, r.lib, "comic/S"); doc.File.Title.V != "S" || !doc.Overrides.IsZero() ||
+		readData(t, r.pool, r.lib, "comic/S").Title.V != "S" {
+		t.Fatalf("metadata = %+v, want only a new file layer", doc)
 	}
 }
 
@@ -927,6 +920,14 @@ func TestSeriesKeepsItsDirectoryWhileANeighbourClaimsTheOther(t *testing.T) {
 
 func TestSeriesLayerReplacesWholeFileLayer(t *testing.T) {
 	r := newTestScan(t, "comics")
+	place := func() {
+		r.place(withMeta(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"), metadata.Fields{
+			Series: metadata.Val("New Series"), Genres: metadata.Val([]string{"Child Genre"}),
+			Language: metadata.Val("en"), Description: metadata.Val("A volume"),
+		}))
+	}
+	place()
+	r.commit(false)
 	seedMetadata(t, r.pool, r.lib, "comic/S", metadata.Doc{
 		File: metadata.Fields{
 			Title: metadata.Val("Stale"), Publishers: metadata.Val([]string{"Stale Press"}),
@@ -937,10 +938,8 @@ func TestSeriesLayerReplacesWholeFileLayer(t *testing.T) {
 		},
 	})
 
-	r.place(withMeta(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"), metadata.Fields{
-		Series: metadata.Val("New Series"), Genres: metadata.Val([]string{"Child Genre"}),
-		Language: metadata.Val("en"), Description: metadata.Val("A volume"),
-	}))
+	r.reload()
+	place()
 	r.commit(true)
 
 	got := readMeta(t, r.pool, r.lib, "comic/S")
@@ -1024,7 +1023,7 @@ func TestFlushReducesSeriesOverInvalidChildren(t *testing.T) {
 			}
 
 			kids, err := db.Select[models.Content](context.Background(), r.pool,
-				`SELECT * FROM content WHERE parent_id = $1 ORDER BY "order"`, seriesID)
+				`SELECT `+models.ContentColumns("")+` FROM content WHERE parent_id = $1 ORDER BY "order"`, seriesID)
 			must(t, err)
 			if len(kids) != 2 || deref(kids[0].Order) != 0 || deref(kids[1].Order) != 1 {
 				t.Fatalf("children = %+v, want the invalid child ranked first", kids)
@@ -1042,15 +1041,14 @@ func TestSeriesLayerSkipsSeriesWithoutChildren(t *testing.T) {
 	r := newTestScan(t, "comics")
 	r.place(comicResult("/lib/A/ch1.cbz", "ch1", "S", "/lib/A"))
 	r.commit(false)
-	// Overrides keep the row past the final flush.
-	seedMetadata(t, r.pool, r.lib, "comic/S", metadata.Doc{File: metadata.Fields{Title: metadata.Val("Existing")},
-		Overrides: metadata.Fields{Description: metadata.Val("mine")}})
+	seedMetadata(t, r.pool, r.lib, "comic/S", metadata.Doc{File: metadata.Fields{Title: metadata.Val("Existing")}})
 
+	// A non-final flush keeps the gone chapter's row, which leaves the series without children.
 	r.reload()
 	r.w.event(listedEvent(t, r.w, "/lib/A"))
-	r.commit(true)
+	r.commit(false)
 
-	assertCatalog(t, r.pool, r.lib, nil)
+	assertCatalog(t, r.pool, r.lib, []string{"comic/S", "comic/S/ch1"})
 	if got := readMeta(t, r.pool, r.lib, "comic/S").File.Title.V; got != "Existing" {
 		t.Fatalf("series title = %q, want a childless series left alone", got)
 	}
@@ -1060,7 +1058,7 @@ func TestFlushMovesRefsWithRegroupedBooks(t *testing.T) {
 	r := newTestScan(t, "books")
 	r.place(bookResult("/lib/Foo v1.epub", epub.Metadata{Title: "Foo v1"}))
 	r.commit(false)
-	// The second set is an orphan already sitting where the book is about to move.
+	// The second set is left by removed content where the book is about to move.
 	seedRefs(t, r, "book/Foo v1", "book/Foo/Foo v1")
 
 	r.reload()
@@ -1124,7 +1122,8 @@ func TestFlushBookJoinsTheBookSeriesHoldingItsName(t *testing.T) {
 	})
 }
 
-// seedRefs puts a user row, a list entry and an override at each uri, all labelled with that uri.
+// seedRefs puts a user row and a list entry at each uri, and an override on the content there if
+// any, all labelled with that uri.
 func seedRefs(t *testing.T, r *scanRun, uris ...string) {
 	t.Helper()
 	exec(t, r.pool, "INSERT INTO users (id, username, password_hash) VALUES ('u1', 'u', 'x')")
@@ -1133,11 +1132,13 @@ func seedRefs(t *testing.T, r *scanRun, uris ...string) {
 		id := fmt.Sprint("r", i)
 		exec(t, r.pool, "INSERT INTO user_to_content (id, user_id, library_id, uri, notes) VALUES ($1, 'u1', $2, $3, $3)", id, r.lib, uri)
 		exec(t, r.pool, "INSERT INTO custom_list_to_content (id, custom_list_id, library_id, uri, notes) VALUES ($1, 'cl1', $2, $3, $3)", id, r.lib, uri)
-		seedMetadata(t, r.pool, r.lib, uri, metadata.Doc{Overrides: metadata.Fields{Title: metadata.Val(uri)}})
+		raw, _ := json.Marshal(metadata.Doc{V: 2, Overrides: metadata.Fields{Title: metadata.Val(uri)}})
+		exec(t, r.pool, "UPDATE content SET data_raw = $3 WHERE library_id = $1 AND uri = $2", r.lib, uri, raw)
 	}
 }
 
-// assertRefs checks that, in every ref table, the refs labelled with each source sit at its target.
+// assertRefs checks that the user and list refs labelled with each source sit at its target, and
+// that the content there is the source's, carrying its override.
 func assertRefs(t *testing.T, r *scanRun, want map[string]string) {
 	t.Helper()
 	for _, table := range []string{"user_to_content", "custom_list_to_content"} {

@@ -160,30 +160,30 @@ func TestMatchNowFollowsCoverage(t *testing.T) {
 		for _, id := range series {
 			e.series(lib, id, "Nothing")
 			e.leaf(id, "/"+id+"/1.cbz")
-			e.exec(`INSERT INTO metadata_links (library_id, uri, provider, state, retry_at)
-				VALUES ($1, 'comic/' || $2, 'fake', 'unmatched', now() + interval '1 day')`, lib, id)
+			e.exec(`INSERT INTO metadata_links (library_id, content_id, provider, state, retry_at)
+				VALUES ($1, $2, 'fake', 'unmatched', now() + interval '1 day')`, lib, id)
 		}
 	}
 	e.sources("l1", `{}`, `[{"path_uri": "/on", "settings": {"auto_match": {"fake": true}}}]`)
 	due := func() []string {
 		t.Helper()
-		uris, err := db.SelectScalars[string](context.Background(), e.pool,
-			"SELECT uri FROM metadata_links WHERE retry_at <= now() ORDER BY uri")
+		ids, err := db.SelectScalars[string](context.Background(), e.pool,
+			"SELECT content_id FROM metadata_links WHERE retry_at <= now() ORDER BY content_id")
 		if err != nil {
 			t.Fatal(err)
 		}
 		e.exec("UPDATE metadata_links SET retry_at = now() + interval '1 day'")
-		return uris
+		return ids
 	}
 	if err := e.svc.MatchNow(context.Background(), nil, []string{"other"}); err != nil || len(due()) != 0 || !e.woken() {
 		t.Fatalf("another provider: %v", err)
 	}
 	e.matchNow()
-	if got := due(); !slices.Equal(got, []string{"comic/on", "comic/other"}) {
+	if got := due(); !slices.Equal(got, []string{"on", "other"}) {
 		t.Fatalf("due %v", got)
 	}
 	e.matchNow("l1")
-	if got := due(); !slices.Equal(got, []string{"comic/on"}) {
+	if got := due(); !slices.Equal(got, []string{"on"}) {
 		t.Fatalf("due %v", got)
 	}
 }
@@ -207,8 +207,8 @@ func TestNextDueFollowsCoverage(t *testing.T) {
 	for id, retry := range map[string]string{"on": "5 minutes", "off": "1 minute"} {
 		e.series("l1", id, "Nothing")
 		e.leaf(id, "/"+id+"/1.cbz")
-		e.exec(`INSERT INTO metadata_links (library_id, uri, provider, state, retry_at)
-			VALUES ('l1', 'comic/' || $1, 'fake', 'unmatched', now() + $2::interval)`, id, retry)
+		e.exec(`INSERT INTO metadata_links (library_id, content_id, provider, state, retry_at)
+			VALUES ('l1', $1, 'fake', 'unmatched', now() + $2::interval)`, id, retry)
 	}
 	e.series("l1", "s", "Local")
 	if err := e.svc.Link(context.Background(), "s", "fake", "1", nil); err != nil {

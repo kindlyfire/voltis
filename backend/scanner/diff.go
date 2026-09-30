@@ -32,7 +32,7 @@ func loadSeries(ctx context.Context, q db.Querier, libraryID string) ([]SeriesRe
 	return db.Select[SeriesRef](ctx, q, `
 		SELECT id, uri, uri_part, type, file_uri
 		FROM content
-		WHERE library_id = $1 AND type IN ('comic_series', 'book_series')
+		WHERE library_id = $1 AND parent_id IS NULL AND type IN ('comic_series', 'book_series')
 	`, libraryID)
 }
 

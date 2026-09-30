@@ -177,7 +177,7 @@ func TestUndoRefused(t *testing.T) {
 	e.series("l1", "t", "Local")
 	e.exec(`CREATE FUNCTION refuse() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'refused'; END $$ LANGUAGE plpgsql`)
 	e.exec(`CREATE TRIGGER refuse BEFORE INSERT ON metadata_links FOR EACH ROW
-		WHEN (NEW.uri = 'comic/t') EXECUTE FUNCTION refuse()`)
+		WHEN (NEW.content_id = 't') EXECUTE FUNCTION refuse()`)
 	revs, errs := e.svc.LinkAll(ctx, []LinkRequest{{"s", "fake", "1", new(e.link("s").Rev)}, {"t", "fake", "1", nil}})
 	if errs[0] == nil || errs[1] == nil || !slices.Equal(revs, []int64{0, 0}) || len(e.svc.undos.m) != 0 {
 		t.Fatalf("rolled back: revs %v, errs %v, undos %v", revs, errs, e.svc.undos.m)

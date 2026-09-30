@@ -7,55 +7,9 @@ import (
 	"time"
 
 	"voltis/db"
-	"voltis/metadata"
-	"voltis/models"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
-
-func seedSeriesScan(t *testing.T, pool *pgxpool.Pool, lib string) (*scanRun, string) {
-	t.Helper()
-	r := newScanRun(t, pool, lib, &ComicsScanner{})
-	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
-	r.commit(false)
-	return r, contentIDByURI(t, pool, lib, "comic/S/ch1")
-}
-
-func TestScanConcurrencyRenameSourceWins(t *testing.T) {
-	pool := newTestPool(t)
-	lib := newTestLibrary(t, pool, "comics")
-	r, _ := seedSeriesScan(t, pool, lib)
-
-	exec(t, pool, "INSERT INTO users (id, username, password_hash) VALUES ('u1', 'u', 'x')")
-	exec(t, pool, "INSERT INTO user_to_content (id, user_id, library_id, uri, starred) VALUES ('src', 'u1', $1, 'comic/S/ch1', true)", lib)
-	exec(t, pool, "INSERT INTO user_to_content (id, user_id, library_id, uri, notes) VALUES ('dst', 'u1', $1, 'comic/S_2019/ch1', 'destination')", lib)
-	seedMetadata(t, pool, lib, "comic/S_2019/ch1", metadata.Doc{Overrides: metadata.Fields{Title: metadata.Val("loser")}})
-	seedMetadata(t, pool, lib, "comic/S/ch1", metadata.Doc{Overrides: metadata.Fields{Title: metadata.Val("winner")}})
-	exec(t, pool, `INSERT INTO metadata_links (library_id, uri, provider, state) VALUES
-		($1, 'comic/S', 'p', 'review'), ($1, 'comic/S_2019', 'p', 'ignored')`, lib)
-
-	r.reload()
-	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S_2019", "/lib/S"))
-	r.commit(false)
-
-	rows, err := db.Select[models.UserToContent](context.Background(), pool,
-		"SELECT * FROM user_to_content WHERE library_id = $1 ORDER BY id", lib)
-	must(t, err)
-	if len(rows) != 1 || rows[0].ID != "src" || rows[0].URI != "comic/S_2019/ch1" {
-		t.Fatalf("annotations = %+v, want the source moved over the orphaned destination", rows)
-	}
-
-	if got := readMeta(t, pool, lib, "comic/S_2019/ch1").Overrides; got.Title.V != "winner" {
-		t.Fatalf("metadata = %+v, want the moving source to win", got)
-	}
-
-	links, err := db.SelectScalars[string](context.Background(), pool,
-		"SELECT uri || ':' || state FROM metadata_links WHERE library_id = $1", lib)
-	must(t, err)
-	if len(links) != 1 || links[0] != "comic/S_2019:review" {
-		t.Fatalf("links = %v, want the source moved over the orphaned destination", links)
-	}
-}
 
 func failOnInsert(t *testing.T, pool *pgxpool.Pool, condition, sqlstate string) {
 	t.Helper()

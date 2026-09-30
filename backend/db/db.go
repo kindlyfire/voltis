@@ -4,8 +4,9 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"io/fs"
 	"log/slog"
-	"sort"
+	"slices"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -28,6 +29,16 @@ func Connect(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 }
 
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
+	return migrate(ctx, pool, "")
+}
+
+// MigrateUntil applies the pending migrations up to and including the named one, for tests of a
+// later migration.
+func MigrateUntil(ctx context.Context, pool *pgxpool.Pool, name string) error {
+	return migrate(ctx, pool, name)
+}
+
+func migrate(ctx context.Context, pool *pgxpool.Pool, until string) error {
 	_, err := pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS _migrations (
 			name TEXT PRIMARY KEY,
@@ -56,9 +67,13 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	if err != nil {
 		return fmt.Errorf("read migrations dir: %w", err)
 	}
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].Name() < entries[j].Name()
-	})
+	if until != "" {
+		i := slices.IndexFunc(entries, func(e fs.DirEntry) bool { return e.Name() == until+".sql" })
+		if i < 0 {
+			return fmt.Errorf("unknown migration %s", until)
+		}
+		entries = entries[:i+1]
+	}
 
 	for _, entry := range entries {
 		name := entry.Name()

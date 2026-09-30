@@ -167,7 +167,7 @@ func (lr *LibraryRoutes) scan(c echo.Context) error {
 const maxScanFileURIs = 5000
 
 func (lr *LibraryRoutes) scanContentIDs(ctx context.Context, contentIDs []string) ([]string, error) {
-	rows, err := db.Select[models.Content](ctx, lr.pool, "SELECT * FROM content WHERE id = ANY($1)", contentIDs)
+	rows, err := db.Select[models.Content](ctx, lr.pool, "SELECT "+models.ContentColumns("")+" FROM content WHERE id = ANY($1)", contentIDs)
 	if err != nil {
 		return nil, err
 	}

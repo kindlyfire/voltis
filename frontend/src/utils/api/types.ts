@@ -128,6 +128,8 @@ export interface LibrarySettings {
     book_series_inference: BookSeriesInference
     /** Match series with each metadata provider in the background; a missing provider is off. */
     auto_match: Record<string, boolean>
+    /** Turns off the scanner's guard against removing a missing mount's items. */
+    always_remove_missing: boolean
 }
 
 export interface Library {
@@ -240,37 +242,6 @@ export interface LibraryUrisResponse {
 export interface BrokenRefsFixRequest {
     delete?: string[]
     update?: Record<string, string>
-}
-
-/** Content an orphan can move to. */
-export interface OrphanTarget {
-    uri: string
-    title: string | null
-}
-
-/** Metadata and provider links kept at a URI no content holds. */
-export interface OrphanedMetadata {
-    uri: string
-    title: string | null
-    /** Overridden field keys. */
-    overrides: string[]
-    links: {
-        provider: string
-        state: 'review' | 'unmatched' | 'linked' | 'ignored'
-        external_id: string | null
-        rejected: string[]
-    }[]
-}
-
-export interface OrphansSummaryItem {
-    library_id: string
-    count: number
-}
-
-export interface OrphansFixRequest {
-    delete?: string[]
-    /** Orphaned URI -> content URI. */
-    move?: Record<string, string>
 }
 
 export interface UserToContentUpdate {
@@ -475,6 +446,8 @@ export interface ScanProgress {
     failed: number
     saved: { added: number; updated: number; removed: number }
     commit_seq: number
+    /** Why the scan removes nothing that went missing. */
+    removals_suppressed?: string
     /** Newest first. */
     recent?: ScanRecent[]
 }
@@ -497,6 +470,7 @@ export interface ScanResult {
     failed: number
     unchanged: number
     duration: number
+    removals_suppressed?: string
 }
 
 export interface TaskSnapshot {

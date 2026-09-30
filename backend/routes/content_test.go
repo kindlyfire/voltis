@@ -224,24 +224,25 @@ func TestContentListWindow(t *testing.T) {
 	mustExec(t, pool, "INSERT INTO libraries (id, name, type) VALUES ($1, 'lib', 'comics')", libID)
 
 	// An empty title is a row without metadata. A year-only date broke the old `::date` cast.
+	var echoID string
 	for _, it := range []struct {
-		title, date string
-		year        int
+		title, date, rating string
+		year                int
 	}{
-		{"Vol 10", "2015-03-01", 2020},
-		{"Émile and the Kite", "2014", 2021},
-		{"", "", 2022},
-		{"Echo Park", "2014-06-15T00:00:00Z", 2023},
-		{"Amber Road", "", 2020},
-		{"3 Tales", "1999-12", 2021},
-		{"Vol 2", "2015", 2022},
-		{"かたな", "", 2023},
-		{`"Quiet Hours"`, "2014", 2020},
-		{"Amber Road", "1999", 2021},
-		{"Zephyr", "", 2022},
-		{"Ezra Vale", "2015-01", 2023},
-		{"Moss", "", 2020},
-		{"Amber Road", "2014", 2021},
+		{"Vol 10", "2015-03-01", "4.5", 2020},
+		{"Émile and the Kite", "2014", "3", 2021},
+		{"", "", "", 2022},
+		{"Echo Park", "2014-06-15T00:00:00Z", "", 2023},
+		{"Amber Road", "", "4.5", 2020},
+		{"3 Tales", "1999-12", "10", 2021},
+		{"Vol 2", "2015", "3", 2022},
+		{"かたな", "", "", 2023},
+		{`"Quiet Hours"`, "2014", "0.5", 2020},
+		{"Amber Road", "1999", "4.5", 2021},
+		{"Zephyr", "", "", 2022},
+		{"Ezra Vale", "2015-01", "7.25", 2023},
+		{"Moss", "", "3", 2020},
+		{"Amber Road", "2014", "", 2021},
 	} {
 		id := models.MakeContentID()
 		mustExec(t, pool, `
@@ -250,10 +251,13 @@ func TestContentListWindow(t *testing.T) {
 		`, id, libID, it.year)
 		if it.title != "" {
 			mustExec(t, pool, `
-				INSERT INTO content_metadata (uri, library_id, data)
-				VALUES ('file:///lib/' || $1, $2,
-					jsonb_strip_nulls(jsonb_build_object('title', $3::text, 'publication_date', NULLIF($4, ''))))
-			`, id, libID, it.title, it.date)
+				UPDATE content SET data = jsonb_strip_nulls(jsonb_build_object('title', $2::text,
+					'publication_date', NULLIF($3, ''), 'rating', NULLIF($4, '')::numeric))
+				WHERE id = $1
+			`, id, it.title, it.date, it.rating)
+		}
+		if it.title == "Echo Park" {
+			echoID = id
 		}
 	}
 
@@ -263,6 +267,13 @@ func TestContentListWindow(t *testing.T) {
 			ids = append(ids, s(item.(map[string]any)["id"]))
 		}
 		return ids
+	}
+
+	// Search matches alternative titles too.
+	mustExec(t, pool, `UPDATE content SET data = data || '{"alt_titles": ["Lantern Quay"]}' WHERE id = $1`, echoID)
+	for _, q := range []string{"lantern", "quay"} {
+		res := c.Get("/api/content?library_id="+libID+"&search="+q).Assert(t, 200).JSON()
+		assertEq(t, s(dataIDs(res)), s([]string{echoID}))
 	}
 
 	// Keys and values are listed ascending; "" is the null key. value reads an item's sort value.
@@ -286,6 +297,12 @@ func TestContentListWindow(t *testing.T) {
 			"", "", "", "", "", "1999", "1999-12", "2014", "2014", "2014", "2014-06-15T00:00:00Z",
 			"2015", "2015-01", "2015-03-01",
 		}},
+		{"rating", func(item map[string]any) string {
+			if rating, ok := item["meta"].(map[string]any)["rating"]; ok {
+				return s(rating)
+			}
+			return ""
+		}, nil, []string{"", "", "", "", "", "0.5", "3", "3", "3", "4.5", "4.5", "4.5", "7.25", "10"}},
 	} {
 		for _, dir := range []string{"asc", "desc"} {
 			t.Run(tc.sort+" "+dir, func(t *testing.T) {
@@ -334,25 +351,26 @@ func TestContentListWindow(t *testing.T) {
 					key   string
 					count int
 				}
-				key, _, _ := bucketKey(tc.sort)
-				rows, err := db.Select[struct {
-					ID  string `db:"id"`
-					Key string `db:"key"`
-				}](context.Background(), pool, "SELECT c.id, COALESCE("+key+", '') AS key FROM content c"+cmJoin+
-					" WHERE c.id = ANY($1)", all)
-				if err != nil {
-					t.Fatal(err)
-				}
-				keyOf := map[string]string{}
-				for _, r := range rows {
-					keyOf[r.ID] = r.Key
-				}
 				var runs []run
-				for _, id := range all {
-					if n := len(runs); n > 0 && runs[n-1].key == keyOf[id] {
-						runs[n-1].count++
-					} else {
-						runs = append(runs, run{keyOf[id], 1})
+				if key, _ := bucketKey(tc.sort); key != "" {
+					rows, err := db.Select[struct {
+						ID  string `db:"id"`
+						Key string `db:"key"`
+					}](context.Background(), pool, "SELECT c.id, COALESCE("+key+", '') AS key FROM content c"+
+						" WHERE c.id = ANY($1)", all)
+					if err != nil {
+						t.Fatal(err)
+					}
+					keyOf := map[string]string{}
+					for _, r := range rows {
+						keyOf[r.ID] = r.Key
+					}
+					for _, id := range all {
+						if n := len(runs); n > 0 && runs[n-1].key == keyOf[id] {
+							runs[n-1].count++
+						} else {
+							runs = append(runs, run{keyOf[id], 1})
+						}
 					}
 				}
 

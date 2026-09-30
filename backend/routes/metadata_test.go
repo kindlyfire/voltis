@@ -3,7 +3,6 @@ package routes
 import (
 	"context"
 	"errors"
-	"net/url"
 	"testing"
 
 	"voltis/db"
@@ -17,11 +16,10 @@ import (
 func newTestSeries(t *testing.T, c *testClient) string {
 	t.Helper()
 	id := newTestContent(t, c.pool())
-	mustExec(t, c.pool(), "UPDATE content SET type = 'comic_series' WHERE id = $1", id)
-	mustExec(t, c.pool(), `INSERT INTO content_metadata (uri, library_id, data_raw, data, data_version)
-		SELECT uri, library_id, '{"v": 2, "file": {"title": "Local", "description": "From the file"}}',
-			'{"title": "Local", "description": "From the file"}', $2
-		FROM content WHERE id = $1`, id, metadata.DataVersion)
+	mustExec(t, c.pool(), `UPDATE content SET type = 'comic_series',
+		data_raw = '{"v": 2, "file": {"title": "Local", "description": "From the file"}}',
+		data = '{"title": "Local", "description": "From the file"}', data_version = $2
+		WHERE id = $1`, id, metadata.DataVersion)
 	return id
 }
 
@@ -130,119 +128,6 @@ func TestMetadataRefreshNow(t *testing.T) {
 	waitUntil(t, "the refresh", func() bool {
 		return c.Get("/api/metadata/content/"+id).Assert(t, 200).JSON()["merged"].(map[string]any)["title"] == "Renamed"
 	})
-}
-
-func TestListSortsAndSearchesDerivedColumns(t *testing.T) {
-	pool := newTestPool(t)
-	c := newAdminClient(t, pool)
-	var ids []string
-	for _, data := range []string{
-		`{"title": "Alpha", "rating": 80}`,
-		`{"title": "Beta", "alt_titles": ["Sousou no Frieren"], "rating": 20}`,
-		`{"title": "Gamma"}`,
-	} {
-		id := newTestContent(t, pool)
-		mustExec(t, pool, "INSERT INTO content_metadata (uri, library_id, data) SELECT uri, library_id, $2 FROM content WHERE id = $1", id, data)
-		ids = append(ids, id)
-	}
-	listed := func(query string) []any {
-		var got []any
-		for _, item := range c.Get("/api/content?valid=true&"+query).Assert(t, 200).JSON()["data"].([]any) {
-			got = append(got, item.(map[string]any)["id"])
-		}
-		return got
-	}
-	for query, want := range map[string][]any{
-		"sort=rating&sort_order=desc": {ids[0], ids[1], ids[2]},
-		"sort=rating&sort_order=asc":  {ids[2], ids[1], ids[0]},
-		"search=sousou":               {ids[1]},
-		"search=frieren":              {ids[1]},
-	} {
-		if got := listed(query); len(got) != len(want) || s(got) != s(want) {
-			t.Errorf("%s: got %v, want %v", query, got, want)
-		}
-	}
-}
-
-func TestOrphanedMetadata(t *testing.T) {
-	pool := newTestPool(t)
-	c := newAdminClient(t, pool)
-	id := newTestSeries(t, c)
-	lib := contentLibrary(t, pool, id)
-	uri := "file:///lib/" + id // as newTestContent places it
-	base := "/api/content/orphaned-metadata/" + lib
-	c.Post("/api/metadata/content/"+id+"/overrides", map[string]any{"rev": 0, "fields": map[string]any{"title": "Theirs"}}).Assert(t, 200)
-	mustExec(t, pool, `INSERT INTO content_metadata (uri, library_id, data_raw)
-		VALUES ('comic/gone', $1, '{"v": 2, "rev": 1, "overrides": {"title": "Mine"}}')`, lib)
-	mustExec(t, pool, "INSERT INTO metadata_links (library_id, uri, provider, state) VALUES ($1, 'comic/gone', 'fake', 'ignored')", lib)
-	// Neither holds a decision, so neither is listed.
-	mustExec(t, pool, `INSERT INTO content_metadata (uri, library_id, data_raw) VALUES ('comic/file-only', $1, '{"v": 2, "file": {"title": "x"}}')`, lib)
-	mustExec(t, pool, "INSERT INTO metadata_links (library_id, uri, provider, state) VALUES ($1, 'comic/pending', 'fake', 'review')", lib)
-
-	summary := c.Get("/api/content/orphaned-metadata").Assert(t, 200).JSONArray()
-	if len(summary) != 1 || summary[0]["library_id"] != lib || summary[0]["count"] != 1.0 {
-		t.Fatalf("summary = %v", summary)
-	}
-	list := c.Get(base).Assert(t, 200).JSON()
-	assertEq(t, s(list["data"]), "[map[links:[map[external_id:<nil> provider:fake rejected:[] state:ignored]] overrides:[title] title:<nil> uri:comic/gone]]")
-	assertEq(t, list["total"], any(1.0))
-
-	member, _ := newMemberClient(t, c)
-	member.Get(base).Assert(t, 403)
-	c.Post(base, map[string]any{"move": map[string]string{"comic/gone": "comic/missing"}}).Assert(t, 400)
-	c.Post(base, map[string]any{"move": map[string]string{"comic/gone": uri}}).Assert(t, 409)
-	if v := c.Get("/api/metadata/content/"+id).Assert(t, 200).JSON(); v["merged"].(map[string]any)["title"] != "Theirs" || len(v["links"].([]any)) != 1 ||
-		v["links"].([]any)[0].(map[string]any)["state"] != "none" {
-		t.Fatalf("destination = %v, want it untouched", v)
-	}
-	assertEq(t, c.Get(base).Assert(t, 200).JSON()["total"], any(1.0))
-
-	c.Post(base, map[string]any{"delete": []string{"comic/gone"}}).Assert(t, 200)
-	assertEq(t, len(c.Get("/api/content/orphaned-metadata").Assert(t, 200).JSONArray()), 0)
-
-	// A kept link on a leaf, whose series has one already, is an orphan too.
-	mustExec(t, pool, `INSERT INTO content (id, uri_part, uri, type, library_id, parent_id)
-		VALUES ('leaf', 'ch1', $1 || '/ch1', 'comic', $2, $3)`, uri, lib, id)
-	mustExec(t, pool, `INSERT INTO metadata_links (library_id, uri, provider, state) VALUES
-		($1, $2, 'fake', 'ignored'), ($1, $2 || '/ch1', 'fake', 'ignored')`, lib, uri)
-	list = c.Get(base).Assert(t, 200).JSON()
-	assertEq(t, s(list["data"]), "[map[links:[map[external_id:<nil> provider:fake rejected:[] state:ignored]] overrides:[] title:<nil> uri:"+uri+"/ch1]]")
-}
-
-func TestOrphanTargets(t *testing.T) {
-	pool := newTestPool(t)
-	c := newAdminClient(t, pool)
-	id := newTestSeries(t, c)
-	lib := contentLibrary(t, pool, id)
-	uri := "file:///lib/" + id
-	c.Post("/api/metadata/content/"+id+"/overrides", map[string]any{"rev": 0, "fields": map[string]any{"title": "Theirs"}}).Assert(t, 200)
-	mustExec(t, pool, `INSERT INTO content (id, uri_part, uri, type, library_id, parent_id)
-		VALUES ('leaf', 'ch1', $1 || '/ch1', 'comic', $2, $3)`, uri, lib, id)
-	// Sorts first, and matches the searches below by prefix.
-	other := "file:///a/" + id
-	mustExec(t, pool, `INSERT INTO content (id, uri_part, uri, type, library_id) VALUES ('other', 'a', $1, 'comic_series', $2)`, other+"x", lib)
-	mustExec(t, pool, `INSERT INTO content_metadata (uri, library_id, data) VALUES ($1, $2, '{"title": "Theirs Again"}')`, other+"x", lib)
-	targets := func(query string) string {
-		return s(c.Get("/api/content/orphaned-metadata/"+lib+"/targets?"+query).Assert(t, 200).JSON()["data"])
-	}
-	theirs, again := "map[title:Theirs uri:"+uri+"]", "map[title:Theirs Again uri:"+other+"x]"
-	for query, want := range map[string]string{
-		"":                                       "[" + again + " " + theirs + " map[title:<nil> uri:" + uri + "/ch1]]",
-		"limit=1":                                "[" + again + "]",
-		"series=true":                            "[" + again + " " + theirs + "]",
-		"q=their":                                "[" + again + " " + theirs + "]",
-		"q=nothing":                              "[]",
-		"q=THEIRS&limit=1":                       "[" + theirs + "]", // an exact title first
-		"q=local&limit=1":                        "[" + theirs + "]", // its own title too
-		"q=" + url.QueryEscape(uri) + "&limit=1": "[" + theirs + "]", // an exact URI first
-	} {
-		if got := targets(query); got != want {
-			t.Errorf("%q: got %s, want %s", query, got, want)
-		}
-	}
-	c.Get("/api/content/orphaned-metadata/"+lib+"/targets?limit=500").Assert(t, 400)
-	member, _ := newMemberClient(t, c)
-	member.Get("/api/content/orphaned-metadata/"+lib+"/targets").Assert(t, 403)
 }
 
 func TestMetadataReview(t *testing.T) {

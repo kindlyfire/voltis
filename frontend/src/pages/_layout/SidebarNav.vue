@@ -160,13 +160,8 @@ const isAdmin = computed(() => qMe.data.value?.permissions.includes('ADMIN'))
 const { canLogout, logout, mutation: mLogout } = useLogout()
 
 const qBrokenRefs = contentApi.useBrokenRefsSummary({ enabled: () => isSettings.value })
-const qOrphans = contentApi.useOrphansSummary({
-    enabled: () => isSettings.value && !!isAdmin.value,
-})
 // Refs whose library was deleted can't be fixed on the page, which leaves them out.
-const hasBrokenRefs = computed(
-    () => !!qBrokenRefs.data.value?.some(s => s.library_id) || !!qOrphans.data.value?.length
-)
+const hasBrokenRefs = computed(() => !!qBrokenRefs.data.value?.some(s => s.library_id))
 
 const qSummary = metadataApi.useSummary({ enabled: () => isSettings.value && !!isAdmin.value })
 const reviewCount = computed(() => qSummary.data.value?.libraries.reduce((n, s) => n + s.review, 0))

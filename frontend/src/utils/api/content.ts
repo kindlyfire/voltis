@@ -1,4 +1,4 @@
-import { keepPreviousData, useMutation, useQuery, type Query } from '@tanstack/vue-query'
+import { useMutation, useQuery, type Query } from '@tanstack/vue-query'
 import { promiseTimeout } from '@vueuse/core'
 import { computed, toValue, type MaybeRefOrGetter } from 'vue'
 import { API_URL, apiFetch } from '../fetch'
@@ -17,10 +17,6 @@ import type {
     Cover,
     DownloadInfo,
     LibraryUrisResponse,
-    OrphanedMetadata,
-    OrphanTarget,
-    OrphansFixRequest,
-    OrphansSummaryItem,
     Paginated,
     ReadingStatus,
     RecentlyReadEntry,
@@ -304,54 +300,6 @@ export const contentApi = {
 
     fixBrokenRefs: async (libraryId: string, body: BrokenRefsFixRequest): Promise<void> => {
         await apiFetch(`/content/broken-refs/${libraryId}`, {
-            method: 'POST',
-            body: JSON.stringify(body),
-        })
-    },
-
-    useOrphansSummary: (options: QueryOptions<OrphansSummaryItem[]> = {}) =>
-        useQuery({
-            queryKey: ['content', 'orphaned-metadata-summary'],
-            queryFn: async () => apiFetch<OrphansSummaryItem[]>('/content/orphaned-metadata'),
-            ...options,
-        }),
-
-    useOrphans: (
-        libraryId: MaybeRefOrGetter<string | undefined | null>,
-        params: MaybeRefOrGetter<PageParams> = {}
-    ) =>
-        useQuery({
-            queryKey: ['content', 'orphaned-metadata', libraryScope(libraryId), params],
-            queryFn: async () =>
-                apiFetch<Paginated<OrphanedMetadata>>(
-                    `/content/orphaned-metadata/${toValue(libraryId)}${pageQuery(toValue(params))}`
-                ),
-            enabled: isEnabled(libraryId),
-        }),
-
-    /** Content that orphans can move to: series only for orphans with links. */
-    useOrphanTargets: (
-        libraryId: MaybeRefOrGetter<string>,
-        params: MaybeRefOrGetter<{ search: string; series: boolean }>
-    ) =>
-        useQuery({
-            queryKey: ['content', 'orphaned-metadata', libraryScope(libraryId), 'targets', params],
-            queryFn: async () => {
-                const { search, series } = toValue(params)
-                const query = new URLSearchParams({
-                    q: search,
-                    series: String(series),
-                    limit: '50',
-                })
-                return apiFetch<{ data: OrphanTarget[] }>(
-                    `/content/orphaned-metadata/${toValue(libraryId)}/targets?${query}`
-                )
-            },
-            placeholderData: keepPreviousData,
-        }),
-
-    fixOrphans: async (libraryId: string, body: OrphansFixRequest): Promise<void> => {
-        await apiFetch(`/content/orphaned-metadata/${libraryId}`, {
             method: 'POST',
             body: JSON.stringify(body),
         })

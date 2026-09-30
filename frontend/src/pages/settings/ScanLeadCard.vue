@@ -28,6 +28,12 @@
             </template>
         </div>
         <p class="text-xs leading-snug font-medium">{{ caption }}</p>
+        <!-- The scan log below the strip has the full message. -->
+        <ATooltip v-if="suppressed" :text="suppressed">
+            <p tabindex="0" class="a-focus text-warning self-start text-xs leading-snug">
+                Nothing removed
+            </p>
+        </ATooltip>
     </div>
 </template>
 
@@ -37,6 +43,7 @@ import type { ScanLead } from '@/stores/scans'
 import AIcon from '@/ui/AIcon.vue'
 import AProgressBar from '@/ui/AProgressBar.vue'
 import ASpinner from '@/ui/ASpinner.vue'
+import ATooltip from '@/ui/ATooltip.vue'
 import { IconAlertCircle, IconCheck } from '@/ui/icons'
 import ScanCounts from './ScanCounts.vue'
 
@@ -59,6 +66,10 @@ const outcomes: Record<Done['outcome'], string> = {
     failed: 'Failed',
     cancelled: 'Cancelled',
 }
+
+const suppressed = computed(() =>
+    props.lead.state === 'done' ? props.lead.removalsSuppressed : undefined
+)
 
 const caption = computed(() => {
     const lead = props.lead

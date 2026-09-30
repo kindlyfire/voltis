@@ -138,7 +138,9 @@ func TestScanPipelineRemovesDescendantsOfADirectoryReplacedByAFile(t *testing.T)
 			must(t, os.RemoveAll(dir))
 			writeFile(t, dir, "no longer a directory")
 
-			if r := p.mustScan(ScanInput{}); r.Removed != 1 {
+			// The emptied root would trip the removal guard.
+			in := ScanInput{Settings: models.LibrarySettings{AlwaysRemoveMissing: true}}
+			if r := p.mustScan(in); r.Removed != 1 {
 				t.Fatalf("rescan = %+v, want the orphaned chapter removed", r)
 			}
 			assertCatalog(t, p.pool, p.lib, nil)

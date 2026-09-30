@@ -65,8 +65,8 @@ func (e *env) series(lib, id, title string) {
 		ON CONFLICT DO NOTHING`, lib)
 	e.exec(`INSERT INTO content (id, uri_part, uri, type, library_id) VALUES ($1, $1, 'comic/' || $1, 'comic_series', $2)`, id, lib)
 	e.tx(func(tx pgx.Tx) error {
-		return e.svc.store.WriteFileLayers(context.Background(), tx, lib,
-			[]metadata.FileLayer{{URI: "comic/" + id, Fields: metadata.Fields{Title: metadata.Val(title)}}}, time.Now())
+		return e.svc.store.WriteFileLayers(context.Background(), tx,
+			[]metadata.FileLayer{{ContentID: id, Fields: metadata.Fields{Title: metadata.Val(title)}}}, time.Now())
 	})
 }
 
@@ -102,7 +102,7 @@ func (e *env) view(contentID string) MetadataView {
 
 func (e *env) link(contentID string) Link {
 	e.t.Helper()
-	l, err := readLink(context.Background(), e.pool, "l1", "comic/"+contentID, "fake")
+	l, err := readLink(context.Background(), e.pool, metadata.Target{ContentID: contentID, LibraryID: "l1"}, "fake")
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -278,7 +278,7 @@ func TestRefreshFetchesTheCanonicalEntry(t *testing.T) {
 	if err := e.svc.Refresh(ctx, "s", "fake"); err != nil {
 		t.Fatal(err)
 	}
-	stored, err := db.SelectScalar[string](ctx, e.pool, "SELECT data->>'title' FROM content_metadata WHERE uri = 'comic/s'")
+	stored, err := db.SelectScalar[string](ctx, e.pool, "SELECT data->>'title' FROM content WHERE id = 's'")
 	if title := e.view("s").Merged.Title.V; title != "Updated Two" || stored != "Updated Two" || err != nil {
 		t.Fatalf("title = %q, stored %q (%v)", title, stored, err)
 	}
@@ -357,8 +357,8 @@ func TestMergesResolveOnRead(t *testing.T) {
 	e.series("l1", "s", "Local")
 	e.publish(found("A", "Old", now.Add(-time.Hour)))
 	cands, _ := json.Marshal([]Candidate{{EntrySummary: EntrySummary{Key: metadata.EntryKey{Provider: "fake", ID: "A"}}}})
-	e.exec(`INSERT INTO metadata_links (library_id, uri, provider, state, candidates, rejected)
-		VALUES ('l1', 'comic/s', 'fake', 'review', $1, '{A,B}')`, cands)
+	e.exec(`INSERT INTO metadata_links (library_id, content_id, provider, state, candidates, rejected)
+		VALUES ('l1', 's', 'fake', 'review', $1, '{A,B}')`, cands)
 
 	e.publish(merged("A", "C", now))
 	if l := e.link("s"); !slices.Equal(l.Rejected, []string{"A", "B"}) || l.Candidates[0].Key.ID != "A" || l.Rev != 1 {
@@ -385,7 +385,7 @@ func TestAliasesResolveAlike(t *testing.T) {
 	e.publish(merged("A", "B", now.Add(-2*time.Hour)), merged("E", "B", now.Add(-2*time.Hour)))
 	e.publish(merged("B", "C", now.Add(-time.Hour)))
 	e.publish(merged("F", "D", now.Add(-time.Hour)), merged("X", "D", now.Add(-time.Hour)))
-	e.exec(`INSERT INTO metadata_links (library_id, uri, provider, state, candidates) VALUES ('l1', 'comic/s', 'fake', 'review',
+	e.exec(`INSERT INTO metadata_links (library_id, content_id, provider, state, candidates) VALUES ('l1', 's', 'fake', 'review',
 		'[{"key": {"provider": "fake", "id": "A"}}, {"key": {"provider": "fake", "id": "E"}}]')`)
 
 	e.publish(merged("B", "X", now))
@@ -419,8 +419,8 @@ func TestPublishResolvesAnOlderMergeThroughTheNewer(t *testing.T) {
 	now := time.Now()
 	e.series("l1", "s", "Local")
 	e.publish(found("A", "Old", now.Add(-time.Hour)))
-	e.exec(`INSERT INTO metadata_links (library_id, uri, provider, state, external_id, origin)
-		VALUES ('l1', 'comic/s', 'fake', 'linked', 'A', 'manual')`)
+	e.exec(`INSERT INTO metadata_links (library_id, content_id, provider, state, external_id, origin)
+		VALUES ('l1', 's', 'fake', 'linked', 'A', 'manual')`)
 
 	e.publish(merged("A", "C", now))
 	if final := e.publish(merged("A", "B", now.Add(-time.Minute))); final != "C" {
@@ -438,12 +438,12 @@ func TestPublishRecomputesAnOlderMergesSnapshot(t *testing.T) {
 	now := time.Now()
 	e.series("l1", "s", "Local")
 	e.publish(found("B", "Old B", now.Add(-time.Hour)))
-	e.exec(`INSERT INTO metadata_links (library_id, uri, provider, state, external_id, origin)
-		VALUES ('l1', 'comic/s', 'fake', 'linked', 'B', 'manual')`)
+	e.exec(`INSERT INTO metadata_links (library_id, content_id, provider, state, external_id, origin)
+		VALUES ('l1', 's', 'fake', 'linked', 'B', 'manual')`)
 	e.publish(merged("A", "C", now))
 	e.publish(merged("A", "B", now.Add(-time.Minute)))
 	stored, err := db.SelectScalar[string](context.Background(), e.pool,
-		"SELECT data->>'title' FROM content_metadata WHERE library_id = 'l1' AND uri = 'comic/s'")
+		"SELECT data->>'title' FROM content WHERE id = 's'")
 	if err != nil || stored != "Title B" {
 		t.Fatalf("stored title = %q (%v)", stored, err)
 	}
@@ -454,7 +454,7 @@ func TestBuildQuery(t *testing.T) {
 	e.series("l1", "s", "Foo")
 	e.exec("UPDATE content SET file_uri = '/lib/Foo (2019)' WHERE id = 's'")
 	e.tx(func(tx pgx.Tx) error {
-		return e.svc.store.WriteFileLayers(context.Background(), tx, "l1", []metadata.FileLayer{{URI: "comic/s",
+		return e.svc.store.WriteFileLayers(context.Background(), tx, []metadata.FileLayer{{ContentID: "s",
 			Fields: metadata.Fields{Title: metadata.Val("Foo Alt"), AltTitles: metadata.Val([]string{"Foo"})}}}, time.Now())
 	})
 	for i, child := range []metadata.Fields{
@@ -467,8 +467,8 @@ func TestBuildQuery(t *testing.T) {
 		e.exec(`INSERT INTO content (id, uri_part, uri, type, library_id, parent_id, "order")
 			VALUES ($1, $1, 'comic/s/' || $1, 'comic', 'l1', 's', $2)`, id, i)
 		e.tx(func(tx pgx.Tx) error {
-			return e.svc.store.WriteFileLayers(context.Background(), tx, "l1",
-				[]metadata.FileLayer{{URI: "comic/s/" + id, Fields: child}}, time.Now())
+			return e.svc.store.WriteFileLayers(context.Background(), tx,
+				[]metadata.FileLayer{{ContentID: id, Fields: child}}, time.Now())
 		})
 	}
 	e.tx(func(tx pgx.Tx) error {

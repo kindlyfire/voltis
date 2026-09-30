@@ -248,8 +248,6 @@ func metadataError(err error) error {
 		return echo.NewHTTPError(http.StatusConflict, "Can no longer undo; it expired or changed since")
 	case errors.Is(err, metadata.ErrConflict):
 		return echo.NewHTTPError(http.StatusConflict, "Changed since it was loaded; reload and try again")
-	case errors.Is(err, metadata.ErrOccupied):
-		return echo.NewHTTPError(http.StatusConflict, err.Error())
 	}
 	if ve, ok := errors.AsType[*metadata.ValidationError](err); ok {
 		return echo.NewHTTPError(http.StatusBadRequest, ve.Error())

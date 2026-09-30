@@ -85,7 +85,8 @@ const (
 
 type LibrarySettings struct {
 	BookSeriesInference string   `json:"book_series_inference"`
-	AutoMatch           Switches `json:"auto_match"` // match series with each provider unattended; a missing one is off
+	AutoMatch           Switches `json:"auto_match"`            // match series with each provider unattended; a missing one is off
+	AlwaysRemoveMissing bool     `json:"always_remove_missing"` // turns off the scanner's removal guard
 }
 
 // SourceSettings overlay a library's settings for the files under a source: a missing key inherits.
@@ -191,13 +192,17 @@ type Content struct {
 	PageCount  *int       `db:"page_count" json:"page_count"`
 }
 
-type ContentMetadata struct {
-	URI       string    `db:"uri"`
-	LibraryID string    `db:"library_id"`
-	Data      JSONB     `db:"data"`
-	DataRaw   JSONB     `db:"data_raw"`
-	UpdatedAt time.Time `db:"updated_at"`
-	ID        string    `db:"id"`
+var contentColumns = []string{"id", "created_at", "updated_at", "uri_part", "uri", "valid", "file_uri",
+	"file_mtime", "file_size", "cover_uri", "type", `"order"`, "order_parts", "file_data", "parent_id",
+	"library_id", "word_count", "page_count"}
+
+// ContentColumns lists the columns Content reads, qualified by alias unless it is empty. The
+// table also holds the metadata, which strict row scans would reject.
+func ContentColumns(alias string) string {
+	if alias == "" {
+		return strings.Join(contentColumns, ", ")
+	}
+	return alias + "." + strings.Join(contentColumns, ", "+alias+".")
 }
 
 type UserToContent struct {

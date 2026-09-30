@@ -21,7 +21,7 @@ type undos struct {
 	now func() time.Time
 }
 
-type linkKey struct{ LibraryID, URI, Provider string }
+type linkKey struct{ ContentID, Provider string }
 
 // undo is a link before a decision, and the revision the decision saved.
 type undo struct {
@@ -87,7 +87,7 @@ func (s *Service) decide(ctx context.Context, o *op, t metadata.Target, provider
 	if err != nil {
 		return 0, err
 	}
-	o.decided[linkKey{t.LibraryID, t.URI, provider}] = d
+	o.decided[linkKey{t.ContentID, provider}] = d
 	return d.rev, nil
 }
 
@@ -108,24 +108,24 @@ func (s *Service) Undo(ctx context.Context, contentID, provider string, rev int6
 		if err != nil {
 			return err
 		}
-		k = linkKey{t.LibraryID, t.URI, provider}
+		k = linkKey{t.ContentID, provider}
 		var ok bool
 		if d, ok = s.undos.get(k, rev); !ok {
 			return ErrNoUndo
 		}
 		// MatchNow updates rows without the metadata lock.
-		l, err := db.SelectOne[Link](ctx, o.tx, "SELECT * FROM metadata_links WHERE library_id = $1 AND uri = $2 AND provider = $3 FOR UPDATE",
-			t.LibraryID, t.URI, provider)
+		l, err := db.SelectOne[Link](ctx, o.tx, "SELECT * FROM metadata_links WHERE content_id = $1 AND provider = $2 FOR UPDATE",
+			t.ContentID, provider)
 		if errors.Is(err, pgx.ErrNoRows) || err == nil && l.Rev != rev {
 			return ErrNoUndo
 		}
 		if err != nil {
 			return err
 		}
-		o.wrote(t.LibraryID, t.URI)
+		o.wrote(t.LibraryID, t.ContentID)
 		if d.prior.State == StateNone {
-			_, err := o.tx.Exec(ctx, "DELETE FROM metadata_links WHERE library_id = $1 AND uri = $2 AND provider = $3",
-				t.LibraryID, t.URI, provider)
+			_, err := o.tx.Exec(ctx, "DELETE FROM metadata_links WHERE content_id = $1 AND provider = $2",
+				t.ContentID, provider)
 			return err
 		}
 		p := d.prior

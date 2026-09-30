@@ -218,7 +218,7 @@ func isImage(data []byte) bool {
 // GC removes provider covers that no metadata references.
 func (c *Cache) GC(ctx context.Context, q db.Querier) error {
 	refs, err := db.SelectScalars[metadata.CoverRef](ctx, q,
-		"SELECT DISTINCT data->'cover' FROM content_metadata WHERE data ? 'cover'")
+		"SELECT DISTINCT data->'cover' FROM content WHERE data ? 'cover'")
 	if err != nil {
 		return err
 	}

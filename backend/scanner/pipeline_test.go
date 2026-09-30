@@ -363,7 +363,7 @@ func TestScanConcurrencyProducesStableCatalog(t *testing.T) {
 	}
 
 	rows, err := db.Select[models.Content](context.Background(), p.pool,
-		"SELECT * FROM content WHERE library_id = $1", p.lib)
+		"SELECT "+models.ContentColumns("")+" FROM content WHERE library_id = $1", p.lib)
 	must(t, err)
 	if len(rows) != 18 {
 		t.Fatalf("rows = %d, want 18", len(rows))
@@ -849,9 +849,7 @@ func TestScanAfterMigration009RebuildsMetadata(t *testing.T) {
 			rows := func() []string {
 				t.Helper()
 				got, err := db.SelectScalars[string](context.Background(), p.pool, `
-					SELECT c.uri || ' ' || coalesce(m.data_raw::text || ' ' || m.data::text, 'no metadata')
-					FROM content c LEFT JOIN content_metadata m ON m.library_id = c.library_id AND m.uri = c.uri
-					ORDER BY c.uri`)
+					SELECT uri || ' ' || data_raw::text || ' ' || data::text FROM content ORDER BY uri`)
 				must(t, err)
 				return got
 			}
@@ -859,7 +857,7 @@ func TestScanAfterMigration009RebuildsMetadata(t *testing.T) {
 			first := p.mustScan(in)
 			want := rows()
 
-			exec(t, p.pool, "TRUNCATE content_metadata")
+			exec(t, p.pool, "UPDATE content SET data_raw = '{}', data = '{}'")
 			exec(t, p.pool, "UPDATE content SET file_mtime = NULL WHERE type IN ('comic', 'book')")
 			if got := p.mustScan(in); got.Updated != first.Added || got.Unchanged != 0 {
 				t.Fatalf("rescan = %+v, want all %d files read again", got, first.Added)
@@ -868,30 +866,5 @@ func TestScanAfterMigration009RebuildsMetadata(t *testing.T) {
 				t.Fatalf("rebuilt rows:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 			}
 		})
-	}
-}
-
-// An ignored link outlives its book series; a standalone book taking the URI carries it along when
-// it joins another series, and the final commit moves it up to that series.
-func TestScanMovesALeafLinkUpToItsSeries(t *testing.T) {
-	p := newPipeline(t, "books")
-	in := ScanInput{LibraryType: "books"}
-	old, foo := filepath.Join(p.root, "Old.epub"), filepath.Join(p.root, "Foo.epub")
-	writeEPUBFixture(t, old, "Old", "Foo", "1")
-	p.mustScan(in)
-	exec(t, p.pool, "INSERT INTO metadata_links (library_id, uri, provider, state) VALUES ($1, 'book/Foo', 'p', 'ignored')", p.lib)
-	must(t, os.Remove(old))
-	p.mustScan(in)
-	writeEPUBFixture(t, foo, "Foo", "", "")
-	p.mustScan(in)
-	assertCatalog(t, p.pool, p.lib, []string{"book/Foo"})
-
-	writeEPUBFixture(t, foo, "Foo", "Bar", "1")
-	must(t, os.Chtimes(foo, time.Now(), time.Now().Add(time.Hour)))
-	p.mustScan(in)
-	assertCatalog(t, p.pool, p.lib, []string{"book/Bar", "book/Bar/Foo"})
-	links, err := db.SelectScalars[string](context.Background(), p.pool, "SELECT uri || ' ' || state FROM metadata_links")
-	if must(t, err); !slices.Equal(links, []string{"book/Bar ignored"}) {
-		t.Fatalf("links = %v", links)
 	}
 }

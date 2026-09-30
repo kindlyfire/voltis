@@ -137,26 +137,36 @@ describe('scanRow', () => {
         },
         {
             name: 'counts a finished run that is not terminal yet from its saved progress',
-            over: { progress: { ...progress, phase: 'done', saved } },
-            want: { state: 'done', outcome: 'completed', counts: saved },
+            over: { progress: { ...progress, phase: 'done', saved, removals_suppressed: 'p' } },
+            want: { state: 'done', outcome: 'completed', counts: saved, removalsSuppressed: 'p' },
         },
         {
-            name: 'uses the terminal output counts',
-            over: { status: 2, progress: { ...progress, saved }, output },
-            want: { state: 'done', outcome: 'completed', counts: output },
+            name: 'uses the terminal output counts and reason',
+            over: {
+                status: 2,
+                progress: { ...progress, saved, removals_suppressed: 'p' },
+                output: { ...output, removals_suppressed: 'o' },
+            },
+            want: {
+                state: 'done',
+                outcome: 'completed',
+                counts: { ...output, removals_suppressed: 'o' },
+                removalsSuppressed: 'o',
+            },
         },
         {
-            name: 'keeps the counts a failed scan committed',
-            over: { status: 3, progress: { ...progress, saved } },
-            want: { state: 'done', outcome: 'failed', counts: saved },
+            name: 'keeps the counts and reason a failed scan published',
+            over: { status: 3, progress: { ...progress, saved, removals_suppressed: 'p' } },
+            want: { state: 'done', outcome: 'failed', counts: saved, removalsSuppressed: 'p' },
         },
         {
             name: 'reports a cancelled scan',
-            over: { status: 4, progress: null },
+            over: { status: 4, progress: { ...progress, removals_suppressed: 'p' } },
             want: {
                 state: 'done',
                 outcome: 'cancelled',
                 counts: { added: 0, updated: 0, removed: 0 },
+                removalsSuppressed: 'p',
             },
         },
     ] as { name: string; over: Partial<TaskSnapshot>; want: ScanLead }[])(

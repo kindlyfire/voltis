@@ -26,7 +26,12 @@ export type ScanLead =
     | { state: 'walking'; found: number }
     | { state: 'parsing'; processed: number; total: number }
     | { state: 'saving' }
-    | { state: 'done'; outcome: 'completed' | 'failed' | 'cancelled'; counts: ScanCounts }
+    | {
+          state: 'done'
+          outcome: 'completed' | 'failed' | 'cancelled'
+          counts: ScanCounts
+          removalsSuppressed?: string
+      }
 
 export interface ScanRow {
     id: string
@@ -41,13 +46,20 @@ function scanLead(task: TaskSnapshot): ScanLead {
     const progress = task.progress
     // A failed or cancelled scan still keeps what its earlier flushes committed.
     const saved = progress?.saved ?? noCounts
+    // Failed and cancelled scans have no output, but published the reason with their progress.
+    const output = hasOutput(task.output) ? task.output : undefined
+    const removalsSuppressed = output?.removals_suppressed ?? progress?.removals_suppressed
     if (isTerminal(task)) {
         if (task.status === TaskStatus.COMPLETED) {
-            const counts = hasOutput(task.output) ? task.output : saved
-            return { state: 'done', outcome: 'completed', counts }
+            return {
+                state: 'done',
+                outcome: 'completed',
+                counts: output ?? saved,
+                removalsSuppressed,
+            }
         }
         const outcome = task.status === TaskStatus.CANCELLED ? 'cancelled' : 'failed'
-        return { state: 'done', outcome, counts: saved }
+        return { state: 'done', outcome, counts: saved, removalsSuppressed }
     }
     if (task.status === TaskStatus.PENDING || !progress) return { state: 'queued' }
     switch (progress.phase) {
@@ -58,7 +70,7 @@ function scanLead(task: TaskSnapshot): ScanLead {
         case 'saving':
             return { state: 'saving' }
         case 'done':
-            return { state: 'done', outcome: 'completed', counts: saved }
+            return { state: 'done', outcome: 'completed', counts: saved, removalsSuppressed }
     }
 }
 

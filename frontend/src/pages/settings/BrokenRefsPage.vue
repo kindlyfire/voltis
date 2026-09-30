@@ -93,7 +93,7 @@
                             <td class="min-w-48 py-2">
                                 <code
                                     class="text-[13px] [overflow-wrap:anywhere]"
-                                    :class="{ 'line-through': edits.get(item.id) === 'delete' }"
+                                    :class="{ 'line-through': edits.get(item.id) === null }"
                                     >{{ item.uri }}</code
                                 >
                             </td>
@@ -117,7 +117,7 @@
                                         placeholder="Replace with…"
                                         size="sm"
                                         clearable
-                                        :disabled="edits.get(item.id) === 'delete'"
+                                        :disabled="edits.get(item.id) === null"
                                         :hint="actionHint(item.id)"
                                         hint-tone="warning"
                                         class="min-w-64 flex-1"
@@ -129,7 +129,7 @@
                                         :icon="IconDelete"
                                         :label="`Delete the data for ${item.uri}`"
                                         size="sm"
-                                        :pressed="edits.get(item.id) === 'delete'"
+                                        :pressed="edits.get(item.id) === null"
                                         class="mt-1"
                                         @click="toggleDelete(item.id)"
                                     />
@@ -146,15 +146,14 @@
                 </footer>
             </ACard>
         </template>
-
-        <OrphanedMetadataSection v-if="isAdmin" />
     </div>
 </template>
 
 <script setup lang="ts">
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import { useHead } from '@unhead/vue'
-import { computed, nextTick, useTemplateRef } from 'vue'
+import { refDebounced } from '@vueuse/core'
+import { computed, nextTick, reactive, ref, useTemplateRef, watch } from 'vue'
 import QueryError from '@/components/QueryError.vue'
 import AButton from '@/ui/AButton.vue'
 import ACard from '@/ui/ACard.vue'
@@ -171,13 +170,11 @@ import ATextField from '@/ui/ATextField.vue'
 import { IconChevronDown, IconDelete, IconEye, IconMagnify, IconRestart } from '@/ui/icons'
 import { useToast } from '@/ui/useToast'
 import { contentApi } from '@/utils/api/content'
+import { librariesApi } from '@/utils/api/libraries'
 import { READING_STATUS_LABELS } from '@/utils/api/types'
 import type { BrokenUserToContent } from '@/utils/api/types'
-import { usersApi } from '@/utils/api/users'
 import { plural } from '@/utils/misc'
 import { showBrokenRefDetailModal } from './BrokenRefDetailModal.vue'
-import OrphanedMetadataSection from './OrphanedMetadataSection.vue'
-import { useRepairTable } from './useRepairTable'
 
 useHead({ title: 'Broken references' })
 
@@ -185,23 +182,76 @@ const queryClient = useQueryClient()
 const toast = useToast()
 const emptyHeading = useTemplateRef('emptyHeading')
 const qSummary = contentApi.useBrokenRefsSummary()
-const qMe = usersApi.useMe()
-const isAdmin = computed(() => qMe.data.value?.permissions.includes('ADMIN'))
+const qLibraries = librariesApi.useList()
 
-const {
-    selectedLibraryId,
+const PAGE_SIZE = 50
+const selectedLibraryId = ref<string | null>(null)
+const searchInput = ref('')
+const search = refDebounced(searchInput, 300)
+const page = ref(1)
+// Each edited ref id points at a content URI, or at null to delete it.
+const edits = reactive(new Map<string, string | null>())
+
+const libraryOptions = computed(() =>
+    // Refs whose library was deleted have no library to fix them in.
+    (qSummary.data.value ?? []).flatMap(s => {
+        if (!s.library_id) return []
+        const lib = qLibraries.data.value?.find(l => l.id === s.library_id)
+        return [{ value: s.library_id, label: `${lib?.name ?? s.library_id} (${s.count})` }]
+    })
+)
+
+watch(
     libraryOptions,
-    searchInput,
-    search,
-    page,
-    pageCount,
-    query: qBrokenRefs,
-    edits,
-    target,
-    setTarget,
-    toggleDelete,
-    changes,
-} = useRepairTable(() => qSummary.data.value, contentApi.useBrokenRefs)
+    options => {
+        if (!options.some(o => o.value === selectedLibraryId.value)) {
+            selectedLibraryId.value = options[0]?.value ?? null
+        }
+    },
+    { immediate: true }
+)
+
+const qBrokenRefs = contentApi.useBrokenRefs(selectedLibraryId, () => ({
+    search: search.value || undefined,
+    limit: PAGE_SIZE,
+    offset: (page.value - 1) * PAGE_SIZE,
+}))
+const pageCount = computed(() => Math.ceil((qBrokenRefs.data.value?.total ?? 0) / PAGE_SIZE))
+
+// Saving can shrink the list below the current page, also when the pagination isn't rendered.
+watch(
+    () => qBrokenRefs.data.value?.total,
+    total => {
+        if (total == null) return
+        page.value = Math.min(page.value, Math.max(1, Math.ceil(total / PAGE_SIZE)))
+    }
+)
+
+watch([selectedLibraryId, search], () => {
+    edits.clear()
+    page.value = 1
+})
+
+function target(id: string): string | null {
+    return edits.get(id) ?? null
+}
+
+function setTarget(id: string, uri: string | undefined) {
+    if (uri) {
+        edits.set(id, uri)
+    } else {
+        edits.delete(id)
+    }
+}
+
+function toggleDelete(id: string) {
+    if (edits.get(id) === null) {
+        edits.delete(id)
+    } else {
+        edits.set(id, null)
+    }
+}
+
 const qUris = contentApi.useLibraryUris(selectedLibraryId)
 const contentUris = computed(() => qUris.data.value?.content_uris ?? [])
 const userUriSet = computed(() => new Set(qUris.data.value?.user_uris ?? []))
@@ -209,19 +259,19 @@ const items = computed(() => qBrokenRefs.data.value?.data ?? [])
 
 function markAllDelete() {
     for (const item of items.value) {
-        edits.set(item.id, 'delete')
+        edits.set(item.id, null)
     }
 }
 
 function unmarkAllDeletes() {
     for (const [id, value] of [...edits]) {
-        if (value === 'delete') edits.delete(id)
+        if (value === null) edits.delete(id)
     }
 }
 
 // Shown under the field, not in a tooltip, so touch users see it too.
 function actionHint(id: string) {
-    if (edits.get(id) === 'delete') return 'Saving deletes this data.'
+    if (edits.get(id) === null) return 'Saving deletes this data.'
     const edit = target(id)
     if (edit && userUriSet.value.has(edit)) {
         return 'This ref already has user data. Saving replaces it with this older entry.'
@@ -231,11 +281,16 @@ function actionHint(id: string) {
 const mSave = useMutation({
     mutationFn: async () => {
         if (!selectedLibraryId.value) return
-        const { deletes, targets } = changes()
-        await contentApi.fixBrokenRefs(selectedLibraryId.value, {
-            delete: deletes,
-            update: targets,
-        })
+        const deletes: string[] = []
+        const update: Record<string, string> = {}
+        for (const [id, value] of edits) {
+            if (value === null) {
+                deletes.push(id)
+            } else {
+                update[id] = value
+            }
+        }
+        await contentApi.fixBrokenRefs(selectedLibraryId.value, { delete: deletes, update })
     },
     onSuccess: async () => {
         toast.show({ message: `Saved ${plural(edits.size, 'change', 'changes')}` })

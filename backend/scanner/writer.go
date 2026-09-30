@@ -3,8 +3,10 @@ package scanner
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"log/slog"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -28,6 +30,20 @@ type committed struct {
 
 var FlushSpacing = 2 * time.Second
 
+// rootTally is what the removal guard knows about one walk root.
+type rootTally struct {
+	stored int
+	seen   int
+	failed bool
+	fresh  map[moveKey]int // new files; a key time.Time would also compare locations
+}
+
+type moveKey struct{ size, mtime int64 }
+
+func moveKeyOf(size int64, mtime time.Time) moveKey {
+	return moveKey{size, mtime.Truncate(time.Millisecond).UnixMilli()}
+}
+
 type writer struct {
 	in       ScanInput
 	tc       *tasks.TaskContext
@@ -47,6 +63,9 @@ type writer struct {
 	behind   map[string][]string
 	gone     map[string]bool
 	trust    bool
+	roots    []string // directory walk roots, resolved, longest first
+	tally    map[string]*rootTally
+	under    map[string]string // leaf ID → its walk root
 	queue    []FSFile
 	inflight int
 	sets     map[string]*SeriesChanges
@@ -76,17 +95,43 @@ func newWriter(in ScanInput, tc *tasks.TaskContext, notify Notifier, res *resolv
 		behind:  map[string][]string{},
 		gone:    map[string]bool{},
 		trust:   true,
+		tally:   map[string]*rootTally{},
+		under:   map[string]string{},
 		sets:    map[string]*SeriesChanges{},
 		prog:    Progress{Phase: "walking"},
 	}
+	// File roots can neither list empty nor lose most of their items, and would draw a content
+	// scan's children away from the series directory. Without the guard, no root is tallied.
+	paths := in.Sources
+	if len(in.FilterPaths) > 0 {
+		paths = in.FilterPaths
+	}
+	if in.Settings.AlwaysRemoveMissing {
+		paths = nil
+	}
+	for _, path := range paths {
+		if info, err := os.Stat(path); err != nil || !info.IsDir() {
+			continue
+		}
+		if key, ok := res.dir(path); ok && w.tally[key] == nil {
+			w.roots = append(w.roots, key)
+			w.tally[key] = &rootTally{fresh: map[moveKey]int{}}
+		}
+	}
+	slices.SortFunc(w.roots, func(a, b string) int { return cmp.Compare(len(b), len(a)) })
 	for _, f := range fps {
 		w.byID[f.ID] = f
 		w.keys[Key{deref(f.ParentID), f.URIPart}] = f.ID
-		if key, ok := res.file(f.Path); ok {
+		key, ok := res.file(f.Path)
+		if ok {
 			w.fps[key] = f
 			w.indexed[f.ID] = key
-		} else if at, ok := res.blocker(f.Path); ok {
-			w.behind[at] = append(w.behind[at], f.ID)
+		} else if key, ok = res.blocker(f.Path); ok {
+			w.behind[key] = append(w.behind[key], f.ID)
+		}
+		if root, found := w.rootOf(key); ok && found {
+			w.tally[root].stored++
+			w.under[f.ID] = root
 		}
 	}
 	w.cov = newCoverage(w.fps)
@@ -116,6 +161,10 @@ func (w *writer) run(ctx context.Context, events <-chan Event, walkDone <-chan e
 	}
 	if err := <-walkDone; err != nil {
 		return err
+	}
+	// Before seed, which would drop gone leaves from the series' directory picks.
+	if w.trust && !w.in.Settings.AlwaysRemoveMissing {
+		w.guard()
 	}
 	w.seed()
 
@@ -212,6 +261,12 @@ func (w *writer) event(ev Event) {
 	case Seen:
 		w.prog.Found++
 		old, exists := w.at(ev.File.Path)
+		if t := w.tallyOf(ev.File.Path); t != nil {
+			t.seen++
+			if !exists {
+				t.fresh[moveKeyOf(ev.File.Size, ev.File.Mtime)]++
+			}
+		}
 		if changed(ev.File, old, exists, w.in.Force) {
 			w.queue = append(w.queue, ev.File)
 			w.prog.Total++
@@ -219,6 +274,9 @@ func (w *writer) event(ev Event) {
 			w.prog.Unchanged++
 		}
 	case Failed:
+		if t := w.tallyOf(ev.Path); t != nil {
+			t.failed = true
+		}
 		slog.Warn("[scanner] failed to read path, retaining missing entries at or below it",
 			"path", ev.Path, "err", ev.Err, "library", w.in.LibraryID)
 		w.logf("Failed to read %s: %v; missing entries at or below it were retained\n", ev.Path, ev.Err)
@@ -275,6 +333,78 @@ func (w *writer) distrust(reason, path string) {
 	slog.Warn("[scanner] the filesystem changed under the scan, removals suppressed",
 		"reason", reason, "path", path, "library", w.in.LibraryID)
 	w.logf("The filesystem changed under the scan (%s, at %s); nothing was removed.\n", reason, path)
+}
+
+func (w *writer) rootOf(key string) (string, bool) {
+	for _, root := range w.roots {
+		if pathWithin(key, root) {
+			return root, true
+		}
+	}
+	return "", false
+}
+
+// tallyOf keys a walked path with res.file, which resolves only its parent: a failed directory
+// may not resolve itself.
+func (w *writer) tallyOf(path string) *rootTally {
+	key, ok := w.res.file(path)
+	if !ok {
+		return nil
+	}
+	root, ok := w.rootOf(key)
+	if !ok {
+		return nil
+	}
+	return w.tally[root]
+}
+
+// guard suppresses every removal when a root that lost items lists empty, as an unmounted drive
+// does, or would lose most of its items to more than moves within it.
+func (w *writer) guard() {
+	gone, missing := map[string]int{}, map[string]int{}
+	for id := range w.gone {
+		root, ok := w.under[id]
+		if !ok {
+			continue
+		}
+		gone[root]++
+		// A new file with the same size and mtime explains one gone leaf as a move.
+		if f := w.byID[id]; f.Size != nil && f.Mtime != nil {
+			if k := moveKeyOf(int64(*f.Size), *f.Mtime); w.tally[root].fresh[k] > 0 {
+				w.tally[root].fresh[k]--
+				continue
+			}
+		}
+		missing[root]++
+	}
+	for _, root := range w.roots {
+		if gone[root] == 0 {
+			continue
+		}
+		t, n := w.tally[root], missing[root]
+		var why string
+		switch {
+		case t.seen == 0 && !t.failed:
+			why = "lists no files"
+		case n*2 > t.stored && n >= 50:
+			why = "is missing most of its items"
+		default:
+			continue
+		}
+		w.suppress(fmt.Sprintf("%s %s (%d of %d items missing)", root, why, n, t.stored))
+		return
+	}
+}
+
+// suppress leaves trust alone: keep would also skip deleting series emptied by moves.
+func (w *writer) suppress(reason string) {
+	clear(w.gone)
+	w.prog.RemovalsSuppressed = reason
+	w.publish() // a scan cancelled from here on has no output to carry the reason
+	slog.Warn("[scanner] removals suppressed", "reason", reason, "library", w.in.LibraryID)
+	w.logf("Removals suppressed: %s. Nothing was removed. If this is intended, turn on "+
+		"'Remove missing items without checking' in the library settings and scan again; "+
+		"the setting applies to scans queued after saving.\n", reason)
 }
 
 func (w *writer) place(r Result) {

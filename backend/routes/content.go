@@ -163,9 +163,8 @@ const unfinishedChildren = `FROM content child
 	WHERE child.parent_id = c.id
 		AND (child_utc.status IS NULL OR child_utc.status NOT IN ('completed', 'dropped'))`
 
-// contentRowColumns selects a contentListRow from content c, user_to_content utc (for @user_id)
-// and content_metadata cm.
-const contentRowColumns = `c.*,
+// contentRowColumns selects a contentListRow from content c and user_to_content utc (for @user_id).
+var contentRowColumns = models.ContentColumns("c") + `,
 	(SELECT COUNT(*) FROM content child WHERE child.parent_id = c.id) AS children_count,
 	(SELECT COUNT(*) ` + unfinishedChildren + `) AS unread_children_count,
 	utc.id AS utc_id, utc.user_id AS utc_user_id, utc.library_id AS utc_library_id,
@@ -173,12 +172,12 @@ const contentRowColumns = `c.*,
 	utc.status_updated_at AS utc_status_updated_at, utc.notes AS utc_notes,
 	utc.rating AS utc_rating, utc.progress AS utc_progress,
 	utc.progress_updated_at AS utc_progress_updated_at,
-	cm.data AS meta_data, cm.updated_at AS meta_updated_at`
+	c.data AS meta_data, c.meta_updated_at`
 
 func selectContentRows(ctx context.Context, q db.Querier, userID string, ids []string) (map[string]contentListRow, error) {
 	rows, err := db.Select[contentListRow](ctx, q, `
 		SELECT `+contentRowColumns+`
-		FROM content c`+utcJoin+cmJoin+`
+		FROM content c`+utcJoin+`
 		WHERE c.id = ANY(@ids)
 	`, pgx.NamedArgs{"user_id": userID, "ids": ids})
 	if err != nil {
@@ -202,7 +201,7 @@ func (cr *ContentRoutes) get(c echo.Context) error {
 
 	r, err := db.SelectOne[contentListRow](ctx, cr.pool, `
 		SELECT `+contentRowColumns+`
-		FROM content c`+utcJoin+cmJoin+`
+		FROM content c`+utcJoin+`
 		WHERE c.id = @id
 	`, pgx.NamedArgs{"user_id": user.ID, "id": contentID})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -380,9 +379,6 @@ const (
 	utcJoin = `
 		LEFT JOIN user_to_content utc
 			ON utc.library_id = c.library_id AND utc.uri = c.uri AND utc.user_id = @user_id`
-	cmJoin = `
-		LEFT JOIN content_metadata cm
-			ON cm.uri = c.uri AND cm.library_id = c.library_id`
 	listJoin = `
 		JOIN custom_list_to_content clc ON clc.custom_list_id = @list_id
 			AND clc.library_id = c.library_id AND clc.uri = c.uri`
@@ -399,8 +395,8 @@ const (
 		) uc ON uc.parent_id = c.id`
 )
 
-// where appends the filter's conditions and args; needsUTC/needsCM say which joins it reads.
-func (f contentFilter) where(args pgx.NamedArgs) (cond string, needsUTC, needsCM bool) {
+// where appends the filter's conditions and args; needsUTC says whether it reads utc.
+func (f contentFilter) where(args pgx.NamedArgs) (cond string, needsUTC bool) {
 	args["valid"] = f.Valid == nil || *f.Valid
 	where := []string{"c.valid = @valid"}
 
@@ -440,16 +436,15 @@ func (f contentFilter) where(args pgx.NamedArgs) (cond string, needsUTC, needsCM
 	}
 	if f.Search != "" {
 		args["search"] = f.Search
-		where = append(where, metadata.Matches("cm", "search_text", false, f.Search))
-		needsCM = true
+		where = append(where, metadata.Matches("c", "search_text", false, f.Search))
 	}
-	return strings.Join(where, " AND "), needsUTC, needsCM
+	return strings.Join(where, " AND "), needsUTC
 }
 
 // from returns the FROM and WHERE clauses of a grid query, with the joins that the filter or the
-// caller (utc, cm, unread) reads.
-func (f contentFilter) from(args pgx.NamedArgs, utc, cm, unread bool) string {
-	cond, fUTC, fCM := f.where(args)
+// caller (utc, unread) reads.
+func (f contentFilter) from(args pgx.NamedArgs, utc, unread bool) string {
+	cond, fUTC := f.where(args)
 	from := "FROM content c"
 	if f.ListID != "" {
 		args["list_id"] = f.ListID
@@ -457,9 +452,6 @@ func (f contentFilter) from(args pgx.NamedArgs, utc, cm, unread bool) string {
 	}
 	if utc || fUTC {
 		from += utcJoin
-	}
-	if cm || fCM {
-		from += cmJoin
 	}
 	if unread {
 		lib := ""
@@ -481,19 +473,19 @@ func nullsOrder(dir string) string {
 
 // contentOrder returns the ORDER BY for a resolved sort (see contentListQuery.order), always
 // ending in c.id, and the joins it reads.
-func contentOrder(sort, dir string) (clause string, needsUTC, needsCM, needsUnread bool) {
+func contentOrder(sort, dir string) (clause string, needsUTC, needsUnread bool) {
 	col, nullable := "", true
 	switch sort {
 	case "":
-		return "paradedb.score(cm.id) DESC, c.id", false, true, false
+		return "paradedb.score(c.id) DESC, c.id", false, false
 	case "list":
-		return `(clc."order" IS NULL), clc."order", clc.created_at, c.id`, false, false, false
+		return `(clc."order" IS NULL), clc."order", clc.created_at, c.id`, false, false
 	case "title":
-		col, needsCM = "cm.sort_title", true
+		col = "c.sort_title"
 	case "rating":
-		col, needsCM = "cm.rating", true
+		col = "c.rating"
 	case "release_date":
-		col, needsCM = "cm.release_date", true
+		col = "c.release_date"
 	case "user_rating":
 		col, needsUTC = "utc.rating", true
 	case "progress_updated_at":
@@ -509,7 +501,7 @@ func contentOrder(sort, dir string) (clause string, needsUTC, needsCM, needsUnre
 	if nullable {
 		clause += " " + nullsOrder(dir)
 	}
-	return clause + ", c.id " + dir, needsUTC, needsCM, needsUnread
+	return clause + ", c.id " + dir, needsUTC, needsUnread
 }
 
 // listContentIDs sorts and paginates the filtered ids, reading only the joins the filter and the
@@ -518,8 +510,8 @@ func listContentIDs(ctx context.Context, q db.Querier, userID string, f contentF
 	sort, dir string, limit *int, offset int,
 ) ([]string, error) {
 	args := pgx.NamedArgs{"user_id": userID}
-	order, utc, cm, unread := contentOrder(sort, dir)
-	sql := "SELECT c.id " + f.from(args, utc, cm, unread) + " ORDER BY " + order
+	order, utc, unread := contentOrder(sort, dir)
+	sql := "SELECT c.id " + f.from(args, utc, unread) + " ORDER BY " + order
 	if limit != nil {
 		sql += fmt.Sprintf(" LIMIT %d", *limit)
 	}
@@ -531,7 +523,7 @@ func listContentIDs(ctx context.Context, q db.Querier, userID string, f contentF
 
 func countContent(ctx context.Context, q db.Querier, userID string, f contentFilter) (int, error) {
 	args := pgx.NamedArgs{"user_id": userID}
-	return db.SelectScalar[int](ctx, q, "SELECT COUNT(*) "+f.from(args, false, false, false), args)
+	return db.SelectScalar[int](ctx, q, "SELECT COUNT(*) "+f.from(args, false, false), args)
 }
 
 type contentPageResponse struct {
@@ -614,19 +606,19 @@ func (cr *ContentRoutes) ids(c echo.Context) error {
 // bucketKey groups a resolved sort's rows into rail segments. Each key is a prefix of the sort
 // key (or monotonic in it), so segments are contiguous in the list. It is "" for sorts without
 // segments.
-func bucketKey(sort string) (key string, needsUTC, needsCM bool) {
+func bucketKey(sort string) (key string, needsUTC bool) {
 	switch sort {
 	case "title":
 		// Rows without metadata sort next to '#'.
-		return "COALESCE(left(cm.sort_title, 1), '#')", false, true
+		return "COALESCE(left(c.sort_title, 1), '#')", false
 	case "created_at":
-		return "to_char(c.created_at AT TIME ZONE 'UTC', 'YYYY')", false, false
+		return "to_char(c.created_at AT TIME ZONE 'UTC', 'YYYY')", false
 	case "progress_updated_at":
-		return "to_char(utc.progress_updated_at AT TIME ZONE 'UTC', 'YYYY')", true, false
+		return "to_char(utc.progress_updated_at AT TIME ZONE 'UTC', 'YYYY')", true
 	case "release_date":
-		return "left(cm.release_date, 4)", false, true
+		return "left(c.release_date, 4)", false
 	}
-	return "", false, false
+	return "", false
 }
 
 type contentBucket struct {
@@ -652,7 +644,7 @@ func (cr *ContentRoutes) buckets(c echo.Context) error {
 
 	f := q.filter()
 	sort, dir := q.order()
-	key, utc, cm := bucketKey(sort)
+	key, utc := bucketKey(sort)
 	res := contentBucketsResponse{Buckets: []contentBucket{}}
 	if key == "" {
 		res.Total, err = countContent(ctx, cr.pool, user.ID, f)
@@ -665,7 +657,7 @@ func (cr *ContentRoutes) buckets(c echo.Context) error {
 	args := pgx.NamedArgs{"user_id": user.ID}
 	res.Buckets, err = db.Select[contentBucket](ctx, cr.pool, fmt.Sprintf(
 		"SELECT %s AS key, COUNT(*) AS count %s GROUP BY 1 ORDER BY 1 %s %s",
-		key, f.from(args, utc, cm, false), dir, nullsOrder(dir)), args)
+		key, f.from(args, utc, false), dir, nullsOrder(dir)), args)
 	if err != nil {
 		return err
 	}
@@ -686,7 +678,7 @@ const kindCountColumns = `COUNT(*) FILTER (WHERE c.type IN ('comic_series', 'boo
 
 func countContentKinds(ctx context.Context, q db.Querier, userID string, f contentFilter) (kindCounts, error) {
 	args := pgx.NamedArgs{"user_id": userID}
-	return db.SelectOne[kindCounts](ctx, q, "SELECT "+kindCountColumns+" "+f.from(args, false, false, false), args)
+	return db.SelectOne[kindCounts](ctx, q, "SELECT "+kindCountColumns+" "+f.from(args, false, false), args)
 }
 
 // listContent runs one page of lq: the ids query sorts and pages, then only those rows hydrate.
@@ -1308,7 +1300,7 @@ func contentURI(ctx context.Context, tx pgx.Tx, contentID string) (libraryID, ur
 }
 
 func getContent(ctx context.Context, pool *pgxpool.Pool, id string) (models.Content, error) {
-	content, err := db.SelectOne[models.Content](ctx, pool, "SELECT * FROM content WHERE id = $1", id)
+	content, err := db.SelectOne[models.Content](ctx, pool, "SELECT "+models.ContentColumns("")+" FROM content WHERE id = $1", id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return models.Content{}, echo.NewHTTPError(http.StatusNotFound, "Content not found")
 	}

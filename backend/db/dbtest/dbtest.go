@@ -16,6 +16,16 @@ import (
 
 func Pool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
+	pool := Unmigrated(t)
+	if err := db.Migrate(context.Background(), pool); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	return pool
+}
+
+// Unmigrated creates an empty test database.
+func Unmigrated(t *testing.T) *pgxpool.Pool {
+	t.Helper()
 	adminURL := cmp.Or(os.Getenv("APP_TESTS_DATABASE_URL"),
 		"postgresql://postgres:postgres@localhost:5432/postgres?sslmode=disable")
 
@@ -47,10 +57,6 @@ func Pool(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("connect test db: %v", err)
 	}
 	t.Cleanup(pool.Close)
-
-	if err := db.Migrate(ctx, pool); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	return pool
 }
 

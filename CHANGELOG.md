@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - OPDS 1.2 and 2.0 catalogs, with page streaming and progress sync for OPDS-PSE
   apps
+- A scan removes nothing when a source folder lists empty or would lose most of
+  its items, as when a drive is not mounted, and says why. The library setting
+  "Remove missing items without checking" turns this off. It applies to scans
+  queued after saving: an already queued scan keeps its settings
 
 ### Upgrade notes
 
@@ -21,6 +25,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `voltis users link <name> --provider proxy --subject <name>`
 - Email matching needs a verified email, and asks for the password of an
   account that has one
+- Metadata, overrides and provider links are now deleted with their content.
+  The upgrade deletes those left behind by removed content, and the "Orphaned
+  metadata" repair section is gone
+- The upgrade rebuilds the content table. Expect minutes on large libraries
+  (about 100 s for 2.3M content rows), and free disk of about the size
+  of `content` and `content_metadata` with their indexes, plus `max_wal_size`
+  (5.4 GB plus WAL in that library)
+- Grants, reloptions and per-column statistics targets on `content` are not
+  carried over
 
 ## [1.0.0-alpha.4] - 2026-09-24
 

@@ -172,27 +172,27 @@ func (s *Service) step(ctx context.Context, paused bool) (time.Duration, error) 
 
 // recomputeStale recomputes a batch of rows an older DataVersion derived, and reports whether
 // there was any. Recomputed rows leave the selection, so each batch makes progress. Every writer
-// derives rows at the current version, so once a batch finds none, none are left.
+// derives rows at the current version, so once a batch finds none, none are left. Rows no writer
+// ever derived, such as content migrated without metadata, have version 0 and are derived once.
+// No index serves data_version, so after a version bump each batch is a sequential scan.
 func (s *Service) recomputeStale(ctx context.Context, c changes) (bool, error) {
 	if s.recomputed {
 		return false, nil
 	}
 	if s.Status().Stale == 0 {
 		n, err := db.SelectScalar[int](ctx, s.pool,
-			"SELECT count(*) FROM content_metadata WHERE data_version < $1", metadata.DataVersion)
+			"SELECT count(*) FROM content WHERE data_version < $1", metadata.DataVersion)
 		if err != nil {
 			return false, err
 		}
 		s.update(func(st *WorkerStatus) { st.Stale = n })
 	}
 	type key struct {
-		URI       string `db:"uri"`
+		ID        string `db:"id"`
 		LibraryID string `db:"library_id"`
 	}
-	keys, err := db.Select[key](ctx, s.pool, `
-		SELECT uri, library_id FROM content_metadata WHERE data_version < $1
-		ORDER BY uri, library_id LIMIT 500
-	`, metadata.DataVersion)
+	keys, err := db.Select[key](ctx, s.pool,
+		"SELECT id, library_id FROM content WHERE data_version < $1 LIMIT 500", metadata.DataVersion)
 	if err != nil || len(keys) == 0 {
 		s.recomputed = err == nil
 		return false, err
@@ -200,12 +200,12 @@ func (s *Service) recomputeStale(ctx context.Context, c changes) (bool, error) {
 	s.update(func(st *WorkerStatus) { st.Activity, st.LibraryID = Recomputing, "" })
 	byLib := map[string][]string{}
 	for _, k := range keys {
-		byLib[k.LibraryID] = append(byLib[k.LibraryID], k.URI)
+		byLib[k.LibraryID] = append(byLib[k.LibraryID], k.ID)
 	}
 	for _, lib := range slices.Sorted(maps.Keys(byLib)) {
 		err := s.commit(ctx, c, func(o *op) error {
-			for _, uri := range byLib[lib] {
-				o.touch(lib, uri)
+			for _, id := range byLib[lib] {
+				o.touch(lib, id)
 			}
 			return db.LockMetadata(ctx, o.tx, lib)
 		})

@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
-	"strings"
 	"time"
 
 	"voltis/db"
@@ -21,7 +20,6 @@ import (
 var (
 	ErrNotFound = errors.New("content not found")
 	ErrConflict = errors.New("changed since it was read")
-	ErrOccupied = errors.New("destination occupied")
 )
 
 type EntryKey struct {
@@ -58,8 +56,8 @@ func (d Doc) Local() Fields {
 }
 
 type FileLayer struct {
-	URI    string
-	Fields Fields
+	ContentID string
+	Fields    Fields
 }
 
 type Layers struct {
@@ -71,7 +69,7 @@ type Layers struct {
 
 // linkError is what a linked row's last_error should say: why its snapshot does not decode, or
 // "" for nothing.
-type linkError struct{ uri, provider, err string }
+type linkError struct{ contentID, provider, err string }
 
 type Store struct{ dec Decoder }
 
@@ -86,8 +84,9 @@ func ReadTarget(ctx context.Context, q db.Querier, contentID string) (Target, er
 	return t, err
 }
 
-// Lock takes the metadata lock of the content's library and reads the content under it, so a
-// write lands on its current URI. Every metadata writer starts here, or after publishing entries.
+// Lock takes the metadata lock of the content's library and reads the content under it, so the
+// content still exists for the write. Every metadata writer starts here, or after publishing
+// entries.
 func (s *Store) Lock(ctx context.Context, tx pgx.Tx, contentID string) (Target, error) {
 	t, err := ReadTarget(ctx, tx, contentID)
 	if err != nil {
@@ -100,161 +99,169 @@ func (s *Store) Lock(ctx context.Context, tx pgx.Tx, contentID string) (Target, 
 }
 
 // WriteFileLayers replaces the file layers of rows in a locked library.
-func (s *Store) WriteFileLayers(ctx context.Context, tx pgx.Tx, libraryID string, rows []FileLayer, now time.Time) error {
+func (s *Store) WriteFileLayers(ctx context.Context, tx pgx.Tx, rows []FileLayer, now time.Time) error {
 	if len(rows) == 0 {
 		return nil
 	}
-	uris := fp.Map(rows, func(r FileLayer) string { return r.URI })
-	docs, err := readDocs(ctx, tx, libraryID, uris)
+	docs, err := readDocs(ctx, tx, fp.Map(rows, func(r FileLayer) string { return r.ContentID }))
 	if err != nil {
 		return err
 	}
 	var changed []string
-	out := make([]Doc, len(rows))
-	for i, r := range rows {
-		d := docs[r.URI]
+	for _, r := range rows {
+		d := docs[r.ContentID]
 		if matchInputs(d.File, d.Overrides) != matchInputs(r.Fields, d.Overrides) {
-			changed = append(changed, r.URI)
+			changed = append(changed, r.ContentID)
 		}
 		d.File = r.Fields
-		out[i] = d
+		docs[r.ContentID] = d
 	}
-	if err := writeDocs(ctx, tx, libraryID, uris, out, now); err != nil {
+	if err := TouchLinks(ctx, tx, changed, now); err != nil {
 		return err
 	}
-	if err := touchLinks(ctx, tx, libraryID, changed, now); err != nil {
-		return err
-	}
-	_, err = s.Recompute(ctx, tx, libraryID, uris)
+	_, err = s.write(ctx, tx, docs, true, now)
 	return err
 }
 
 // SetOverrides replaces a locked row's overrides, failing with ErrConflict unless they are still
 // at expectRev.
 func (s *Store) SetOverrides(ctx context.Context, tx pgx.Tx, t Target, expectRev int64, o Fields) error {
-	docs, err := readDocs(ctx, tx, t.LibraryID, []string{t.URI})
+	docs, err := readDocs(ctx, tx, []string{t.ContentID})
 	if err != nil {
 		return err
 	}
-	d := docs[t.URI]
+	d := docs[t.ContentID]
 	if d.Rev != expectRev {
 		return ErrConflict
 	}
 	now := time.Now().UTC()
 	if matchInputs(d.File, d.Overrides) != matchInputs(d.File, o) {
-		if err := touchLinks(ctx, tx, t.LibraryID, []string{t.URI}, now); err != nil {
+		if err := TouchLinks(ctx, tx, []string{t.ContentID}, now); err != nil {
 			return err
 		}
 	}
 	d.Rev, d.Overrides = d.Rev+1, o
-	if err := writeDocs(ctx, tx, t.LibraryID, []string{t.URI}, []Doc{d}, now); err != nil {
-		return err
-	}
-	_, err = s.Recompute(ctx, tx, t.LibraryID, []string{t.URI})
+	docs[t.ContentID] = d
+	_, err = s.write(ctx, tx, docs, true, now)
 	return err
 }
 
 // Recompute derives data from the local layers and linked snapshots, and reports whether it
-// changed a row or a link's error; a row whose data comes out the same is not written. A snapshot
-// that no longer decodes is left out, and its link's last_error says why.
-func (s *Store) Recompute(ctx context.Context, tx pgx.Tx, libraryID string, uris []string) (changed bool, err error) {
-	all, errs, err := s.load(ctx, tx, libraryID, uris)
+// changed a row's data or a link's error. A snapshot that no longer decodes is left out, and its
+// link's last_error says why.
+func (s *Store) Recompute(ctx context.Context, tx pgx.Tx, contentIDs []string) (changed bool, err error) {
+	docs, err := readDocs(ctx, tx, contentIDs)
+	if err != nil {
+		return false, err
+	}
+	return s.write(ctx, tx, docs, false, time.Now().UTC())
+}
+
+// write derives the rows' data from docs and their linked snapshots, and writes data_raw too when
+// raw is set. A row is written only when its layers or data change, or an older version derived
+// it, and its meta_updated_at moves only with its layers or data.
+func (s *Store) write(ctx context.Context, tx pgx.Tx, docs map[string]Doc, raw bool, now time.Time) (bool, error) {
+	all, errs, err := s.load(ctx, tx, docs)
 	if err != nil {
 		return false, err
 	}
 	for _, c := range errs {
 		if c.err != "" {
 			slog.Warn("[metadata] leaving out a linked snapshot that does not decode",
-				"library", libraryID, "uri", c.uri, "provider", c.provider, "err", c.err)
+				"content", c.contentID, "provider", c.provider, "err", c.err)
 		}
 	}
 	if len(errs) > 0 {
 		_, err := tx.Exec(ctx, `
 			UPDATE metadata_links l SET last_error = NULLIF(r.err, '')
-			FROM unnest($2::text[], $3::text[], $4::text[]) AS r(uri, provider, err)
-			WHERE l.library_id = $1 AND l.uri = r.uri AND l.provider = r.provider
-		`, libraryID, fp.Map(errs, func(c linkError) string { return c.uri }),
+			FROM unnest($1::text[], $2::text[], $3::text[]) AS r(content_id, provider, err)
+			WHERE l.content_id = r.content_id AND l.provider = r.provider
+		`, fp.Map(errs, func(c linkError) string { return c.contentID }),
 			fp.Map(errs, func(c linkError) string { return c.provider }),
 			fp.Map(errs, func(c linkError) string { return c.err }))
 		if err != nil {
 			return false, err
 		}
 	}
-	var keys, data []string
-	for uri, l := range all {
+	var ids []string
+	var raws []*string // nil keeps data_raw
+	var data []string
+	for id, l := range all {
 		b, err := json.Marshal(l.Resolved.Fields)
 		if err != nil {
 			return false, err
 		}
-		keys, data = append(keys, uri), append(data, string(b))
+		var r *string
+		if raw {
+			d := docs[id]
+			d.V = docVersion
+			rb, err := json.Marshal(d)
+			if err != nil {
+				return false, err
+			}
+			r = new(string(rb))
+		}
+		ids, raws, data = append(ids, id), append(raws, r), append(data, string(b))
 	}
-	empty, _ := json.Marshal(Doc{V: docVersion})
-	tag, err := tx.Exec(ctx, `
-		INSERT INTO content_metadata (uri, library_id, data, data_raw, data_version, updated_at)
-		SELECT r.uri, $1, r.data, $2, $3, now() FROM unnest($4::text[], $5::jsonb[]) AS r(uri, data)
-		ON CONFLICT (uri, library_id) DO UPDATE
-		SET data = EXCLUDED.data, data_version = EXCLUDED.data_version, updated_at = EXCLUDED.updated_at
-		WHERE content_metadata.data <> EXCLUDED.data
-	`, libraryID, empty, DataVersion, keys, data)
-	if err != nil {
-		return false, err
-	}
-	// A row an older version derived the same way only needs its version, which leaves data and
-	// the search index alone.
-	_, err = tx.Exec(ctx, `
-		UPDATE content_metadata SET data_version = $3 WHERE library_id = $1 AND uri = ANY($2) AND data_version < $3
-	`, libraryID, keys, DataVersion)
-	return len(errs) > 0 || tag.RowsAffected() > 0, err
+	changed, err := db.SelectScalars[bool](ctx, tx, `
+		UPDATE content c SET data_raw = coalesce(r.raw, c.data_raw), data = r.data, data_version = $4,
+			meta_updated_at = CASE WHEN c.data_raw <> coalesce(r.raw, c.data_raw) OR c.data <> r.data
+				THEN $5 ELSE c.meta_updated_at END
+		FROM unnest($1::text[], $2::jsonb[], $3::jsonb[]) AS r(id, raw, data)
+		WHERE c.id = r.id AND (c.data_raw <> coalesce(r.raw, c.data_raw) OR c.data <> r.data OR c.data_version < $4)
+		RETURNING old.data IS DISTINCT FROM new.data
+	`, ids, raws, data, DataVersion, now)
+	return len(errs) > 0 || slices.Contains(changed, true), err
 }
 
-// Load reads a row's layers, leaving out snapshots that no longer decode and links it cannot hold.
+// Load reads a row's layers, leaving out snapshots that no longer decode.
 func (s *Store) Load(ctx context.Context, q db.Querier, t Target) (Layers, error) {
-	all, _, err := s.load(ctx, q, t.LibraryID, []string{t.URI})
+	docs, err := readDocs(ctx, q, []string{t.ContentID})
 	if err != nil {
 		return Layers{}, err
 	}
-	if l := all[t.URI]; l != nil {
+	all, _, err := s.load(ctx, q, docs)
+	if err != nil {
+		return Layers{}, err
+	}
+	if l := all[t.ContentID]; l != nil {
 		return *l, nil
 	}
 	return Layers{Resolved: Merge()}, nil
 }
 
-// Conditions on content_metadata m and metadata_links l for rows that hold an admin's decision,
-// and so outlive their content: metadata with overrides, and links that are decided or reject ids.
-const (
-	KeptMetadata = `m.data_raw ? 'overrides'`
-	KeptLink     = `(l.state IN ('linked', 'ignored') OR l.rejected <> '{}')`
-	// HeldMetadata is a condition on metadata m that content has its URI.
-	HeldMetadata = `EXISTS (SELECT 1 FROM content c WHERE c.library_id = m.library_id AND c.uri = m.uri)`
-)
+// LeafDoc is a leaf's data_raw and data, for a scan to write with the row.
+type LeafDoc struct{ Raw, Data string }
 
-var (
-	// SeriesContent is a condition on content c: provider data attaches to series only. It assumes
-	// providers describe every series type, as FixOrphans alone checks a provider's kinds.
-	SeriesContent = "c.type IN ('" + strings.Join(SeriesTypes, "', '") + "')"
-	// HeldLink is a condition on a link l that its URI holds content it attaches to; any other
-	// link is an orphan, even on a leaf that took over a removed series' URI.
-	HeldLink = `EXISTS (SELECT 1 FROM content c WHERE c.library_id = l.library_id AND c.uri = l.uri AND ` +
-		SeriesContent + `)`
-)
+// NewLeafDoc replaces a linkless leaf's file layer in d, and reports whether its match inputs changed.
+func NewLeafDoc(d Doc, file Fields) (LeafDoc, bool, error) {
+	changed := matchInputs(d.File, d.Overrides) != matchInputs(file, d.Overrides)
+	d.V, d.File = docVersion, file
+	raw, err := json.Marshal(d)
+	if err != nil {
+		return LeafDoc{}, false, err
+	}
+	data, err := json.Marshal(d.Local())
+	return LeafDoc{string(raw), string(data)}, changed, err
+}
 
-// Matches is a condition that the bm25-indexed field of metadata m matches the words of the named
+// Matches is a condition that the bm25-indexed field of content c matches the words of the named
 // argument @search, each as a prefix and, from three characters, with a typo: all of them, or any.
 // The search goes in as a function argument: generic plans reject a parameter cast to pdb.fuzzy.
-func Matches(m, field string, all bool, search string) string {
+func Matches(c, field string, all bool, search string) string {
 	dist := 1
 	if len(search) < 3 {
 		dist = 0
 	}
 	return fmt.Sprintf("%s.id @@@ paradedb.match('%s', @search, distance => %d, prefix => true, conjunction_mode => %t)",
-		m, field, dist, all)
+		c, field, dist, all)
 }
 
-// ExactTitle is a condition that the named argument @search is one of metadata m's titles, whatever
-// the case, read from search_text: its title line, or an alt title as its JSON string; false
-// without metadata. Searches rank these first, as fuzzy matches all score alike.
-const ExactTitle = `coalesce(lower(split_part(m.search_text, E'\n', 1)) = lower(@search)
-	OR strpos(lower(m.search_text), lower(to_jsonb(@search::text)::text)) > 0, false)`
+// ExactTitle is a condition that the named argument @search is one of content c's titles, whatever
+// the case, read from search_text: its title line, or an alt title as its JSON string. Searches
+// rank these first, as fuzzy matches all score alike.
+const ExactTitle = `(lower(split_part(c.search_text, E'\n', 1)) = lower(@search)
+	OR strpos(lower(c.search_text), lower(to_jsonb(@search::text)::text)) > 0)`
 
 // LinkedEntry joins a link l to the entry e it reads: the one its id's merges lead to. join is
 // "JOIN" or "LEFT JOIN".
@@ -263,107 +270,31 @@ func LinkedEntry(join string) string {
 		join + ` provider_entries e ON e.provider = a.provider AND e.external_id = a.canonical_id`
 }
 
-// CollectOrphans deletes the orphaned rows that keep nothing an admin decided. A kept link on a
-// leaf moves up to its series first, when that has no row for the provider, unless it is linked:
-// the entry was chosen for another series, so it stays an orphan to repair.
-func (s *Store) CollectOrphans(ctx context.Context, tx pgx.Tx, libraryID string) error {
-	for _, sql := range []string{`
-		WITH moves AS (
-			SELECT DISTINCT ON (p.uri, l.provider) l.uri, l.provider, p.uri AS parent
-			FROM metadata_links l
-			JOIN content c ON c.library_id = l.library_id AND c.uri = l.uri
-			JOIN content p ON p.id = c.parent_id
-			WHERE l.library_id = $1 AND NOT ` + SeriesContent + ` AND ` + KeptLink + ` AND l.state <> 'linked'
-			  AND NOT EXISTS (SELECT 1 FROM metadata_links x
-			                  WHERE x.library_id = $1 AND x.uri = p.uri AND x.provider = l.provider)
-			ORDER BY p.uri, l.provider, l.uri)
-		UPDATE metadata_links l SET uri = m.parent,
-			retry_at = CASE WHEN l.state IN ('review', 'unmatched') THEN now() END -- matching reads the series now
-		FROM moves m WHERE l.library_id = $1 AND l.uri = m.uri AND l.provider = m.provider`, `
-		DELETE FROM content_metadata m
-		WHERE m.library_id = $1 AND NOT ` + KeptMetadata + ` AND NOT ` + HeldMetadata, `
-		DELETE FROM metadata_links l WHERE l.library_id = $1 AND NOT ` + KeptLink + ` AND NOT ` + HeldLink,
-	} {
-		if _, err := tx.Exec(ctx, sql, libraryID); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// FixOrphans moves the overrides of each source in moves onto its destination, then deletes the
-// rows in deleted, in a locked library whose content the caller checked the repair against. A move
-// keeps the destination's file layer and brings the overrides only onto a row without any, else
-// fails with ErrOccupied. The caller moves the links and recomputes the destinations.
-func (s *Store) FixOrphans(ctx context.Context, tx pgx.Tx, libraryID string, deleted []string, moves map[string]string) error {
-	docs, err := readDocs(ctx, tx, libraryID, slices.Concat(slices.Collect(maps.Keys(moves)), slices.Collect(maps.Values(moves))))
-	if err != nil {
-		return err
-	}
-	var uris, changed []string
-	var out []Doc
-	for _, src := range slices.Sorted(maps.Keys(moves)) {
-		from, dst := docs[src], moves[src]
-		if from.Overrides.IsZero() {
-			continue
-		}
-		to := docs[dst]
-		if !to.Overrides.IsZero() {
-			return fmt.Errorf("%w: %s has overrides", ErrOccupied, dst)
-		}
-		if matchInputs(to.File, to.Overrides) != matchInputs(to.File, from.Overrides) {
-			changed = append(changed, dst)
-		}
-		to.Rev, to.Overrides = to.Rev+1, from.Overrides
-		docs[dst] = to
-		uris, out = append(uris, dst), append(out, to)
-	}
-	if _, err := tx.Exec(ctx, "DELETE FROM content_metadata WHERE library_id = $1 AND uri = ANY($2)", libraryID, deleted); err != nil {
-		return err
-	}
-	now := time.Now().UTC()
-	if err := writeDocs(ctx, tx, libraryID, uris, out, now); err != nil {
-		return err
-	}
-	return touchLinks(ctx, tx, libraryID, changed, now)
-}
-
-// load reads rows' layers, and the links whose last_error no longer says why their snapshot does
-// not decode.
-func (s *Store) load(ctx context.Context, q db.Querier, libraryID string, uris []string) (map[string]*Layers, []linkError, error) {
-	docs, err := readDocs(ctx, q, libraryID, uris)
-	if err != nil {
-		return nil, nil, err
-	}
+// load reads the linked snapshots of rows whose local layers are in docs, and the links whose
+// last_error no longer says why their snapshot does not decode.
+func (s *Store) load(ctx context.Context, q db.Querier, docs map[string]Doc) (map[string]*Layers, []linkError, error) {
 	type linked struct {
-		URI        string          `db:"uri"`
+		ContentID  string          `db:"content_id"`
 		Provider   string          `db:"provider"`
 		ExternalID string          `db:"external_id"`
 		Raw        json.RawMessage `db:"raw"`
 		LastError  string          `db:"last_error"`
 	}
 	links, err := db.Select[linked](ctx, q, `
-		SELECT l.uri, l.provider, e.external_id, e.raw, coalesce(l.last_error, '') AS last_error
+		SELECT l.content_id, l.provider, e.external_id, e.raw, coalesce(l.last_error, '') AS last_error
 		FROM metadata_links l `+LinkedEntry("JOIN")+`
-		WHERE l.library_id = $1 AND l.uri = ANY($2) AND l.state = 'linked' AND `+HeldLink, libraryID, uris)
+		WHERE l.content_id = ANY($1) AND l.state = 'linked'`, slices.Collect(maps.Keys(docs)))
 	if err != nil {
 		return nil, nil, err
 	}
 
-	out := map[string]*Layers{}
-	get := func(uri string) *Layers {
-		if out[uri] == nil {
-			d := docs[uri]
-			out[uri] = &Layers{File: d.File, Overrides: d.Overrides, OverridesRev: d.Rev}
-		}
-		return out[uri]
-	}
-	for uri := range docs {
-		get(uri)
+	out := make(map[string]*Layers, len(docs))
+	for id, d := range docs {
+		out[id] = &Layers{File: d.File, Overrides: d.Overrides, OverridesRev: d.Rev}
 	}
 	var changed []linkError
 	for _, r := range links {
-		l := get(r.URI)
+		l := out[r.ContentID]
 		f, err := s.dec.Layer(EntryKey{r.Provider, r.ExternalID}, r.Raw)
 		var msg string
 		if err != nil {
@@ -372,7 +303,7 @@ func (s *Store) load(ctx context.Context, q db.Querier, libraryID string, uris [
 			l.Providers = append(l.Providers, Layer{r.Provider, f})
 		}
 		if msg != r.LastError {
-			changed = append(changed, linkError{r.URI, r.Provider, msg})
+			changed = append(changed, linkError{r.ContentID, r.Provider, msg})
 		}
 	}
 	for _, l := range out {
@@ -382,39 +313,21 @@ func (s *Store) load(ctx context.Context, q db.Querier, libraryID string, uris [
 	return out, changed, nil
 }
 
-func readDocs(ctx context.Context, q db.Querier, libraryID string, uris []string) (map[string]Doc, error) {
+// readDocs reads rows' local layers.
+func readDocs(ctx context.Context, q db.Querier, contentIDs []string) (map[string]Doc, error) {
 	type row struct {
-		URI string `db:"uri"`
+		ID  string `db:"id"`
 		Doc Doc    `db:"data_raw"`
 	}
-	rows, err := db.Select[row](ctx, q,
-		"SELECT uri, data_raw FROM content_metadata WHERE library_id = $1 AND uri = ANY($2)", libraryID, uris)
+	rows, err := db.Select[row](ctx, q, "SELECT id, data_raw FROM content WHERE id = ANY($1)", contentIDs)
 	if err != nil {
 		return nil, err
 	}
 	docs := make(map[string]Doc, len(rows))
 	for _, r := range rows {
-		docs[r.URI] = r.Doc
+		docs[r.ID] = r.Doc
 	}
 	return docs, nil
-}
-
-func writeDocs(ctx context.Context, tx pgx.Tx, libraryID string, uris []string, docs []Doc, now time.Time) error {
-	raws := make([]string, len(docs))
-	for i, d := range docs {
-		d.V = docVersion
-		b, err := json.Marshal(d)
-		if err != nil {
-			return err
-		}
-		raws[i] = string(b)
-	}
-	_, err := tx.Exec(ctx, `
-		INSERT INTO content_metadata (uri, library_id, data_raw, updated_at)
-		SELECT r.uri, $1, r.data_raw, $2 FROM unnest($3::text[], $4::jsonb[]) AS r(uri, data_raw)
-		ON CONFLICT (uri, library_id) DO UPDATE SET data_raw = EXCLUDED.data_raw, updated_at = EXCLUDED.updated_at
-	`, libraryID, now, uris, raws)
-	return err
 }
 
 // matchInputs is what automatic matching reads from a row's own layers, as a series or as a child
@@ -425,17 +338,16 @@ func matchInputs(file, overrides Fields) string {
 	return string(b)
 }
 
-// touchLinks makes the pending links of the rows, and of their series, due again, since their
+// TouchLinks makes the pending links of the rows, and of their series, due again, since their
 // inputs changed. Scans write content before its layers, so new children have their parent.
-func touchLinks(ctx context.Context, tx pgx.Tx, libraryID string, uris []string, now time.Time) error {
-	if len(uris) == 0 {
+func TouchLinks(ctx context.Context, tx pgx.Tx, contentIDs []string, now time.Time) error {
+	if len(contentIDs) == 0 {
 		return nil
 	}
 	_, err := tx.Exec(ctx, `
-		UPDATE metadata_links SET retry_at = $3
-		WHERE library_id = $1 AND state IN ('review', 'unmatched') AND (uri = ANY($2) OR uri IN (
-			SELECT p.uri FROM content c JOIN content p ON p.id = c.parent_id
-			WHERE c.library_id = $1 AND c.uri = ANY($2)))
-	`, libraryID, uris, now)
+		UPDATE metadata_links SET retry_at = $2
+		WHERE state IN ('review', 'unmatched')
+		  AND (content_id = ANY($1) OR content_id IN (SELECT parent_id FROM content WHERE id = ANY($1)))
+	`, contentIDs, now)
 	return err
 }

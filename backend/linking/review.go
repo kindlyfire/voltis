@@ -46,8 +46,7 @@ type ReviewPage struct {
 	Total int
 }
 
-// Review lists the links of a tab, most recently changed first. Links without series content are
-// left out: they are repaired as orphans.
+// Review lists the links of a tab, most recently changed first.
 func (s *Service) Review(ctx context.Context, q ReviewQuery) (ReviewPage, error) {
 	cond, ok := reviewTabs[q.Tab]
 	if !ok {
@@ -55,26 +54,26 @@ func (s *Service) Review(ctx context.Context, q ReviewQuery) (ReviewPage, error)
 	}
 	args := pgx.NamedArgs{"library_id": q.LibraryID, "providers": s.providerNames(), "search": q.Search,
 		"limit": q.Limit, "offset": q.Offset}
-	from := "FROM metadata_links l JOIN content c ON c.library_id = l.library_id AND c.uri = l.uri AND " +
-		metadata.SeriesContent + " LEFT JOIN content_metadata m ON m.library_id = l.library_id AND m.uri = l.uri"
+	from := "FROM metadata_links l JOIN content c ON c.id = l.content_id"
 	where := "WHERE " + cond + " AND l.provider = ANY(@providers) AND (@library_id = '' OR l.library_id = @library_id)"
-	order := "l.updated_at DESC, l.library_id, l.uri, l.provider"
+	order := "l.updated_at DESC, l.library_id, l.content_id, l.provider"
+	count := "FROM metadata_links l"
 	if q.Search != "" {
-		where += " AND " + metadata.Matches("m", "search_text", true, q.Search)
+		where += " AND " + metadata.Matches("c", "search_text", true, q.Search)
 		order = metadata.ExactTitle + " DESC, " + order
+		count = from
 	}
 	if q.Failed {
 		where += " AND l.last_error IS NOT NULL"
 	}
 	var page ReviewPage
 	var err error
-	if page.Total, err = db.SelectScalar[int](ctx, s.pool, "SELECT count(*) "+from+" "+where, args); err != nil {
+	if page.Total, err = db.SelectScalar[int](ctx, s.pool, "SELECT count(*) "+count+" "+where, args); err != nil {
 		return page, err
 	}
 
 	type row struct {
 		Link
-		ContentID string          `db:"content_id"`
 		Data      json.RawMessage `db:"data"`
 		Doc       metadata.Doc    `db:"doc"`
 		EntryID   *string         `db:"entry_id"`
@@ -86,7 +85,7 @@ func (s *Service) Review(ctx context.Context, q ReviewQuery) (ReviewPage, error)
 		Error     *string         `db:"entry_error"`
 	}
 	rows, err := db.Select[row](ctx, s.pool, `
-		SELECT l.*, c.id AS content_id, COALESCE(m.data, '{}') AS data, COALESCE(m.data_raw, '{}') AS doc,
+		SELECT l.*, c.data, c.data_raw AS doc,
 			e.external_id AS entry_id, e.raw, e.fetched_at, e.deleted, e.refresh_at,
 			e.attempts AS entry_attempts, e.last_error AS entry_error
 		`+from+`
@@ -98,7 +97,7 @@ func (s *Service) Review(ctx context.Context, q ReviewQuery) (ReviewPage, error)
 	if err != nil {
 		return page, err
 	}
-	contents, err := db.Select[models.Content](ctx, s.pool, "SELECT * FROM content WHERE id = ANY($1)",
+	contents, err := db.Select[models.Content](ctx, s.pool, "SELECT "+models.ContentColumns("")+" FROM content WHERE id = ANY($1)",
 		fp.Map(rows, func(r row) string { return r.ContentID }))
 	if err != nil {
 		return page, err
@@ -153,7 +152,7 @@ func (s *Service) Summary(ctx context.Context) (Summary, error) {
 		SELECT l.library_id, count(*) FILTER (WHERE l.state = 'review') AS review,
 			count(*) FILTER (WHERE l.state = 'unmatched') AS unmatched,
 			count(*) FILTER (WHERE l.last_error IS NOT NULL) AS failed
-		FROM metadata_links l JOIN content c ON c.library_id = l.library_id AND c.uri = l.uri AND `+metadata.SeriesContent+`
+		FROM metadata_links l
 		WHERE l.state IN ('review', 'unmatched') AND l.provider = ANY($1)
 		GROUP BY l.library_id ORDER BY l.library_id
 	`, s.providerNames())
@@ -166,7 +165,7 @@ func (s *Service) Summary(ctx context.Context) (Summary, error) {
 			(SELECT count(*) FROM provider_entries WHERE provider = p AND attempts > 0 AND merged_into IS NULL
 				AND fetched_at > '-infinity') AS failing,
 			(SELECT count(*) FROM metadata_links l WHERE l.provider = p AND l.state = 'linked'
-				AND l.last_error IS NOT NULL AND `+metadata.HeldLink+`) AS undecodable,
+				AND l.last_error IS NOT NULL) AS undecodable,
 			(SELECT max(fetched_at) FROM provider_entries WHERE provider = p AND fetched_at > '-infinity') AS last_fetched
 		FROM unnest($1::text[]) p
 	`, s.providerNames())

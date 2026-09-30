@@ -68,6 +68,7 @@ function library(name: string): Library {
         settings: {
             book_series_inference: 'conservative',
             auto_match: { mangabaka: true, gone: true },
+            always_remove_missing: false,
         },
     }
 }
@@ -128,7 +129,7 @@ describe('LibraryModal', () => {
     it('shows a switch per provider of the type, and overrides as chips', async () => {
         const { tab, panel, button } = await open()
         expect(tab('General').attributes('aria-selected')).toBe('true')
-        const switches = panel('General').findAll('input[role="switch"]')
+        const switches = panel('General').find('[aria-busy]').findAll('input[role="switch"]')
         expect(switches.map(s => (s.element as HTMLInputElement).checked)).toEqual([true])
         expect(panel('General').text()).toContain('with MangaBaka')
         expect(panel('General').text()).not.toContain('Books DB')
@@ -164,7 +165,7 @@ describe('LibraryModal', () => {
         await button('Settings of source 2').trigger('click')
         expect(hints()).toHaveLength(1)
 
-        await panel('General').find('input[role="switch"]').setValue(false)
+        await panel('General').find('[aria-busy] input[role="switch"]').setValue(false)
         expect(sources.text()).toContain('Inherit (off)')
         expect(hints()).toHaveLength(2)
         expect(wrapper.text()).not.toContain('Inherit (on)')
@@ -204,6 +205,7 @@ describe('LibraryModal', () => {
                 settings: {
                     book_series_inference: 'conservative',
                     auto_match: { mangabaka: true, gone: true },
+                    always_remove_missing: false,
                 },
             },
         ])
@@ -231,7 +233,7 @@ describe('LibraryModal', () => {
         config.value = undefined
         const { panel } = await open()
         expect(panel('General').find('[aria-busy="true"]').exists()).toBe(true)
-        expect(panel('General').find('input[role="switch"]').exists()).toBe(false)
+        expect(panel('General').find('[aria-busy] input[role="switch"]').exists()).toBe(false)
     })
 
     it('shows why the providers failed to load, without a placeholder', async () => {

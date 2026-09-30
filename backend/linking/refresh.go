@@ -7,7 +7,6 @@ import (
 	"slices"
 
 	"voltis/db"
-	"voltis/metadata"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -34,8 +33,8 @@ var usedEntries = `FROM provider_entries e
 	WHERE e.provider = $1 AND e.merged_into IS NULL
 	  AND EXISTS (SELECT 1 FROM provider_entries a
 	              WHERE a.provider = e.provider AND a.canonical_id = e.external_id AND EXISTS (
-	                  SELECT 1 FROM metadata_links l JOIN content c ON c.library_id = l.library_id AND c.uri = l.uri
-	                  WHERE l.provider = a.provider AND ` + metadata.SeriesContent + ` AND ` + refersTo("a.external_id") + `))`
+	                  SELECT 1 FROM metadata_links l
+	                  WHERE l.provider = a.provider AND ` + refersTo("a.external_id") + `))`
 
 // refreshBatch fetches a batch of each provider's used entries due for a refresh, outside any
 // transaction, then publishes it, adding the libraries it changed to c; an entry that fails to

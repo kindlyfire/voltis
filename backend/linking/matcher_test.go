@@ -51,8 +51,8 @@ func (e *env) matchNow(libs ...string) {
 func (e *env) retitle(id, title string) {
 	e.t.Helper()
 	e.tx(func(tx pgx.Tx) error {
-		return e.svc.store.WriteFileLayers(context.Background(), tx, "l1",
-			[]metadata.FileLayer{{URI: "comic/" + id, Fields: metadata.Fields{Title: metadata.Val(title)}}}, time.Now())
+		return e.svc.store.WriteFileLayers(context.Background(), tx,
+			[]metadata.FileLayer{{ContentID: id, Fields: metadata.Fields{Title: metadata.Val(title)}}}, time.Now())
 	})
 }
 
@@ -113,7 +113,7 @@ func TestMatchBackfill(t *testing.T) {
 	if res := e.match(); res != (MatchResult{Unmatched: 1}) {
 		t.Fatalf("after match now = %+v", res)
 	}
-	if l, err := readLink(ctx, e.pool, "l2", "comic/f", "fake"); err != nil || l.State != StateNone {
+	if l, err := readLink(ctx, e.pool, metadata.Target{ContentID: "f", LibraryID: "l2"}, "fake"); err != nil || l.State != StateNone {
 		t.Fatalf("f = %+v (%v)", l, err)
 	}
 
@@ -285,8 +285,8 @@ func TestMatchLeavesOutResultsThroughARejectedChain(t *testing.T) {
 	e.series("l1", "s", "Target")
 	e.publish(merged("B", "C", earlier))
 	e.publish(merged("R", "B", earlier))
-	e.exec(`INSERT INTO metadata_links (library_id, uri, provider, state, rejected, retry_at)
-		VALUES ('l1', 'comic/s', 'fake', 'unmatched', '{R}', now())`)
+	e.exec(`INSERT INTO metadata_links (library_id, content_id, provider, state, rejected, retry_at)
+		VALUES ('l1', 's', 'fake', 'unmatched', '{R}', now())`)
 	alias := providertest.Series("Target", metadata.Manga)
 	alias.MergedInto = "B"
 	e.fake.Put("A", alias)
@@ -396,10 +396,10 @@ func TestReviewSearchAndFilter(t *testing.T) {
 	for id, title := range map[string]string{"a": "Sousou no Frieren", "b": "Emma", "c": "Frieren Again", "d": "Nothing", "e": "frieren"} {
 		e.series("l1", id, title)
 	}
-	e.exec(`INSERT INTO metadata_links (library_id, uri, provider, state, last_error) VALUES
-		('l1', 'comic/a', 'fake', 'review', NULL), ('l1', 'comic/b', 'fake', 'review', NULL),
-		('l1', 'comic/c', 'fake', 'unmatched', 'down'), ('l1', 'comic/d', 'fake', 'unmatched', NULL),
-		('l1', 'comic/e', 'fake', 'review', NULL)`)
+	e.exec(`INSERT INTO metadata_links (library_id, content_id, provider, state, last_error) VALUES
+		('l1', 'a', 'fake', 'review', NULL), ('l1', 'b', 'fake', 'review', NULL),
+		('l1', 'c', 'fake', 'unmatched', 'down'), ('l1', 'd', 'fake', 'unmatched', NULL),
+		('l1', 'e', 'fake', 'review', NULL)`)
 	// Prepared statements may run generic plans, which take the search only as a function argument.
 	cfg := e.pool.Config()
 	cfg.ConnConfig.RuntimeParams["plan_cache_mode"] = "force_generic_plan"
@@ -549,7 +549,7 @@ func TestSummaryHealth(t *testing.T) {
 	e.exec("UPDATE provider_entries SET raw = '{}' WHERE external_id = '1'")
 	e.exec("UPDATE provider_entries SET attempts = 2, last_error = 'down' WHERE external_id = '2'")
 	e.tx(func(tx pgx.Tx) error {
-		_, err := e.svc.store.Recompute(ctx, tx, "l1", []string{"comic/s"})
+		_, err := e.svc.store.Recompute(ctx, tx, []string{"s"})
 		return err
 	})
 	last, err := db.SelectScalar[time.Time](ctx, e.pool, "SELECT max(fetched_at) FROM provider_entries")

@@ -130,7 +130,7 @@ func Register(ctx context.Context, e *echo.Echo, pool *pgxpool.Pool, st *setting
 	(&ContentRoutes{pool: pool}).Register(api.Group("/content"))
 	fr := &FileRoutes{pool: pool, covers: deps.Covers}
 	fr.Register(api.Group("/files"))
-	(&ContentRefRoutes{pool: pool, links: deps.Links}).Register(api.Group("/content"))
+	(&ContentRefRoutes{pool: pool}).Register(api.Group("/content"))
 	(&CustomListRoutes{pool: pool}).Register(api.Group("/custom-lists"))
 	(&TaskRoutes{pool: pool, manager: manager}).Register(api.Group("/tasks"))
 	(&MetadataRoutes{pool: pool, hub: hub, store: deps.Metadata, links: deps.Links, reg: deps.Providers}).

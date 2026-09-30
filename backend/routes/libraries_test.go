@@ -79,13 +79,13 @@ func TestLibrarySettings(t *testing.T) {
 	settings := func(lib map[string]any) string { return asJSON(t, lib["settings"]) }
 
 	lib := c.Post("/api/libraries/new", body(nil)).Assert(t, 200).JSON()
-	assertEq(t, settings(lib), `{"auto_match":{},"book_series_inference":"conservative"}`)
+	assertEq(t, settings(lib), `{"always_remove_missing":false,"auto_match":{},"book_series_inference":"conservative"}`)
 	assertEq(t, asJSON(t, lib["sources"]), `[{"path_uri":"`+dir+`","settings":{}}]`)
 	id := s(lib["id"])
 
 	// Keys of providers not registered are kept.
 	off := map[string]any{"book_series_inference": "off", "auto_match": map[string]any{"fake": true, "gone": false}}
-	want := `{"auto_match":{"fake":true,"gone":false},"book_series_inference":"off"}`
+	want := `{"always_remove_missing":false,"auto_match":{"fake":true,"gone":false},"book_series_inference":"off"}`
 	assertEq(t, settings(c.Post("/api/libraries/"+id, body(off)).Assert(t, 200).JSON()), want)
 	assertEq(t, settings(c.Post("/api/libraries/"+id, body(nil)).Assert(t, 200).JSON()), want)
 	assertEq(t, settings(c.Get("/api/libraries").Assert(t, 200).JSONArray()[0]), want)
@@ -100,7 +100,7 @@ func TestLibrarySettings(t *testing.T) {
 		{"path_uri": dir}, {"path_uri": dir + "/"}}}).Assert(t, 400)
 	// Omitted keys take their defaults: matching is off unless asked for.
 	partial := c.Post("/api/libraries/"+id, body(map[string]any{"book_series_inference": "off"})).Assert(t, 200).JSON()
-	assertEq(t, settings(partial), `{"auto_match":{},"book_series_inference":"off"}`)
+	assertEq(t, settings(partial), `{"always_remove_missing":false,"auto_match":{},"book_series_inference":"off"}`)
 	for _, sources := range []any{nil, []any{}} {
 		lib := c.Post("/api/libraries/"+id, map[string]any{"name": "books", "sources": sources}).Assert(t, 200).JSON()
 		assertEq(t, asJSON(t, lib["sources"]), `[]`)
@@ -130,13 +130,13 @@ func TestLibraryAutoMatchChanges(t *testing.T) {
 	// s is under the source, v under the narrower one, u under neither.
 	for name, file := range map[string]string{"s": filepath.Join(dir, "b", "s.cbz"), "u": "/elsewhere/u.cbz", "v": filepath.Join(a, "v.cbz")} {
 		insertSeries(t, pool, id, name, file)
-		mustExec(t, pool, `INSERT INTO metadata_links (library_id, uri, provider, state, retry_at)
-			VALUES ($1, 'comic/' || $2, 'fake', 'unmatched', now() + interval '1 day')`, id, name)
+		mustExec(t, pool, `INSERT INTO metadata_links (library_id, content_id, provider, state, retry_at)
+			VALUES ($1, $2, 'fake', 'unmatched', now() + interval '1 day')`, id, name)
 	}
 	due := func() string {
 		t.Helper()
 		autoMatching.Wait()
-		due, err := db.SelectScalar[string](context.Background(), pool, `SELECT coalesce(string_agg(uri, ' ' ORDER BY uri), '')
+		due, err := db.SelectScalar[string](context.Background(), pool, `SELECT coalesce(string_agg(content_id, ' ' ORDER BY content_id), '')
 			FROM metadata_links WHERE retry_at <= now()`)
 		if err != nil {
 			t.Fatal(err)
@@ -163,12 +163,12 @@ func TestLibraryAutoMatchChanges(t *testing.T) {
 		sources []any
 		due     string
 	}{
-		{"a source on", false, []any{source(dir, true)}, "comic/s comic/v"},
-		{"the library on too", true, []any{source(dir)}, "comic/s comic/u comic/v"},
+		{"a source on", false, []any{source(dir, true)}, "s v"},
+		{"the library on too", true, []any{source(dir)}, "s u v"},
 		{"the source off", true, []any{source(dir, false)}, ""},
-		{"a narrower source off", true, []any{source(a, false)}, "comic/s comic/u"},
+		{"a narrower source off", true, []any{source(a, false)}, "s u"},
 		{"widening the off source", true, []any{source(dir, false)}, ""},
-		{"a source on in a library off", false, []any{source(dir, true)}, "comic/s comic/v"},
+		{"a source on in a library off", false, []any{source(dir, true)}, "s v"},
 		{"narrowing the on source", false, []any{source(a, true)}, ""},
 		{"everything off", false, nil, ""},
 	} {
@@ -189,10 +189,10 @@ func TestLibraryAutoMatchWakesTheWorker(t *testing.T) {
 			return c.Get("/api/metadata/summary").Assert(t, 200).JSON()["worker"].(map[string]any)["activity"] == "idle"
 		})
 	}
-	matched := func(id, uri string) {
-		waitUntil(t, "a match of "+uri, func() bool {
+	matched := func(lib, id string) {
+		waitUntil(t, "a match of "+id, func() bool {
 			n, err := db.SelectScalar[int](context.Background(), pool,
-				"SELECT count(*) FROM metadata_links WHERE library_id = $1 AND uri = $2", id, uri)
+				"SELECT count(*) FROM metadata_links WHERE library_id = $1 AND content_id = $2", lib, id)
 			return err == nil && n == 1
 		})
 	}
@@ -201,13 +201,13 @@ func TestLibraryAutoMatchWakesTheWorker(t *testing.T) {
 	insertSeries(t, pool, id, "s", filepath.Join(dir, "s", "1.cbz"))
 	c.Post("/api/libraries/"+id, map[string]any{"name": "c", "sources": []any{map[string]any{"path_uri": dir,
 		"settings": map[string]any{"auto_match": map[string]any{"fake": true}}}}}).Assert(t, 200)
-	matched(id, "comic/s")
+	matched(id, "s")
 
 	idle()
 	insertSeries(t, pool, id, "t", filepath.Join(dir, "t", "1.cbz"))
 	c.Post("/api/libraries/new", map[string]any{"name": "d", "type": "comics",
 		"settings": map[string]any{"auto_match": map[string]any{"fake": true}}}).Assert(t, 200)
-	matched(id, "comic/t")
+	matched(id, "t")
 }
 
 func insertSeries(t *testing.T, pool *pgxpool.Pool, lib, id, fileURI string) {
@@ -216,9 +216,8 @@ func insertSeries(t *testing.T, pool *pgxpool.Pool, lib, id, fileURI string) {
 		VALUES ($1, $1, 'comic/' || $1, 'comic_series', $2)`, id, lib)
 	mustExec(t, pool, `INSERT INTO content (id, uri_part, uri, file_uri, type, parent_id, library_id)
 		VALUES ($1 || '1', '1', 'comic/' || $1 || '/1', $3, 'comic', $1, $2)`, id, lib, fileURI)
-	mustExec(t, pool, `INSERT INTO content_metadata (uri, library_id, data_raw, data, data_version)
-		VALUES ('comic/' || $1, $2, '{"v": 2, "file": {"title": "Local"}}', '{"title": "Local"}', $3)`,
-		id, lib, metadata.DataVersion)
+	mustExec(t, pool, `UPDATE content SET data_raw = '{"v": 2, "file": {"title": "Local"}}',
+		data = '{"title": "Local"}', data_version = $2 WHERE id = $1`, id, metadata.DataVersion)
 }
 
 func asJSON(t *testing.T, v any) string {

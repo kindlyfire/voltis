@@ -8,6 +8,7 @@ import (
 
 	"voltis/db"
 	"voltis/lib/fp"
+	"voltis/metadata"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -31,8 +32,8 @@ const (
 
 // Link is a metadata_links row: where a series stands with one provider.
 type Link struct {
+	ContentID  string      `db:"content_id"`
 	LibraryID  string      `db:"library_id"`
-	URI        string      `db:"uri"`
 	Provider   string      `db:"provider"`
 	State      State       `db:"state"`
 	ExternalID *string     `db:"external_id"`
@@ -123,12 +124,6 @@ func (l *Link) settle(s State, id *string, origin *Origin) {
 	l.Candidates, l.RetryAt, l.Attempts, l.LastError = nil, nil, 0, nil
 }
 
-// disposable reports whether the link records no admin decision: pending, rejecting nothing.
-// It matches the negation of metadata.KeptLink.
-func (l Link) disposable() bool {
-	return l.pending() && len(l.Rejected) == 0
-}
-
 func (l Link) pending() bool { return l.State == StateReview || l.State == StateUnmatched }
 
 // Expect guards a write against a link changed since it was read.
@@ -144,11 +139,11 @@ func (e Expect) holds(l Link) bool {
 	return l.State != StateNone && l.Rev == *e.Rev
 }
 
-func readLink(ctx context.Context, q db.Querier, libraryID, uri, provider string) (Link, error) {
+func readLink(ctx context.Context, q db.Querier, t metadata.Target, provider string) (Link, error) {
 	l, err := db.SelectOne[Link](ctx, q,
-		"SELECT * FROM metadata_links WHERE library_id = $1 AND uri = $2 AND provider = $3", libraryID, uri, provider)
+		"SELECT * FROM metadata_links WHERE content_id = $1 AND provider = $2", t.ContentID, provider)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return Link{LibraryID: libraryID, URI: uri, Provider: provider, State: StateNone}, nil
+		return Link{ContentID: t.ContentID, LibraryID: t.LibraryID, Provider: provider, State: StateNone}, nil
 	}
 	return l, err
 }
@@ -156,15 +151,15 @@ func readLink(ctx context.Context, q db.Querier, libraryID, uri, provider string
 // save writes a link at its next revision.
 func save(ctx context.Context, tx pgx.Tx, l Link) error {
 	_, err := tx.Exec(ctx, `
-		INSERT INTO metadata_links (library_id, uri, provider, state, external_id, origin, candidates, rejected,
+		INSERT INTO metadata_links (content_id, library_id, provider, state, external_id, origin, candidates, rejected,
 			retry_at, attempts, last_error, rev, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::jsonb, '[]'), COALESCE($8::text[], '{}'), $9, $10, $11, $12, now())
-		ON CONFLICT (library_id, uri, provider) DO UPDATE SET
+		ON CONFLICT (content_id, provider) DO UPDATE SET
 			state = EXCLUDED.state, external_id = EXCLUDED.external_id, origin = EXCLUDED.origin,
 			candidates = EXCLUDED.candidates, rejected = EXCLUDED.rejected, retry_at = EXCLUDED.retry_at,
 			attempts = EXCLUDED.attempts, last_error = EXCLUDED.last_error, rev = EXCLUDED.rev,
 			updated_at = EXCLUDED.updated_at
-	`, l.LibraryID, l.URI, l.Provider, l.State, l.ExternalID, l.Origin, l.Candidates, l.Rejected,
+	`, l.ContentID, l.LibraryID, l.Provider, l.State, l.ExternalID, l.Origin, l.Candidates, l.Rejected,
 		l.RetryAt, l.Attempts, l.LastError, l.Rev+1)
 	return err
 }

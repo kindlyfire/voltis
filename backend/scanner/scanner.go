@@ -62,6 +62,8 @@ type ScanResult struct {
 	Failed    int           `json:"failed"`
 	Unchanged int           `json:"unchanged"`
 	Duration  time.Duration `json:"duration"`
+	// Why nothing that went missing was removed; empty when removals ran.
+	RemovalsSuppressed string `json:"removals_suppressed,omitempty"`
 }
 
 type Counts struct {
@@ -96,6 +98,8 @@ type Progress struct {
 	Failed    int    `json:"failed"`
 	Saved     Counts `json:"saved"`
 	CommitSeq int    `json:"commit_seq"`
+	// Published as soon as the removal guard trips.
+	RemovalsSuppressed string `json:"removals_suppressed,omitempty"`
 	// Newest first; saved() replaces the slice, since publish shares it with the marshalling goroutine.
 	Recent []RecentEntry `json:"recent,omitempty"`
 }
@@ -218,6 +222,8 @@ func runScan(ctx context.Context, in ScanInput, tc *tasks.TaskContext, notify No
 		Failed:    w.prog.Failed,
 		Unchanged: w.prog.Unchanged,
 		Duration:  time.Since(start),
+
+		RemovalsSuppressed: w.prog.RemovalsSuppressed,
 	}, err
 }
 

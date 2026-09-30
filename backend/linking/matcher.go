@@ -233,7 +233,7 @@ func (s *Service) Rematch(ctx context.Context, contentID, provider string, expec
 	if err != nil {
 		return err
 	}
-	l, err := readLink(ctx, s.pool, t.LibraryID, t.URI, provider)
+	l, err := readLink(ctx, s.pool, t, provider)
 	if err != nil {
 		return err
 	}
@@ -253,11 +253,11 @@ func (s *Service) Rematch(ctx context.Context, contentID, provider string, expec
 // pendingSeries selects the titled series of library $1 that provider $2 describes (content types
 // $3) and neither links nor ignores. A series has no title until a scan writes its file layer, and
 // matching it before would record a false "no match"; writing the layer makes it due. Series have
-// no parent, which lets idx_content_roots list them.
+// no parent, which lets idx_content_roots list them. Joining the link on library_id too puts it
+// under c.library_id = $1, so nextDue can walk idx_metadata_links_retry.
 const pendingSeries = `FROM content c
-	JOIN content_metadata m ON m.library_id = c.library_id AND m.uri = c.uri AND m.data->>'title' <> ''
-	LEFT JOIN metadata_links l ON l.library_id = c.library_id AND l.uri = c.uri AND l.provider = $2
-	WHERE c.library_id = $1 AND c.parent_id IS NULL AND c.type = ANY($3)
+	LEFT JOIN metadata_links l ON l.content_id = c.id AND l.library_id = c.library_id AND l.provider = $2
+	WHERE c.library_id = $1 AND c.parent_id IS NULL AND c.type = ANY($3) AND c.data->>'title' <> ''
 	  AND (l.state IS NULL OR l.state IN ('review', 'unmatched'))`
 
 // customPlan runs a query with a plan for its arguments. A generic plan cannot tell how many rows
@@ -282,7 +282,7 @@ func (s *Service) matchSeries(ctx context.Context, c changes, p providers.Provid
 	dryRun func(t metadata.Target, q MatchQuery, d MatchDecision, err error)) (MatchResult, int, error) {
 	var out MatchResult
 	for i, t := range page {
-		l, err := readLink(ctx, s.pool, t.LibraryID, t.URI, p.Name())
+		l, err := readLink(ctx, s.pool, t, p.Name())
 		if err != nil {
 			return out, i + 1, err
 		}
@@ -391,12 +391,12 @@ func (s *Service) bump(ctx context.Context, libraryID, provider string, cov auto
 	}
 	// Read the covered links first: an UPDATE plans without parallel workers, and then rather
 	// hashes every leaf of the table than probes the series' own.
-	uris, err := db.SelectScalars[string](ctx, s.pool, `SELECT l.uri FROM metadata_links l
-		JOIN content c ON c.library_id = l.library_id AND c.uri = l.uri WHERE `+retriable+covered,
+	ids, err := db.SelectScalars[string](ctx, s.pool, `SELECT l.content_id FROM metadata_links l
+		JOIN content c ON c.id = l.content_id WHERE `+retriable+covered,
 		append([]any{customPlan, libraryID, provider}, args...)...)
 	if err != nil {
 		return err
 	}
-	_, err = s.pool.Exec(ctx, due+" AND l.uri = ANY($3)", libraryID, provider, uris)
+	_, err = s.pool.Exec(ctx, due+" AND l.content_id = ANY($3)", libraryID, provider, ids)
 	return err
 }

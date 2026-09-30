@@ -83,8 +83,8 @@ func TestWorkerTakesLibrariesInTurnWhateverTheirCase(t *testing.T) {
 func TestMatchNowIgnoresLibrariesOff(t *testing.T) {
 	e := setup(t)
 	e.series("l1", "s", "Remote One")
-	e.exec(`INSERT INTO metadata_links (library_id, uri, provider, state, retry_at)
-		VALUES ('l1', 'comic/s', 'fake', 'unmatched', now() + interval '1 day')`)
+	e.exec(`INSERT INTO metadata_links (library_id, content_id, provider, state, retry_at)
+		VALUES ('l1', 's', 'fake', 'unmatched', now() + interval '1 day')`)
 	e.series("l1", "t", "Remote Two")
 	e.exec(`UPDATE libraries SET settings = '{}'`)
 	e.matchNow("l1")
@@ -100,8 +100,8 @@ func TestWorkerSkipsUntitledSeries(t *testing.T) {
 	e.series("l1", "s", "")
 	e.exec(`INSERT INTO content (id, uri_part, uri, type, library_id) VALUES ('t', 't', 'comic/t', 'comic_series', 'l1')`)
 	e.series("l1", "u", "Remote Two")
-	e.exec(`INSERT INTO metadata_links (library_id, uri, provider, state, retry_at)
-		VALUES ('l1', 'comic/u', 'fake', 'unmatched', now() + interval '1 day')`)
+	e.exec(`INSERT INTO metadata_links (library_id, content_id, provider, state, retry_at)
+		VALUES ('l1', 'u', 'fake', 'unmatched', now() + interval '1 day')`)
 	e.retitle("u", "")
 	if wait := e.untilIdle(); wait < 14*time.Minute || e.svc.Status().Matched != (MatchResult{}) {
 		t.Fatalf("waits %v, status %+v", wait, e.svc.Status())
@@ -131,7 +131,7 @@ func TestIdleWorkerSleepsUntilTheNextDueTime(t *testing.T) {
 	}
 	snapshot := func() string {
 		s, err := db.SelectScalar[string](context.Background(), e.pool, `SELECT
-			(SELECT jsonb_agg(l ORDER BY uri) FROM metadata_links l)::text ||
+			(SELECT jsonb_agg(l ORDER BY content_id) FROM metadata_links l)::text ||
 			(SELECT jsonb_agg(e ORDER BY external_id) FROM provider_entries e)::text`)
 		if err != nil {
 			t.Fatal(err)
@@ -144,7 +144,7 @@ func TestIdleWorkerSleepsUntilTheNextDueTime(t *testing.T) {
 		t.Fatal("an idle step wrote or notified")
 	}
 
-	e.exec("UPDATE metadata_links SET retry_at = now() + interval '5 minutes' WHERE uri = 'comic/u'")
+	e.exec("UPDATE metadata_links SET retry_at = now() + interval '5 minutes' WHERE content_id = 'u'")
 	if wait := e.step(); wait < 4*time.Minute || wait > 5*time.Minute {
 		t.Fatalf("waits %v for a retry due in 5 minutes", wait)
 	}
@@ -153,8 +153,8 @@ func TestIdleWorkerSleepsUntilTheNextDueTime(t *testing.T) {
 		t.Fatalf("waits %v for a refresh due in 2 minutes", wait)
 	}
 	// l2 does not match automatically: its series are not waited for.
-	e.exec(`INSERT INTO metadata_links (library_id, uri, provider, state, retry_at)
-		VALUES ('l2', 'comic/v', 'fake', 'unmatched', now() - interval '1 minute')`)
+	e.exec(`INSERT INTO metadata_links (library_id, content_id, provider, state, retry_at)
+		VALUES ('l2', 'v', 'fake', 'unmatched', now() - interval '1 minute')`)
 	if wait := e.step(); wait < time.Minute {
 		t.Fatalf("waits %v", wait)
 	}
@@ -169,7 +169,7 @@ func TestMatchNowAndRefreshNowMakeRowsDue(t *testing.T) {
 	e.series("l1", "s", "Remote One")
 	e.series("l2", "d", "Nothing")
 	e.match()
-	e.exec("UPDATE metadata_links SET retry_at = now() + interval '1 day' WHERE uri = 'comic/c'") // its inputs changed
+	e.exec("UPDATE metadata_links SET retry_at = now() + interval '1 day' WHERE content_id = 'c'") // its inputs changed
 	e.exec(`INSERT INTO provider_entries (provider, external_id, canonical_id, raw, fetched_at, refresh_at)
 		VALUES ('fake', 'unused', 'unused', '{}', now(), now() + interval '1 day')`)
 	due := func(sql string) []string {
@@ -181,7 +181,7 @@ func TestMatchNowAndRefreshNowMakeRowsDue(t *testing.T) {
 	}
 
 	e.matchNow("l1")
-	if got := due("SELECT uri FROM metadata_links WHERE retry_at <= now() ORDER BY uri"); !slices.Equal(got, []string{"comic/a", "comic/c"}) ||
+	if got := due("SELECT content_id FROM metadata_links WHERE retry_at <= now() ORDER BY content_id"); !slices.Equal(got, []string{"a", "c"}) ||
 		!e.woken() {
 		t.Fatalf("due %v", got)
 	}
@@ -238,25 +238,26 @@ func TestWorkerRecomputesStaleRowsFirst(t *testing.T) {
 	e := setup(t)
 	ctx := context.Background()
 	e.series("l1", "s", "Remote One")
-	e.exec(`INSERT INTO content_metadata (uri, library_id, data_raw, data)
-		SELECT format('comic/x%s', i), 'l1', jsonb_build_object('v', 2, 'file', jsonb_build_object('title', i::text)), '{"title": "Old"}'
+	e.exec(`INSERT INTO content (id, uri_part, uri, type, library_id, data_raw, data)
+		SELECT 'x' || i, 'x' || i, 'comic/x' || i, 'comic', 'l1',
+			jsonb_build_object('v', 2, 'file', jsonb_build_object('title', i::text)), '{"title": "Old"}'
 		FROM generate_series(1000, 1599) i`)
-	e.exec("UPDATE content_metadata SET data_version = 0")
+	e.exec("UPDATE content SET data_version = 0")
 	stale := func() []string {
 		t.Helper()
-		uris, err := db.SelectScalars[string](ctx, e.pool,
-			"SELECT uri FROM content_metadata WHERE data_version < $1 OR data->>'title' = 'Old' ORDER BY uri", metadata.DataVersion)
+		ids, err := db.SelectScalars[string](ctx, e.pool,
+			"SELECT id FROM content WHERE data_version < $1 OR data->>'title' = 'Old'", metadata.DataVersion)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return uris
+		return ids
 	}
 
 	if wait := e.step(); wait != 0 || e.svc.Status().Activity != Recomputing || e.svc.Status().Stale != 101 {
 		t.Fatalf("waits %v, status %+v", wait, e.svc.Status())
 	}
-	if left := stale(); len(left) != 101 || left[0] != "comic/x1499" || e.link("s").State != StateNone {
-		t.Fatalf("stale after a batch: %d from %v; s = %+v", len(left), left[:1], e.link("s"))
+	if left := stale(); len(left) != 101 || e.link("s").State != StateNone {
+		t.Fatalf("stale after a batch: %d; s = %+v", len(left), e.link("s"))
 	}
 	if !slices.Equal(e.notified, []string{"l1"}) {
 		t.Fatalf("notified = %v", e.notified)
@@ -334,8 +335,8 @@ func TestWorkerDefersLibrariesBeingScanned(t *testing.T) {
 	e := setup(t)
 	e.series("l1", "s", "Remote One")
 	e.series("l1", "u", "Nothing")
-	e.exec(`INSERT INTO metadata_links (library_id, uri, provider, state, retry_at)
-		VALUES ('l1', 'comic/u', 'fake', 'unmatched', now() - interval '1 minute')`)
+	e.exec(`INSERT INTO metadata_links (library_id, content_id, provider, state, retry_at)
+		VALUES ('l1', 'u', 'fake', 'unmatched', now() - interval '1 minute')`)
 	scanning := true
 	e.svc.scanning = func(string) bool { return scanning }
 	if wait := e.untilIdle(); wait < 14*time.Minute || e.link("s").State != StateNone {
@@ -369,7 +370,7 @@ func TestWorkerKeepsGoingPastAMatchError(t *testing.T) {
 	e.exec("UPDATE provider_entries SET refresh_at = now()")
 	e.exec(`CREATE FUNCTION refuse() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'refused'; END $$ LANGUAGE plpgsql`)
 	e.exec(`CREATE TRIGGER refuse BEFORE INSERT ON metadata_links FOR EACH ROW
-		WHEN (NEW.uri = 'comic/bad') EXECUTE FUNCTION refuse()`)
+		WHEN (NEW.content_id = 'bad') EXECUTE FUNCTION refuse()`)
 
 	if _, err := e.svc.step(context.Background(), false); err == nil {
 		t.Fatal("no error")
@@ -387,7 +388,7 @@ func TestWorkerMovesPastAFailingSeries(t *testing.T) {
 	}
 	e.exec(`CREATE FUNCTION refuse() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'refused'; END $$ LANGUAGE plpgsql`)
 	e.exec(`CREATE TRIGGER refuse BEFORE INSERT ON metadata_links FOR EACH ROW
-		WHEN (NEW.uri = 'comic/a') EXECUTE FUNCTION refuse()`)
+		WHEN (NEW.content_id = 'a') EXECUTE FUNCTION refuse()`)
 	if _, err := e.svc.step(context.Background(), false); err == nil {
 		t.Fatal("no error")
 	}

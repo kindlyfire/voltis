@@ -102,7 +102,7 @@ func outcome(r providers.Record, err error) FetchOutcome {
 // op is a transaction that recomputes the rows it touched before committing.
 type op struct {
 	tx      pgx.Tx
-	dirty   map[string]map[string]bool // library -> uris
+	dirty   map[string]map[string]bool // library -> content ids
 	changed changes
 	decided map[linkKey]undo // kept for Undo once committed
 }
@@ -112,16 +112,16 @@ func newOp(tx pgx.Tx) *op {
 }
 
 // touch marks a row for recomputing, which changes its library only if its data changes.
-func (o *op) touch(libraryID, uri string) {
+func (o *op) touch(libraryID, contentID string) {
 	if o.dirty[libraryID] == nil {
 		o.dirty[libraryID] = map[string]bool{}
 	}
-	o.dirty[libraryID][uri] = true
+	o.dirty[libraryID][contentID] = true
 }
 
 // wrote marks a row whose links or layers were written, which changes its library.
-func (o *op) wrote(libraryID, uri string) {
-	o.touch(libraryID, uri)
+func (o *op) wrote(libraryID, contentID string) {
+	o.touch(libraryID, contentID)
 	o.changed[libraryID] = true
 }
 
@@ -152,7 +152,7 @@ func (s *Service) commit(ctx context.Context, c changes, fn func(o *op) error) e
 			return err
 		}
 		for _, lib := range slices.Sorted(maps.Keys(o.dirty)) {
-			changed, err := s.store.Recompute(ctx, tx, lib, slices.Collect(maps.Keys(o.dirty[lib])))
+			changed, err := s.store.Recompute(ctx, tx, slices.Collect(maps.Keys(o.dirty[lib])))
 			if err != nil {
 				return err
 			}
@@ -173,7 +173,7 @@ func (s *Service) commit(ctx context.Context, c changes, fn func(o *op) error) e
 // Store.Lock, which holds the library's metadata lock that every link writer takes.
 func (s *Service) write(ctx context.Context, o *op, t metadata.Target, provider string, expect Expect,
 	change func(*Link) error) error {
-	l, err := readLink(ctx, o.tx, t.LibraryID, t.URI, provider)
+	l, err := readLink(ctx, o.tx, t, provider)
 	if err != nil {
 		return err
 	}
@@ -195,7 +195,7 @@ func (s *Service) write(ctx context.Context, o *op, t metadata.Target, provider 
 	if err := save(ctx, o.tx, l); err != nil {
 		return err
 	}
-	o.wrote(t.LibraryID, t.URI)
+	o.wrote(t.LibraryID, t.ContentID)
 	return nil
 }
 
@@ -326,13 +326,13 @@ func (s *Service) publish(ctx context.Context, o *op, res []Fetched, extraLibs .
 			return nil, err
 		}
 	}
-	var lib, uri string
-	rows, err := o.tx.Query(ctx, "SELECT l.library_id, l.uri "+consumers, provs, ids)
+	var lib, id string
+	rows, err := o.tx.Query(ctx, "SELECT l.library_id, l.content_id "+consumers, provs, ids)
 	if err != nil {
 		return nil, err
 	}
-	if _, err = pgx.ForEachRow(rows, []any{&lib, &uri}, func() error {
-		o.touch(lib, uri)
+	if _, err = pgx.ForEachRow(rows, []any{&lib, &id}, func() error {
+		o.touch(lib, id)
 		return nil
 	}); err != nil {
 		return nil, err

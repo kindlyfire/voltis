@@ -27,7 +27,7 @@ const keys = [
     ['content', 'c_1'],
     ['content', 'list', libraryScope('l1'), { library_id: 'l1' }],
     ['content', 'list', libraryScope('l2'), { library_id: 'l2' }],
-    ['content', 'orphaned-metadata', libraryScope('l2'), {}],
+    ['content', 'broken-refs', libraryScope('l2'), {}],
     ['metadata', 'review', libraryScope('l2'), { libraryId: 'l2' }],
     ['metadata', 'summary'],
     ['metadata-config'],

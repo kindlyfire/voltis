@@ -35,10 +35,8 @@ func buildQuery(ctx context.Context, q db.Querier, t metadata.Target) (MatchQuer
 		Doc     metadata.Doc `db:"doc"`
 	}
 	rows, err := db.Select[row](ctx, q, `
-		SELECT c.file_uri, COALESCE(m.data_raw, '{}') AS doc
-		FROM content c LEFT JOIN content_metadata m ON m.library_id = c.library_id AND m.uri = c.uri
-		WHERE c.id = $1 OR c.parent_id = $1
-		ORDER BY c.id = $1 DESC, c."order"
+		SELECT file_uri, data_raw AS doc FROM content WHERE id = $1 OR parent_id = $1
+		ORDER BY id = $1 DESC, "order"
 	`, t.ContentID)
 	if err != nil || len(rows) == 0 {
 		return MatchQuery{}, err

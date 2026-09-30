@@ -35,6 +35,11 @@
                                 v => v && form.setValue('book_series_inference', v)
                             "
                         />
+                        <ASwitch
+                            v-bind="form.field('always_remove_missing')"
+                            label="Remove missing items without checking"
+                            description="Normally a scan removes nothing when a source folder is empty or most of it is missing, as when a drive is not mounted. Applies to scans queued after saving."
+                        />
                         <div class="mt-3 flex flex-col gap-3" :aria-busy="config.isPending.value">
                             <QueryError :query="config" />
                             <template v-if="config.data.value">
@@ -295,6 +300,7 @@ const form = useForm({
         ),
         book_series_inference: z.enum(['off', 'conservative']),
         auto_match: z.record(z.string(), z.boolean()),
+        always_remove_missing: z.boolean(),
     }),
     initialValues: {
         name: '',
@@ -302,6 +308,7 @@ const form = useForm({
         sources: [],
         book_series_inference: 'conservative',
         auto_match: {},
+        always_remove_missing: false,
     },
     onSubmit: async values => {
         await upsert.mutateAsync({
@@ -314,6 +321,7 @@ const form = useForm({
             settings: {
                 book_series_inference: values.book_series_inference,
                 auto_match: values.auto_match,
+                always_remove_missing: values.always_remove_missing,
             },
         })
         toast.show({ message: isNew.value ? `Created ${values.name}` : 'Library saved' })
@@ -486,6 +494,7 @@ watch(
                 sources: sources.map(s => newRow(s.path_uri, s.settings)),
                 book_series_inference: settings.book_series_inference,
                 auto_match: settings.auto_match,
+                always_remove_missing: settings.always_remove_missing ?? false,
             })
         }
     },

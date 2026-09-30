@@ -26,12 +26,18 @@ type rename struct{ Old, New string }
 const contentUpsert = `
 	INSERT INTO content (id, created_at, updated_at, uri_part, uri, valid, file_uri,
 		file_mtime, file_size, cover_uri, type, "order", order_parts, file_data,
-		parent_id, library_id, word_count, page_count)
-	VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+		parent_id, library_id, word_count, page_count, data_raw, data, data_version, meta_updated_at)
+	VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+		COALESCE($19::jsonb, '{}'), COALESCE($20::jsonb, '{}'), COALESCE($21::int, 0),
+		CASE WHEN $19::jsonb IS NULL THEN NULL ELSE $3::timestamptz END)
 	ON CONFLICT (id) DO UPDATE SET
 		uri_part = $4, uri = $5, valid = $6, file_uri = $7, file_mtime = $8,
 		file_size = $9, cover_uri = $10, type = $11, "order" = $12, order_parts = $13,
-		file_data = $14, parent_id = $15, updated_at = $3, word_count = $17, page_count = $18`
+		file_data = $14, parent_id = $15, updated_at = $3, word_count = $17, page_count = $18,
+		data_raw = COALESCE($19, content.data_raw), data = COALESCE($20, content.data),
+		data_version = COALESCE($21, content.data_version),
+		meta_updated_at = CASE WHEN $19 IS NOT NULL AND (content.data_raw <> $19 OR content.data <> $20)
+			THEN $3 ELSE content.meta_updated_at END`
 
 func commitLoop(ctx context.Context, pool *pgxpool.Pool, store *metadata.Store, s FileScanner, libraryID string,
 	in <-chan flush, out chan<- committed) {
@@ -71,8 +77,8 @@ func retryable(err error) bool {
 // recentTally accumulates what a flush did to one entry: a series, or a standalone item.
 type recentTally struct {
 	RecentEntry
-	uri, uriPart string
-	tick         int
+	uriPart string
+	tick    int
 }
 
 func commit(ctx context.Context, tx pgx.Tx, store *metadata.Store, s FileScanner, libraryID string, f flush,
@@ -82,10 +88,10 @@ func commit(ctx context.Context, tx pgx.Tx, store *metadata.Store, s FileScanner
 	}
 
 	tallies := map[string]*recentTally{}
-	tally := func(id, uri, uriPart string, tick int) *recentTally {
+	tally := func(id, uriPart string, tick int) *recentTally {
 		t, ok := tallies[id]
 		if !ok {
-			t = &recentTally{RecentEntry: RecentEntry{ID: id}, uri: uri, uriPart: uriPart}
+			t = &recentTally{RecentEntry: RecentEntry{ID: id}, uriPart: uriPart}
 			tallies[id] = t
 		}
 		t.tick = max(t.tick, tick)
@@ -113,21 +119,25 @@ func commit(ctx context.Context, tx pgx.Tx, store *metadata.Store, s FileScanner
 
 	cur := map[string]models.Content{}
 	key := map[string]Key{}
+	docs := map[string]metadata.Doc{}
 	var c models.Content
+	var doc metadata.Doc
 	err := query(ctx, tx, `
-		SELECT id, created_at, uri, uri_part, type, file_uri, cover_uri, file_mtime, parent_id
+		SELECT id, created_at, uri, uri_part, type, file_uri, cover_uri, file_mtime, parent_id, "order", data_raw
 		FROM content WHERE library_id = $1 AND id = ANY($2::text[])
 	`, []any{libraryID, ids},
-		[]any{&c.ID, &c.CreatedAt, &c.URI, &c.URIPart, &c.Type, &c.FileURI, &c.CoverURI, &c.FileMtime, &c.ParentID},
+		[]any{&c.ID, &c.CreatedAt, &c.URI, &c.URIPart, &c.Type, &c.FileURI, &c.CoverURI, &c.FileMtime, &c.ParentID, &c.Order, &doc},
 		func() error {
 			cur[c.ID] = c
 			key[c.ID] = Key{deref(c.ParentID), c.URIPart}
+			docs[c.ID] = doc
+			// JSON scans merge into the destination, so the next row starts from empty.
+			doc = metadata.Doc{}
 			return nil
 		})
 	if err != nil {
 		return Counts{}, nil, err
 	}
-
 	dropped := map[string]bool{}
 	maps.Copy(dropped, f.gone)
 	for _, id := range deletes {
@@ -160,20 +170,14 @@ func commit(ctx context.Context, tx pgx.Tx, store *metadata.Store, s FileScanner
 	}
 
 	if len(deletes) > 0 {
-		var id, uri, part, title string
+		var id, part, title string
 		var parentID *string
-		// The title is read now: a leaf moving into a deleted item's URI later in the flush takes
-		// its metadata.
 		err := query(ctx, tx, `
-			WITH d AS (
-				DELETE FROM content WHERE library_id = $1 AND id = ANY($2::text[])
-				RETURNING id, parent_id, uri, uri_part
-			)
-			SELECT d.id, d.parent_id, d.uri, d.uri_part, COALESCE(NULLIF(m.data->>'title', ''), d.uri_part)
-			FROM d LEFT JOIN content_metadata m ON m.library_id = $1 AND m.uri = d.uri
-		`, []any{libraryID, deletes}, []any{&id, &parentID, &uri, &part, &title}, func() error {
+			DELETE FROM content WHERE library_id = $1 AND id = ANY($2::text[])
+			RETURNING id, parent_id, uri_part, COALESCE(NULLIF(data->>'title', ''), uri_part)
+		`, []any{libraryID, deletes}, []any{&id, &parentID, &part, &title}, func() error {
 			if parentID == nil {
-				t := tally(id, uri, part, deleteTick[id])
+				t := tally(id, part, deleteTick[id])
 				t.Removed++
 				t.Deleted = true
 				t.Title = title
@@ -182,7 +186,7 @@ func commit(ctx context.Context, tx pgx.Tx, store *metadata.Store, s FileScanner
 				if set, ok := f.sets[*parentID]; ok {
 					ref = set.Ref
 				}
-				tally(*parentID, ref.URI, ref.URIPart, deleteTick[id]).Removed++
+				tally(*parentID, ref.URIPart, deleteTick[id]).Removed++
 			}
 			return nil
 		})
@@ -196,7 +200,7 @@ func commit(ctx context.Context, tx pgx.Tx, store *metadata.Store, s FileScanner
 		return Counts{}, nil, err
 	}
 
-	var metaWrites []metadata.FileLayer
+	var touched []string
 	for _, st := range steps {
 		if st.write == nil {
 			if err := identityStep(ctx, tx, libraryID, st.set, now); err != nil {
@@ -219,22 +223,29 @@ func commit(ctx context.Context, tx pgx.Tx, store *metadata.Store, s FileScanner
 				moves = append(moves, rename{Old: c.URI, New: uri})
 			}
 		}
-		if err := upsertContent(ctx, tx, leafRow(st.write.id, libraryID, uri, *item, parentID, old, now)); err != nil {
+		// Leaves have no links, so their metadata is written with the row.
+		meta, changed, err := metadata.NewLeafDoc(docs[st.write.id], item.MetaRaw)
+		if err != nil {
+			return Counts{}, nil, err
+		}
+		if changed {
+			touched = append(touched, st.write.id)
+		}
+		if err := upsertContent(ctx, tx, leafRow(st.write.id, libraryID, uri, *item, parentID, old, now), &meta); err != nil {
 			return Counts{}, nil, err
 		}
 		// Only the row tells an add from a moved file reclaiming a deleted item's ID.
 		var t *recentTally
 		if parentID != nil {
-			t = tally(*parentID, st.set.Ref.URI, st.set.Ref.URIPart, st.write.tick)
+			t = tally(*parentID, st.set.Ref.URIPart, st.write.tick)
 		} else {
-			t = tally(st.write.id, uri, item.URIPart, st.write.tick)
+			t = tally(st.write.id, item.URIPart, st.write.tick)
 		}
 		if old != nil {
 			t.Updated++
 		} else {
 			t.Added++
 		}
-		metaWrites = append(metaWrites, metadata.FileLayer{URI: uri, Fields: item.MetaRaw})
 	}
 	if err := applyRenames(ctx, tx, libraryID, moves); err != nil {
 		return Counts{}, nil, err
@@ -264,7 +275,7 @@ func commit(ctx context.Context, tx pgx.Tx, store *metadata.Store, s FileScanner
 		}
 	}
 
-	if err := store.WriteFileLayers(ctx, tx, libraryID, metaWrites, now); err != nil {
+	if err := metadata.TouchLinks(ctx, tx, touched, now); err != nil {
 		return Counts{}, nil, err
 	}
 
@@ -274,15 +285,19 @@ func commit(ctx context.Context, tx pgx.Tx, store *metadata.Store, s FileScanner
 
 	if f.final {
 		if !f.keep {
-			var id string
+			var id, title string
 			err := query(ctx, tx, `
-				DELETE FROM content p
-				WHERE p.library_id = $1 AND p.type IN ('comic_series', 'book_series')
-				  AND NOT EXISTS (SELECT 1 FROM content c WHERE c.parent_id = p.id)
-				RETURNING p.id
-			`, []any{libraryID}, []any{&id}, func() error {
+				-- Materialized: find empty root series by index first, then touch only their heap rows.
+				WITH gone AS MATERIALIZED (
+					SELECT s.id FROM content s
+					WHERE s.library_id = $1 AND s.parent_id IS NULL AND s.type IN ('comic_series', 'book_series')
+					  AND NOT EXISTS (SELECT 1 FROM content c WHERE c.parent_id = s.id)
+				)
+				DELETE FROM content p USING gone WHERE p.id = gone.id
+				RETURNING p.id, COALESCE(NULLIF(p.data->>'title', ''), p.uri_part)
+			`, []any{libraryID}, []any{&id, &title}, func() error {
 				if t, ok := tallies[id]; ok {
-					t.Deleted = true
+					t.Deleted, t.Title = true, title
 				}
 				return nil
 			})
@@ -295,16 +310,11 @@ func commit(ctx context.Context, tx pgx.Tx, store *metadata.Store, s FileScanner
 		}
 	}
 
-	counts, recent, err := recentEntries(ctx, tx, libraryID, tallies)
-	if err == nil && f.final && !f.keep {
-		// Only now: recentEntries titles deleted entries from their metadata.
-		err = store.CollectOrphans(ctx, tx, libraryID)
-	}
-	return counts, recent, err
+	return recentEntries(ctx, tx, libraryID, tallies)
 }
 
-// recentEntries sums every entry's counts and details the newest entries. A deleted row is joined
-// to its metadata by its last URI, since metadata outlives the row.
+// recentEntries sums every entry's counts and details the newest entries. Deleted entries carry
+// their titles from the delete.
 func recentEntries(ctx context.Context, tx pgx.Tx, libraryID string, tallies map[string]*recentTally) (Counts, []RecentEntry, error) {
 	var counts Counts
 	for _, t := range tallies {
@@ -319,19 +329,17 @@ func recentEntries(ctx context.Context, tx pgx.Tx, libraryID string, tallies map
 	}
 
 	ids := fp.Map(top, func(t *recentTally) string { return t.ID })
-	uris := fp.Map(top, func(t *recentTally) string { return t.uri })
 	parts := fp.Map(top, func(t *recentTally) string { return t.uriPart })
 	var id, title string
 	var hasCover bool
 	var mtime *time.Time
 	var cover *metadata.CoverRef
 	err := query(ctx, tx, `
-		SELECT r.id, COALESCE(NULLIF(m.data->>'title', ''), c.uri_part, r.uri_part),
-		       c.cover_uri IS NOT NULL, c.file_mtime, CASE WHEN c.id IS NOT NULL THEN m.data->'cover' END
-		FROM unnest($2::text[], $3::text[], $4::text[]) AS r(id, uri, uri_part)
+		SELECT r.id, COALESCE(NULLIF(c.data->>'title', ''), c.uri_part, r.uri_part),
+		       c.cover_uri IS NOT NULL, c.file_mtime, c.data->'cover'
+		FROM unnest($2::text[], $3::text[]) AS r(id, uri_part)
 		LEFT JOIN content c ON c.library_id = $1 AND c.id = r.id
-		LEFT JOIN content_metadata m ON m.library_id = $1 AND m.uri = COALESCE(c.uri, r.uri)
-	`, []any{libraryID, ids, uris, parts}, []any{&id, &title, &hasCover, &mtime, &cover}, func() error {
+	`, []any{libraryID, ids, parts}, []any{&id, &title, &hasCover, &mtime, &cover}, func() error {
 		t := tallies[id]
 		t.Title, t.CoverVersion = cmp.Or(t.Title, title), covers.Version(cover, hasCover, mtime)
 		return nil
@@ -381,9 +389,9 @@ func commitSeries(ctx context.Context, tx pgx.Tx, store *metadata.Store, s FileS
 			return err
 		}
 
-		seriesMeta = append(seriesMeta, metadata.FileLayer{URI: ref.URI, Fields: seriesLayer(ref, ordered)})
+		seriesMeta = append(seriesMeta, metadata.FileLayer{ContentID: id, Fields: seriesLayer(ref, ordered)})
 	}
-	return store.WriteFileLayers(ctx, tx, libraryID, seriesMeta, now)
+	return store.WriteFileLayers(ctx, tx, seriesMeta, now)
 }
 
 // loadChildren reads the children of series, with their file layers, leaving out dropped ones.
@@ -397,8 +405,8 @@ func loadChildren(ctx context.Context, tx pgx.Tx, libraryID string, seriesIDs []
 	var parentID string
 	err := query(ctx, tx, `
 		SELECT c.id, c.uri_part, c.order_parts, c.cover_uri, c.file_mtime, c.parent_id,
-		       COALESCE(m.data_raw->'file', '{}')
-		FROM content c LEFT JOIN content_metadata m ON m.library_id = c.library_id AND m.uri = c.uri
+		       COALESCE(c.data_raw->'file', '{}')
+		FROM content c
 		WHERE c.library_id = $1 AND c.parent_id = ANY($2::text[])
 	`, []any{libraryID, seriesIDs},
 		[]any{&kid.ID, &kid.URIPart, &kid.OrderParts, &kid.CoverURI, &kid.FileMtime, &parentID, &kid.Meta}, func() error {
@@ -425,7 +433,7 @@ func identityStep(ctx context.Context, tx pgx.Tx, libraryID string, set *SeriesC
 			URIPart:   ref.URIPart,
 			Valid:     true,
 			FileURI:   ref.FileURI,
-		})
+		}, nil)
 	}
 
 	_, err := tx.Exec(ctx, "UPDATE content SET uri = $2, uri_part = $3, file_uri = $4, updated_at = $5 WHERE id = $1",
@@ -438,9 +446,10 @@ func identityStep(ctx context.Context, tx pgx.Tx, libraryID string, set *SeriesC
 	return err
 }
 
-// applyRenames moves refs in two phases: every source first moves to its own temporary URI, which no
-// real URI can equal, so chains and swaps never overwrite a live source; then each moves to its
-// destination, where the source wins over any row left there, which can only be an orphan.
+// applyRenames moves user and list refs in two phases: every source first moves to its own
+// temporary URI, which no real URI can equal, so chains and swaps never overwrite a live source;
+// then each moves to its destination. A row left there by removed content goes when the source
+// brings its own for the same user or list.
 func applyRenames(ctx context.Context, tx pgx.Tx, libraryID string, pairs []rename) error {
 	if len(pairs) == 0 {
 		return nil
@@ -451,22 +460,15 @@ func applyRenames(ctx context.Context, tx pgx.Tx, libraryID string, pairs []rena
 	for i := range tmps {
 		tmps[i] = fmt.Sprintf("\x01rename/%d", i)
 	}
-	// Metadata and links at a destination belong to removed content, so they all go; a user's or
-	// list's row goes only when the source brings its own.
 	for _, t := range []struct{ table, owner string }{
-		{"content_metadata", ""},
-		{"metadata_links", ""},
 		{"user_to_content", "user_id"},
 		{"custom_list_to_content", "custom_list_id"},
 	} {
 		move := `UPDATE ` + t.table + ` m SET uri = r.dst FROM unnest($2::text[], $3::text[]) AS r(src, dst)
 			WHERE m.library_id = $1 AND m.uri = r.src`
 		orphans := `DELETE FROM ` + t.table + ` d USING unnest($2::text[], $3::text[]) AS r(src, dst)
-			WHERE d.library_id = $1 AND d.uri = r.dst`
-		if t.owner != "" {
-			orphans += ` AND EXISTS (SELECT 1 FROM ` + t.table + ` s
+			WHERE d.library_id = $1 AND d.uri = r.dst AND EXISTS (SELECT 1 FROM ` + t.table + ` s
 				WHERE s.library_id = $1 AND s.uri = r.src AND s.` + t.owner + ` = d.` + t.owner + `)`
-		}
 		for _, st := range []struct {
 			sql      string
 			src, dst []string
@@ -479,7 +481,8 @@ func applyRenames(ctx context.Context, tx pgx.Tx, libraryID string, pairs []rena
 	return nil
 }
 
-func upsertContent(ctx context.Context, tx pgx.Tx, c models.Content) error {
+// upsertContent writes a row, and its metadata unless meta is nil.
+func upsertContent(ctx context.Context, tx pgx.Tx, c models.Content, meta *metadata.LeafDoc) error {
 	data := c.FileData
 	if data == nil {
 		data = json.RawMessage("{}")
@@ -488,8 +491,14 @@ func upsertContent(ctx context.Context, tx pgx.Tx, c models.Content) error {
 	if parts == nil {
 		parts = []*float32{}
 	}
+	var raw, derived *string
+	var version *int
+	if meta != nil {
+		raw, derived, version = &meta.Raw, &meta.Data, new(metadata.DataVersion)
+	}
 	_, err := tx.Exec(ctx, contentUpsert, c.ID, c.CreatedAt, c.UpdatedAt, c.URIPart, c.URI, c.Valid,
-		c.FileURI, c.FileMtime, c.FileSize, c.CoverURI, c.Type, c.Order, parts, data, c.ParentID, c.LibraryID, c.WordCount, c.PageCount)
+		c.FileURI, c.FileMtime, c.FileSize, c.CoverURI, c.Type, c.Order, parts, data, c.ParentID, c.LibraryID, c.WordCount, c.PageCount,
+		raw, derived, version)
 	return err
 }
 

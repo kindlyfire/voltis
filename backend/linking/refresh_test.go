@@ -110,7 +110,10 @@ func TestRefreshDue(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	e.exec("DELETE FROM content WHERE id = 'd'") // its link is orphaned
+	e.exec("DELETE FROM content WHERE id = 'd'") // its link goes with it
+	if n, err := db.SelectScalar[int](ctx, e.pool, "SELECT count(*) FROM metadata_links WHERE content_id = 'd'"); err != nil || n != 0 {
+		t.Fatalf("links of deleted content = %d (%v)", n, err)
+	}
 	e.exec("UPDATE provider_entries SET refresh_at = now() WHERE external_id <> '4'")
 	e.fake.Put("1", providertest.Payload{MergedInto: "3"})
 	e.fake.Put("3", providertest.Payload{MergedInto: "6"})
@@ -122,7 +125,7 @@ func TestRefreshDue(t *testing.T) {
 		t.Fatalf("result = %+v", res)
 	}
 	if got := slices.Concat(e.fake.Fetches()[before:]...); !slices.Equal(got, []string{"1", "2", "3", "6"}) {
-		t.Fatalf("fetched %v; not due or orphaned entries are skipped", got)
+		t.Fatalf("fetched %v; entries not due or unused are skipped", got)
 	}
 	if l := e.view("a").Links[0]; l.Entry.Key.ID != "6" || l.Entry.Title != "Remote Six" {
 		t.Fatalf("merged link = %+v", l)
@@ -134,7 +137,7 @@ func TestRefreshDue(t *testing.T) {
 	if s := e.entryState("2"); !s.Deleted || s.RefreshAt.Before(time.Now().Add(50*24*time.Hour)) {
 		t.Fatalf("deleted entry = %+v", s)
 	}
-	// The tombstones of both hops are young; the orphaned link keeps its entry.
+	// The tombstones of both hops are young; the unused entry waits for the collector.
 	if got := e.entryIDs(); !slices.Equal(got, []string{"1", "2", "3", "4", "5", "6"}) {
 		t.Fatalf("entries = %v", got)
 	}
@@ -142,7 +145,7 @@ func TestRefreshDue(t *testing.T) {
 	before = len(e.fake.Fetches())
 	e.refresh(true)
 	if got := slices.Sorted(slices.Values(slices.Concat(e.fake.Fetches()[before:]...))); !slices.Equal(got, []string{"2", "4", "6"}) {
-		t.Fatalf("forced fetch = %v; tombstones and orphans are skipped", got)
+		t.Fatalf("forced fetch = %v; tombstones and unused entries are skipped", got)
 	}
 }
 
@@ -160,8 +163,8 @@ func TestUnchangedRefreshIsSilent(t *testing.T) {
 	versions := func() string {
 		t.Helper()
 		v, err := db.SelectScalar[string](ctx, e.pool, `SELECT
-			(SELECT string_agg(xmin::text, ',' ORDER BY uri) FROM content_metadata) || ';' ||
-			(SELECT string_agg(xmin::text, ',' ORDER BY uri) FROM metadata_links)`)
+			(SELECT string_agg(xmin::text, ',' ORDER BY id) FROM content) || ';' ||
+			(SELECT string_agg(xmin::text, ',' ORDER BY content_id) FROM metadata_links)`)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -195,8 +198,8 @@ func TestRefreshNotifiesEntryChanges(t *testing.T) {
 		}
 	}
 	e.series("l3", "u", "Local")
-	e.exec(`INSERT INTO metadata_links (library_id, uri, provider, state, candidates)
-		VALUES ('l3', 'comic/u', 'fake', 'review', '[{"key": {"provider": "fake", "id": "2"}}]')`)
+	e.exec(`INSERT INTO metadata_links (library_id, content_id, provider, state, candidates)
+		VALUES ('l3', 'u', 'fake', 'review', '[{"key": {"provider": "fake", "id": "2"}}]')`)
 	e.fake.Put("1", providertest.Payload{Deleted: true})
 	e.fake.Put("2", providertest.Payload{MergedInto: "4"})
 	e.fake.Put("4", providertest.Series("Remote Two", metadata.Manga))
@@ -301,8 +304,8 @@ func TestCollectUnusedEntries(t *testing.T) {
 		('fake', 'rejected', 'unused', '{}', 'unused', now() - interval '31 days', now()),
 		('fake', 'offered', 'unused', '{}', 'unused', now() - interval '31 days', now())`)
 	cands := `[{"key": {"provider": "fake", "id": "offered"}}]`
-	e.exec(`INSERT INTO metadata_links (library_id, uri, provider, state, candidates, rejected)
-		VALUES ('l1', 'comic/s', 'fake', 'review', $1, '{rejected}')`, cands)
+	e.exec(`INSERT INTO metadata_links (library_id, content_id, provider, state, candidates, rejected)
+		VALUES ('l1', 's', 'fake', 'review', $1, '{rejected}')`, cands)
 
 	e.collect()
 	// The unused entry stays while tombstones point at it.

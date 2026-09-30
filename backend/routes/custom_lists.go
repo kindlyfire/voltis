@@ -142,13 +142,12 @@ func (cr *CustomListRoutes) list(c echo.Context) error {
 			(
 				SELECT array_to_json(
 					(array_agg(json_build_object('id', c.id, 'local', c.cover_uri IS NOT NULL,
-						'mtime', c.file_mtime, 'cover', cm.data->'cover')
+						'mtime', c.file_mtime, 'cover', c.data->'cover')
 						ORDER BY (clc."order" IS NULL), clc."order", clc.created_at)
-					 FILTER (WHERE c.cover_uri IS NOT NULL OR cm.data ? 'cover'))[1:4]
+					 FILTER (WHERE c.cover_uri IS NOT NULL OR c.data ? 'cover'))[1:4]
 				)
 				FROM custom_list_to_content clc
 				LEFT JOIN content c ON c.library_id = clc.library_id AND c.uri = clc.uri
-				LEFT JOIN content_metadata cm ON cm.library_id = c.library_id AND cm.uri = c.uri
 				WHERE clc.custom_list_id = cl.id
 			) AS covers
 		FROM custom_lists cl
@@ -206,11 +205,10 @@ func (cr *CustomListRoutes) get(c echo.Context) error {
 	entryRows, err := db.Select[entryRow](ctx, cr.pool, `
 		SELECT clc.*,
 			c.id AS content_id,
-			row_to_json(c.*) AS content_data,
-			cm.data AS meta_data
+			(SELECT row_to_json(r) FROM (SELECT `+models.ContentColumns("c")+`) r) AS content_data,
+			c.data AS meta_data
 		FROM custom_list_to_content clc
 		LEFT JOIN content c ON c.library_id = clc.library_id AND c.uri = clc.uri
-		LEFT JOIN content_metadata cm ON cm.uri = clc.uri AND cm.library_id = clc.library_id
 		WHERE clc.custom_list_id = $1
 		ORDER BY (clc."order" IS NULL), clc."order", clc.created_at
 	`, cl.ID)
