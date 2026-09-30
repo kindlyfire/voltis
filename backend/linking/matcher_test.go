@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"voltis/db"
+	"voltis/db/dbtest"
 	"voltis/lib/fp"
 	"voltis/metadata"
 	"voltis/providers/providertest"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // match matches pages of due series, as the worker does, until none is left.
@@ -393,39 +393,117 @@ func TestResolveReview(t *testing.T) {
 
 func TestReviewSearchAndFilter(t *testing.T) {
 	e := setup(t)
-	for id, title := range map[string]string{"a": "Sousou no Frieren", "b": "Emma", "c": "Frieren Again", "d": "Nothing", "e": "frieren"} {
-		e.series("l1", id, title)
-	}
-	e.exec(`INSERT INTO metadata_links (library_id, content_id, provider, state, last_error) VALUES
-		('l1', 'a', 'fake', 'review', NULL), ('l1', 'b', 'fake', 'review', NULL),
-		('l1', 'c', 'fake', 'unmatched', 'down'), ('l1', 'd', 'fake', 'unmatched', NULL),
-		('l1', 'e', 'fake', 'review', NULL)`)
-	// Prepared statements may run generic plans, which take the search only as a function argument.
-	cfg := e.pool.Config()
-	cfg.ConnConfig.RuntimeParams["plan_cache_mode"] = "force_generic_plan"
-	generic, err := pgxpool.NewWithConfig(context.Background(), cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer generic.Close()
-	e.svc.pool = generic
-	for _, c := range []struct {
-		q    ReviewQuery
-		want []string
+	ctx := context.Background()
+	// Links change in this order, the first least recently.
+	series := []struct {
+		id, title string
+		alts      []string
 	}{
-		{ReviewQuery{Tab: "review", Search: "frier"}, []string{"a", "e"}},
-		{ReviewQuery{Tab: "review", Search: "Frieren"}, []string{"e", "a"}},          // an exact title first
-		{ReviewQuery{Tab: "review", Search: "emna"}, []string{"b"}},                  // a typo
-		{ReviewQuery{Tab: "review", Search: "frieren emma"}, nil},                    // every word
-		{ReviewQuery{Tab: "unmatched", Search: "frieren"}, []string{"c"}},            // the tab still applies
-		{ReviewQuery{Tab: "unmatched", Failed: true}, []string{"c"}},                 // the last attempt failed
-		{ReviewQuery{Tab: "review", LibraryID: "l2", Search: "frieren"}, []string{}}, // another library
+		{"exact", "Reborn Inside a Quest", nil},
+		{"decoy", "Chronicle of Nothing", []string{"Reborn Again", "Inside Stories", "A Quest Tale"}},
+		{"prim", "Silent Things Inside", nil},
+		{"across", "Other Paths", []string{"Silent Things", "Inside Out"}},
+		{"starts", "Ember Gate Chronicles", nil},
+		{"later", "Beyond the Ember Gate", nil},
+		{"silver", "Silver Lantern", nil},
+		{"moon", "Tower of the Moon", nil},
+		{"noname", "No Name", nil},
+		{"kimi", "Kimi no Na wa Sora", nil},
+		{"complete", "Lights of Crimson", []string{"Tower Under Moon"}},
+		{"partial", "Crimson Tower Under Moon", nil},
+		{"thai1", "Crimson Tower ม หา", nil},
+		{"thai2", "Crimson Tower มหาวิทยาลัย", []string{"หา"}},
+		{"thai3", "Crimson Tower มหาวิทยาลัย", []string{"ม หา"}},
+		{"thai4", "Crimson Tower ม หา", []string{"Crimson Tower มหากุ้ง"}},
+		{"greek", "Άγγελος Φως", []string{"Αγγελος Φως"}},
+		{"istanbul", "İstanbul Nights", nil},
+		{"alpha", "ɑdam Relay", nil},
+		{"mixed", "Tōkyō 東京 Москва กรุงเทพ 2049", nil},
+		{"broken", "Broken Signal", nil},
+		{"calm", "Broken Calm", nil},
+		{"bridge", "Broken Bridge", nil},
+	}
+	for i, s := range series {
+		e.series("l1", s.id, s.title)
+		if s.alts != nil {
+			e.tx(func(tx pgx.Tx) error {
+				return e.svc.store.WriteFileLayers(ctx, tx, []metadata.FileLayer{{ContentID: s.id,
+					Fields: metadata.Fields{Title: metadata.Val(s.title), AltTitles: metadata.Val(s.alts)}}}, time.Now())
+			})
+		}
+		state, lastError := "review", (*string)(nil)
+		switch s.id {
+		case "broken":
+			state, lastError = "unmatched", new("down")
+		case "calm":
+			state = "unmatched"
+		}
+		e.exec(`INSERT INTO metadata_links (library_id, content_id, provider, state, last_error, updated_at)
+			VALUES ('l1', $1, 'fake', $2, $3, now() + $4 * interval '1 second')`, s.id, state, lastError, i)
+	}
+	// Prepared statements may run generic plans, which take the search only as a function argument.
+	generic := dbtest.GenericPlans(t, e.pool)
+	e.svc.pool = generic
+
+	for _, c := range []struct {
+		search string
+		want   []string // the leading results, or nil for none
+	}{
+		{"Reborn Inside a Quest", []string{"exact", "decoy"}},               // above an alias-heavy decoy, though older
+		{"inside silent things", []string{"prim", "across"}},                // every token in the primary title
+		{"ember gate", []string{"starts", "later"}},                         // the title starts with the query
+		{"si", []string{"silver", "prim"}},                                  // a 2-character prefix; equal scores, the more recent first
+		{"Rebron", []string{"exact"}},                                       // a typo
+		{"mon", nil},                                                        // no typo below 4 characters
+		{"reborn lantern", nil},                                             // every token
+		{"in in", nil},                                                      // a repeated token is still exact
+		{"reborn inside the quest", []string{"exact"}},                      // an optional stopword
+		{"no", []string{"noname", "kimi"}},                                  // only stopwords: required
+		{"crimson tower under moon light", []string{"complete", "partial"}}, // one of 5 may miss
+		// thai3's title starts with the query, above thai4's alt; thai2 starts with it but misses ม.
+		{"Crimson Tower มหา", []string{"thai3", "thai4", "thai1", "thai2"}},
+		{"?!-", nil},
+		{"  Reborn   Inside a Quest ", []string{"exact"}},
+		{"Αγγελος", []string{"greek"}},     // ICU keeps the tonos, so only the alt holds this form
+		{"İstanblu", []string{"istanbul"}}, // a typo in a token with a combining mark
+		{"ɑdma", []string{"alpha"}},        // ascii_folding leaves ɑ, still Latin
+		{"Tōkyō 東京 Москва กรุงเทพ 2049", []string{"mixed"}},
 	} {
-		c.q.Limit = 10
-		page, err := e.svc.Review(context.Background(), c.q)
+		page, err := e.svc.Review(ctx, ReviewQuery{Tab: "review", Limit: 50, Search: c.search})
 		got := fp.Map(page.Items, func(it ReviewItem) string { return it.Content.ID })
-		if err != nil || page.Total != len(c.want) || !slices.Equal(got, c.want) {
-			t.Errorf("%+v: got %v of %d (%v), want %v", c.q, got, page.Total, err, c.want)
+		if err != nil || len(got) != page.Total || len(got) < len(c.want) || c.want == nil && len(got) > 0 ||
+			!slices.Equal(got[:len(c.want)], c.want) {
+			t.Errorf("%q: got %v of %d (%v), want %v first", c.search, got, page.Total, err, c.want)
+		}
+	}
+
+	// Filters: each case fails without its predicate.
+	for q, want := range map[ReviewQuery][]string{
+		{Tab: "unmatched", Search: "broken"}:               {"broken", "calm"}, // not bridge, in review
+		{Tab: "unmatched", Failed: true}:                   {"broken"},         // not calm, which has no error
+		{Tab: "review", LibraryID: "l2", Search: "broken"}: nil,
+	} {
+		q.Limit = 50
+		page, err := e.svc.Review(ctx, q)
+		got := fp.Map(page.Items, func(it ReviewItem) string { return it.Content.ID })
+		if slices.Sort(got); err != nil || !slices.Equal(got, want) {
+			t.Errorf("%+v: got %v (%v), want %v", q, got, err, want)
+		}
+	}
+
+	// Every title term of the query for a mixed-script title is a term the index holds for it, so
+	// title_query tokenizes as the index does.
+	toks, err := db.SelectScalars[string](ctx, generic, `SELECT DISTINCT v #>> '{}' FROM jsonb_path_query(
+		public.title_query($1)::text::jsonb, 'strict $.**.term ? (@.field == "title_words").value') v`,
+		"Tōkyō 東京 Москва กรุงเทพ 2049")
+	if err != nil || len(toks) < 5 {
+		t.Fatalf("tokens %v: %v", toks, err)
+	}
+	for _, tok := range toks {
+		n, err := db.SelectScalar[int](ctx, generic, `SELECT count(*) FROM content c
+			WHERE c.id @@@ paradedb.term('title_words', $1) AND c.id = 'mixed'`, tok)
+		if err != nil || n != 1 {
+			t.Errorf("token %q: %d hits (%v)", tok, n, err)
 		}
 	}
 }

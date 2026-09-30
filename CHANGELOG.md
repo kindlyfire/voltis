@@ -12,9 +12,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   its items, as when a drive is not mounted, and says why. The library setting
   "Remove missing items without checking" turns this off. It applies to scans
   queued after saving: an already queued scan keeps its settings
+- Search matches titles and alternative titles. It matches every word except
+  common short ones, allowing one miss in longer searches, and tolerates a
+  typo. Exact titles rank first, then titles that start with the search
 
 ### Upgrade notes
 
+- The Postgres image must be `paradedb/paradedb:0.25.10-pg18`, and the upgrade
+  refuses to run on an older `pg_search`. The new image changes the glibc
+  collation, so don't reuse the data volume. Dump the database, start the new
+  image on a fresh volume, then `createdb -T template0 voltis`, run
+  `CREATE EXTENSION vector` in it, and load the dump
 - Setting `auth.admin_group` now demotes users whose OIDC login carries no
   groups. To restore an admin, fix the groups claim or clear the mapping with
   `voltis settings set auth.admin_group ""`, then run
@@ -28,10 +36,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Metadata, overrides and provider links are now deleted with their content.
   The upgrade deletes those left behind by removed content, and the "Orphaned
   metadata" repair section is gone
-- The upgrade rebuilds the content table. Expect minutes on large libraries
-  (about 100 s for 2.3M content rows), and free disk of about the size
-  of `content` and `content_metadata` with their indexes, plus `max_wal_size`
-  (5.4 GB plus WAL in that library)
+- The upgrade rebuilds the content table, then rewrites it once more and
+  rebuilds its search index. Expect minutes on large libraries (about 100 s for
+  2.3M content rows for the rebuild, and about as long again for the rewrite),
+  and free disk of about the size of `content` and `content_metadata` with
+  their indexes, plus `max_wal_size` (5.4 GB plus WAL in that library)
 - Grants, reloptions and per-column statistics targets on `content` are not
   carried over
 

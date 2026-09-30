@@ -20,6 +20,7 @@ import type {
     Paginated,
     ReadingStatus,
     RecentlyReadEntry,
+    UncountedPage,
     UserToContent,
     UserToContentUpdate,
 } from './types'
@@ -106,8 +107,18 @@ export function listSearchParams(p: ContentListParams): URLSearchParams {
     if (p.offset !== undefined) searchParams.append('offset', String(p.offset))
     if (p.sort) searchParams.append('sort', p.sort)
     if (p.sort_order) searchParams.append('sort_order', p.sort_order)
+    if (p.count !== undefined) searchParams.append('count', String(p.count))
     return searchParams
 }
+
+const listQuery = <T>(params: MaybeRefOrGetter<ContentListParams | undefined>) => ({
+    queryKey: ['content', 'list', libraryScope(() => toValue(params)?.library_id), params],
+    queryFn: async () => {
+        const query = listSearchParams(toValue(params)!).toString()
+        return apiFetch<T>(`/content${query ? `?${query}` : ''}`)
+    },
+    enabled: isEnabled(params),
+})
 
 export const contentApi = {
     useGet: (
@@ -125,19 +136,20 @@ export const contentApi = {
         return apiFetch<Content>(`/content/${id}`, init)
     },
 
+    /** Counted; see useListUncounted for `count: false`. */
     useList: (
-        params: MaybeRefOrGetter<ContentListParams | undefined> = {},
+        params: MaybeRefOrGetter<(ContentListParams & { count?: true }) | undefined> = {},
         options: QueryOptions<Paginated<Content>> = {}
-    ) =>
-        useQuery({
-            queryKey: ['content', 'list', libraryScope(() => toValue(params)?.library_id), params],
-            queryFn: async () => {
-                const query = listSearchParams(toValue(params)!).toString()
-                return apiFetch<Paginated<Content>>(`/content${query ? `?${query}` : ''}`)
-            },
-            enabled: isEnabled(params),
-            ...options,
-        }),
+    ) => useQuery({ ...listQuery<Paginated<Content>>(params), ...options }),
+
+    /** useList without the count query. */
+    useListUncounted: (params: MaybeRefOrGetter<ContentListParams | undefined>) =>
+        useQuery(
+            listQuery<UncountedPage<Content>>(() => {
+                const p = toValue(params)
+                return p && { ...p, count: false }
+            })
+        ),
 
     useBuckets: (params: MaybeRefOrGetter<ContentListParams>) =>
         useQuery({

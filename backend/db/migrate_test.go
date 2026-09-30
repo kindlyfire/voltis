@@ -138,7 +138,7 @@ func TestMergeContentMetadataMigration(t *testing.T) {
 	}
 	before := constraints()
 
-	if err := db.Migrate(ctx, pool); err != nil {
+	if err := db.MigrateUntil(ctx, pool, "015_merge_content_metadata"); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 

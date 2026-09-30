@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"voltis/db"
+	"voltis/db/dbtest"
 	"voltis/lib/fp"
 	"voltis/models"
 
@@ -388,6 +389,27 @@ func TestContentListWindow(t *testing.T) {
 				assertEq(t, s(bucketKeys), s(keys))
 			})
 		}
+	}
+
+	// Both start with "lantern" and score alike. Sort title and id would put c_lantern_a first, so
+	// c_lantern_b first shows the shorter-title tiebreak.
+	mustExec(t, pool, `INSERT INTO content (id, uri_part, uri, type, library_id, data) VALUES
+		('c_lantern_a', 'a', 'file:///lib/a', 'comic_series', $1, '{"title": "Lantern Alpha Two"}'),
+		('c_lantern_b', 'b', 'file:///lib/b', 'comic_series', $1, '{"title": "Lantern Beta"}')`, libID)
+	list := func(query string) string {
+		return s(dataIDs(c.Get("/api/content?library_id="+libID+query).Assert(t, 200).JSON()))
+	}
+	relevance := s([]string{"c_lantern_b", "c_lantern_a", echoID}) // titles above the alt, shorter first
+	assertEq(t, list("&search=lantern"), relevance)
+	assertEq(t, list("&search=+lantern+"), relevance)
+	assertEq(t, list("&search=lantern&sort=title&sort_order=asc"), s([]string{echoID, "c_lantern_a", "c_lantern_b"}))
+	assertEq(t, list("&sort=relevance"), list(""))
+
+	// Kind counts of a search stay right under generic plans, which pgx reaches from a statement's
+	// sixth run.
+	k, err := countContentKinds(context.Background(), dbtest.GenericPlans(t, pool), "", contentFilter{LibraryID: libID, Search: "lantern"})
+	if err != nil || k != (kindCounts{Series: 3}) {
+		t.Fatalf("kinds = %+v (%v)", k, err)
 	}
 }
 

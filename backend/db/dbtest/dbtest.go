@@ -14,6 +14,19 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// GenericPlans is another pool on pool's database whose connections always run generic plans.
+func GenericPlans(t *testing.T, pool *pgxpool.Pool) *pgxpool.Pool {
+	t.Helper()
+	cfg := pool.Config()
+	cfg.ConnConfig.RuntimeParams["plan_cache_mode"] = "force_generic_plan"
+	p, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("generic pool: %v", err)
+	}
+	t.Cleanup(p.Close)
+	return p
+}
+
 func Pool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	pool := Unmigrated(t)

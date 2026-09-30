@@ -114,7 +114,7 @@ type opdsQuery struct {
 	Page   int    `query:"page"   validate:"min=1" default:"1"`
 	Status string `query:"status" validate:"oneof=all unread reading completed" default:"all"`
 	Sort   string `query:"sort"   validate:"omitempty,oneof=title added released number"`
-	Query  string `query:"query"`
+	Query  string `query:"query"  validate:"max=200"`
 }
 
 // bindOPDSQuery binds the params, allowing only the given sorts when there are any.
@@ -170,7 +170,7 @@ var opdsStatuses = []struct{ value, title string }{
 var itemTypes = []string{"comic", "book"}
 
 // applySort sets both Sort and SortOrder: the `default:"desc"` tag only applies to bound queries.
-// An empty sort keeps the query's own order (list order, or score order for a search).
+// An empty sort keeps the query's own order (list order, or relevance for a search).
 func applySort(f *contentListQuery, sort string) {
 	if s, ok := opdsSorts[sort]; ok {
 		f.Sort, f.SortOrder = s.sort, s.order

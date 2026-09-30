@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"voltis/db"
@@ -46,21 +47,23 @@ type ReviewPage struct {
 	Total int
 }
 
-// Review lists the links of a tab, most recently changed first.
+// Review lists the links of a tab, the most relevant to the search first, then the most recently
+// changed.
 func (s *Service) Review(ctx context.Context, q ReviewQuery) (ReviewPage, error) {
 	cond, ok := reviewTabs[q.Tab]
 	if !ok {
 		return ReviewPage{}, &metadata.ValidationError{Field: "tab", Msg: fmt.Sprintf("unknown tab %q", q.Tab)}
 	}
-	args := pgx.NamedArgs{"library_id": q.LibraryID, "providers": s.providerNames(), "search": q.Search,
+	search := strings.TrimSpace(q.Search)
+	args := pgx.NamedArgs{"library_id": q.LibraryID, "providers": s.providerNames(), "search": search,
 		"limit": q.Limit, "offset": q.Offset}
 	from := "FROM metadata_links l JOIN content c ON c.id = l.content_id"
 	where := "WHERE " + cond + " AND l.provider = ANY(@providers) AND (@library_id = '' OR l.library_id = @library_id)"
 	order := "l.updated_at DESC, l.library_id, l.content_id, l.provider"
 	count := "FROM metadata_links l"
-	if q.Search != "" {
-		where += " AND " + metadata.Matches("c", "search_text", true, q.Search)
-		order = metadata.ExactTitle + " DESC, " + order
+	if search != "" {
+		where += " AND " + metadata.TitleMatch("c", true) // links are on series, which are root-level
+		order = metadata.TitleScore("c") + " DESC, " + order
 		count = from
 	}
 	if q.Failed {

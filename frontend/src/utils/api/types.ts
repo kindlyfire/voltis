@@ -306,6 +306,9 @@ export interface Paginated<T> {
     total: number
 }
 
+/** A page fetched with `count: false`. */
+export type UncountedPage<T> = Omit<Paginated<T>, 'total'> & { total: null }
+
 export interface ContentBuckets {
     total: number
     buckets: { key: string | null; count: number }[]
@@ -332,7 +335,10 @@ export interface ContentListParams {
         | 'unread_children_count'
         | 'release_date'
         | 'title'
+        | 'relevance'
     sort_order?: 'asc' | 'desc'
+    /** false leaves out the total, which is then null (see useListUncounted). */
+    count?: boolean
 }
 
 export interface SpineItem {

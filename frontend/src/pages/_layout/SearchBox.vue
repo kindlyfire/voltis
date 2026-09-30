@@ -93,7 +93,7 @@ import ASpinner from '@/ui/ASpinner.vue'
 import { IconClose, IconMagnify } from '@/ui/icons'
 import { useOverlayLayer } from '@/ui/overlay'
 import { contentApi, coverUrl } from '@/utils/api/content'
-import type { Content, Paginated } from '@/utils/api/types'
+import type { Content, UncountedPage } from '@/utils/api/types'
 import { displayContentType } from '@/utils/misc'
 
 const router = useRouter()
@@ -107,10 +107,10 @@ const isOpen = computed(() => wantOpen.value && !!debounced.value)
 useOverlayLayer('menu', isOpen)
 
 // Keyed by the search term, so a late response for an older term can't overwrite a newer one's.
-const query = contentApi.useList(() =>
+const query = contentApi.useListUncounted(() =>
     debounced.value ? { search: debounced.value, limit: 10, parent_id: 'null' } : undefined
 )
-const last = shallowRef<Paginated<Content>>()
+const last = shallowRef<UncountedPage<Content>>()
 // Set while the term is blank until the debounce catches up, so a late response for the term
 // that was cleared doesn't refill `last`.
 let blanked = false

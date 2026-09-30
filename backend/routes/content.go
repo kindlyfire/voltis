@@ -315,10 +315,10 @@ type contentListQuery struct {
 	Starred       string   `query:"starred"         validate:"omitempty,oneof=true false"`
 	HasStatus     string   `query:"has_status"      validate:"omitempty,oneof=true false"`
 	HasRating     string   `query:"has_rating"      validate:"omitempty,oneof=true false"`
-	Search        string   `query:"search"`
+	Search        string   `query:"search"          validate:"max=200"`
 	Limit         *int     `query:"limit"           validate:"omitempty,min=0"`
 	Offset        int      `query:"offset"          validate:"min=0"`
-	Sort          string   `query:"sort"            validate:"omitempty,oneof=progress_updated_at created_at order rating user_rating unread_children_count release_date title"`
+	Sort          string   `query:"sort"            validate:"omitempty,oneof=progress_updated_at created_at order rating user_rating unread_children_count release_date title relevance"`
 	SortOrder     string   `query:"sort_order"      validate:"omitempty,oneof=asc desc" default:"desc"`
 	Count         string   `query:"count"           validate:"omitempty,oneof=true false"`
 	Include       string   `query:"include"`
@@ -335,17 +335,19 @@ func (q contentListQuery) filter() contentFilter {
 		Starred:       optBool(q.Starred),
 		HasStatus:     optBool(q.HasStatus),
 		HasRating:     optBool(q.HasRating),
-		Search:        q.Search,
+		Search:        strings.TrimSpace(q.Search),
 		ListID:        q.ListID,
 	}
 }
 
-// order resolves the sort: without one, "" for search relevance, list order within a list, or
-// else title asc (sort_order defaults to desc, so it is ignored).
+// order resolves the sort: an explicit one; else relevance for a search, list order in a list, or
+// title asc (sort_order defaults to desc, so it is ignored).
 func (q contentListQuery) order() (sort, dir string) {
 	switch {
-	case q.Sort != "" || q.Search != "":
+	case q.Sort != "" && q.Sort != "relevance":
 		return q.Sort, q.SortOrder
+	case strings.TrimSpace(q.Search) != "":
+		return "relevance", ""
 	case q.ListID != "":
 		return "list", "asc"
 	}
@@ -436,7 +438,7 @@ func (f contentFilter) where(args pgx.NamedArgs) (cond string, needsUTC bool) {
 	}
 	if f.Search != "" {
 		args["search"] = f.Search
-		where = append(where, metadata.Matches("c", "search_text", false, f.Search))
+		where = append(where, metadata.TitleMatch("c", f.ParentID == "null"))
 	}
 	return strings.Join(where, " AND "), needsUTC
 }
@@ -476,8 +478,8 @@ func nullsOrder(dir string) string {
 func contentOrder(sort, dir string) (clause string, needsUTC, needsUnread bool) {
 	col, nullable := "", true
 	switch sort {
-	case "":
-		return "paradedb.score(c.id) DESC, c.id", false, false
+	case "relevance":
+		return metadata.TitleScore("c") + ` DESC, c.search_title_len, c.sort_title, c.id COLLATE "C"`, false, false
 	case "list":
 		return `(clc."order" IS NULL), clc."order", clc.created_at, c.id`, false, false
 	case "title":
@@ -505,13 +507,18 @@ func contentOrder(sort, dir string) (clause string, needsUTC, needsUnread bool) 
 }
 
 // listContentIDs sorts and paginates the filtered ids, reading only the joins the filter and the
-// order need; a nil limit means all.
+// order need; a nil limit means all, or maxContentIDs for a search.
 func listContentIDs(ctx context.Context, q db.Querier, userID string, f contentFilter,
 	sort, dir string, limit *int, offset int,
 ) ([]string, error) {
 	args := pgx.NamedArgs{"user_id": userID}
 	order, utc, unread := contentOrder(sort, dir)
 	sql := "SELECT c.id " + f.from(args, utc, unread) + " ORDER BY " + order
+	if limit == nil && f.Search != "" {
+		// pg_search 0.25.10's scan fails a generic plan without a LIMIT ("unrecognized node type"),
+		// and allocates its top-k heap by the LIMIT, so it can't be huge either.
+		limit = new(maxContentIDs)
+	}
 	if limit != nil {
 		sql += fmt.Sprintf(" LIMIT %d", *limit)
 	}
@@ -524,6 +531,32 @@ func listContentIDs(ctx context.Context, q db.Querier, userID string, f contentF
 func countContent(ctx context.Context, q db.Querier, userID string, f contentFilter) (int, error) {
 	args := pgx.NamedArgs{"user_id": userID}
 	return db.SelectScalar[int](ctx, q, "SELECT COUNT(*) "+f.from(args, false, false), args)
+}
+
+// SearchEvalResult is one root-level search's first page of ids, its total and the time each took.
+type SearchEvalResult struct {
+	IDs                 []string
+	Total               int
+	PageTime, CountTime time.Duration
+}
+
+// SearchEvalQuery runs a root-level content search, as the header (libraryID "") or a library's
+// grid runs it, for the relevance eval.
+func SearchEvalQuery(ctx context.Context, q db.Querier, search, libraryID string, limit int) (SearchEvalResult, error) {
+	lq := contentListQuery{Search: search, LibraryID: libraryID, ParentID: "null"}
+	f := lq.filter()
+	sort, dir := lq.order()
+	start := time.Now()
+	ids, err := listContentIDs(ctx, q, "", f, sort, dir, &limit, 0)
+	if err != nil {
+		return SearchEvalResult{}, err
+	}
+	pageTime, start := time.Since(start), time.Now()
+	total, err := countContent(ctx, q, "", f)
+	if err != nil {
+		return SearchEvalResult{}, err
+	}
+	return SearchEvalResult{ids, total, pageTime, time.Since(start)}, nil
 }
 
 type contentPageResponse struct {
@@ -676,9 +709,18 @@ const kindCountColumns = `COUNT(*) FILTER (WHERE c.type IN ('comic_series', 'boo
 	COUNT(*) FILTER (WHERE c.type = 'comic') AS comics,
 	COUNT(*) FILTER (WHERE c.type = 'book') AS books`
 
-func countContentKinds(ctx context.Context, q db.Querier, userID string, f contentFilter) (kindCounts, error) {
+func countContentKinds(ctx context.Context, pool *pgxpool.Pool, userID string, f contentFilter) (k kindCounts, err error) {
 	args := pgx.NamedArgs{"user_id": userID}
-	return db.SelectOne[kindCounts](ctx, q, "SELECT "+kindCountColumns+" "+f.from(args, false, false), args)
+	sql := "SELECT " + kindCountColumns + " " + f.from(args, false, false)
+	err = db.WithTx(ctx, pool, func(tx pgx.Tx) error {
+		// pg_search 0.25.10's aggregate scan miscounts FILTER aggregates under generic plans.
+		if _, err := tx.Exec(ctx, "SET LOCAL paradedb.enable_aggregate_custom_scan = off"); err != nil {
+			return err
+		}
+		k, err = db.SelectOne[kindCounts](ctx, tx, sql, args)
+		return err
+	})
+	return k, err
 }
 
 // listContent runs one page of lq: the ids query sorts and pages, then only those rows hydrate.
@@ -703,15 +745,15 @@ func listContent(ctx context.Context, q db.Querier, userID string, lq contentLis
 
 // queryContent runs one page of lq with its total. counts, when non-nil, holds countContentKinds
 // for the same filter and saves the count query.
-func queryContent(ctx context.Context, q db.Querier, userID string, lq contentListQuery, counts *kindCounts) ([]contentListRow, int, error) {
+func queryContent(ctx context.Context, pool *pgxpool.Pool, userID string, lq contentListQuery, counts *kindCounts) ([]contentListRow, int, error) {
 	if counts == nil {
-		k, err := countContentKinds(ctx, q, userID, lq.filter())
+		k, err := countContentKinds(ctx, pool, userID, lq.filter())
 		if err != nil {
 			return nil, 0, err
 		}
 		counts = &k
 	}
-	rows, err := listContent(ctx, q, userID, lq)
+	rows, err := listContent(ctx, pool, userID, lq)
 	return rows, counts.Series + counts.items(), err
 }
 

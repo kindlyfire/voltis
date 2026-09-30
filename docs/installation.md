@@ -20,7 +20,7 @@ services:
             - /my/library/2:/app/library/2
 
     postgres:
-        image: paradedb/paradedb:0.21.8-pg18
+        image: paradedb/paradedb:0.25.10-pg18
         environment:
             POSTGRES_DB: voltis
             POSTGRES_USER: postgres

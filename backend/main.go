@@ -17,6 +17,7 @@ import (
 	"voltis/providers"
 	"voltis/providers/mangabaka"
 	"voltis/routes"
+	"voltis/searcheval"
 	"voltis/settings"
 
 	"github.com/cshum/vipsgen/vips"
@@ -220,6 +221,33 @@ func main() {
 							pool := connectDB(ctx)
 							defer pool.Close()
 							return cmd.SetIssuer(ctx, pool, from, to)
+						},
+					},
+				},
+			},
+			{
+				Name:   "dev",
+				Hidden: true,
+				Commands: []*cli.Command{
+					{
+						Name:  "search-eval",
+						Usage: "Rank a relevance fixture's searches against a restored database",
+						Flags: []cli.Flag{
+							// No APP_DATABASE_URL fallback, so it never runs against the dev database by accident.
+							&cli.StringFlag{Name: "db", Usage: "Database URL", Required: true},
+							&cli.StringFlag{Name: "cases", Usage: "JSONL cases file", Required: true},
+							&cli.StringFlag{Name: "out", Usage: "Results JSON file", Required: true},
+							&cli.StringFlag{Name: "baseline", Usage: "Results JSON file to diff ranks against"},
+						},
+						Action: func(ctx context.Context, c *cli.Command) error {
+							pool, err := db.Connect(ctx, c.String("db"))
+							if err != nil {
+								return err
+							}
+							defer pool.Close()
+							return searcheval.Run(ctx, pool, searcheval.Options{
+								Cases: c.String("cases"), Out: c.String("out"), Baseline: c.String("baseline"),
+							})
 						},
 					},
 				},

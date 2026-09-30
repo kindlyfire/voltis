@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"maps"
 	"slices"
@@ -245,23 +244,19 @@ func NewLeafDoc(d Doc, file Fields) (LeafDoc, bool, error) {
 	return LeafDoc{string(raw), string(data)}, changed, err
 }
 
-// Matches is a condition that the bm25-indexed field of content c matches the words of the named
-// argument @search, each as a prefix and, from three characters, with a typo: all of them, or any.
-// The search goes in as a function argument: generic plans reject a parameter cast to pdb.fuzzy.
-func Matches(c, field string, all bool, search string) string {
-	dist := 1
-	if len(search) < 3 {
-		dist = 0
+// TitleMatch is a condition that content c's titles match the named argument @search, trimmed and
+// non-blank. rootOnly excludes is_root = false inside the index query: a plain c.is_root filter adds
+// its own score, and pg_search 0.25.10 drops matches when it is a must term.
+func TitleMatch(c string, rootOnly bool) string {
+	if rootOnly {
+		return c + ".id @@@ paradedb.boolean(must => ARRAY[public.title_query(@search)], " +
+			"must_not => ARRAY[paradedb.term('is_root', false)])"
 	}
-	return fmt.Sprintf("%s.id @@@ paradedb.match('%s', @search, distance => %d, prefix => true, conjunction_mode => %t)",
-		c, field, dist, all)
+	return c + ".id @@@ public.title_query(@search)"
 }
 
-// ExactTitle is a condition that the named argument @search is one of content c's titles, whatever
-// the case, read from search_text: its title line, or an alt title as its JSON string. Searches
-// rank these first, as fuzzy matches all score alike.
-const ExactTitle = `(lower(split_part(c.search_text, E'\n', 1)) = lower(@search)
-	OR strpos(lower(c.search_text), lower(to_jsonb(@search::text)::text)) > 0)`
+// TitleScore is TitleMatch's relevance, for ORDER BY; a whole-title match ranks above any other.
+func TitleScore(c string) string { return "pdb.score(" + c + ".id)" }
 
 // LinkedEntry joins a link l to the entry e it reads: the one its id's merges lead to. join is
 // "JOIN" or "LEFT JOIN".

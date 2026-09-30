@@ -158,7 +158,7 @@ func (r *MetadataRoutes) undo(c echo.Context) error {
 type reviewQuery struct {
 	LibraryID string `query:"library_id"`
 	Tab       string `query:"tab"    default:"review"`
-	Search    string `query:"q"`
+	Search    string `query:"q"      validate:"max=200"`
 	Failed    bool   `query:"failed"`
 	Limit     int    `query:"limit"  default:"50" validate:"min=1,max=200"`
 	Offset    int    `query:"offset" validate:"min=0"`
