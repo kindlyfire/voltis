@@ -286,3 +286,18 @@ func TestBookFilesCacheOnlyWhenVersioned(t *testing.T) {
 			"private, max-age=31536000, immutable")
 	}
 }
+
+func TestGetComicPageUnsized(t *testing.T) {
+	pool := newTestPool(t)
+	c := newAdminClient(t, pool)
+
+	img := testJPEG(t)
+	id := newTestContent(t, pool)
+	mustExec(t, pool, `UPDATE content SET file_uri = $2, file_data = '{"pages": [["01.jpg"], ["02.jpg"]]}' WHERE id = $1`,
+		id, testCBZ(t, t.TempDir(), map[string][]byte{"01.jpg": []byte("other"), "02.jpg": img}))
+
+	if body := c.Get("/api/files/comic-page/"+id+"/1").Assert(t, 200).Body; !bytes.Equal(body, img) {
+		t.Errorf("page 1 returned %d bytes, want the second entry", len(body))
+	}
+	c.Get("/api/files/comic-page/"+id+"/2").Assert(t, 404)
+}

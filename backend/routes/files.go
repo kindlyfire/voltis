@@ -148,7 +148,7 @@ func comicPage(ctx context.Context, pool *pgxpool.Pool, contentID string, index 
 	return
 }
 
-// comicPageNames reads the page names from file_data's [name, width, height] tuples.
+// comicPageNames reads the page names from file_data's [name] or [name, width, height] tuples.
 func comicPageNames(fileData []byte) ([]string, error) {
 	var fd struct {
 		Pages [][]json.RawMessage `json:"pages"`

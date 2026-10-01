@@ -55,3 +55,22 @@ it('sets a status only after the reader changes page', async () => {
     expect(writes()[2]!.status).toBe('completed')
     expect(vi.mocked(invalidateStatusChange).mock.calls).toEqual([['s_1'], ['s_1']])
 })
+
+it('requests page sizes and maps unsized pages to 0, 0', async () => {
+    vi.mocked(contentApi.get).mockResolvedValue({
+        id: 'c_1',
+        file_data: { pages: [['0.png', 800, 1200], ['1.png']] },
+        user_data: null,
+    } as unknown as Content)
+
+    const comic = createComicState('c_1', 0)
+    const onReady = vi.fn()
+    comic.setHandlers({ onReady })
+    await vi.waitFor(() => expect(onReady).toHaveBeenCalled())
+    expect(vi.mocked(contentApi.get).mock.lastCall?.[2]).toEqual({ pageSizes: true })
+    expect(comic.pageDimensions).toEqual([
+        { width: 800, height: 1200 },
+        { width: 0, height: 0 },
+    ])
+    await comic.dispose()
+})

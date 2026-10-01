@@ -160,7 +160,11 @@ func classifyComic(file FSFile, meta metadata.Fields, year *int, pages []comic.P
 	}
 	meta.Title = cmp.Or(meta.Title, metadata.Val(strings.Join(titleParts, " ")))
 
+	// Archive page sizes are computed when the reader first opens the comic.
 	pageTuples := fp.Map(pages, func(p comic.PageInfo) any {
+		if !p.Sized {
+			return []any{p.Name}
+		}
 		return []any{p.Name, p.Width, p.Height}
 	})
 	fd, _ := json.Marshal(map[string]any{"pages": pageTuples})

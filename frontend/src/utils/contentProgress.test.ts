@@ -6,7 +6,10 @@ import { contentProgress, seriesPosition, type ContentProgress } from './content
 function comic(progress: ReadingProgress, pages?: number, status: ReadingStatus = 'reading') {
     return {
         type: 'comic',
-        file_data: pages == null ? undefined : { pages: Array.from({ length: pages }, () => []) },
+        file_data:
+            pages == null
+                ? undefined
+                : { pages: Array.from({ length: pages }, (_, i) => [`${i}.jpg`]) },
         user_data: { progress, status },
     } as unknown as Content
 }

@@ -7,7 +7,7 @@ import { contentApi } from '@/utils/api/content'
 import { useLocalStorage } from '@/utils/localStorage'
 import { arrayAtNowrap, getLayoutTop } from '@/utils/misc'
 import { createComicState, type ComicState } from './createComicState'
-import type { ReaderMode, SiblingsInfo } from './types'
+import type { PageDimensions, ReaderMode, SiblingsInfo } from './types'
 
 const zComicSettings = z.object({
     longstripWidth: z.number().min(10).max(100).default(100),
@@ -24,6 +24,25 @@ const zComicSettings = z.object({
 export interface ReaderContentOptions {
     contentId: string
     initialPage: number | 'last' | 'resume'
+}
+
+// A width or height of 0 means the size is unknown.
+const sized = (p: PageDimensions) => p.width > 0 && p.height > 0
+
+/** Detects longstrips by the average aspect ratio of the pages with a known size. */
+export function detectMode(pages: readonly PageDimensions[]): ReaderMode {
+    const known = pages.filter(sized)
+    if (known.length === 0) return 'paged'
+    const avgAspectRatio = known.reduce((sum, p) => sum + p.height / p.width, 0) / known.length
+    return avgAspectRatio > 1.6 ? 'longstrip' : 'paged'
+}
+
+export function pageStyle(page: PageDimensions, widthPercent: number) {
+    if (!sized(page)) return {}
+    return {
+        width: `min(${widthPercent}%, ${page.width}px)`,
+        aspectRatio: `${page.width} / ${page.height}`,
+    }
 }
 
 export const useReaderStore = defineStore('reader', () => {
@@ -52,14 +71,7 @@ export const useReaderStore = defineStore('reader', () => {
         const s = seriesSettings.value
         if (!s) return 'paged'
         if (s.mode) return s.mode
-
-        // We detect longstrips by taking the average aspect ratio of pages
-        const pages = state.value?.pageDimensions || []
-        if (pages.length === 0) return 'paged'
-        const totalAspectRatio = pages.reduce((sum, p) => sum + p.height / p.width, 0)
-        const avgAspectRatio = totalAspectRatio / pages.length
-        console.log('Avg aspect ratio:', avgAspectRatio)
-        return avgAspectRatio > 1.6 ? 'longstrip' : 'paged'
+        return detectMode(state.value?.pageDimensions || [])
     })
 
     const state: Ref<ComicState | null> = ref(null)

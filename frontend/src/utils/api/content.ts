@@ -132,8 +132,9 @@ export const contentApi = {
             ...options,
         }),
 
-    get: async (id: string, init?: RequestInit) => {
-        return apiFetch<Content>(`/content/${id}`, init)
+    /** `pageSizes` computes missing comic page sizes, which can take a while on first open. */
+    get: async (id: string, init?: RequestInit, opts?: { pageSizes?: boolean }) => {
+        return apiFetch<Content>(`/content/${id}${opts?.pageSizes ? '?page_sizes=1' : ''}`, init)
     },
 
     /** Counted; see useListUncounted for `count: false`. */

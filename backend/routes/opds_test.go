@@ -67,7 +67,7 @@ func seedOPDS(t *testing.T, pool *pgxpool.Pool, userID string) opdsFixture {
 			fileURI, size = &path, new(int(info.Size()))
 			var tuples [][]any
 			for _, name := range slices.Sorted(maps.Keys(pages)) {
-				tuples = append(tuples, []any{name, 4, 2})
+				tuples = append(tuples, []any{name})
 			}
 			data, _ := json.Marshal(map[string]any{"pages": tuples})
 			fileData = string(data)

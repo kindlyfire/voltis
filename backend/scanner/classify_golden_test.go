@@ -112,22 +112,22 @@ func TestClassifyComicGoldens(t *testing.T) {
 		{
 			"volume and chapter from filename",
 			"Series Name (2019)/Series Name v01 ch003.cbz", "",
-			"prefix=comic type=comic part=v1_ch3 order=[1,3] cover=001.jpg title=Vol. 1 Ch. 3 series=comic|comic_series|Series Name_2019 index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
+			"prefix=comic type=comic part=v1_ch3 order=[1,3] cover=001.jpg title=Vol. 1 Ch. 3 series=comic|comic_series|Series Name_2019 index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]}",
 		},
 		{
 			"comicinfo overrides filename",
 			"Series Name (2019)/Series Name v01 ch003.cbz", comicInfoFull,
-			"prefix=comic type=comic part=v2_ch4.5 order=[2,4.5] cover=001.jpg title=Meta Title series=comic|comic_series|Meta Series_2001 index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
+			"prefix=comic type=comic part=v2_ch4.5 order=[2,4.5] cover=001.jpg title=Meta Title series=comic|comic_series|Meta Series_2001 index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]}",
 		},
 		{
 			"fallback chapter from digits",
 			"Other Series/003 - Something.cbz", "",
-			"prefix=comic type=comic part=ch3 order=[nil,3] cover=001.jpg title=Ch. 3 series=comic|comic_series|Other Series index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
+			"prefix=comic type=comic part=ch3 order=[nil,3] cover=001.jpg title=Ch. 3 series=comic|comic_series|Other Series index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]}",
 		},
 		{
 			"year only",
 			"Yearly/Yearly (1995).cbz", "",
-			"prefix=comic type=comic part=y1995 order=[nil,nil] cover=001.jpg title=Yearly (1995) series=comic|comic_series|Yearly index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
+			"prefix=comic type=comic part=y1995 order=[nil,nil] cover=001.jpg title=Yearly (1995) series=comic|comic_series|Yearly index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]}",
 		},
 		{
 			"unidentifiable",

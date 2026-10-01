@@ -3,14 +3,20 @@ package routes
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"voltis/db"
 	"voltis/db/dbtest"
+	"voltis/lib/comic"
 	"voltis/lib/fp"
 	"voltis/models"
 
@@ -841,5 +847,198 @@ func TestRecentlyRead(t *testing.T) {
 	run("limit bounds", func(t *testing.T) {
 		c.Get("/api/content/recently-read?limit=0").Assert(t, 400)
 		c.Get("/api/content/recently-read?limit=51").Assert(t, 400)
+	})
+}
+
+func TestComicPageSizes(t *testing.T) {
+	pool := newTestPool(t)
+	c := newAdminClient(t, pool)
+	ctx := context.Background()
+	const unsized = `{"pages": [["01.jpg"], ["02.jpg"]]}`
+	const sized = `{"pages": [["01.jpg", 4, 2], ["02.jpg", 0, 0]]}`
+
+	newComic := func(t *testing.T, path, fileData string) string {
+		t.Helper()
+		id := newTestContent(t, pool)
+		mustExec(t, pool, "UPDATE content SET file_uri = $2, file_mtime = now(), file_size = 1, file_data = $3 WHERE id = $1",
+			id, path, fileData)
+		return id
+	}
+	cbz := func(t *testing.T) string {
+		return testCBZ(t, t.TempDir(), map[string][]byte{"01.jpg": testJPEG(t), "02.jpg": []byte("not an image")})
+	}
+	stored := func(t *testing.T, id string) string {
+		t.Helper()
+		fd, err := db.SelectScalar[string](ctx, pool, "SELECT file_data::text FROM content WHERE id = $1", id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fd
+	}
+	served := func(t *testing.T, path string) string {
+		t.Helper()
+		fd, _ := json.Marshal(c.Get(path).Assert(t, 200).JSON()["file_data"])
+		return string(fd)
+	}
+	normalize := func(s string) string {
+		var v any
+		_ = json.Unmarshal([]byte(s), &v)
+		out, _ := json.Marshal(v)
+		return string(out)
+	}
+	// counting swaps pageSizes for one that counts calls and waits for release, which cleanup calls.
+	counting := func(t *testing.T) (calls *atomic.Int32, release func()) {
+		calls, released := new(atomic.Int32), make(chan struct{})
+		release = sync.OnceFunc(func() { close(released) })
+		t.Cleanup(func() { pageSizes = comic.PageSizes })
+		t.Cleanup(release)
+		pageSizes = func(ctx context.Context, path string, names []string) ([]comic.PageInfo, error) {
+			calls.Add(1)
+			<-released
+			return comic.PageSizes(ctx, path, names)
+		}
+		return calls, release
+	}
+	waitUntil := func(t *testing.T, cond func() bool) {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); !cond(); time.Sleep(time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatal("timed out")
+			}
+		}
+	}
+
+	t.Run("without the flag", func(t *testing.T) {
+		id := newComic(t, cbz(t), unsized)
+		assertEq(t, served(t, "/api/content/"+id), normalize(unsized))
+		assertEq(t, stored(t, id), unsized)
+	})
+
+	t.Run("with the flag", func(t *testing.T) {
+		id := newComic(t, cbz(t), unsized)
+		assertEq(t, served(t, "/api/content/"+id+"?page_sizes=1"), normalize(sized))
+		assertEq(t, stored(t, id), sized)
+	})
+
+	t.Run("already sized", func(t *testing.T) {
+		calls, release := counting(t)
+		release()
+		id := newComic(t, cbz(t), `{"pages": [["01.jpg", 9, 9]]}`)
+		assertEq(t, served(t, "/api/content/"+id+"?page_sizes=1"), `{"pages":[["01.jpg",9,9]]}`)
+		assertEq(t, calls.Load(), int32(0))
+	})
+
+	t.Run("unreadable archive", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "bad.cbz")
+		if err := os.WriteFile(path, []byte("not a zip"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		id := newComic(t, path, unsized)
+		assertEq(t, served(t, "/api/content/"+id+"?page_sizes=1"), `{"pages":[["01.jpg",0,0],["02.jpg",0,0]]}`)
+		assertEq(t, stored(t, id), unsized)
+	})
+
+	t.Run("flight deadline", func(t *testing.T) {
+		t.Cleanup(func() { pageSizes, pageSizesTimeout = comic.PageSizes, 5*time.Minute })
+		pageSizesTimeout = 50 * time.Millisecond
+		observed := make(chan error, 1)
+		pageSizes = func(ctx context.Context, path string, names []string) ([]comic.PageInfo, error) {
+			select {
+			case <-ctx.Done():
+			case <-time.After(5 * time.Second):
+			}
+			observed <- ctx.Err()
+			return nil, errors.New("stub")
+		}
+		id := newComic(t, cbz(t), unsized)
+		assertEq(t, served(t, "/api/content/"+id+"?page_sizes=1"), `{"pages":[["01.jpg",0,0],["02.jpg",0,0]]}`)
+		assertEq(t, stored(t, id), unsized)
+		select {
+		case err := <-observed:
+			assertEq(t, err, context.DeadlineExceeded)
+		default:
+			t.Fatal("pageSizes was not called")
+		}
+	})
+
+	t.Run("row changed since read", func(t *testing.T) {
+		id := newComic(t, cbz(t), unsized)
+		row, err := db.SelectOne[pageSizesRow](ctx, pool,
+			"SELECT file_uri, file_mtime, file_size, file_data FROM content WHERE id = $1", id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mustExec(t, pool, "UPDATE content SET file_mtime = file_mtime + interval '1 second' WHERE id = $1", id)
+		if _, err := savePageSizes(ctx, pool, id, row); err != nil {
+			t.Fatal(err)
+		}
+		assertEq(t, stored(t, id), unsized)
+
+		row.FileMtime = nil
+		row.FileData = models.JSONB(`{"pages": [["other.jpg"]]}`)
+		mustExec(t, pool, "UPDATE content SET file_mtime = NULL WHERE id = $1", id)
+		if _, err := savePageSizes(ctx, pool, id, row); err != nil {
+			t.Fatal(err)
+		}
+		assertEq(t, stored(t, id), unsized)
+	})
+
+	t.Run("concurrent and sequential callers compute once", func(t *testing.T) {
+		calls, release := counting(t)
+		id := newComic(t, cbz(t), unsized)
+		// The deadline bounds every call, so a stuck flight fails the test instead of hanging it.
+		wctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		const n = 8
+		results := make(chan error, n+1)
+		call := func() {
+			fd, err := pageSizesFor(wctx, pool, id)
+			if err == nil && normalize(string(fd)) != normalize(sized) {
+				err = fmt.Errorf("got %s", fd)
+			}
+			results <- err
+		}
+		go call()
+		waitUntil(t, func() bool { return calls.Load() == 1 })
+		for range n {
+			go call()
+		}
+		time.Sleep(50 * time.Millisecond)
+		assertEq(t, calls.Load(), int32(1))
+		assertEq(t, len(results), 0)
+		release()
+		for range n + 1 {
+			if err := <-results; err != nil {
+				t.Error(err)
+			}
+		}
+		if _, err := pageSizesFor(wctx, pool, id); err != nil {
+			t.Fatal(err)
+		}
+		assertEq(t, calls.Load(), int32(1))
+		assertEq(t, stored(t, id), sized)
+	})
+
+	t.Run("cancelled caller", func(t *testing.T) {
+		calls, release := counting(t)
+		id := newComic(t, cbz(t), unsized)
+		cctx, cancel := context.WithCancel(ctx)
+		done := make(chan error, 1)
+		go func() {
+			_, err := pageSizesFor(cctx, pool, id)
+			done <- err
+		}()
+		waitUntil(t, func() bool { return calls.Load() == 1 })
+		cancel()
+		select {
+		case err := <-done:
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("err = %v, want context.Canceled", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("cancelled caller did not return")
+		}
+		release()
+		waitUntil(t, func() bool { return stored(t, id) == sized })
 	})
 }

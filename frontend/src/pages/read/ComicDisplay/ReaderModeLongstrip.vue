@@ -42,7 +42,7 @@ import { ref, onMounted } from 'vue'
 import { useNavbarScrollHide } from '@/pages/_layout/useLayoutStore'
 import AButton from '@/ui/AButton.vue'
 import ASpinner from '@/ui/ASpinner.vue'
-import { useReaderStore } from './useComicDisplayStore'
+import { pageStyle, useReaderStore } from './useComicDisplayStore'
 
 const reader = useReaderStore()
 const containerRef = ref<HTMLElement | null>(null)
@@ -50,12 +50,7 @@ useNavbarScrollHide()
 
 function getPageStyle(index: number) {
     const page = reader.state?.pageDimensions[index]
-    if (!page) return {}
-    const widthPercent = reader.settings.longstripWidth
-    return {
-        width: `min(${widthPercent}%, ${page.width}px)`,
-        aspectRatio: `${page.width} / ${page.height}`,
-    }
+    return page ? pageStyle(page, reader.settings.longstripWidth) : {}
 }
 
 // Update current page based on scroll position

@@ -1,6 +1,7 @@
 package comic
 
 import (
+	"context"
 	"encoding/xml"
 	"fmt"
 	"image"
@@ -66,6 +67,7 @@ type PageInfo struct {
 	Name   string `json:"name"`
 	Width  int    `json:"width"`
 	Height int    `json:"height"`
+	Sized  bool   `json:"-"`
 }
 
 func ParseComicInfo(data []byte) (*ComicInfo, error) {
@@ -228,24 +230,9 @@ func scanArchivePages(path string) ([]PageInfo, *ComicInfo) {
 			continue
 		}
 
-		ext := strings.ToLower(filepath.Ext(entry.Name))
-		if !imageExtensions[ext] {
-			continue
-		}
-
-		rc, err := a.OpenFile(entry.Name)
-		if err != nil {
+		if imageExtensions[strings.ToLower(filepath.Ext(entry.Name))] {
 			pages = append(pages, PageInfo{Name: entry.Name})
-			continue
 		}
-
-		cfg, _, err := image.DecodeConfig(rc)
-		_ = rc.Close()
-		if err != nil {
-			pages = append(pages, PageInfo{Name: entry.Name})
-			continue
-		}
-		pages = append(pages, PageInfo{Name: entry.Name, Width: cfg.Width, Height: cfg.Height})
 	}
 
 	sort.Slice(pages, func(i, j int) bool {
@@ -253,6 +240,34 @@ func scanArchivePages(path string) ([]PageInfo, *ComicInfo) {
 	})
 
 	return pages, comicInfo
+}
+
+// PageSizes decodes the dimensions of the named archive entries, in order. An entry that is
+// missing or can't be decoded gets 0, 0; only failing to open the archive or ctx ending is an error.
+func PageSizes(ctx context.Context, path string, names []string) ([]PageInfo, error) {
+	a, err := archive.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = a.Close() }()
+
+	pages := make([]PageInfo, len(names))
+	for i, name := range names {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		pages[i] = PageInfo{Name: name, Sized: true}
+		rc, err := a.OpenFile(name)
+		if err != nil {
+			continue
+		}
+		cfg, _, err := image.DecodeConfig(rc)
+		_ = rc.Close()
+		if err == nil {
+			pages[i].Width, pages[i].Height = cfg.Width, cfg.Height
+		}
+	}
+	return pages, nil
 }
 
 func scanPDFPages(path string) []PageInfo {
@@ -288,6 +303,7 @@ func scanPDFPages(path string) []PageInfo {
 			Name:   fmt.Sprintf("p%d", i+1),
 			Width:  pageWidth,
 			Height: pageHeight,
+			Sized:  true,
 		}
 	}
 	return pages

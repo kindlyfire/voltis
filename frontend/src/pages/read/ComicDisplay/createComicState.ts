@@ -85,7 +85,7 @@ export function createComicState(contentId: string, initialPage: number | 'last'
     }, 1000)
 
     contentApi
-        .get(contentId, { signal: contentController.signal })
+        .get(contentId, { signal: contentController.signal }, { pageSizes: true })
         .then(content => {
             if (disposed) return
             if (!state.handlers) {
@@ -95,8 +95,8 @@ export function createComicState(contentId: string, initialPage: number | 'last'
             state.content = content
             userData = content.user_data ?? null
             state.pageDimensions = (content.file_data.pages ?? []).map(p => ({
-                width: p[1],
-                height: p[2],
+                width: p[1] ?? 0,
+                height: p[2] ?? 0,
             }))
             // We just use `reactive` to turn it into UnwrapNestedRefs<_>
             state.loaders = reactive(

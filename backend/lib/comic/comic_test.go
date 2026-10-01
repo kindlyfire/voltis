@@ -3,10 +3,13 @@ package comic
 import (
 	"archive/zip"
 	"bytes"
+	"context"
+	"errors"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -145,5 +148,73 @@ func TestParseComicInfoDropsPlaceholders(t *testing.T) {
 	ci, err := ParseComicInfo([]byte(`<ComicInfo><Year>-1</Year><Volume>-1</Volume><Count>-1</Count></ComicInfo>`))
 	if err != nil || ci.Year != nil || ci.Volume != "" || ci.Count != nil {
 		t.Fatalf("parsed %+v (%v)", ci, err)
+	}
+}
+
+func TestScanArchiveIsUnsized(t *testing.T) {
+	img := jpegBytes(t)
+	pages, ci := Scan(writeCBZ(t, map[string][]byte{
+		"002.jpg":       img,
+		"001.jpg":       img,
+		"notes.txt":     []byte("x"),
+		"ComicInfo.xml": []byte(`<ComicInfo><Title>T</Title></ComicInfo>`),
+	}))
+	want := []PageInfo{{Name: "001.jpg"}, {Name: "002.jpg"}}
+	if !reflect.DeepEqual(pages, want) {
+		t.Errorf("pages = %+v, want %+v", pages, want)
+	}
+	if ci == nil || ci.Title != "T" {
+		t.Errorf("comic info = %+v", ci)
+	}
+}
+
+func TestScanPDFIsSized(t *testing.T) {
+	if _, err := exec.LookPath("pdfinfo"); err != nil {
+		t.Skip("pdfinfo not installed")
+	}
+	path := filepath.Join(t.TempDir(), "test.pdf")
+	pdf := "%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n" +
+		"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n" +
+		"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 72 144]>>endobj\n" +
+		"trailer<</Root 1 0 R>>\n%%EOF\n"
+	if err := os.WriteFile(path, []byte(pdf), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pages, _ := Scan(path)
+	want := []PageInfo{{Name: "p1", Width: 250, Height: 500, Sized: true}}
+	if !reflect.DeepEqual(pages, want) {
+		t.Errorf("pages = %+v, want %+v", pages, want)
+	}
+}
+
+func TestPageSizes(t *testing.T) {
+	path := writeCBZ(t, map[string][]byte{"001.jpg": jpegBytes(t), "002.jpg": []byte("not an image")})
+	pages, err := PageSizes(context.Background(), path, []string{"002.jpg", "001.jpg", "missing.jpg"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []PageInfo{
+		{Name: "002.jpg", Sized: true},
+		{Name: "001.jpg", Width: 4, Height: 2, Sized: true},
+		{Name: "missing.jpg", Sized: true},
+	}
+	if !reflect.DeepEqual(pages, want) {
+		t.Errorf("pages = %+v, want %+v", pages, want)
+	}
+
+	notZip := filepath.Join(t.TempDir(), "bad.cbz")
+	if err := os.WriteFile(notZip, []byte("not a zip"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{notZip, filepath.Join(t.TempDir(), "missing.cbz")} {
+		if _, err := PageSizes(context.Background(), path, []string{"001.jpg"}); err == nil {
+			t.Errorf("PageSizes(%s) succeeded", path)
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := PageSizes(ctx, path, []string{"001.jpg"}); !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
 	}
 }

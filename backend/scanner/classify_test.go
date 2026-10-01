@@ -15,10 +15,7 @@ import (
 	"voltis/metadata"
 )
 
-var testPages = []comic.PageInfo{
-	{Name: "001.jpg", Width: 4, Height: 2},
-	{Name: "002.jpg", Width: 4, Height: 2},
-}
+var testPages = []comic.PageInfo{{Name: "001.jpg"}, {Name: "002.jpg"}}
 
 func TestClassifyComicTuples(t *testing.T) {
 	cases := []struct {
@@ -30,17 +27,17 @@ func TestClassifyComicTuples(t *testing.T) {
 		{
 			"chapter only",
 			"/lib/Other Series/Other Series ch7.cbz", metadata.Fields{},
-			"prefix=comic type=comic part=ch7 order=[nil,7] cover=001.jpg title=Ch. 7 series=comic|comic_series|Other Series index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
+			"prefix=comic type=comic part=ch7 order=[nil,7] cover=001.jpg title=Ch. 7 series=comic|comic_series|Other Series index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]}",
 		},
 		{
 			"fallback chapter strips directory prefix",
 			"/lib/Series 1000/Series 1000 002.cbz", metadata.Fields{},
-			"prefix=comic type=comic part=ch2 order=[nil,2] cover=001.jpg title=Ch. 2 series=comic|comic_series|Series 1000 index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
+			"prefix=comic type=comic part=ch2 order=[nil,2] cover=001.jpg title=Ch. 2 series=comic|comic_series|Series 1000 index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]}",
 		},
 		{
 			"metadata year without comicinfo year",
 			"/lib/Plain/Plain ch1.cbz", metadata.Fields{Series: metadata.Val("Plain Series")},
-			"prefix=comic type=comic part=ch1 order=[nil,1] cover=001.jpg title=Ch. 1 series=comic|comic_series|Plain Series index=0 data={\"pages\":[[\"001.jpg\",4,2],[\"002.jpg\",4,2]]}",
+			"prefix=comic type=comic part=ch1 order=[nil,1] cover=001.jpg title=Ch. 1 series=comic|comic_series|Plain Series index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]}",
 		},
 	}
 	for _, c := range cases {
@@ -52,6 +49,14 @@ func TestClassifyComicTuples(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("sized pages", func(t *testing.T) {
+		pages := []comic.PageInfo{{Name: "p1", Width: 4, Height: 2, Sized: true}, {Name: "p2", Sized: true}}
+		item := classifyComic(FSFile{Path: "/lib/S/S ch1.pdf", Mtime: baseTime, Size: 10}, metadata.Fields{}, nil, pages)
+		if got, want := string(item.FileData), `{"pages":[["p1",4,2],["p2",0,0]]}`; got != want {
+			t.Errorf("got %s, want %s", got, want)
+		}
+	})
 }
 
 func TestClassifyBookTuples(t *testing.T) {

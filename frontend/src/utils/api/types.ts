@@ -253,7 +253,8 @@ export interface UserToContentUpdate {
 }
 
 export interface ContentFileData {
-    pages?: Array<[filename: string, width: number, height: number]>
+    /** Archive pages lack their size until requested with `pageSizes`. */
+    pages?: Array<[filename: string] | [filename: string, width: number, height: number]>
 }
 
 /** A content's cover as the API versions it; see `coverUrl`. */

@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
 	"voltis/covers"
 	"voltis/db"
+	"voltis/lib/comic"
 	"voltis/lib/fp"
 	"voltis/metadata"
 	"voltis/models"
@@ -18,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
+	"golang.org/x/sync/singleflight"
 )
 
 type ContentRoutes struct {
@@ -211,6 +215,24 @@ func (cr *ContentRoutes) get(c echo.Context) error {
 		return err
 	}
 
+	if c.QueryParam("page_sizes") == "1" && r.Type == "comic" && r.FileURI != nil && !pagesSized(r.FileData) {
+		fd, err := pageSizesFor(ctx, cr.pool, r.ID)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err != nil {
+			names, err := comicPageNames(r.FileData)
+			if err != nil {
+				return err
+			}
+			fd, err = sizedFileData(r.FileData, fp.Map(names, func(n string) comic.PageInfo { return comic.PageInfo{Name: n} }))
+			if err != nil {
+				return err
+			}
+		}
+		r.FileData = fd
+	}
+
 	length, err := contentLength(ctx, cr.pool, user.ID, r.Content, r.UTCStatus)
 	if err != nil {
 		return err
@@ -226,6 +248,87 @@ func (cr *ContentRoutes) get(c echo.Context) error {
 	})
 	dto.Length = length
 	return c.JSON(http.StatusOK, dto)
+}
+
+var (
+	pageSizesGroup singleflight.Group
+	// Swapped in tests.
+	pageSizes        = comic.PageSizes
+	pageSizesTimeout = 5 * time.Minute
+)
+
+type pageSizesRow struct {
+	FileURI   string       `db:"file_uri"`
+	FileMtime *time.Time   `db:"file_mtime"`
+	FileSize  *int         `db:"file_size"`
+	FileData  models.JSONB `db:"file_data"`
+}
+
+// pageSizesFor runs one flight per comic, which outlives cancelled callers so its result is kept.
+func pageSizesFor(ctx context.Context, pool *pgxpool.Pool, contentID string) (models.JSONB, error) {
+	ch := pageSizesGroup.DoChan(contentID, func() (any, error) {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), pageSizesTimeout)
+		defer cancel()
+		row, err := db.SelectOne[pageSizesRow](ctx, pool, `
+			SELECT file_uri, file_mtime, file_size, file_data FROM content WHERE id = $1 AND file_uri IS NOT NULL
+		`, contentID)
+		if err == nil && !pagesSized(row.FileData) {
+			row.FileData, err = savePageSizes(ctx, pool, contentID, row)
+		}
+		if err != nil {
+			slog.Warn("compute comic page sizes", "content_id", contentID, "err", err)
+		}
+		return row.FileData, err
+	})
+	select {
+	case res := <-ch:
+		if res.Err != nil {
+			return nil, res.Err
+		}
+		return res.Val.(models.JSONB), nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func savePageSizes(ctx context.Context, pool *pgxpool.Pool, contentID string, row pageSizesRow) (models.JSONB, error) {
+	names, err := comicPageNames(row.FileData)
+	if err != nil {
+		return nil, err
+	}
+	pages, err := pageSizes(ctx, row.FileURI, names)
+	if err != nil {
+		return nil, err
+	}
+	fd, err := sizedFileData(row.FileData, pages)
+	if err != nil {
+		return nil, err
+	}
+	_, err = pool.Exec(ctx, `
+		UPDATE content SET file_data = $5
+		WHERE id = $1 AND file_uri = $2
+			AND file_mtime IS NOT DISTINCT FROM $3 AND file_size IS NOT DISTINCT FROM $4
+			AND file_data = $6
+	`, contentID, row.FileURI, row.FileMtime, row.FileSize, fd, row.FileData)
+	return fd, err
+}
+
+func pagesSized(fileData []byte) bool {
+	var fd struct {
+		Pages [][]json.RawMessage `json:"pages"`
+	}
+	_ = json.Unmarshal(fileData, &fd)
+	return !slices.ContainsFunc(fd.Pages, func(p []json.RawMessage) bool { return len(p) < 3 })
+}
+
+// sizedFileData replaces file_data's pages with [name, width, height] tuples, keeping other keys.
+func sizedFileData(fileData []byte, pages []comic.PageInfo) (models.JSONB, error) {
+	var fd map[string]any
+	if err := json.Unmarshal(fileData, &fd); err != nil {
+		return nil, err
+	}
+	fd["pages"] = fp.Map(pages, func(p comic.PageInfo) any { return []any{p.Name, p.Width, p.Height} })
+	return json.Marshal(fd)
 }
 
 // contentLength sums the length of a leaf, or of a series' valid children, and what the user has
