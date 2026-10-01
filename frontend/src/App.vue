@@ -1,5 +1,7 @@
 <template>
-    <TooltipProvider :delay-duration="400">
+    <!-- Focus opens a tooltip only when it's keyboard-visible: not when an overlay closed by a tap or
+         click hands focus back to its trigger. -->
+    <TooltipProvider :delay-duration="400" ignore-non-keyboard-focus>
         <div
             v-if="qMe.isLoading.value || qInfo.isLoading.value"
             id="app-loading"

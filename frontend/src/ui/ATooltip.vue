@@ -14,7 +14,10 @@
 <script setup lang="ts">
 import { TooltipContent, TooltipPortal, TooltipRoot, TooltipTrigger } from 'reka-ui'
 
-/** Supplementary text only: tooltips don't show on touch. Needs `TooltipProvider` (in App.vue). */
+/**
+ * Supplementary text only: tooltips open on mouse hover or keyboard focus, never on touch. Needs
+ * `TooltipProvider` (in App.vue), which ignores focus that isn't `:focus-visible`.
+ */
 withDefaults(
     defineProps<{
         text?: string
