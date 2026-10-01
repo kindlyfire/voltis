@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -824,47 +823,4 @@ func TestScanInfersBookSeriesAndRescansWithoutChurn(t *testing.T) {
 	p.mustScan(ScanInput{LibraryType: "books", Force: true})
 	inferred()
 	followsV01()
-}
-
-// Migration 009 drops the old metadata and every file's mtime. The next scan of the unchanged tree
-// then reads every file again and rebuilds every file and series layer as the first scan wrote it.
-func TestScanAfterMigration009RebuildsMetadata(t *testing.T) {
-	for _, c := range []struct {
-		libType string
-		files   func(root string)
-	}{
-		{"comics", func(root string) {
-			writeCBZ(t, filepath.Join(root, "Foo (2019)", "Foo ch1.cbz"), comicInfoXML("Foo", "1", "Alpha", "en"))
-			writeCBZ(t, filepath.Join(root, "Foo (2019)", "Foo ch2.cbz"), comicInfoXML("Foo", "2", "Beta", ""))
-			writeCBZFixture(t, filepath.Join(root, "Bar", "b1.cbz"), "Bar", "1")
-		}},
-		{"books", func(root string) {
-			writeEPUBFixture(t, filepath.Join(root, "Bar v1.epub"), "Bar Volume 1", "Bar", "1")
-			writeEPUBFixture(t, filepath.Join(root, "Solo.epub"), "Solo", "", "")
-		}},
-	} {
-		t.Run(c.libType, func(t *testing.T) {
-			p := newPipeline(t, c.libType)
-			c.files(p.root)
-			rows := func() []string {
-				t.Helper()
-				got, err := db.SelectScalars[string](context.Background(), p.pool, `
-					SELECT uri || ' ' || data_raw::text || ' ' || data::text FROM content ORDER BY uri`)
-				must(t, err)
-				return got
-			}
-			in := ScanInput{LibraryType: c.libType}
-			first := p.mustScan(in)
-			want := rows()
-
-			exec(t, p.pool, "UPDATE content SET data_raw = '{}', data = '{}'")
-			exec(t, p.pool, "UPDATE content SET file_mtime = NULL WHERE type IN ('comic', 'book')")
-			if got := p.mustScan(in); got.Updated != first.Added || got.Unchanged != 0 {
-				t.Fatalf("rescan = %+v, want all %d files read again", got, first.Added)
-			}
-			if got := rows(); !slices.Equal(got, want) {
-				t.Fatalf("rebuilt rows:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
-			}
-		})
-	}
 }

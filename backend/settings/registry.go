@@ -99,7 +99,7 @@ var defs = []Def{
 		Help: "Pause matching series with metadata providers automatically. Linked metadata keeps refreshing.",
 	},
 	{Key: BootstrapCompleted, Type: TypeBool, Default: false, Internal: true},
-	// Seeded by migration 011; prefixes globally unique OPDS (Atom) IDs.
+	// Seeded by 001_init; prefixes globally unique OPDS (Atom) IDs.
 	{Key: InstallationID, Type: TypeString, Default: "", Internal: true},
 }
 

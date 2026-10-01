@@ -32,8 +32,8 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	return migrate(ctx, pool, "")
 }
 
-// MigrateUntil applies the pending migrations up to and including the named one, for tests of a
-// later migration.
+// MigrateUntil applies the pending migrations up to and including the named one, so a test can
+// prepare data for the migration after it.
 func MigrateUntil(ctx context.Context, pool *pgxpool.Pool, name string) error {
 	return migrate(ctx, pool, name)
 }
@@ -42,7 +42,7 @@ func migrate(ctx context.Context, pool *pgxpool.Pool, until string) error {
 	_, err := pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS _migrations (
 			name TEXT PRIMARY KEY,
-			applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+			applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)
 	`)
 	if err != nil {

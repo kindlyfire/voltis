@@ -172,8 +172,8 @@ func (s *Service) step(ctx context.Context, paused bool) (time.Duration, error) 
 
 // recomputeStale recomputes a batch of rows an older DataVersion derived, and reports whether
 // there was any. Recomputed rows leave the selection, so each batch makes progress. Every writer
-// derives rows at the current version, so once a batch finds none, none are left. Rows no writer
-// ever derived, such as content migrated without metadata, have version 0 and are derived once.
+// derives rows at the current version, so once a batch finds none, none are left. Rows inserted
+// without a derivation have version 0 and are derived once.
 // No index serves data_version, so after a version bump each batch is a sequential scan.
 func (s *Service) recomputeStale(ctx context.Context, c changes) (bool, error) {
 	if s.recomputed {
