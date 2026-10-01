@@ -24,9 +24,7 @@ import (
 type rename struct{ Old, New string }
 
 const contentUpsert = `
-	INSERT INTO content (id, created_at, updated_at, uri_part, uri, valid, file_uri,
-		file_mtime, file_size, cover_uri, type, "order", order_parts, file_data,
-		parent_id, library_id, word_count, page_count, data_raw, data, data_version, meta_updated_at)
+	INSERT INTO content (` + upsertColumns + `, meta_updated_at)
 	VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
 		COALESCE($19::jsonb, '{}'), COALESCE($20::jsonb, '{}'), COALESCE($21::int, 0),
 		CASE WHEN $19::jsonb IS NULL THEN NULL ELSE $3::timestamptz END)
@@ -201,8 +199,12 @@ func commit(ctx context.Context, tx pgx.Tx, store *metadata.Store, s FileScanner
 	}
 
 	var touched []string
+	var leaves leafBatch
 	for _, st := range steps {
 		if st.write == nil {
+			if err := leaves.flush(ctx, tx); err != nil {
+				return Counts{}, nil, err
+			}
 			if err := identityStep(ctx, tx, libraryID, st.set, now); err != nil {
 				return Counts{}, nil, err
 			}
@@ -231,7 +233,7 @@ func commit(ctx context.Context, tx pgx.Tx, store *metadata.Store, s FileScanner
 		if changed {
 			touched = append(touched, st.write.id)
 		}
-		if err := upsertContent(ctx, tx, leafRow(st.write.id, libraryID, uri, *item, parentID, old, now), &meta); err != nil {
+		if err := leaves.add(ctx, tx, leafRow(st.write.id, libraryID, uri, *item, parentID, old, now), &meta); err != nil {
 			return Counts{}, nil, err
 		}
 		// Only the row tells an add from a moved file reclaiming a deleted item's ID.
@@ -246,6 +248,9 @@ func commit(ctx context.Context, tx pgx.Tx, store *metadata.Store, s FileScanner
 		} else {
 			t.Added++
 		}
+	}
+	if err := leaves.flush(ctx, tx); err != nil {
+		return Counts{}, nil, err
 	}
 	if err := applyRenames(ctx, tx, libraryID, moves); err != nil {
 		return Counts{}, nil, err
@@ -483,6 +488,11 @@ func applyRenames(ctx context.Context, tx pgx.Tx, libraryID string, pairs []rena
 
 // upsertContent writes a row, and its metadata unless meta is nil.
 func upsertContent(ctx context.Context, tx pgx.Tx, c models.Content, meta *metadata.LeafDoc) error {
+	_, err := tx.Exec(ctx, contentUpsert, upsertArgs(c, meta)...)
+	return err
+}
+
+func upsertArgs(c models.Content, meta *metadata.LeafDoc) []any {
 	data := c.FileData
 	if data == nil {
 		data = json.RawMessage("{}")
@@ -496,9 +506,77 @@ func upsertContent(ctx context.Context, tx pgx.Tx, c models.Content, meta *metad
 	if meta != nil {
 		raw, derived, version = &meta.Raw, &meta.Data, new(metadata.DataVersion)
 	}
-	_, err := tx.Exec(ctx, contentUpsert, c.ID, c.CreatedAt, c.UpdatedAt, c.URIPart, c.URI, c.Valid,
+	return []any{c.ID, c.CreatedAt, c.UpdatedAt, c.URIPart, c.URI, c.Valid,
 		c.FileURI, c.FileMtime, c.FileSize, c.CoverURI, c.Type, c.Order, parts, data, c.ParentID, c.LibraryID, c.WordCount, c.PageCount,
-		raw, derived, version)
+		raw, derived, version}
+}
+
+const upsertColumns = `id, created_at, updated_at, uri_part, uri, valid, file_uri, file_mtime, file_size,
+	cover_uri, type, "order", order_parts, file_data, parent_id, library_id, word_count, page_count,
+	data_raw, data, data_version`
+
+// leafUpsert is contentUpsert for many leaves at once; leaves always carry metadata. Rows go in
+// step order, so unique keys are claimed in the same order as row by row.
+const leafUpsert = `
+	INSERT INTO content (` + upsertColumns + `, meta_updated_at)
+	SELECT ` + upsertColumns + `, updated_at FROM pg_temp.scan_leaves ORDER BY seq
+	ON CONFLICT (id) DO UPDATE SET
+		uri_part = excluded.uri_part, uri = excluded.uri, valid = excluded.valid, file_uri = excluded.file_uri,
+		file_mtime = excluded.file_mtime, file_size = excluded.file_size, cover_uri = excluded.cover_uri,
+		type = excluded.type, "order" = excluded."order", order_parts = excluded.order_parts,
+		file_data = excluded.file_data, parent_id = excluded.parent_id, updated_at = excluded.updated_at,
+		word_count = excluded.word_count, page_count = excluded.page_count,
+		data_raw = excluded.data_raw, data = excluded.data, data_version = excluded.data_version,
+		meta_updated_at = CASE WHEN content.data_raw <> excluded.data_raw OR content.data <> excluded.data
+			THEN excluded.updated_at ELSE content.meta_updated_at END`
+
+// leafBatch buffers leaf upserts between identity steps, which must land first.
+type leafBatch struct {
+	rows [][]any
+	ids  map[string]bool
+}
+
+func (b *leafBatch) add(ctx context.Context, tx pgx.Tx, c models.Content, meta *metadata.LeafDoc) error {
+	// One statement cannot update a row twice.
+	if b.ids[c.ID] {
+		if err := b.flush(ctx, tx); err != nil {
+			return err
+		}
+	}
+	if b.ids == nil {
+		b.ids = map[string]bool{}
+	}
+	b.ids[c.ID] = true
+	b.rows = append(b.rows, append(upsertArgs(c, meta), len(b.rows)))
+	return nil
+}
+
+func (b *leafBatch) flush(ctx context.Context, tx pgx.Tx) error {
+	rows := b.rows
+	b.rows, b.ids = nil, nil
+	if len(rows) == 1 {
+		_, err := tx.Exec(ctx, contentUpsert, rows[0][:len(rows[0])-1]...)
+		return err
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	// Dropped at commit, so no pooled session keeps a copy of an older content schema; a later
+	// flush in the same transaction reuses it.
+	_, err := tx.Exec(ctx, `
+		CREATE TEMP TABLE IF NOT EXISTS pg_temp.scan_leaves ON COMMIT DROP AS
+			SELECT `+upsertColumns+`, 0 AS seq FROM content LIMIT 0;
+		TRUNCATE pg_temp.scan_leaves`)
+	if err != nil {
+		return err
+	}
+	cols := []string{"id", "created_at", "updated_at", "uri_part", "uri", "valid", "file_uri", "file_mtime",
+		"file_size", "cover_uri", "type", "order", "order_parts", "file_data", "parent_id", "library_id",
+		"word_count", "page_count", "data_raw", "data", "data_version", "seq"}
+	if _, err := tx.CopyFrom(ctx, pgx.Identifier{"pg_temp", "scan_leaves"}, cols, pgx.CopyFromRows(rows)); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, leafUpsert)
 	return err
 }
 
