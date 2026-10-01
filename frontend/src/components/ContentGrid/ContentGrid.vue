@@ -44,6 +44,7 @@
                 Set reading status
             </AMenuItem>
             <AMenuItem
+                v-if="isAdmin"
                 :leading-icon="IconMagnifyScan"
                 :disabled="selectedIds.size === 0"
                 @select="bulk(ids => showScanModal({ contentIds: ids }))"
@@ -245,6 +246,7 @@ import {
     type ContentListParams,
     type ReadingStatus,
 } from '@/utils/api/types'
+import { usersApi } from '@/utils/api/users'
 import { getLayoutTop, plural, readingStatusOptions, useRouteQueryParams } from '@/utils/misc'
 import { useRestoreReady } from '@/utils/whenReachable'
 import { showBulkResetProgressModal } from './BulkResetProgressModal.vue'
@@ -286,6 +288,9 @@ const [DefineMeta, ReuseMeta] = createReusableTemplate()
 const filtersId = useId()
 
 const starred = computed(() => filters.starred.value === 'true')
+
+const qMe = usersApi.useMe()
+const isAdmin = computed(() => !!qMe.data.value?.permissions.includes('ADMIN'))
 
 const filterKeys = Object.keys(FILTER_DEFAULTS) as FilterKey[]
 const hasFilters = computed(() => filterKeys.some(k => filters[k].value !== FILTER_DEFAULTS[k]))
