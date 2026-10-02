@@ -5,6 +5,7 @@
                 :icon="IconSync"
                 :label="active ? 'Library scans (running)' : 'Library scans'"
                 :class="{ 'scan-spin': active }"
+                data-scan-trigger
             />
         </template>
         <ul class="flex flex-col gap-3">
@@ -40,12 +41,17 @@
                 <div class="text-fg-muted text-xs">{{ detail(row.lead) }}</div>
             </li>
         </ul>
+        <div class="mt-2 flex justify-end">
+            <AButton variant="text" size="sm" @click="openDetails">Show details</AButton>
+        </div>
     </APopover>
 </template>
 
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
+import { showScanModal } from '@/pages/settings/ScanModal.vue'
 import { isTerminal, type ScanLead, scanRow, useScanStore } from '@/stores/scans'
+import AButton from '@/ui/AButton.vue'
 import AIcon from '@/ui/AIcon.vue'
 import AIconButton from '@/ui/AIconButton.vue'
 import APopover from '@/ui/APopover.vue'
@@ -70,6 +76,16 @@ const visible = computed(() => isAdmin.value && rows.value.length > 0)
 
 function getLibraryName(id: string): string {
     return libraries.data?.value?.find(l => l.id === id)?.name ?? id
+}
+
+// "Show details" unmounts with the popover, so focus returns to the popover's trigger. It is
+// found in the DOM because AIconButton's root is a fragment.
+function openDetails() {
+    menuOpen.value = false
+    void showScanModal(
+        { taskIds: rows.value.map(r => r.id) },
+        { focusFallback: () => document.querySelector<HTMLElement>('[data-scan-trigger]') }
+    )
 }
 
 function bar(lead: ScanLead): number {

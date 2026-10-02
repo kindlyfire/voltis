@@ -17,9 +17,8 @@ export const librariesApi = {
                     method: 'POST',
                     body: JSON.stringify(body),
                 }),
-            onSuccess: () => {
-                queryClient.invalidateQueries({ queryKey: ['libraries'] })
-            },
+            // Resolves once the list has the library, so a scan modal opened next can name it.
+            onSuccess: () => queryClient.invalidateQueries({ queryKey: ['libraries'] }),
         })
     },
 

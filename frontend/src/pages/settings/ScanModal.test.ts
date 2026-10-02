@@ -1,4 +1,4 @@
-import { type DOMWrapper, mount } from '@vue/test-utils'
+import { type DOMWrapper, flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick, ref } from 'vue'
@@ -77,9 +77,9 @@ function chips(card: DOMWrapper<Element>): string[][] {
         .map(c => [c.find('[aria-hidden="true"]').text(), c.find('.sr-only').text()])
 }
 
-function open() {
+function open(over: { taskIds?: string[]; autoStart?: boolean } = {}) {
     return mount(ScanModal, {
-        props: { open: true, close: () => {}, libraryIds: ['l_1'] },
+        props: { open: true, close: () => {}, libraryIds: ['l_1'], ...over },
         global: { stubs },
     })
 }
@@ -112,12 +112,32 @@ afterEach(() => {
 })
 
 describe('ScanModal', () => {
-    it('reconciles the task IDs returned by the scan POST', async () => {
-        const wrapper = open()
-        await startScan(wrapper)
+    it.each([
+        ['on Start', false],
+        ['on mount', true],
+    ])('reconciles the task IDs returned by the scan POST, started %s', async (_, autoStart) => {
+        const wrapper = open({ autoStart })
+        if (autoStart) await flushPromises()
+        else await startScan(wrapper)
 
         expect(scanMock).toHaveBeenCalledWith({ ids: ['l_1'], force: false })
         expect(snapshotMock).toHaveBeenCalledWith(['t_1'])
+        wrapper.unmount()
+    })
+
+    it('shows the form again when the scan it started on mount fails', async () => {
+        let reject!: (e: Error) => void
+        scanMock.mockReturnValue(new Promise((_, r) => (reject = r)))
+        const wrapper = open({ autoStart: true })
+        await nextTick()
+        const checkbox = () => wrapper.find('input[type="checkbox"]').exists()
+        expect(wrapper.text()).toContain('Starting the scan…')
+        expect(checkbox()).toBe(false)
+
+        reject(new Error('down'))
+        await flushPromises()
+        expect(wrapper.findAll('button').some(b => b.text() === 'Start scan')).toBe(true)
+        expect(checkbox()).toBe(true)
         wrapper.unmount()
     })
 
@@ -136,6 +156,8 @@ describe('ScanModal', () => {
         await vi.advanceTimersByTimeAsync(2000)
         expect(logsMock).toHaveBeenCalledTimes(2)
         expect(store.logs['t_1']).toEqual({ text: 'hello', len: 5 })
+        expect(wrapper.find('[aria-label="Scan log"]').text()).toBe('hello')
+        expect(wrapper.find('h4').exists()).toBe(false)
 
         await vi.advanceTimersByTimeAsync(5000)
         expect(logsMock).toHaveBeenCalledTimes(2)
@@ -213,8 +235,10 @@ describe('ScanModal', () => {
         const store = useScanStore()
         store.accept(task({ status: 3, progress: parsing }))
 
-        const wrapper = open()
-        await startScan(wrapper)
+        const wrapper = open({ taskIds: ['t_1'] })
+        await flushPromises()
+        expect(scanMock).not.toHaveBeenCalled()
+        expect(wrapper.attributes('title')).toBe('Library scans')
 
         const lead = wrapper.find('.scan-strip > li')
         expect(lead.text()).toContain('Failed')
@@ -252,26 +276,30 @@ describe('ScanModal', () => {
     it('follows the log only while it is scrolled to the end', async () => {
         const store = useScanStore()
         store.accept(task())
+        const input = { ...task().input, library_id: 'l_2', filter_paths: ['/comics/a'] }
+        store.accept(task({ id: 't_2', input }))
         store.logs['t_1'] = { text: 'one\n', len: 4 }
+        store.logs['t_2'] = { text: 'x\n', len: 2 }
 
-        const wrapper = open()
-        await startScan(wrapper)
-        const pre = wrapper.find('pre').element
-        // Ten pixels per character, so the height follows the rendered text.
-        Object.defineProperty(pre, 'scrollHeight', { get: () => pre.textContent!.length * 10 })
-        Object.defineProperty(pre, 'clientHeight', { value: 20 })
-        pre.scrollTop = 10
+        const wrapper = open({ taskIds: ['t_1', 't_2'] })
+        const region = wrapper.find('[aria-label="Scan log"]')
+        expect(region.findAll('h4').map(h => h.text())).toEqual(['l_1', 'l_2 (selected content)'])
+        const el = region.element
+        // Ten pixels per character, so the height follows the rendered text: 290 to start.
+        Object.defineProperty(el, 'scrollHeight', { get: () => el.textContent!.length * 10 })
+        Object.defineProperty(el, 'clientHeight', { value: 20 })
+        el.scrollTop = 270
 
         store.logs['t_1'] = { text: 'one\ntwo\n', len: 8 }
         await nextTick()
         await nextTick()
-        expect(pre.scrollTop).toBe(70)
+        expect(el.scrollTop).toBe(330)
 
-        pre.scrollTop = 0
+        el.scrollTop = 0
         store.logs['t_1'] = { text: 'one\ntwo\nthree\n', len: 14 }
         await nextTick()
         await nextTick()
-        expect(pre.scrollTop).toBe(0)
+        expect(el.scrollTop).toBe(0)
         wrapper.unmount()
     })
 })

@@ -6,11 +6,7 @@
                 <AButton variant="tonal" :leading-icon="IconMagnifyScan" @click="showScanModal([])">
                     Scan all
                 </AButton>
-                <AButton
-                    ref="createButton"
-                    :leading-icon="IconPlus"
-                    @click="showLibraryModal('new')"
-                >
+                <AButton ref="createButton" :leading-icon="IconPlus" @click="createLibrary">
                     Create library
                 </AButton>
             </div>
@@ -99,4 +95,9 @@ const libraries = librariesApi.useList()
 const createButton = useTemplateRef<{ $el: HTMLElement }>('createButton')
 // A deleted library's Edit button is gone.
 const focusFallback = () => createButton.value?.$el
+
+async function createLibrary() {
+    const id = await showLibraryModal('new')
+    if (id) void showScanModal([id], { start: true, focusFallback })
+}
 </script>

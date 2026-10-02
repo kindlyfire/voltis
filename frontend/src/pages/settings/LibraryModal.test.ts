@@ -3,6 +3,7 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { computed, ref } from 'vue'
 import LibraryModal from '@/pages/settings/LibraryModal.vue'
+import ASelect from '@/ui/ASelect.vue'
 import type { MetadataConfig } from '@/utils/api/metadata'
 import type { Library, LibraryUpsert } from '@/utils/api/types'
 import { addOverlays } from '@/utils/modalTesting'
@@ -16,7 +17,10 @@ vi.mock('@/utils/api/libraries', () => ({
     librariesApi: {
         useList: () => ({ data: libraries }),
         useUpsert: () => ({
-            mutateAsync: async (body: LibraryUpsert) => upserted.push(body),
+            mutateAsync: async (body: LibraryUpsert) => {
+                upserted.push(body)
+                return { ...library(body.name), id: 'l_new' }
+            },
             isPending: ref(false),
         }),
         useDelete: () => ({
@@ -89,9 +93,9 @@ beforeEach(() => {
 
 enableAutoUnmount(afterEach)
 
-async function open(libraryId = 'l_1') {
+async function open(libraryId = 'l_1', close: (createdId?: string) => void = () => {}) {
     const wrapper = mount(LibraryModal, {
-        props: { open: true, close: () => {}, libraryId },
+        props: { open: true, close, libraryId },
         global: { stubs, plugins: [VueQueryPlugin] },
     })
     await flushPromises()
@@ -146,6 +150,8 @@ describe('LibraryModal', () => {
         const { wrapper, tab, button } = await open()
         const warning = () => tab('Sources').find('[aria-label="No sources"]').exists()
         expect(warning()).toBe(false)
+        expect(wrapper.text()).not.toContain('No sources')
+        expect(button('Save').attributes('disabled')).toBeUndefined()
         expect(button('Settings of source 1').classes()).toContain('variant-standard')
         expect(button('Settings of source 2').classes()).toContain('variant-tonal')
 
@@ -153,6 +159,25 @@ describe('LibraryModal', () => {
             await input.setValue(' ')
         }
         expect(warning()).toBe(true)
+        expect(wrapper.text()).toContain('No sources')
+        expect(button('Save').attributes('disabled')).toBeDefined()
+    })
+
+    it('creates a library only with a source, and closes with its id', async () => {
+        const close = vi.fn()
+        const { wrapper, button, submit } = await open('new', close)
+        expect(wrapper.text()).toContain('No sources')
+        expect(button('Create and scan').attributes('disabled')).toBeDefined()
+
+        await wrapper.find('input').setValue('Comics')
+        wrapper.findComponent(ASelect).vm.$emit('update:modelValue', 'comics')
+        await button('Add path manually').trigger('click')
+        await wrapper.find('input[placeholder="/path/to/folder"]').setValue('/comics')
+        expect(wrapper.text()).not.toContain('No sources')
+        expect(button('Create and scan').attributes('disabled')).toBeUndefined()
+
+        await submit()
+        expect(close).toHaveBeenCalledWith('l_new')
     })
 
     it('labels inherit after the unsaved library value and hints when off', async () => {

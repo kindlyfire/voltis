@@ -219,9 +219,23 @@
             >
                 Delete
             </AButton>
+            <p
+                v-if="!hasSources"
+                :id="warningId"
+                class="text-fg-muted flex items-center gap-1 text-sm"
+            >
+                <AIcon :icon="IconAlert" class="text-warning" />
+                No sources
+            </p>
             <AButton variant="text" tone="neutral" @click="close()">Cancel</AButton>
-            <AButton type="submit" :form="formId" :loading="form.mutation.isPending.value">
-                {{ isNew ? 'Create' : 'Save' }}
+            <AButton
+                type="submit"
+                :form="formId"
+                :loading="form.mutation.isPending.value"
+                :disabled="!hasSources"
+                :aria-describedby="!hasSources ? warningId : undefined"
+            >
+                {{ isNew ? 'Create and scan' : 'Save' }}
             </AButton>
         </template>
     </ADialog>
@@ -256,7 +270,7 @@ import { useSourceOverlaps } from './useSourceOverlaps'
 
 const props = defineProps<{
     open: boolean
-    close: () => void
+    close: (createdId?: string) => void
     libraryId: string
 }>()
 
@@ -266,6 +280,7 @@ const library = computed(() => libraries.data?.value?.find(l => l.id === props.l
 const upsert = librariesApi.useUpsert()
 const deleteLibrary = librariesApi.useDelete()
 const formId = useId()
+const warningId = useId()
 const toast = useToast()
 const typeOptions = [
     { value: 'comics', label: 'Comics' },
@@ -311,7 +326,7 @@ const form = useForm({
         always_remove_missing: false,
     },
     onSubmit: async values => {
-        await upsert.mutateAsync({
+        const saved = await upsert.mutateAsync({
             id: isNew.value ? undefined : props.libraryId,
             name: values.name,
             type: values.type!,
@@ -324,8 +339,8 @@ const form = useForm({
                 always_remove_missing: values.always_remove_missing,
             },
         })
-        toast.show({ message: isNew.value ? `Created ${values.name}` : 'Library saved' })
-        props.close()
+        if (!isNew.value) toast.show({ message: 'Library saved' })
+        props.close(isNew.value ? saved.id : undefined)
     },
 })
 
@@ -338,6 +353,7 @@ const inferenceHint = computed(() =>
 
 // A field that fails validation may sit in a hidden tab: show it, so the form can focus it.
 function onSubmit(e: Event) {
+    if (!hasSources.value) return e.preventDefault()
     form.onSubmit(e)
     const field = form.errors.value[0]?.path[0]
     if (field !== undefined) tab.value = field === 'sources' ? 'sources' : 'general'
@@ -521,7 +537,11 @@ async function handleDelete() {
 import { Modals, type ShowOptions } from '@/utils/modals'
 import Self from './LibraryModal.vue'
 
-export function showLibraryModal(libraryId: string, options?: ShowOptions): Promise<void> {
+/** Resolves with the id of the library it created, if any. */
+export function showLibraryModal(
+    libraryId: string,
+    options?: ShowOptions
+): Promise<string | undefined> {
     return Modals.show(Self, { libraryId }, options)
 }
 </script>

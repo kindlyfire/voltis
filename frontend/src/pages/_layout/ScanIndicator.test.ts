@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick, ref } from 'vue'
 import ScanIndicator from '@/pages/_layout/ScanIndicator.vue'
+import { showScanModal } from '@/pages/settings/ScanModal.vue'
 import { useScanStore } from '@/stores/scans'
 import { librariesApi } from '@/utils/api/libraries'
 import type { TaskSnapshot, TaskStatusValue } from '@/utils/api/types'
@@ -20,12 +21,18 @@ vi.mock('@/utils/api/users', async () => {
     return { usersApi: { useMe: () => ({ data: ref({ permissions: ['ADMIN'] }) }) } }
 })
 
+vi.mock('@/pages/settings/ScanModal.vue', () => ({ showScanModal: vi.fn() }))
+
 vi.mock('@/utils/ws', () => ({
     ws: { connect: () => {}, send: () => {}, on: () => () => {} },
 }))
 
 const stubs = {
-    APopover: { template: '<div><slot name="trigger" /><slot /></div>', emits: ['update:open'] },
+    APopover: {
+        template: '<div><slot name="trigger" /><slot /></div>',
+        props: ['open'],
+        emits: ['update:open'],
+    },
     AIconButton: true,
 }
 
@@ -60,7 +67,7 @@ function open() {
     return mount(ScanIndicator, { global: { stubs } })
 }
 
-describe('ScanIndicator dismissal', () => {
+describe('ScanIndicator', () => {
     it('dismisses a task that was already terminal at mount', async () => {
         const store = useScanStore()
         store.accept(task('t_1', 2))
@@ -113,6 +120,26 @@ describe('ScanIndicator dismissal', () => {
 
         expect(store.dismissed.has('t_1')).toBe(true)
         expect(store.dismissed.has('t_2')).toBe(false)
+        wrapper.unmount()
+    })
+
+    it('opens the scan modal on every listed task and closes the popover', async () => {
+        const store = useScanStore()
+        store.accept(task('t_1', 1))
+        store.accept(task('t_2', 2))
+
+        const wrapper = open()
+        const popover = wrapper.findComponent(stubs.APopover)
+        popover.vm.$emit('update:open', true)
+        await nextTick()
+        expect(popover.props('open')).toBe(true)
+
+        await wrapper
+            .findAll('button')
+            .find(b => b.text() === 'Show details')!
+            .trigger('click')
+        expect(showScanModal).toHaveBeenCalledWith({ taskIds: ['t_1', 't_2'] }, expect.anything())
+        expect(popover.props('open')).toBe(false)
         wrapper.unmount()
     })
 })

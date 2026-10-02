@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -218,6 +219,14 @@ func (lr *LibraryRoutes) upsert(c echo.Context) error {
 		return err
 	}
 
+	// A scan of a library with no sources has no root to guard removals, so it would delete
+	// everything.
+	if !slices.ContainsFunc(req.Sources, func(s models.LibrarySource) bool {
+		return strings.TrimSpace(s.PathURI) != ""
+	}) {
+		return echo.NewHTTPError(http.StatusBadRequest, "A library needs at least one source")
+	}
+
 	prefixes := map[string]bool{}
 	for _, source := range req.Sources {
 		info, err := os.Stat(source.PathURI)
@@ -234,9 +243,6 @@ func (lr *LibraryRoutes) upsert(c echo.Context) error {
 		}
 	}
 
-	if req.Sources == nil {
-		req.Sources = []models.LibrarySource{}
-	}
 	sourcesJSON, err := json.Marshal(req.Sources)
 	if err != nil {
 		return err

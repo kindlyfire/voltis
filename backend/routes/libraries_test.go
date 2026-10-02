@@ -101,13 +101,11 @@ func TestLibrarySettings(t *testing.T) {
 	// Omitted keys take their defaults: matching is off unless asked for.
 	partial := c.Post("/api/libraries/"+id, body(map[string]any{"book_series_inference": "off"})).Assert(t, 200).JSON()
 	assertEq(t, settings(partial), `{"always_remove_missing":false,"auto_match":{},"book_series_inference":"off"}`)
-	for _, sources := range []any{nil, []any{}} {
-		lib := c.Post("/api/libraries/"+id, map[string]any{"name": "books", "sources": sources}).Assert(t, 200).JSON()
-		assertEq(t, asJSON(t, lib["sources"]), `[]`)
-	}
-	stored, err := db.SelectScalar[string](context.Background(), pool, "SELECT sources::text FROM libraries WHERE id = $1", id)
-	if err != nil || stored != "[]" {
-		t.Fatalf("stored sources = %s (%v)", stored, err)
+	for _, sources := range []any{nil, []any{}, []any{map[string]any{"path_uri": "  "}}} {
+		for _, path := range []string{"new", id} {
+			res := c.Post("/api/libraries/"+path, map[string]any{"name": "books", "type": "books", "sources": sources})
+			assertEq(t, s(res.Assert(t, 400).JSON()["error"]), "A library needs at least one source")
+		}
 	}
 	src := map[string]any{"path_uri": dir, "settings": map[string]any{"auto_match": map[string]any{"fake": false}}}
 	lib = c.Post("/api/libraries/"+id, map[string]any{"name": "books", "sources": []any{src}}).Assert(t, 200).JSON()
@@ -126,7 +124,8 @@ func TestLibraryAutoMatchChanges(t *testing.T) {
 	if err := os.Mkdir(a, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	id := s(c.Post("/api/libraries/new", map[string]any{"name": "c", "type": "comics"}).Assert(t, 200).JSON()["id"])
+	id := s(c.Post("/api/libraries/new", map[string]any{"name": "c", "type": "comics",
+		"sources": []any{map[string]any{"path_uri": dir}}}).Assert(t, 200).JSON()["id"])
 	// s is under the source, v under the narrower one, u under neither.
 	for name, file := range map[string]string{"s": filepath.Join(dir, "b", "s.cbz"), "u": "/elsewhere/u.cbz", "v": filepath.Join(a, "v.cbz")} {
 		insertSeries(t, pool, id, name, file)
@@ -170,7 +169,7 @@ func TestLibraryAutoMatchChanges(t *testing.T) {
 		{"widening the off source", true, []any{source(dir, false)}, ""},
 		{"a source on in a library off", false, []any{source(dir, true)}, "s v"},
 		{"narrowing the on source", false, []any{source(a, true)}, ""},
-		{"everything off", false, nil, ""},
+		{"everything off", false, []any{source(a)}, ""},
 	} {
 		save(step.library, step.sources...)
 		if got := due(); got != step.due {
@@ -197,7 +196,8 @@ func TestLibraryAutoMatchWakesTheWorker(t *testing.T) {
 		})
 	}
 	idle()
-	id := s(c.Post("/api/libraries/new", map[string]any{"name": "c", "type": "comics"}).Assert(t, 200).JSON()["id"])
+	id := s(c.Post("/api/libraries/new", map[string]any{"name": "c", "type": "comics",
+		"sources": []any{map[string]any{"path_uri": dir}}}).Assert(t, 200).JSON()["id"])
 	insertSeries(t, pool, id, "s", filepath.Join(dir, "s", "1.cbz"))
 	c.Post("/api/libraries/"+id, map[string]any{"name": "c", "sources": []any{map[string]any{"path_uri": dir,
 		"settings": map[string]any{"auto_match": map[string]any{"fake": true}}}}}).Assert(t, 200)
@@ -206,6 +206,7 @@ func TestLibraryAutoMatchWakesTheWorker(t *testing.T) {
 	idle()
 	insertSeries(t, pool, id, "t", filepath.Join(dir, "t", "1.cbz"))
 	c.Post("/api/libraries/new", map[string]any{"name": "d", "type": "comics",
+		"sources":  []any{map[string]any{"path_uri": t.TempDir()}},
 		"settings": map[string]any{"auto_match": map[string]any{"fake": true}}}).Assert(t, 200)
 	matched(id, "t")
 }
