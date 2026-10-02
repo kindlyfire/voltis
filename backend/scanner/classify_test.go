@@ -30,14 +30,24 @@ func TestClassifyComicTuples(t *testing.T) {
 			"prefix=comic type=comic part=ch7 order=[nil,7] cover=001.jpg title=Ch. 7 series=comic|comic_series|Other Series index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]}",
 		},
 		{
-			"fallback chapter strips directory prefix",
-			"/lib/Series 1000/Series 1000 002.cbz", metadata.Fields{},
+			"fallback chapter strips directory prefix and tags",
+			"/lib/Series 1000/Series 1000 002 (2019).cbz", metadata.Fields{},
 			"prefix=comic type=comic part=ch2 order=[nil,2] cover=001.jpg title=Ch. 2 series=comic|comic_series|Series 1000 index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]}",
 		},
 		{
 			"metadata year without comicinfo year",
 			"/lib/Plain/Plain ch1.cbz", metadata.Fields{Series: metadata.Val("Plain Series")},
 			"prefix=comic type=comic part=ch1 order=[nil,1] cover=001.jpg title=Ch. 1 series=comic|comic_series|Plain Series index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]}",
+		},
+		{
+			"comicinfo number ignores filename issue marker",
+			"/lib/Tide Atlas/0074 - Spare Extra #1.cbz", metadata.Fields{Number: metadata.Val("74")},
+			"prefix=comic type=comic part=ch74 order=[nil,74] cover=001.jpg title=Ch. 74 series=comic|comic_series|Tide Atlas index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]}",
+		},
+		{
+			"series name is not a chapter marker",
+			"/lib/C3 Unit/C3 Unit v02.cbz", metadata.Fields{},
+			"prefix=comic type=comic part=v2 order=[2,nil] cover=001.jpg title=Vol. 2 series=comic|comic_series|C3 Unit index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]}",
 		},
 	}
 	for _, c := range cases {

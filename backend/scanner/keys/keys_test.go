@@ -40,6 +40,8 @@ func TestKeysParseVolume(t *testing.T) {
 		{"Revolver 3", "nil"},
 		{"Series#7", "7"},
 		{"Series#2 ch2", "2"},
+		{"Name c010 v02", "nil"},
+		{"Arc 2 v03", "3"},
 	}
 	for _, c := range cases {
 		if got := fmtFloatPtr(ParseVolume(c.in)); got != c.want {
@@ -172,7 +174,6 @@ func TestKeysParseFallbackChapter(t *testing.T) {
 		{"Series 012", "12"},
 		{"1 - 0025", "25"},
 		{"Series", "nil"},
-		{"Series 3 (2019)", "3"},
 		{"7.5", "7.5"},
 		{"2 10 3", "10"},
 	}
@@ -247,16 +248,16 @@ func TestKeysParseSeriesName(t *testing.T) {
 }
 
 func TestKeysRemoveCommonPrefix(t *testing.T) {
-	cases := []struct{ a, b, wantA, wantB string }{
-		{"Series ch1", "Series", " ch1", ""},
-		{"abc", "abd", "c", "d"},
-		{"", "abc", "", "abc"},
-		{"same", "same", "", ""},
+	cases := []struct{ a, b, want string }{
+		{"Series ch1", "Series", " ch1"},
+		{"Series 12 c5", "Series 1", "12 c5"},
+		{"Vol 2", "Vols", "Vol 2"},
+		{"", "abc", ""},
+		{"same", "same", ""},
 	}
 	for _, c := range cases {
-		a, b := RemoveCommonPrefix(c.a, c.b)
-		if a != c.wantA || b != c.wantB {
-			t.Errorf("RemoveCommonPrefix(%q, %q) = %q/%q, want %q/%q", c.a, c.b, a, b, c.wantA, c.wantB)
+		if got := RemoveCommonPrefix(c.a, c.b); got != c.want {
+			t.Errorf("RemoveCommonPrefix(%q, %q) = %q, want %q", c.a, c.b, got, c.want)
 		}
 	}
 }

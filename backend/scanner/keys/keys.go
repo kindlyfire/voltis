@@ -7,15 +7,18 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 var (
 	// Textual markers need a non-letter before them; not \b, which counts "_" as a word character.
 	volumePattern  = regexp.MustCompile(`(?i)(?:\#|(?:^|[^\p{L}])(?:v|vo|vol|volu|volum|volume)\.?)\s*(\d+(?:\.\d+)?)`)
 	chapterPattern = regexp.MustCompile(`(?i)(?:c|ch|chap|chapt|chapte|chapter)\.?\s*(\d+(?:\.\d+)?)`)
-	numberPattern  = regexp.MustCompile(`(\d+(?:\.\d+)?)`)
-	yearPattern    = regexp.MustCompile(`\((\d+)\)`)
-	trailingTags   = regexp.MustCompile(`\s*[\[\(][^\[\]\(\)]*[\]\)]\s*$`)
+	// Positions a chapter marker for ParseVolume; bounded like volumePattern so "Arc 2" isn't one.
+	chapterIndexPattern = regexp.MustCompile(`(?:^|[^\p{L}])` + chapterPattern.String())
+	numberPattern       = regexp.MustCompile(`(\d+(?:\.\d+)?)`)
+	yearPattern         = regexp.MustCompile(`\((\d+)\)`)
+	trailingTags        = regexp.MustCompile(`\s*[\[\(][^\[\]\(\)]*[\]\)]\s*$`)
 
 	// Book patterns take Unicode spaces (\s alone is ASCII-only), as titles often carry NBSPs.
 	bookVolumePattern = regexp.MustCompile(`(?i)(?:^|[^\p{L}])((?:v|vol\.?|volume)[\s\p{Z}]*(\d+(?:\.\d+)?))`)
@@ -26,24 +29,26 @@ var (
 	specialPattern  = regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{N}])(?:sp\d+|(?:short|side)[\s\p{Z}]+stor(?:y|ies)|bonus|extra|exclusive)(?:$|[^\p{L}\p{N}])`)
 )
 
-func parseNumber(pattern *regexp.Regexp, name string) *float64 {
-	m := pattern.FindStringSubmatch(name)
+// ParseVolume ignores a volume after the chapter marker, as in "c010 v02".
+func ParseVolume(name string) *float64 {
+	m := volumePattern.FindStringSubmatchIndex(name)
 	if m == nil {
 		return nil
 	}
-	v, err := strconv.ParseFloat(m[1], 64)
-	if err != nil {
+	if c := chapterIndexPattern.FindStringIndex(name); c != nil && m[0] >= c[0] {
 		return nil
 	}
-	return &v
+	return parseFloat(name[m[2]:m[3]])
 }
 
-func ParseVolume(name string) *float64 { return parseNumber(volumePattern, name) }
-
-func ParseChapter(name string) *float64 { return parseNumber(chapterPattern, name) }
+func ParseChapter(name string) *float64 {
+	if m := chapterPattern.FindStringSubmatch(name); m != nil {
+		return parseFloat(m[1])
+	}
+	return nil
+}
 
 func ParseFallbackChapter(name string) *float64 {
-	name = CleanSeriesName(name)
 	matches := numberPattern.FindAllStringSubmatch(name, -1)
 	if len(matches) == 0 {
 		return nil
@@ -56,7 +61,11 @@ func ParseFallbackChapter(name string) *float64 {
 		}
 	}
 
-	v, err := strconv.ParseFloat(best, 64)
+	return parseFloat(best)
+}
+
+func parseFloat(s string) *float64 {
+	v, err := strconv.ParseFloat(s, 64)
 	if err != nil {
 		return nil
 	}
@@ -128,13 +137,26 @@ func ParseBookFileVolume(stem string) (string, float64, bool) {
 // IsBookSpecial reports markers of specials and extras, whose volume numbers refer to another book.
 func IsBookSpecial(s string) bool { return specialPattern.MatchString(s) }
 
-func RemoveCommonPrefix(a, b string) (string, string) {
-	minLen := min(len(b), len(a))
+// RemoveCommonPrefix strips from a its common prefix with b, backed off to a word boundary in
+// both so "Series 12" with "Series 1" leaves "12", not "2".
+func RemoveCommonPrefix(a, b string) string {
 	i := 0
-	for i < minLen && a[i] == b[i] {
+	for i < min(len(a), len(b)) && a[i] == b[i] {
 		i++
 	}
-	return a[i:], b[i:]
+	for i > 0 && (midWord(a, i) || midWord(b, i)) {
+		_, size := utf8.DecodeLastRuneInString(a[:i])
+		i -= size
+	}
+	return a[i:]
+}
+
+// midWord reports whether cutting s at i splits a rune or a run of letters and digits.
+func midWord(s string, i int) bool {
+	prev, _ := utf8.DecodeLastRuneInString(s[:i])
+	next, _ := utf8.DecodeRuneInString(s[i:])
+	return (i < len(s) && !utf8.RuneStart(s[i])) ||
+		(unicode.In(prev, unicode.Letter, unicode.Digit) && unicode.In(next, unicode.Letter, unicode.Digit))
 }
 
 func FormatNum(f float64) string {

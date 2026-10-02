@@ -19,6 +19,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and the "Orphaned metadata" repair section is gone
 - Items in a series show their number ("Volume 3", "Vol. 2 · Ch. 5") above a
   shortened title
+- Comics with a ComicInfo number take their volume only from ComicInfo, so
+  chapters such as "0074 - Extra #1" no longer get one from the file name, and a
+  series name such as "C3" no longer reads as a chapter or volume. A forced
+  rescan fixes existing libraries
 
 ### Upgrade notes
 

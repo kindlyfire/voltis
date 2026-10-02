@@ -111,16 +111,10 @@ func classifyComic(file FSFile, meta metadata.Fields, year *int, pages []comic.P
 	}
 
 	stem := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-	filename := keys.CleanSeriesName(stem)
+	// Without the series name, so "C3 Unit v02" doesn't read as chapter 3.
+	name := keys.RemoveCommonPrefix(keys.CleanSeriesName(stem), dirName)
 
-	volNum := keys.ParseVolume(filename)
-	if v, ok := meta.Volume.Get(); ok {
-		if f, err := keys.ParseFloatStr(v); err == nil {
-			volNum = &f
-		}
-	}
-
-	var chNum *float64
+	var volNum, chNum *float64
 	if n, ok := meta.Number.Get(); ok {
 		if f, err := keys.ParseFloatStr(n); err == nil {
 			chNum = &f
@@ -128,13 +122,18 @@ func classifyComic(file FSFile, meta metadata.Fields, year *int, pages []comic.P
 			chNum = keys.ParseChapter(n)
 		}
 	} else {
-		chNum = keys.ParseChapter(filename)
+		volNum = keys.ParseVolume(name)
+		chNum = keys.ParseChapter(name)
+	}
+	if v, ok := meta.Volume.Get(); ok {
+		if f, err := keys.ParseFloatStr(v); err == nil {
+			volNum = &f
+		}
 	}
 
 	yearNum := keys.ParseSeriesYear(stem)
 	if volNum == nil && chNum == nil {
-		stripped, _ := keys.RemoveCommonPrefix(filename, dirName)
-		chNum = keys.ParseFallbackChapter(stripped)
+		chNum = keys.ParseFallbackChapter(name)
 	}
 
 	var uriParts, titleParts []string
