@@ -217,6 +217,8 @@ type UserToContent struct {
 	Rating            *int       `db:"rating" json:"rating"`
 	Progress          JSONB      `db:"progress" json:"progress"`
 	ProgressUpdatedAt *time.Time `db:"progress_updated_at" json:"progress_updated_at"`
+	Revision          *string    `db:"revision" json:"revision"`
+	LastReadAt        *time.Time `db:"last_read_at" json:"last_read_at"`
 }
 
 type CustomList struct {

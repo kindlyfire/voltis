@@ -13,21 +13,39 @@
         </div>
         <div v-else class="flex flex-col gap-9">
             <h1 class="sr-only">Home</h1>
-            <QueryError :query="qLastRead" />
+            <QueryError :query="qContinue" />
             <AScrollRow
-                v-if="qLastRead.isLoading.value || lastRead.length"
-                title="Recently Read"
-                :aria-busy="qLastRead.isLoading.value || undefined"
+                v-if="qContinue.isLoading.value || continueEntries.length"
+                title="Continue reading"
+                see-all="/browse?sort=continue&sort_order=desc"
+                :aria-busy="qContinue.isLoading.value || undefined"
             >
-                <template v-if="qLastRead.isLoading.value">
+                <template v-if="qContinue.isLoading.value">
                     <ContentGridItemSkeleton v-for="i in 6" :key="i" subtitle />
                 </template>
                 <ContentGridItem
-                    v-for="e in lastRead"
+                    v-for="e in continueEntries"
                     v-else
                     :key="e.series?.id ?? e.item.id"
                     :content="e.item"
                     :series="e.series"
+                    :is-new="e.is_new"
+                    to-read-route
+                />
+            </AScrollRow>
+
+            <QueryError :query="qUpdated" />
+            <AScrollRow
+                v-if="updated.length"
+                title="Recently updated"
+                see-all="/browse?sort=recently_updated&sort_order=desc"
+            >
+                <ContentGridItem
+                    v-for="item in updated"
+                    :key="item.id"
+                    :content="item"
+                    :series="item.continue?.series"
+                    :is-new="item.continue?.is_new"
                     to-read-route
                 />
             </AScrollRow>
@@ -35,7 +53,8 @@
             <QueryError :query="qNewest" />
             <AScrollRow
                 v-if="qNewest.isLoading.value || newest.length"
-                title="Newly Added"
+                title="Recently added"
+                see-all="/browse?sort=created_at&sort_order=desc"
                 :aria-busy="qNewest.isLoading.value || undefined"
             >
                 <template v-if="qNewest.isLoading.value">
@@ -60,6 +79,7 @@ import AButton from '@/ui/AButton.vue'
 import AScrollRow from '@/ui/AScrollRow.vue'
 import { contentApi } from '@/utils/api/content'
 import { librariesApi } from '@/utils/api/libraries'
+import { readingApi } from '@/utils/api/reading'
 import { usersApi } from '@/utils/api/users'
 
 useHead({
@@ -71,8 +91,11 @@ const libraries = computed(() => qLibraries.data.value)
 const qUser = usersApi.useMe()
 const user = qUser.data
 
-const qLastRead = contentApi.useRecentlyRead(10)
-const lastRead = computed(() => qLastRead.data.value ?? [])
+const qContinue = readingApi.useContinueReading(10)
+const continueEntries = computed(() => qContinue.data.value ?? [])
+
+const qUpdated = readingApi.useRecentlyUpdated(10)
+const updated = computed(() => qUpdated.data.value?.data ?? [])
 
 const qNewest = contentApi.useList({
     parent_id: 'null',

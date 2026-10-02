@@ -3,22 +3,48 @@
         <h2 ref="heading" tabindex="-1" class="font-display text-2xl font-semibold outline-none">
             End of book
         </h2>
-        <AButton v-if="next" class="book-end__next" @click.stop="emit('open', next.id)">
-            Next: {{ next.title }}
-        </AButton>
-        <AButton variant="tonal" :to="exit.to" @click.stop="emit('leave')">
-            {{ exit.label }}
-        </AButton>
+        <template v-if="next">
+            <p :id="nextId" class="max-w-md text-center text-balance">{{ next.title }}</p>
+            <AButton
+                class="book-end__next"
+                :aria-describedby="nextId"
+                @click.stop="emit('open', next.id)"
+            >
+                Read next
+            </AButton>
+        </template>
+        <!-- Surely the last volume, or a standalone book: where the series stands. -->
+        <ReaderEndSummary
+            v-if="!next && siblings.status === 'ready' && sync"
+            :sync="sync"
+            :exit="exit"
+            @leave="emit('leave')"
+        />
+        <template v-else>
+            <SiblingsRetry v-if="!next" :siblings="siblings" />
+            <AButton variant="tonal" :to="exit.to" @click.stop="emit('leave')">
+                {{ exit.label }}
+            </AButton>
+        </template>
     </div>
 </template>
 
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import AButton from '@/ui/AButton.vue'
 import type { Content } from '@/utils/api/types'
+import ReaderEndSummary from '../ReaderEndSummary.vue'
 import type { ReaderExit } from '../readerExit'
+import type { ReadingSync } from '../readingSync'
+import SiblingsRetry from '../SiblingsRetry.vue'
+import type { Siblings } from '../useSiblings'
 
-const props = defineProps<{ exit: ReaderExit; next: Content | null }>()
+const props = defineProps<{
+    exit: ReaderExit
+    next: Content | null
+    siblings: Siblings
+    sync?: ReadingSync
+}>()
 const emit = defineEmits<{
     open: [id: string]
     leave: []
@@ -26,6 +52,7 @@ const emit = defineEmits<{
     blur: []
 }>()
 
+const nextId = useId()
 const root = ref<HTMLElement>()
 const heading = ref<HTMLElement>()
 

@@ -83,46 +83,14 @@ func TestUserData(t *testing.T) {
 		return res.JSON()
 	}
 
-	t.Run("progress null", func(t *testing.T) {
+	t.Run("status and progress go through reading", func(t *testing.T) {
 		id := newTestContent(t, pool)
-		res := post(t, id, map[string]any{"progress": nil}, 200)
-
-		progress, ok := res["progress"].(map[string]any)
-		if !ok {
-			t.Fatalf("progress not an object: %v", res["progress"])
-		}
-		assertEq(t, len(progress), 0)
-		assertNil(t, "progress_updated_at", res["progress_updated_at"])
-	})
-
-	t.Run("progress not an object", func(t *testing.T) {
-		id := newTestContent(t, pool)
-		for _, invalid := range []any{5, "x", []any{}} {
-			post(t, id, map[string]any{"progress": invalid}, 400)
+		for _, body := range []map[string]any{
+			{"status": "reading"}, {"status": nil}, {"progress": map[string]any{"current_page": 3}}, {"progress": nil},
+		} {
+			post(t, id, body, 400)
 		}
 		assertEq(t, utcCount(t, pool, id), 0)
-	})
-
-	t.Run("progress object", func(t *testing.T) {
-		id := newTestContent(t, pool)
-		res := post(t, id, map[string]any{"progress": map[string]any{"current_page": 3}}, 200)
-		assertEq(t, s(res["progress"].(map[string]any)["current_page"]), "3")
-		assertNotNil(t, "progress_updated_at", res["progress_updated_at"])
-
-		got := c.Get("/api/content/"+id).Assert(t, 200).JSON()
-		userData := got["user_data"].(map[string]any)
-		assertEq(t, s(userData["progress"].(map[string]any)["current_page"]), "3")
-	})
-
-	t.Run("progress reset", func(t *testing.T) {
-		id := newTestContent(t, pool)
-		for _, reset := range []any{nil, map[string]any{}} {
-			post(t, id, map[string]any{"progress": map[string]any{"current_page": 4}}, 200)
-
-			res := post(t, id, map[string]any{"progress": reset}, 200)
-			assertEq(t, len(res["progress"].(map[string]any)), 0)
-			assertNil(t, "progress_updated_at", res["progress_updated_at"])
-		}
 	})
 
 	t.Run("empty body", func(t *testing.T) {
@@ -133,41 +101,35 @@ func TestUserData(t *testing.T) {
 		assertNil(t, "status", res["status"])
 		assertEq(t, utcCount(t, pool, id), 1)
 
-		post(t, id, map[string]any{"status": "reading", "rating": 8}, 200)
+		post(t, id, map[string]any{"rating": 8}, 200)
 
 		res = post(t, id, map[string]any{}, 200)
-		assertEq(t, s(res["status"]), "reading")
 		assertEq(t, s(res["rating"]), "8")
 		assertEq(t, utcCount(t, pool, id), 1)
 	})
 
 	t.Run("clear fields", func(t *testing.T) {
 		id := newTestContent(t, pool)
-		post(t, id, map[string]any{"status": "reading", "notes": "hello", "rating": 8}, 200)
+		post(t, id, map[string]any{"notes": "hello", "rating": 8}, 200)
 
-		res := post(t, id, map[string]any{"status": nil, "notes": nil, "rating": nil}, 200)
-		assertNil(t, "status", res["status"])
+		res := post(t, id, map[string]any{"notes": nil, "rating": nil}, 200)
 		assertNil(t, "notes", res["notes"])
 		assertNil(t, "rating", res["rating"])
 	})
 
-	t.Run("partial update", func(t *testing.T) {
+	t.Run("partial update keeps the reading state", func(t *testing.T) {
 		id := newTestContent(t, pool)
-		first := post(t, id, map[string]any{
-			"status": "reading", "rating": 8, "starred": true,
-			"progress": map[string]any{"current_page": 2},
-		}, 200)
-		assertNotNil(t, "status_updated_at", first["status_updated_at"])
-		assertNotNil(t, "progress_updated_at", first["progress_updated_at"])
+		setStatus(t, c, id, "reading")
+		first := post(t, id, map[string]any{"rating": 8, "starred": true}, 200)
+		assertNotNil(t, "revision", first["revision"])
 
 		res := post(t, id, map[string]any{"notes": "hello"}, 200)
 		assertEq(t, s(res["notes"]), "hello")
 		assertEq(t, s(res["status"]), "reading")
 		assertEq(t, s(res["rating"]), "8")
 		assertEq(t, s(res["starred"]), "true")
-		assertEq(t, s(res["progress"].(map[string]any)["current_page"]), "2")
 		assertEq(t, s(res["status_updated_at"]), s(first["status_updated_at"]))
-		assertEq(t, s(res["progress_updated_at"]), s(first["progress_updated_at"]))
+		assertEq(t, s(res["revision"]), s(first["revision"]))
 	})
 
 	t.Run("length", func(t *testing.T) {
@@ -201,10 +163,15 @@ func TestUserData(t *testing.T) {
 		insert("book", &books, nil, nil)
 		book := insert("book", nil, new(200), nil)
 
-		post(t, comic1, map[string]any{"status": "completed"}, 200)
-		post(t, comic2, map[string]any{"progress": map[string]any{"current_page": 5}}, 200)
-		post(t, comic3, map[string]any{"progress": map[string]any{"current_page": 0, "progress_percent": 10}}, 200)
-		post(t, book, map[string]any{"progress": map[string]any{"progress_percent": 50}}, 200)
+		setStatus(t, c, comic1, "completed")
+		for id, progress := range map[string]string{
+			comic2: `{"current_page": 5}`, comic3: `{"current_page": 0, "progress_percent": 10}`,
+			book: `{"progress_percent": 50}`,
+		} {
+			setStatus(t, c, id, "reading")
+			mustExec(t, pool, `UPDATE user_to_content SET progress = $1
+				WHERE uri = (SELECT uri FROM content WHERE id = $2)`, progress, id)
+		}
 
 		want := func(l map[string]any, unit string, total, remaining int) {
 			t.Helper()
@@ -217,7 +184,7 @@ func TestUserData(t *testing.T) {
 			t.Errorf("book series length = %v, want none with an uncounted child", l)
 		}
 		for _, status := range []string{"completed", "dropped"} {
-			post(t, comics, map[string]any{"status": status}, 200)
+			setStatus(t, c, comics, status)
 			want(length(comics), "pages", 60, 0)
 		}
 	})
@@ -427,6 +394,15 @@ type recentFixture struct {
 	base   time.Time
 }
 
+func newRecentFixture(t *testing.T, pool *pgxpool.Pool, c *testClient) *recentFixture {
+	t.Helper()
+	me := c.Get("/api/users/me").Assert(t, 200).JSON()
+	f := &recentFixture{t: t, pool: pool, libID: models.MakeLibraryID(), userID: s(me["id"]),
+		base: time.Now().Add(-time.Hour).UTC()}
+	f.exec("INSERT INTO libraries (id, name, type) VALUES ($1, 'lib', 'comics')", f.libID)
+	return f
+}
+
 func (f *recentFixture) exec(sql string, args ...any) {
 	f.t.Helper()
 	if _, err := f.pool.Exec(context.Background(), sql, args...); err != nil {
@@ -434,13 +410,14 @@ func (f *recentFixture) exec(sql string, args ...any) {
 	}
 }
 
+// content inserts content added a day before the fixture's base.
 func (f *recentFixture) content(typ string, parentID *string, order int) string {
 	f.t.Helper()
 	id := models.MakeContentID()
 	f.exec(`
-		INSERT INTO content (id, uri_part, uri, type, library_id, parent_id, "order")
-		VALUES ($1, $1, 'file:///lib/' || $1, $2, $3, $4, $5)
-	`, id, typ, f.libID, parentID, order)
+		INSERT INTO content (id, created_at, uri_part, uri, type, library_id, parent_id, "order")
+		VALUES ($1, $2, $1, 'file:///lib/' || $1, $3, $4, $5, $6)
+	`, id, f.base.Add(-24*time.Hour), typ, f.libID, parentID, order)
 	return id
 }
 
@@ -455,84 +432,137 @@ func (f *recentFixture) series(n int) (string, []string) {
 	return id, kids
 }
 
+// added makes content added at fixture minute m.
+func (f *recentFixture) added(id string, m int) {
+	f.t.Helper()
+	f.exec("UPDATE content SET created_at = $2 WHERE id = $1", id, f.at(m))
+}
+
 // at is the fixture time m minutes after the base.
 func (f *recentFixture) at(m int) *time.Time {
 	t := f.base.Add(time.Duration(m) * time.Minute)
 	return &t
 }
 
-// set writes a user_to_content row for the fixture user; an empty status is NULL, and a
-// progress time sets a non-empty progress.
-func (f *recentFixture) set(id, status string, progressAt, statusAt *time.Time) {
+// set writes a user_to_content row for the fixture user; an empty status is NULL, and a read
+// time sets a non-empty progress.
+func (f *recentFixture) set(id, status string, readAt, statusAt *time.Time) {
 	f.t.Helper()
-	f.setFor(f.userID, id, status, progressAt, statusAt)
+	f.setFor(f.userID, id, status, readAt, statusAt)
 }
 
-func (f *recentFixture) setFor(userID, id, status string, progressAt, statusAt *time.Time) {
+func (f *recentFixture) setFor(userID, id, status string, readAt, statusAt *time.Time) {
 	f.t.Helper()
 	f.exec(`
-		INSERT INTO user_to_content (id, user_id, library_id, uri, status, status_updated_at, progress, progress_updated_at)
+		INSERT INTO user_to_content (id, user_id, library_id, uri, status, status_updated_at, progress,
+			progress_updated_at, last_read_at)
 		SELECT $1, $2, library_id, uri, NULLIF($3, ''), $4,
-			CASE WHEN $5::timestamptz IS NULL THEN '{}' ELSE '{"current_page": 1}' END::jsonb, $5
+			CASE WHEN $5::timestamptz IS NULL THEN '{}' ELSE '{"current_page": 1}' END::jsonb, $5, $5
 		FROM content WHERE id = $6
 		ON CONFLICT (user_id, library_id, uri) DO UPDATE SET status = EXCLUDED.status,
 			status_updated_at = EXCLUDED.status_updated_at, progress = EXCLUDED.progress,
-			progress_updated_at = EXCLUDED.progress_updated_at
-	`, models.MakeUserToContentID(), userID, status, statusAt, progressAt, id)
+			progress_updated_at = EXCLUDED.progress_updated_at, last_read_at = EXCLUDED.last_read_at
+	`, models.MakeUserToContentID(), userID, status, statusAt, readAt, id)
+}
+
+// userData is "<status or -> <progress>", plus " t" when progress_updated_at is set, or "-"
+// without a row.
+func (f *recentFixture) userData(id string) string {
+	f.t.Helper()
+	v, err := db.SelectScalar[string](context.Background(), f.pool, `
+		SELECT concat_ws(' ', COALESCE(utc.status, '-'), utc.progress::text,
+			NULLIF(utc.progress_updated_at IS NOT NULL, false))
+		FROM content c LEFT JOIN user_to_content utc
+			ON utc.library_id = c.library_id AND utc.uri = c.uri AND utc.user_id = $2
+		WHERE c.id = $1
+	`, id, f.userID)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return v
+}
+
+func (f *recentFixture) revision(id string) string {
+	f.t.Helper()
+	v, err := db.SelectScalar[*string](context.Background(), f.pool, `
+		SELECT utc.revision FROM content c JOIN user_to_content utc
+			ON utc.library_id = c.library_id AND utc.uri = c.uri AND utc.user_id = $2
+		WHERE c.id = $1
+	`, id, f.userID)
+	if err != nil || v == nil {
+		f.t.Fatalf("revision of %s: %v", id, err)
+	}
+	return *v
 }
 
 func TestBulkActions(t *testing.T) {
 	pool := newTestPool(t)
 	c := newAdminClient(t, pool)
-	me := c.Get("/api/users/me").Assert(t, 200).JSON()
-	f := &recentFixture{t: t, pool: pool, libID: models.MakeLibraryID(), userID: s(me["id"]),
-		base: time.Now().Add(-time.Hour).UTC()}
-	f.exec("INSERT INTO libraries (id, name, type) VALUES ($1, 'lib', 'comics')", f.libID)
+	f := newRecentFixture(t, pool, c)
 
 	a, b, other := f.content("comic", nil, 0), f.content("comic", nil, 1), f.content("comic", nil, 2)
+	f.exec("UPDATE content SET page_count = 5 WHERE id = $1", a)
 	series, kids := f.series(2)
 	f.set(a, "reading", f.at(0), f.at(0))
 	f.set(series, "reading", f.at(0), f.at(0))
 	f.set(kids[0], "completed", f.at(0), f.at(0))
 
-	// userData is "<status or -> <progress>", plus " t" when progress_updated_at is set, or "-"
-	// without a row.
-	userData := func(id string) string {
-		t.Helper()
-		v, err := db.SelectScalar[string](context.Background(), pool, `
-			SELECT concat_ws(' ', COALESCE(utc.status, '-'), utc.progress::text,
-				NULLIF(utc.progress_updated_at IS NOT NULL, false))
-			FROM content c LEFT JOIN user_to_content utc
-				ON utc.library_id = c.library_id AND utc.uri = c.uri AND utc.user_id = $2
-			WHERE c.id = $1
-		`, id, f.userID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return v
-	}
 	bulk := func(path string, body map[string]any) string {
 		t.Helper()
 		return s(c.Post(path, body).Assert(t, 200).JSON()["count"])
 	}
 
+	// Completing ends the items, as mark_completed does, under one revision.
 	assertEq(t, bulk("/api/content/bulk/user-data", map[string]any{
 		"ids": []string{a, b, a, "c_unknown"}, "action": "set_status", "status": "completed",
 	}), "2")
-	assertEq(t, userData(a), `completed {"current_page": 1} t`)
-	assertEq(t, userData(b), "completed {}")
-	assertEq(t, userData(other), "-")
+	assertEq(t, f.userData(a), `completed {"at_end": true, "current_page": 4, "progress_percent": 100} t`)
+	assertEq(t, f.userData(b), `completed {"at_end": true, "current_page": 0, "progress_percent": 100} t`)
+	assertEq(t, f.userData(other), "-")
+	assertEq(t, f.revision(a), f.revision(b))
 	c.Post("/api/content/bulk/user-data", map[string]any{"ids": []string{}, "action": "set_status"}).Assert(t, 400)
 
+	// Other statuses keep the position.
+	assertEq(t, bulk("/api/content/bulk/user-data", map[string]any{
+		"ids": []string{a}, "action": "set_status", "status": "on_hold",
+	}), "1")
+	assertEq(t, f.userData(a), `on_hold {"at_end": true, "current_page": 4, "progress_percent": 100} t`)
+
 	assertEq(t, bulk("/api/content/bulk/user-data", map[string]any{"ids": []string{series}, "action": "reset"}), "1")
-	assertEq(t, userData(series), "- {}")
-	assertEq(t, userData(kids[0]), "- {}")
-	assertEq(t, userData(a), `completed {"current_page": 1} t`)
-	// Completing every child completes the series.
+	assertEq(t, f.userData(series), "- {}")
+	assertEq(t, f.userData(kids[0]), "- {}")
+	// Completing every child starts the series, and never completes it.
 	assertEq(t, bulk("/api/content/bulk/user-data", map[string]any{
 		"ids": kids, "action": "set_status", "status": "completed",
 	}), "2")
-	assertEq(t, userData(series), "completed {}")
+	assertEq(t, f.userData(series), "reading {}")
+
+	// A series with its unfinished volumes; dropped ones stay dropped.
+	s2, kids2 := f.series(3)
+	f.set(kids2[0], "dropped", nil, f.at(0))
+	f.set(kids2[1], "reading", f.at(0), f.at(0))
+	assertEq(t, bulk("/api/content/bulk/user-data", map[string]any{
+		"ids": []string{s2}, "action": "set_status", "status": "completed",
+	}), "1")
+	assertEq(t, f.userData(s2), "completed {}")
+	assertEq(t, f.userData(kids2[1]), `reading {"current_page": 1} t`)
+	bulk("/api/content/bulk/user-data", map[string]any{
+		"ids": []string{s2}, "action": "set_status", "status": "completed", "include_children": true,
+	})
+	assertEq(t, f.userData(kids2[0]), "dropped {}")
+	assertEq(t, f.userData(kids2[1]), `completed {"at_end": true, "current_page": 0, "progress_percent": 100} t`)
+	assertEq(t, f.userData(kids2[2]), `completed {"at_end": true, "current_page": 0, "progress_percent": 100} t`)
+
+	// A series selected with one of its unfinished children.
+	s4, kids4 := f.series(2)
+	assertEq(t, bulk("/api/content/bulk/user-data", map[string]any{
+		"ids": []string{s4, kids4[0]}, "action": "set_status", "status": "completed", "include_children": true,
+	}), "2")
+	assertEq(t, f.userData(kids4[1]), `completed {"at_end": true, "current_page": 0, "progress_percent": 100} t`)
+
+	s3, kids3 := f.series(1)
+	bulk("/api/content/bulk/user-data", map[string]any{"ids": kids3, "action": "set_status", "status": "reading"})
+	assertEq(t, f.userData(s3), "reading {}")
 
 	lists := make([]string, 2)
 	for i := range lists {
@@ -543,31 +573,164 @@ func TestBulkActions(t *testing.T) {
 	assertEq(t, bulk("/api/custom-lists/entries", entries), "0")
 }
 
-func TestRecentlyRead(t *testing.T) {
+func TestSeriesReading(t *testing.T) {
 	pool := newTestPool(t)
 	c := newAdminClient(t, pool)
-	me := c.Get("/api/users/me").Assert(t, 200).JSON()
+	f := newRecentFixture(t, pool, c)
 
-	f := &recentFixture{t: t, pool: pool, libID: models.MakeLibraryID(), userID: s(me["id"]),
-		base: time.Now().Add(-time.Hour).UTC()}
-	f.exec("INSERT INTO libraries (id, name, type) VALUES ($1, 'lib', 'comics')", f.libID)
+	seriesReading := func(id string, body map[string]any) string {
+		t.Helper()
+		return s(c.Post("/api/content/"+id+"/series-reading", body).Assert(t, 200).JSON()["count"])
+	}
+	counts := func(id string) string {
+		t.Helper()
+		got := c.Get("/api/content/"+id).Assert(t, 200).JSON()
+		return fmt.Sprintf("%v/%v read, %v dropped, %v unread, %v new", got["completed_children_count"],
+			got["children_count"], got["dropped_children_count"], got["unread_children_count"], got["new_children_count"])
+	}
+
+	t.Run("mark through", func(t *testing.T) {
+		series, kids := f.series(5)
+		f.set(kids[1], "dropped", nil, f.at(0))
+		f.set(kids[4], "reading", f.at(0), f.at(0))
+		f.exec(`UPDATE user_to_content SET progress = '{"current_page": 12}' WHERE uri = 'file:///lib/' || $1`, kids[4])
+		f.exec("UPDATE content SET valid = false WHERE id = $1", kids[0])
+		assertEq(t, seriesReading(series, map[string]any{"action": "mark_through", "until_id": kids[2]}), "1")
+		assertEq(t, f.userData(kids[0]), "-")
+		assertEq(t, f.userData(kids[1]), "dropped {}")
+		assertEq(t, f.userData(kids[2]), `completed {"at_end": true, "current_page": 0, "progress_percent": 100} t`)
+		assertEq(t, f.userData(kids[3]), "-")
+		assertEq(t, f.userData(kids[4]), `reading {"current_page": 12} t`)
+		assertEq(t, f.userData(series), "reading {}")
+		assertEq(t, counts(series), "1/4 read, 1 dropped, 2 unread, 0 new")
+		c.Post("/api/content/"+series+"/series-reading", map[string]any{"action": "mark_through", "until_id": "c_x"}).
+			Assert(t, 404)
+		c.Post("/api/content/"+kids[1]+"/series-reading", map[string]any{"action": "clear"}).Assert(t, 400)
+	})
+
+	t.Run("mark series completed", func(t *testing.T) {
+		series, kids := f.series(3)
+		f.set(kids[0], "completed", nil, f.at(0))
+		assertEq(t, seriesReading(series, map[string]any{"action": "mark_series_completed"}), "1")
+		assertEq(t, f.userData(series), "completed {}")
+		assertEq(t, f.userData(kids[1]), "-")
+		assertEq(t, seriesReading(series, map[string]any{"action": "mark_series_completed", "include_unread": true}), "3")
+		assertEq(t, f.userData(kids[2]), `completed {"at_end": true, "current_page": 0, "progress_percent": 100} t`)
+		assertEq(t, counts(series), "3/3 read, 0 dropped, 0 unread, 0 new")
+	})
+
+	t.Run("clear is the same everywhere", func(t *testing.T) {
+		for _, clear := range []func(series string){
+			func(series string) { seriesReading(series, map[string]any{"action": "clear"}) },
+			func(series string) {
+				c.Post("/api/content/"+series+"/reading", map[string]any{"op": "clear"}).Assert(t, 200)
+			},
+			func(series string) {
+				c.Post("/api/content/bulk/user-data", map[string]any{"ids": []string{series}, "action": "reset"}).
+					Assert(t, 200)
+			},
+		} {
+			series, kids := f.series(2)
+			f.set(series, "reading", nil, f.at(0))
+			f.set(kids[0], "completed", f.at(1), f.at(1))
+			f.set(kids[1], "reading", f.at(2), f.at(2))
+			clear(series)
+			for _, id := range []string{series, kids[0], kids[1]} {
+				var state string
+				if err := pool.QueryRow(context.Background(), `
+					SELECT concat_ws(' ', utc.status, utc.progress::text, utc.progress_updated_at, utc.last_read_at,
+						utc.status_updated_at, utc.revision LIKE 'srv:%')
+					FROM content c JOIN user_to_content utc ON utc.library_id = c.library_id AND utc.uri = c.uri
+					WHERE c.id = $1`, id).Scan(&state); err != nil {
+					t.Fatal(err)
+				}
+				assertEq(t, state, "{} t")
+			}
+		}
+	})
+
+	t.Run("new volumes of a completed series", func(t *testing.T) {
+		series, kids := f.series(4)
+		for _, id := range kids {
+			f.set(id, "completed", nil, f.at(0))
+		}
+		f.set(series, "completed", nil, f.at(1))
+		for i := range 2 {
+			f.added(f.content("comic", &series, 10+i), 2)
+		}
+		assertEq(t, counts(series), "4/6 read, 0 dropped, 2 unread, 2 new")
+		// An earlier volume added before the completion is not new.
+		f.content("comic", &series, -1)
+		assertEq(t, counts(series), "4/7 read, 0 dropped, 3 unread, 2 new")
+		// Past max(3, half), they are a re-added series, not new volumes.
+		for i := range 4 {
+			f.added(f.content("comic", &series, 20+i), 2)
+		}
+		assertEq(t, counts(series), "4/11 read, 0 dropped, 7 unread, 0 new")
+	})
+}
+
+func TestContinueReading(t *testing.T) {
+	pool := newTestPool(t)
+	c := newAdminClient(t, pool)
+	f := newRecentFixture(t, pool, c)
 
 	get := func(t *testing.T, cl *testClient, query string) []map[string]any {
 		t.Helper()
-		return cl.Get("/api/content/recently-read"+query).Assert(t, 200).JSONArray()
+		return cl.Get("/api/content/continue-reading"+query).Assert(t, 200).JSONArray()
 	}
-	// expect asserts the entries, as "item" or "item@series" strings.
-	expect := func(t *testing.T, want ...string) {
-		t.Helper()
+	// entries are "item" or "item@series" strings, with "*" when new.
+	entries := func(t *testing.T, res []map[string]any) []string {
 		var got []string
-		for _, e := range get(t, c, "") {
+		for _, e := range res {
 			id := s(e["item"].(map[string]any)["id"])
 			if series, ok := e["series"].(map[string]any); ok {
 				id += "@" + s(series["id"])
 			}
+			if e["is_new"] == true {
+				id += "*"
+			}
 			got = append(got, id)
 		}
-		assertEq(t, strings.Join(got, ","), strings.Join(want, ","))
+		return got
+	}
+	// list is the same, from the grid's sort.
+	list := func(t *testing.T, sort string) []string {
+		t.Helper()
+		var got []string
+		for _, e := range c.Get("/api/content?sort="+sort+"&sort_order=desc").Assert(t, 200).JSON()["data"].([]any) {
+			item := e.(map[string]any)
+			id := s(item["id"])
+			cont := item["continue"].(map[string]any)
+			if series, ok := cont["series"].(map[string]any); ok {
+				id += "@" + s(series["id"])
+			}
+			if cont["is_new"] == true {
+				id += "*"
+			}
+			got = append(got, id)
+		}
+		return got
+	}
+	// expect asserts Home's entries, which the continue sort lists too.
+	expect := func(t *testing.T, want ...string) {
+		t.Helper()
+		assertEq(t, strings.Join(entries(t, get(t, c, "")), ","), strings.Join(want, ","))
+		assertEq(t, strings.Join(list(t, "continue"), ","), strings.Join(want, ","))
+	}
+	expectUpdated := func(t *testing.T, want ...string) {
+		t.Helper()
+		assertEq(t, strings.Join(list(t, "recently_updated"), ","), strings.Join(want, ","))
+	}
+	// target resolves content's continue button as "target action reason new earlier".
+	target := func(t *testing.T, id string) string {
+		t.Helper()
+		r := c.Get("/api/content/"+id+"/continue").Assert(t, 200).JSON()
+		tid := "-"
+		if tg, ok := r["target"].(map[string]any); ok {
+			tid = s(tg["id"])
+		}
+		return fmt.Sprintf("%s %v %v %v %v", tid, r["action"], r["reason"], r["is_new"], r["earlier_unread_id"])
 	}
 	run := func(name string, fn func(t *testing.T)) {
 		t.Run(name, func(t *testing.T) {
@@ -577,250 +740,121 @@ func TestRecentlyRead(t *testing.T) {
 		})
 	}
 
-	run("two reading children", func(t *testing.T) {
+	run("reading children", func(t *testing.T) {
 		series, kids := f.series(3)
 		f.set(kids[0], "reading", f.at(1), f.at(0))
 		f.set(kids[1], "reading", f.at(2), f.at(0))
 		res := get(t, c, "")
 		assertLen(t, res, 1)
-		item, ser := res[0]["item"].(map[string]any), res[0]["series"].(map[string]any)
-		assertEq(t, s(item["id"]), kids[1])
-		assertEq(t, s(item["user_data"].(map[string]any)["status"]), "reading")
-		assertEq(t, s(ser["id"]), series)
-		assertEq(t, s(ser["children_count"]), "3")
-		assertEq(t, s(ser["unread_children_count"]), "3")
+		assertEq(t, s(res[0]["item"].(map[string]any)["id"]), kids[1])
+		assertEq(t, res[0]["action"], any("resume"))
+		assertEq(t, s(res[0]["series"].(map[string]any)["unread_children_count"]), "3")
+		assertEq(t, target(t, series), kids[1]+" resume <nil> false "+kids[0])
 	})
 
-	run("anchor completed", func(t *testing.T) {
+	run("completed anchor continues with the next volume", func(t *testing.T) {
 		series, kids := f.series(3)
-		f.set(kids[0], "completed", f.at(0), f.at(1))
+		f.set(kids[0], "completed", nil, f.at(1))
 		expect(t, kids[1]+"@"+series)
-		res := get(t, c, "")
-		assertNil(t, "user_data", res[0]["item"].(map[string]any)["user_data"])
-		assertEq(t, s(res[0]["series"].(map[string]any)["unread_children_count"]), "2")
+		assertEq(t, target(t, series), kids[1]+" next <nil> false <nil>")
 	})
 
-	run("mark until", func(t *testing.T) {
+	run("held and dropped volumes are skipped", func(t *testing.T) {
 		series, kids := f.series(4)
-		f.set(kids[3], "reading", f.at(0), f.at(0))
-		c.Post("/api/content/"+series+"/series-item-statuses", map[string]any{
-			"status": "completed", "until_id": kids[1],
-		}).Assert(t, 200)
-		expect(t, kids[2]+"@"+series)
+		f.set(kids[0], "completed", nil, f.at(2))
+		f.set(kids[1], "on_hold", nil, f.at(0))
+		f.set(kids[2], "dropped", nil, f.at(0))
+		expect(t, kids[3]+"@"+series)
 	})
 
-	run("wraps to an earlier unread child", func(t *testing.T) {
+	run("no wrap, earlier unread", func(t *testing.T) {
 		series, kids := f.series(3)
 		f.set(kids[1], "completed", nil, f.at(0))
 		f.set(kids[2], "completed", nil, f.at(1))
-		expect(t, kids[0]+"@"+series)
+		expect(t)
+		assertEq(t, target(t, series), "- <nil> earlier_unread false "+kids[0])
 	})
 
-	run("all read", func(t *testing.T) {
-		_, kids := f.series(2)
+	run("caught up", func(t *testing.T) {
+		series, kids := f.series(2)
+		f.set(series, "reading", nil, f.at(0))
 		f.set(kids[0], "completed", nil, f.at(0))
 		f.set(kids[1], "dropped", nil, f.at(1))
 		expect(t)
+		assertEq(t, target(t, series), "- <nil> caught_up false <nil>")
+		empty, _ := f.series(0)
+		assertEq(t, target(t, empty), "- <nil> empty false <nil>")
 	})
 
-	run("invalid children", func(t *testing.T) {
+	run("held target", func(t *testing.T) {
 		series, kids := f.series(3)
-		f.set(kids[0], "completed", nil, f.at(1))
-		f.exec("UPDATE content SET valid = false WHERE id = $1", kids[1])
-		expect(t, kids[2]+"@"+series)
-		f.exec("UPDATE content SET valid = false WHERE id = $1", kids[2])
+		f.set(kids[0], "on_hold", nil, f.at(0))
+		f.set(kids[1], "completed", nil, f.at(1))
+		f.set(kids[2], "on_hold", f.at(0), f.at(0))
 		expect(t)
+		assertEq(t, target(t, series), kids[2]+" resume held false <nil>")
 	})
 
-	run("on hold children", func(t *testing.T) {
-		series, kids := f.series(3)
-		f.set(kids[0], "completed", nil, f.at(1))
-		f.set(kids[1], "on_hold", nil, f.at(0))
-		expect(t, kids[2]+"@"+series)
-		f.set(kids[2], "on_hold", nil, f.at(0))
-		expect(t)
-		got := c.Get("/api/content/"+series).Assert(t, 200).JSON()
-		assertEq(t, s(got["unread_children_count"]), "2")
-	})
-
-	run("peek with a reading child", func(t *testing.T) {
-		series, kids := f.series(6)
-		f.set(kids[4], "reading", f.at(1), f.at(0))
-		f.set(kids[1], "completed", f.at(3), f.at(-5))
-		standalone := f.content("comic", nil, 0)
-		f.set(standalone, "reading", f.at(2), f.at(0))
-		expect(t, kids[4]+"@"+series, standalone)
-	})
-
-	run("peek with no reading child", func(t *testing.T) {
-		series, kids := f.series(10)
-		f.set(kids[7], "completed", nil, f.at(1))
-		f.set(kids[1], "completed", f.at(2), f.at(-5))
-		expect(t, kids[8]+"@"+series)
-	})
-
-	run("stale reading", func(t *testing.T) {
-		series, kids := f.series(10)
-		f.set(kids[9], "reading", f.at(0), f.at(0))
-		f.set(kids[7], "completed", nil, f.at(1))
-		expect(t, kids[8]+"@"+series)
-	})
-
-	run("marked completed from the series page", func(t *testing.T) {
-		series, kids := f.series(6)
-		f.set(kids[4], "reading", f.at(1), f.at(0))
-		f.set(kids[2], "completed", nil, f.at(2))
-		expect(t, kids[3]+"@"+series)
-		f.set(kids[3], "completed", nil, f.at(0))
-		expect(t, kids[4]+"@"+series)
-	})
-
-	run("two reading children, earlier one newer", func(t *testing.T) {
-		series, kids := f.series(3)
-		f.set(kids[0], "reading", f.at(2), f.at(0))
-		f.set(kids[1], "reading", f.at(1), f.at(0))
-		expect(t, kids[0]+"@"+series)
-	})
-
-	run("progress without status", func(t *testing.T) {
-		series, kids := f.series(4)
-		f.set(kids[0], "", f.at(2), nil)
-		f.set(kids[2], "completed", nil, f.at(1))
-		expect(t, kids[0]+"@"+series)
-	})
-
-	run("plan to read being read", func(t *testing.T) {
-		series, kids := f.series(5)
-		f.set(kids[1], "plan_to_read", f.at(2), f.at(0))
-		f.set(kids[3], "completed", nil, f.at(1))
-		expect(t, kids[1]+"@"+series)
-	})
-
-	run("reading ranks by its newer status time", func(t *testing.T) {
-		series, kids := f.series(4)
-		f.set(kids[0], "reading", f.at(0), f.at(3))
-		f.set(kids[2], "completed", nil, f.at(2))
-		expect(t, kids[0]+"@"+series)
-	})
-
-	run("next child plan to read", func(t *testing.T) {
-		series, kids := f.series(3)
-		f.set(kids[0], "completed", nil, f.at(1))
-		f.set(kids[1], "plan_to_read", nil, f.at(0))
-		expect(t, kids[1]+"@"+series)
-	})
-
-	run("anchor on hold", func(t *testing.T) {
-		series, kids := f.series(3)
-		f.set(kids[0], "completed", nil, f.at(0))
-		f.set(kids[1], "on_hold", f.at(2), f.at(1))
-		expect(t, kids[2]+"@"+series)
-	})
-
-	run("status-only bulk completed", func(t *testing.T) {
-		series, kids := f.series(5)
-		for _, id := range kids[:3] {
-			f.set(id, "completed", nil, f.at(1))
-		}
-		expect(t, kids[3]+"@"+series)
-	})
-
-	run("only plan to read", func(t *testing.T) {
-		_, kids := f.series(3)
-		f.set(kids[1], "plan_to_read", nil, f.at(0))
-		expect(t)
-	})
-
-	run("series status", func(t *testing.T) {
+	run("later new volume", func(t *testing.T) {
 		series, kids := f.series(2)
+		f.set(series, "reading", nil, f.at(0))
 		f.set(kids[0], "completed", nil, f.at(1))
-		want := kids[1] + "@" + series
-		for _, status := range []string{"dropped", "on_hold"} {
-			f.set(series, status, nil, f.at(0))
-			expect(t)
-			c.Patch("/api/users/me/preferences", map[string]any{"home": map[string]any{"ignoreSeriesStatus": true}}).
-				Assert(t, 200)
-			expect(t, want)
-			c.Patch("/api/users/me/preferences", map[string]any{"home": nil}).Assert(t, 200)
-		}
-		for _, status := range []string{"plan_to_read", "completed"} {
-			f.set(series, status, nil, f.at(0))
-			expect(t, want)
-		}
-		f.exec("DELETE FROM user_to_content WHERE uri = 'file:///lib/' || $1", series)
-		expect(t, want)
+		f.set(kids[1], "completed", nil, f.at(2))
+		expect(t)
+		expectUpdated(t)
+		vol3 := f.content("comic", &series, 2)
+		f.added(vol3, 3)
+		expect(t, vol3+"@"+series+"*")
+		expectUpdated(t, vol3+"@"+series+"*")
+		assertEq(t, target(t, series), vol3+" next <nil> true <nil>")
+		// A newer earlier insertion does not move the new volume's date.
+		early := f.content("comic", &series, -1)
+		f.added(early, 4)
+		assertEq(t, target(t, series), vol3+" next <nil> true "+early)
+		// Only a reading series is recently updated.
+		f.set(series, "", nil, nil)
+		expect(t, vol3+"@"+series+"*")
+		expectUpdated(t)
+		f.set(series, "completed", nil, f.at(3))
+		expect(t)
+		expectUpdated(t)
 	})
 
-	run("malformed preferences", func(t *testing.T) {
+	run("earlier insertion only", func(t *testing.T) {
 		series, kids := f.series(2)
+		f.set(series, "reading", nil, f.at(0))
 		f.set(kids[0], "completed", nil, f.at(1))
-		f.set(series, "dropped", nil, f.at(0))
-		for _, raw := range []string{`[1,2]`, `{"home": {"ignoreSeriesStatus": "yes"}}`} {
-			f.exec("UPDATE users SET preferences = $1 WHERE id = $2", json.RawMessage(raw), f.userID)
-			expect(t)
-		}
-		f.exec("UPDATE users SET preferences = '{}' WHERE id = $1", f.userID)
+		f.set(kids[1], "completed", nil, f.at(2))
+		f.added(f.content("comic", &series, -1), 3)
+		expect(t)
+		expectUpdated(t)
 	})
 
-	run("series status follows its children", func(t *testing.T) {
-		status := func(id string) any {
-			t.Helper()
-			ud, _ := c.Get("/api/content/"+id).Assert(t, 200).JSON()["user_data"].(map[string]any)
-			return ud["status"]
+	run("mass re-add guard", func(t *testing.T) {
+		series, kids := f.series(2)
+		f.set(series, "reading", nil, f.at(0))
+		f.set(kids[0], "completed", nil, f.at(1))
+		f.set(kids[1], "completed", nil, f.at(2))
+		var added []string
+		for i := range 4 {
+			id := f.content("comic", &series, 10+i)
+			f.added(id, 3)
+			added = append(added, id)
 		}
-		post := func(id string, st any) {
-			t.Helper()
-			c.Post("/api/content/"+id+"/user-data", map[string]any{"status": st}).Assert(t, 200)
-		}
-		bulk := func(id string, body map[string]any) {
-			t.Helper()
-			c.Post("/api/content/"+id+"/series-item-statuses", body).Assert(t, 200)
-		}
-
-		a, aKids := f.series(3)
-		post(aKids[0], "reading")
-		assertEq[any](t, status(a), "reading")
-		post(a, nil)
-		post(aKids[0], "reading") // unchanged child: the cleared series stays cleared
-		assertNil(t, "series status", status(a))
-		post(aKids[0], "completed")
-		assertEq[any](t, status(a), "reading")
-		f.set(aKids[1], "dropped", nil, f.at(0))
-		post(aKids[2], "completed")
-		assertEq[any](t, status(a), "completed")
-
-		b, bKids := f.series(2)
-		f.set(b, "plan_to_read", nil, f.at(0))
-		post(bKids[0], "reading")
-		bulk(b, map[string]any{"status": "completed"})
-		assertEq[any](t, status(b), "plan_to_read")
-
-		cs, cKids := f.series(3)
-		bulk(cs, map[string]any{"status": "completed", "until_id": cKids[0]})
-		assertEq[any](t, status(cs), "reading")
-		bulk(cs, map[string]any{"status": nil})
-		assertEq[any](t, status(cs), "reading")
-		bulk(cs, map[string]any{"status": "completed"})
-		assertEq[any](t, status(cs), "completed")
+		expect(t, added[0]+"@"+series)
+		expectUpdated(t)
 	})
 
 	run("standalone", func(t *testing.T) {
-		reading, completed := f.content("comic", nil, 0), f.content("comic", nil, 0)
+		reading, completed, atEnd := f.content("comic", nil, 0), f.content("comic", nil, 0), f.content("comic", nil, 0)
 		f.set(reading, "reading", nil, f.at(1))
 		f.set(completed, "completed", f.at(2), f.at(2))
+		f.set(atEnd, "completed", f.at(3), f.at(3))
+		f.exec(`UPDATE user_to_content SET progress = '{"current_page": 3, "at_end": true}' WHERE uri = 'file:///lib/' || $1`, atEnd)
 		expect(t, reading)
-	})
-
-	run("groups before the limit", func(t *testing.T) {
-		series, kids := f.series(3)
-		for i, id := range kids {
-			f.set(id, "reading", f.at(i+1), f.at(0))
-		}
-		standalone := f.content("comic", nil, 0)
-		f.set(standalone, "reading", f.at(0), f.at(0))
-		assertLen(t, get(t, c, "?limit=2"), 2)
-		assertLen(t, get(t, c, "?limit=1"), 1)
-		expect(t, kids[2]+"@"+series, standalone)
+		assertEq(t, target(t, reading), reading+" start <nil> false <nil>")
+		assertEq(t, target(t, completed), completed+" resume <nil> false <nil>")
+		assertEq(t, target(t, atEnd), "- <nil> completed false <nil>")
 	})
 
 	run("order", func(t *testing.T) {
@@ -828,10 +862,67 @@ func TestRecentlyRead(t *testing.T) {
 		b, bKids := f.series(2)
 		f.set(aKids[0], "reading", f.at(1), f.at(0))
 		f.set(bKids[0], "reading", f.at(3), f.at(0))
-		// No progress: sorts by its status time.
 		standalone := f.content("comic", nil, 0)
 		f.set(standalone, "reading", nil, f.at(2))
 		expect(t, bKids[0]+"@"+b, standalone, aKids[0]+"@"+a)
+		assertLen(t, get(t, c, "?limit=2"), 2)
+		c.Get("/api/content/continue-reading?limit=0").Assert(t, 400)
+		c.Get("/api/content/continue-reading?limit=51").Assert(t, 400)
+
+		// Equal recency: target id descending.
+		x, y := f.content("comic", nil, 0), f.content("comic", nil, 0)
+		f.exec("DELETE FROM user_to_content")
+		f.set(x, "reading", nil, f.at(5))
+		f.set(y, "reading", nil, f.at(5))
+		// The database's collation orders the ids, not Go's byte order.
+		want, err := db.SelectScalars[string](context.Background(), pool,
+			"SELECT id FROM content WHERE id = ANY($1) ORDER BY id DESC", []string{x, y})
+		if err != nil {
+			t.Fatal(err)
+		}
+		expect(t, want...)
+	})
+
+	run("preference adds held items and series", func(t *testing.T) {
+		series, kids := f.series(2)
+		f.set(kids[0], "completed", nil, f.at(1))
+		f.set(series, "on_hold", nil, f.at(0))
+		item := f.content("comic", nil, 0)
+		f.set(item, "dropped", f.at(2), f.at(2))
+		expect(t)
+		c.Patch("/api/users/me/preferences", map[string]any{"home": map[string]any{"ignoreSeriesStatus": true}}).
+			Assert(t, 200)
+		expect(t, item, kids[1]+"@"+series)
+		c.Patch("/api/users/me/preferences", map[string]any{"home": nil}).Assert(t, 200)
+		for _, status := range []string{"plan_to_read", "completed"} {
+			f.set(series, status, nil, f.at(0))
+			expect(t)
+		}
+	})
+
+	run("preference adds held series without child activity", func(t *testing.T) {
+		for _, status := range []string{"on_hold", "dropped"} {
+			series, kids := f.series(2)
+			f.set(series, status, nil, f.at(0))
+			expect(t)
+			c.Patch("/api/users/me/preferences", map[string]any{"home": map[string]any{"ignoreSeriesStatus": true}}).
+				Assert(t, 200)
+			expect(t, kids[0]+"@"+series)
+			c.Patch("/api/users/me/preferences", map[string]any{"home": nil}).Assert(t, 200)
+			f.set(series, "completed", nil, f.at(0))
+		}
+	})
+
+	run("invalid anchor and target are skipped", func(t *testing.T) {
+		series, kids := f.series(3)
+		f.set(kids[0], "reading", f.at(5), f.at(5))
+		f.set(kids[1], "completed", nil, f.at(1))
+		f.exec("UPDATE content SET valid = false WHERE id = $1", kids[0])
+		expect(t, kids[2]+"@"+series)
+		assertEq(t, target(t, series), kids[2]+" next <nil> false <nil>")
+		f.exec("UPDATE content SET valid = false WHERE id = $1", kids[2])
+		expect(t)
+		assertEq(t, target(t, series), "- <nil> caught_up false <nil>")
 	})
 
 	run("other users", func(t *testing.T) {
@@ -839,14 +930,7 @@ func TestRecentlyRead(t *testing.T) {
 		item := f.content("comic", nil, 0)
 		f.setFor(memberID, item, "reading", f.at(0), f.at(0))
 		expect(t)
-		res := get(t, member, "")
-		assertLen(t, res, 1)
-		assertEq(t, s(res[0]["item"].(map[string]any)["id"]), item)
-	})
-
-	run("limit bounds", func(t *testing.T) {
-		c.Get("/api/content/recently-read?limit=0").Assert(t, 400)
-		c.Get("/api/content/recently-read?limit=51").Assert(t, 400)
+		assertEq(t, strings.Join(entries(t, get(t, member, "")), ","), item)
 	})
 }
 
@@ -1041,4 +1125,174 @@ func TestComicPageSizes(t *testing.T) {
 		release()
 		waitUntil(t, func() bool { return stored(t, id) == sized })
 	})
+}
+
+func TestContinueListSorts(t *testing.T) {
+	pool := newTestPool(t)
+	c := newAdminClient(t, pool)
+	f := newRecentFixture(t, pool, c)
+
+	ids := func(query string) []string {
+		t.Helper()
+		var out []string
+		for _, e := range c.Get("/api/content?"+query).Assert(t, 200).JSON()["data"].([]any) {
+			out = append(out, s(e.(map[string]any)["id"]))
+		}
+		return out
+	}
+	idsOf := func(query string) []string {
+		t.Helper()
+		var out []string
+		for _, id := range c.Get("/api/content/ids?limit=100&"+query).Assert(t, 200).JSON()["ids"].([]any) {
+			out = append(out, s(id))
+		}
+		return out
+	}
+
+	// Series a read last at minute 5 by its newest child, b at minute 2, the standalone at 3.
+	a, aKids := f.series(2)
+	b, bKids := f.series(2)
+	standalone, unread := f.content("comic", nil, 0), f.content("comic", nil, 0)
+	f.set(aKids[0], "completed", f.at(5), f.at(5))
+	f.set(aKids[1], "reading", f.at(1), f.at(1))
+	f.set(bKids[0], "reading", f.at(2), f.at(2))
+	f.set(standalone, "reading", f.at(3), f.at(3))
+	f.set(unread, "plan_to_read", nil, f.at(9))
+	newVol := f.content("comic", &b, 5)
+	f.added(newVol, 6)
+	f.set(b, "reading", nil, f.at(0))
+	f.set(bKids[0], "completed", f.at(2), f.at(2))
+	f.set(bKids[1], "completed", nil, f.at(1))
+
+	root := "parent_id=null&library_id=" + f.libID
+	assertEq(t, s(ids(root+"&sort=last_read_at&sort_order=desc")), s([]string{a, standalone, b, unread}))
+	assertEq(t, s(ids(root+"&sort=progress_updated_at&sort_order=desc")), s([]string{a, standalone, b, unread}))
+	assertEq(t, s(ids(root+"&sort=history&sort_order=desc")), s([]string{a, standalone, b}))
+
+	cont := []string{aKids[1], standalone, newVol}
+	assertEq(t, s(ids("sort=continue&sort_order=desc&parent_id=null")), s(cont))
+	assertEq(t, s(ids("sort=recently_updated&sort_order=desc")), s([]string{newVol}))
+	slices.Reverse(cont)
+	assertEq(t, s(ids("sort=continue&sort_order=asc")), s(cont))
+	assertEq(t, s(idsOf("sort=continue&sort_order=asc")), s(cont))
+
+	for _, q := range []string{"sort=history&sort_order=desc&parent_id=null", "sort=continue&sort_order=desc",
+		"sort=continue&sort_order=asc", "sort=recently_updated&sort_order=desc"} {
+		page := c.Get("/api/content?"+q).Assert(t, 200).JSON()
+		buckets := c.Get("/api/content/buckets?"+q).Assert(t, 200).JSON()
+		n := len(idsOf(q))
+		assertEq(t, s(page["total"]), s(n))
+		assertEq(t, s(buckets["total"]), s(n))
+		keys := buckets["buckets"].([]any)
+		if len(keys) == 0 || keys[0].(map[string]any)["key"] == nil {
+			t.Fatalf("%s: no year buckets: %v", q, keys)
+		}
+	}
+
+	// The continue rows carry their series.
+	data := c.Get("/api/content?sort=continue&sort_order=desc").Assert(t, 200).JSON()["data"].([]any)
+	first := data[0].(map[string]any)["continue"].(map[string]any)
+	assertEq(t, first["action"], any("resume"))
+	assertEq(t, s(first["series"].(map[string]any)["id"]), a)
+	assertNil(t, "continue", c.Get("/api/content/"+a).Assert(t, 200).JSON()["continue"])
+
+	// Recently updated orders by when the new volume came, read longer ago or not.
+	d, dKids := f.series(1)
+	f.set(d, "reading", nil, f.at(-20))
+	f.set(dKids[0], "completed", f.at(-10), f.at(-10))
+	dNew := f.content("comic", &d, 5)
+	f.added(dNew, 8)
+	updated := []string{dNew, newVol}
+	assertEq(t, s(ids("sort=recently_updated&sort_order=desc")), s(updated))
+	assertEq(t, s(idsOf("sort=recently_updated&sort_order=desc")), s(updated))
+	slices.Reverse(updated)
+	assertEq(t, s(ids("sort=recently_updated&sort_order=asc")), s(updated))
+	assertEq(t, s(idsOf("sort=recently_updated&sort_order=asc")), s(updated))
+	buckets := c.Get("/api/content/buckets?sort=recently_updated&sort_order=asc").Assert(t, 200).JSON()
+	assertEq(t, s(buckets["total"]), "2")
+}
+
+// TestContinueListMatrix checks the continue and recently updated sorts together across the list,
+// its ids and its year buckets: one library at a time, both directions, invalid volumes left out.
+func TestContinueListMatrix(t *testing.T) {
+	pool := newTestPool(t)
+	c := newAdminClient(t, pool)
+	f := newRecentFixture(t, pool, c)
+	other := newRecentFixture(t, pool, c)
+	lastYear := -400 * 24 * 60
+
+	ids := func(query string) []string {
+		t.Helper()
+		var out []string
+		for _, e := range c.Get("/api/content?"+query).Assert(t, 200).JSON()["data"].([]any) {
+			out = append(out, s(e.(map[string]any)["id"]))
+		}
+		return out
+	}
+	idsOf := func(query string) []string {
+		t.Helper()
+		var out []string
+		for _, id := range c.Get("/api/content/ids?limit=100&"+query).Assert(t, 200).JSON()["ids"].([]any) {
+			out = append(out, s(id))
+		}
+		return out
+	}
+	years := func(query string) []string {
+		t.Helper()
+		res := c.Get("/api/content/buckets?"+query).Assert(t, 200).JSON()
+		var out []string
+		for _, b := range res["buckets"].([]any) {
+			out = append(out, s(b.(map[string]any)["key"]))
+		}
+		assertEq(t, s(res["total"]), s(len(idsOf(query))))
+		return out
+	}
+	year := func(m int) string { return s(f.at(m).Year()) }
+
+	recent, old := f.content("comic", nil, 0), f.content("comic", nil, 0)
+	f.set(recent, "reading", f.at(0), f.at(0))
+	f.set(old, "reading", f.at(lastYear+3), f.at(lastYear+3))
+	// A series whose only read volume is no longer valid continues nowhere.
+	_, goneKids := f.series(2)
+	f.set(goneKids[0], "reading", f.at(1), f.at(1))
+	f.exec("UPDATE content SET valid = false WHERE id = $1", goneKids[0])
+	// Caught up with a new volume each: this year, and last year, with an invalid newer one.
+	newer, newerKids := f.series(1)
+	f.set(newer, "reading", nil, f.at(lastYear))
+	f.set(newerKids[0], "completed", f.at(lastYear+2), f.at(lastYear+2))
+	newVol := f.content("comic", &newer, 5)
+	f.added(newVol, -10)
+	older, olderKids := f.series(1)
+	f.set(older, "reading", nil, f.at(lastYear))
+	f.set(olderKids[0], "completed", f.at(lastYear+1), f.at(lastYear+1))
+	oldVol, invalidVol := f.content("comic", &older, 5), f.content("comic", &older, 6)
+	f.added(oldVol, lastYear+10)
+	f.added(invalidVol, 0)
+	f.exec("UPDATE content SET valid = false WHERE id = $1", invalidVol)
+	// Another library's reading stays out of this one's lists.
+	elsewhere := other.content("comic", nil, 0)
+	other.set(elsewhere, "reading", other.at(2), other.at(2))
+
+	lib := "&library_id=" + f.libID
+	for _, tc := range []struct {
+		sort  string
+		want  []string
+		years []string
+	}{
+		{"continue", []string{recent, old, newVol, oldVol}, []string{year(0), year(lastYear)}},
+		{"recently_updated", []string{newVol, oldVol}, []string{year(-10), year(lastYear)}},
+	} {
+		for _, dir := range []string{"desc", "asc"} {
+			q := "sort=" + tc.sort + "&sort_order=" + dir + lib
+			want, wantYears := slices.Clone(tc.want), slices.Clone(tc.years)
+			if dir == "asc" {
+				slices.Reverse(want)
+				slices.Reverse(wantYears)
+			}
+			assertEq(t, s(ids(q)), s(want))
+			assertEq(t, s(idsOf(q)), s(want))
+			assertEq(t, s(years(q)), s(wantYears))
+			assertEq(t, s(c.Get("/api/content?"+q).Assert(t, 200).JSON()["total"]), s(len(want)))
+		}
+	}
 }

@@ -13,8 +13,21 @@
                 <!-- Named by the card's link. -->
                 <ABadge :icon="statusIcon" :label="statusLabel" aria-hidden="true" />
             </template>
-            <template v-if="childrenCount != null && !settings.hideItemCount" #topRight>
-                <ABadge aria-hidden="true">{{ childrenCount }}</ABadge>
+            <template
+                v-if="newLabel || (childrenCount != null && !settings.hideItemCount)"
+                #topRight
+            >
+                <span class="flex gap-1">
+                    <ABadge v-if="newLabel" class="content-card__new" aria-hidden="true">
+                        {{ newLabel }}
+                    </ABadge>
+                    <ABadge
+                        v-if="childrenCount != null && !settings.hideItemCount"
+                        aria-hidden="true"
+                    >
+                        {{ childrenCount }}
+                    </ABadge>
+                </span>
             </template>
             <span v-if="toReadRoute && !selecting" class="content-card__details">
                 <AIconButton
@@ -75,7 +88,7 @@ import {
 import { coverUrl } from '@/utils/api/content'
 import { READING_STATUS_LABELS } from '@/utils/api/types'
 import type { Content, ReadingStatus } from '@/utils/api/types'
-import { contentProgress, seriesPosition } from '@/utils/contentProgress'
+import { contentProgress, seriesReadLabel } from '@/utils/contentProgress'
 import { useContentGridStore } from './store'
 
 const props = withDefaults(
@@ -89,6 +102,8 @@ const props = withDefaults(
         selected?: boolean
         /** Glows the cover while the item is being read. */
         highlightReading?: boolean
+        /** A volume added since the user caught up with its series. */
+        isNew?: boolean
     }>(),
     { storeKey: 'default' }
 )
@@ -113,11 +128,17 @@ const to = computed(() =>
 )
 
 const title = computed(() => (props.series ?? props.content).title)
-const position = computed(() => (props.series ? seriesPosition(props.series) : null))
+const readLabel = computed(() => (props.series ? seriesReadLabel(props.series) : null))
 const subtitle = computed(() => {
     if (!props.series) return undefined
-    const p = position.value
-    return p ? `${props.content.title} · ${p.read} / ${p.total}` : props.content.title
+    return readLabel.value ? `${props.content.title} · ${readLabel.value}` : props.content.title
+})
+
+// A completed series counts what was added since; an item is new to its series.
+const newLabel = computed(() => {
+    if (props.isNew) return 'New'
+    const n = props.content.new_children_count
+    return props.content.user_data?.status === 'completed' && n ? `${n} new` : null
 })
 
 // Measured on pointerenter, which fires before the pointermove that opens the tooltip.
@@ -151,15 +172,27 @@ const highlighted = computed(
         status.value === 'reading'
 )
 const statusIcon = computed(() => (status.value ? STATUS_ICONS[status.value] : undefined))
-const statusLabel = computed(() => (status.value ? READING_STATUS_LABELS[status.value] : undefined))
+const caughtUp = computed(() => {
+    const c = props.content
+    const total = c.children_count ?? 0
+    return (
+        total > 0 && (c.completed_children_count ?? 0) + (c.dropped_children_count ?? 0) === total
+    )
+})
+const statusLabel = computed(() => {
+    if (!status.value) return undefined
+    const label = READING_STATUS_LABELS[status.value]
+    return status.value === 'reading' && caughtUp.value ? `${label} · Caught up` : label
+})
 
 // Deliberate, so the progress bar and badges don't end up in the name.
 const linkLabel = computed(() => {
     const parts = [props.toReadRoute ? `Read ${title.value}` : title.value]
     if (props.series) {
         parts.push(props.content.title)
-        if (position.value) parts.push(`${position.value.read} of ${position.value.total} read`)
+        if (readLabel.value) parts.push(readLabel.value)
     }
+    if (newLabel.value) parts.push(newLabel.value)
     if (statusLabel.value) parts.push(statusLabel.value)
     if (childrenCount.value != null) {
         const unread = settings.value.itemCountMode === 'unread'

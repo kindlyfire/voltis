@@ -362,7 +362,7 @@ type createEntryRequest struct {
 	Notes     *string `json:"notes"`
 }
 
-// createEntryInner expects the caller to hold lockContentLibraries for the content.
+// createEntryInner expects the caller to hold lockUserData for the content.
 func createEntryInner(ctx context.Context, tx pgx.Tx, listID string, contentID string, notes *string) error {
 	libraryID, uri, err := contentURI(ctx, tx, contentID)
 	if err != nil {
@@ -412,7 +412,7 @@ func (cr *CustomListRoutes) createEntry(c echo.Context) error {
 
 	ctx := reqCtx(c)
 	err = db.WithTx(ctx, cr.pool, func(q pgx.Tx) error {
-		if err := lockContentLibraries(ctx, q, req.ContentID); err != nil {
+		if err := lockUserData(ctx, q, user.ID, req.ContentID); err != nil {
 			return err
 		}
 		return createEntryInner(ctx, q, cl.ID, req.ContentID, req.Notes)
@@ -457,7 +457,7 @@ func (cr *CustomListRoutes) bulkCreateEntries(c echo.Context) error {
 
 	var count int64
 	err = db.WithTx(ctx, cr.pool, func(tx pgx.Tx) error {
-		if err := lockContentLibraries(ctx, tx, ids...); err != nil {
+		if err := lockUserData(ctx, tx, user.ID, ids...); err != nil {
 			return err
 		}
 		args := pgx.NamedArgs{"ids": ids, "now": time.Now().UTC(), "list_ids": listIDs}

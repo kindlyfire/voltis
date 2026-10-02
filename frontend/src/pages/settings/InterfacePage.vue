@@ -35,8 +35,8 @@
         <ACard title="Home">
             <ASwitch
                 v-model="ignoreSeriesStatus"
-                label="Show on-hold and dropped series in Recently Read"
-                description="Otherwise a series you put on hold or dropped is hidden, even while you read one of its items."
+                label="Show on-hold and dropped items and series in Continue reading"
+                description="Otherwise items and series you put on hold or dropped stay out of Continue reading."
                 :readonly="homeMutation.isPending.value"
                 @update:model-value="saveHome"
             />
@@ -118,8 +118,8 @@ import ASwitch from '@/ui/ASwitch.vue'
 import ATextField from '@/ui/ATextField.vue'
 import { IconAutoStories, IconBookOpen, IconBookshelf } from '@/ui/icons'
 import { useToast } from '@/ui/useToast'
-import { invalidateRecentlyRead } from '@/utils/api/content'
 import { librariesApi } from '@/utils/api/libraries'
+import { invalidateContinueReading } from '@/utils/api/reading'
 import type { LibraryPreference, PreferencesPatch } from '@/utils/api/types'
 import { usersApi } from '@/utils/api/users'
 import { useForm } from '@/utils/forms'
@@ -212,7 +212,7 @@ async function saveHome(v: boolean) {
         ignoreSeriesStatus.value = !v
         return
     }
-    invalidateRecentlyRead()
+    invalidateContinueReading()
     toast.show({ message: 'Saved Home preferences' })
 }
 

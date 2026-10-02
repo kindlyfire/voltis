@@ -1,36 +1,19 @@
-import { computed, type MaybeRefOrGetter, toValue } from 'vue'
-import { contentApi } from '@/utils/api/content'
+import { computed, type MaybeRefOrGetter } from 'vue'
 import type { Content } from '@/utils/api/types'
+import { useSiblings, type Siblings } from '../useSiblings'
 
-/** The readable book with the smallest `order` after the current one. Array
- * position means nothing: `order` can be null before a series flush, and the
- * list has no tie-breaker. */
-export function nextVolume(current: Content, siblings: Content[]): Content | null {
-    const from = current.order
-    if (from == null) return null
-    let best: Content | null = null
-    for (const item of siblings) {
-        if (item.type !== 'book' || !item.valid || item.order == null || item.order <= from)
-            continue
-        if (!best || item.order < best.order!) best = item
-    }
-    return best
+/** The first readable book after the current volume, once the series' siblings are known. */
+export function nextVolume({ status, items, index }: Siblings): Content | null {
+    if (status !== 'ready' || index < 0) return null
+    return items.slice(index + 1).find(item => item.type === 'book' && item.valid) ?? null
 }
 
-/** Same query as the comic reader's sibling list, so they share a cache. */
+/** The next volume, with the siblings' state for the end of the book. */
 export function useNextVolume(
     content: MaybeRefOrGetter<Content | null>,
     enabled: MaybeRefOrGetter<boolean>
 ) {
-    const query = contentApi.useList(() => {
-        const current = toValue(content)
-        if (current?.parent_id && toValue(enabled)) {
-            return { parent_id: current.parent_id, sort: 'order', sort_order: 'asc' }
-        }
-    })
-    return computed(() => {
-        const current = toValue(content)
-        const siblings = query.data.value?.data
-        return current && siblings && toValue(enabled) ? nextVolume(current, siblings) : null
-    })
+    const siblings = useSiblings(content, enabled)
+    const next = computed(() => nextVolume(siblings.value))
+    return { siblings, next }
 }

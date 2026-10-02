@@ -345,7 +345,7 @@ func TestOPDSFeeds(t *testing.T) {
 	c.Get("/opds/"+key+"/v1.2"+series+"?page=99").Assert(t, 404)
 
 	// Facets: status and sort.
-	c.Post("/api/content/"+fx.Vol1+"/user-data", map[string]any{"status": "completed"}).Assert(t, 200)
+	setStatus(t, c, fx.Vol1, "completed")
 	a = v1(series + "?status=unread")
 	assertEq(t, a.Total, "1")
 	assertEq(t, a.Entries[0].Title, "Vol. 2")
@@ -477,36 +477,45 @@ func TestOPDSFeeds(t *testing.T) {
 	}
 
 	// PSE progress.
-	progress := func(id string) (status string, page int, percent float64) {
+	mustExec(t, pool, "DELETE FROM user_to_content WHERE uri = 'moonlit-harbor'")
+	progress := func(id string) (status string, page int, percent float64, atEnd bool) {
 		t.Helper()
 		err := pool.QueryRow(ctx, `
-			SELECT COALESCE(utc.status, ''), (utc.progress->>'current_page')::int, (utc.progress->>'progress_percent')::float8
+			SELECT COALESCE(utc.status, ''), (utc.progress->>'current_page')::int,
+				(utc.progress->>'progress_percent')::float8, COALESCE((utc.progress->>'at_end')::bool, false)
 			FROM user_to_content utc JOIN content c ON c.library_id = utc.library_id AND c.uri = utc.uri
 			WHERE c.id = $1 AND utc.user_id = $2
-		`, id, userID).Scan(&status, &page, &percent)
+		`, id, userID).Scan(&status, &page, &percent, &atEnd)
 		if err != nil {
 			t.Fatal(err)
 		}
 		return
 	}
-	assertProgress := func(id, status string, page int, percent float64) {
+	assertProgress := func(id, status string, page int, percent float64, atEnd bool) {
 		t.Helper()
-		st, p, pc := progress(id)
+		st, p, pc, end := progress(id)
 		assertEq(t, st, status)
 		assertEq(t, p, page)
 		assertEq(t, pc, percent)
+		assertEq(t, end, atEnd)
 	}
 	fetchPage(fx.Vol2, 0).Assert(t, 200)
 	assertEq(t, utcCount(t, pool, fx.Vol2), 0)
 	fetchPage(fx.Vol2, 1).Assert(t, 200)
-	assertProgress(fx.Vol2, "reading", 1, 66.7)
+	assertProgress(fx.Vol2, "reading", 1, 33.3, false) // page / pages, as the web reader shows it
+	assertEq(t, readingOf(t, c, fx.SeriesID)["status"], any("reading"))
+	rev, err := db.SelectScalar[bool](ctx, pool,
+		"SELECT revision LIKE 'opds-' || $1 || ':%' FROM user_to_content WHERE uri = 'moonlit-harbor/vol-2'", s(k["id"]))
+	if err != nil || !rev {
+		t.Fatalf("PSE revision is not the key's (%v)", err)
+	}
 	fetchPage(fx.Vol2, 5).Assert(t, 404)
-	assertProgress(fx.Vol2, "reading", 1, 66.7)
-	c.Post("/api/content/"+fx.Vol2+"/user-data", map[string]any{"status": "on_hold"}).Assert(t, 200)
+	assertProgress(fx.Vol2, "reading", 1, 33.3, false)
+	setStatus(t, c, fx.Vol2, "on_hold")
 	fetchPage(fx.Vol2, 2).Assert(t, 200)
-	assertProgress(fx.Vol2, "on_hold", 2, 100)
-	fetchPage(fx.Vol2, 1).Assert(t, 200)
-	assertProgress(fx.Vol2, "on_hold", 2, 100)
+	assertProgress(fx.Vol2, "completed", 2, 100, true)
+	fetchPage(fx.Vol2, 1).Assert(t, 200) // a lower page is a no-op
+	assertProgress(fx.Vol2, "completed", 2, 100, true)
 
 	link := findLink(v1(series + "?page=2").Entries[0].Links, "http://vaemendis.net/opds-pse/stream")
 	assertEq(t, link.LastRead, "3")
@@ -518,12 +527,12 @@ func TestOPDSFeeds(t *testing.T) {
 	mustExec(t, pool, `UPDATE user_to_content SET progress = progress || '{"current_page": 30}' WHERE uri = 'moonlit-harbor/vol-2'`)
 	assertEq(t, findLink(v1(series + "?page=2").Entries[0].Links, "http://vaemendis.net/opds-pse/stream").LastRead, "3")
 
-	c.Post("/api/content/"+fx.Vol2+"/user-data",
-		map[string]any{"status": "reading", "progress": map[string]any{"current_page": 1}}).Assert(t, 200)
+	setStatus(t, c, fx.Vol2, "reading")
+	mustExec(t, pool, `UPDATE user_to_content SET progress = '{"current_page": 1}' WHERE uri = 'moonlit-harbor/vol-2'`)
 	fetchPage(fx.Vol2, 2).Assert(t, 200)
-	assertProgress(fx.Vol2, "completed", 2, 100)
+	assertProgress(fx.Vol2, "completed", 2, 100, true)
 	fetchPage(fx.Lantern, 0).Assert(t, 200)
-	assertProgress(fx.Lantern, "completed", 0, 100)
+	assertProgress(fx.Lantern, "completed", 0, 100, true)
 
 	// A revoke that lands while a write waits for the library lock drops the write. Last, since it
 	// revokes the key.
@@ -535,6 +544,8 @@ func TestOPDSFeeds(t *testing.T) {
 	if err := db.LockMetadata(ctx, tx, fx.LibraryID); err != nil {
 		t.Fatal(err)
 	}
+	mustExec(t, pool, `UPDATE user_to_content SET progress = '{"current_page": 1, "progress_percent": 33.3}'
+		WHERE uri = 'moonlit-harbor/vol-1'`)
 	fetched := make(chan *response, 1)
 	go func() { fetched <- fetchPage(fx.Vol1, 2) }()
 	waitBlockedOn(t, pool, "'metadata:'")
@@ -543,5 +554,5 @@ func TestOPDSFeeds(t *testing.T) {
 		t.Fatal(err)
 	}
 	(<-fetched).Assert(t, 200)
-	assertProgress(fx.Vol1, "completed", 1, 66.7)
+	assertProgress(fx.Vol1, "completed", 1, 33.3, false)
 }

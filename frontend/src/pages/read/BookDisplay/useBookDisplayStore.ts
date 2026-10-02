@@ -65,6 +65,7 @@ export const useBookDisplayStore = defineStore('book-display', () => {
             session.value.setEntry(entry)
             return
         }
+        // The next session's load queues behind this one's exit write.
         session.value?.dispose()
         drawerScroll.value = {}
         session.value = createBookSession(
@@ -79,9 +80,8 @@ export const useBookDisplayStore = defineStore('book-display', () => {
         sidebarOpen.value = false
         drawerTab.value = 'contents'
         drawerScroll.value = {}
-        const current = session.value
+        session.value?.dispose()
         session.value = null
-        return current?.dispose()
     }
 
     return { session, sidebarOpen, drawerTab, drawerScroll, settings, setContent, dispose }

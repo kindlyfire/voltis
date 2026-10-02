@@ -15,6 +15,11 @@
                 placeholder="No status"
                 clearable
             />
+            <ACheckbox
+                v-if="hasSeries && status === 'completed'"
+                v-model="includeChildren"
+                label="Also mark unread volumes as read"
+            />
             <QueryError :mutation="mBulk" />
         </div>
         <template #actions>
@@ -36,6 +41,7 @@ import { useMutation } from '@tanstack/vue-query'
 import { ref } from 'vue'
 import QueryError from '@/components/QueryError.vue'
 import AButton from '@/ui/AButton.vue'
+import ACheckbox from '@/ui/ACheckbox.vue'
 import ADialog from '@/ui/ADialog.vue'
 import ASelect from '@/ui/ASelect.vue'
 import { useToast } from '@/ui/useToast'
@@ -47,14 +53,22 @@ const props = defineProps<{
     open: boolean
     close: (done?: boolean) => void
     contentIds: string[]
+    /** Whether the selection can hold series, whose volumes Completed can include. */
+    hasSeries: boolean
 }>()
 
 const status = ref<ReadingStatus | null>(null)
+const includeChildren = ref(false)
 const toast = useToast()
 
 const mBulk = useMutation({
     mutationFn: (status: ReadingStatus | null) =>
-        contentApi.bulkUserData({ ids: props.contentIds, action: 'set_status', status }),
+        contentApi.bulkUserData({
+            ids: props.contentIds,
+            action: 'set_status',
+            status,
+            include_children: status === 'completed' && props.hasSeries && includeChildren.value,
+        }),
     onSuccess: ({ count }, status) => {
         const items = plural(count, 'item')
         toast.show({
@@ -72,7 +86,9 @@ import { Modals } from '@/utils/modals'
 import Self from './BulkStatusModal.vue'
 
 /** Resolves true once the statuses were set. */
-export function showBulkStatusModal(contentIds: string[]): Promise<boolean> {
-    return Modals.show<boolean | undefined>(Self, { contentIds }).then(done => done === true)
+export function showBulkStatusModal(contentIds: string[], hasSeries: boolean): Promise<boolean> {
+    return Modals.show<boolean | undefined>(Self, { contentIds, hasSeries }).then(
+        done => done === true
+    )
 }
 </script>

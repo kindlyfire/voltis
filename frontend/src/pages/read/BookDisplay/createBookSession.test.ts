@@ -2,23 +2,50 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick, reactive, ref } from 'vue'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import { contentApi } from '@/utils/api/content'
-import type { BookLocator, BookStructure, Content, UserToContent } from '@/utils/api/types'
+import { readingApi } from '@/utils/api/reading'
+import type {
+    BookLocator,
+    BookStructure,
+    Content,
+    ReadingProgress,
+    ReadingRequest,
+    ReadingResponse,
+    ReadingStateResponse,
+    ReadingState,
+    ReadingStatus,
+} from '@/utils/api/types'
+import { Modals } from '@/utils/modals'
+import { resetReadingActor } from '../readingSync'
 import { parseBookEntry, type BookEntry } from './bookEntry'
+import { progressPercent } from './bookProgress'
 import { zBookSettings, type BookSettings } from './bookSettings'
 import { createBookSession, isEmptySlice, type BookSession } from './createBookSession'
 import { FakeNav } from './fakeNav'
 import { createBookNav } from './useBookDisplayStore'
 
+vi.mock('./bookProgress', async original => {
+    const actual = await original<typeof import('./bookProgress')>()
+    return { ...actual, progressPercent: vi.fn(actual.progressPercent) }
+})
 vi.mock('@/utils/api/content', () => ({
     contentApi: {
         get: vi.fn(),
         bookStructure: vi.fn(),
         bookDocument: vi.fn(),
-        updateUserData: vi.fn(),
     },
-    bumpRecentlyRead: vi.fn(),
-    invalidateRecentlyRead: vi.fn(),
-    invalidateStatusChange: vi.fn(),
+}))
+
+vi.mock('@/utils/modals', async original => ({
+    ...(await original<typeof import('@/utils/modals')>()),
+    Modals: { show: vi.fn(async () => 'start') },
+}))
+
+vi.mock('@/utils/api/reading', () => ({
+    readingApi: { get: vi.fn(), post: vi.fn() },
+    bumpContinueReading: vi.fn(),
+    invalidateReading: vi.fn(),
+    markPositionSaved: vi.fn(),
+    ReadingConflict: class extends Error {},
 }))
 
 const STRUCTURE: BookStructure = {
@@ -79,22 +106,32 @@ function serve(structure: BookStructure, docs: Record<string, Served>) {
     })
 }
 
-function content(
-    progress: Record<string, unknown> = {},
-    status: string | null = 'reading'
-): Content {
-    return {
-        id: 'c_1',
-        file_mtime: '2026-01-01',
-        file_size: 1234,
-        title: 'A Book',
-        type: 'book',
-        user_data: { starred: false, status, notes: null, rating: null, progress } as UserToContent,
-    } as unknown as Content
+const CONTENT = {
+    id: 'c_1',
+    file_mtime: '2026-01-01',
+    file_size: 1234,
+    title: 'A Book',
+    type: 'book',
+    parent_id: null,
+    user_data: null,
+} as unknown as Content
+
+let server: ReadingState
+
+/** The saved reading state the session starts from. Writes replace it, as the server does. */
+function reading(progress: ReadingProgress = {}, status: ReadingStatus | null = 'reading') {
+    server = {
+        revision: null,
+        status,
+        status_updated_at: null,
+        progress,
+        progress_updated_at: null,
+        last_read_at: null,
+    }
 }
 
 function saved(locator: Omit<BookLocator, 'version'>) {
-    vi.mocked(contentApi.get).mockResolvedValue(content({ book: { version: 1, ...locator } }))
+    reading({ book: { version: 1, ...locator } })
 }
 
 /* A fake text layout. Body children are stacked 100px blocks, each slice 1000px
@@ -257,13 +294,44 @@ function clickNew(host: HTMLElement, href: string, frag = '') {
 /** The book document with an image in its first block. */
 const WITH_IMAGE = DOCUMENTS['book.xhtml']!.replace('<p id="p1">', '<p id="p1"><img src="a.png" />')
 
-const writes = () => vi.mocked(contentApi.updateUserData).mock.calls
+function respond(req: ReadingRequest): ReadingResponse {
+    server = {
+        ...server,
+        revision: `${req.writer_id}:${req.seq}`,
+        progress: 'progress' in req ? req.progress : server.progress,
+    }
+    return {
+        state: server,
+        outcome: 'saved',
+        previous: null,
+        series: null,
+        writer: req.writer_id ?? null,
+        series_previous: null,
+    }
+}
+
+/** Position and finish writes, as [contentId, request, init]. */
+const writes = () =>
+    vi
+        .mocked(readingApi.post)
+        .mock.calls.filter(([, req]) => req.op === 'position' || req.op === 'finish') as Array<
+        [string, ReadingRequest & { progress: ReadingProgress }, RequestInit | undefined]
+    >
 const lastWrite = () => writes().at(-1)![1]
-const completed = () => writes().some(([, payload]) => payload.status === 'completed')
+const completed = () => writes().some(([, req]) => req.op === 'finish')
+
+/** The reader's own scrolling: input on the page arms it, after the frame in which the session's
+ * own scrolls count as programmatic. */
+async function userScroll(y: number) {
+    if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(20)
+    else await new Promise(resolve => requestAnimationFrame(resolve))
+    window.dispatchEvent(new WheelEvent('wheel'))
+    scrollTo(y)
+}
 
 /** The reader scrolls into the second block; the closing write must carry it. */
 async function expectCapturing(session: BookSession) {
-    scrollTo(150)
+    await userScroll(150)
     await flush()
     await session.dispose()
     expect(lastWrite().progress!.book).toMatchObject({ anchorId: 'p1b' })
@@ -284,9 +352,15 @@ beforeEach(() => {
         const style = computedStyle(el, pseudo)
         return style.writingMode ? style : Object.assign(style, { writingMode: 'horizontal-tb' })
     })
-    vi.mocked(contentApi.get).mockResolvedValue(content({ current_page: 7 }))
+    vi.mocked(contentApi.get).mockResolvedValue(CONTENT)
+    reading()
     serve(STRUCTURE, DOCUMENTS)
-    vi.mocked(contentApi.updateUserData).mockResolvedValue({ progress: {} } as UserToContent)
+    vi.mocked(readingApi.get).mockImplementation(async () => ({
+        state: server,
+        series: null,
+        writer: null,
+    }))
+    vi.mocked(readingApi.post).mockImplementation(async (_id, req) => respond(req))
     window.scrollTo = ((options: { top: number } | number) => {
         scrollY = typeof options === 'number' ? options : options.top
     }) as typeof window.scrollTo
@@ -305,7 +379,9 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
-    for (const session of sessions.splice(0)) await session.dispose()
+    for (const session of sessions.splice(0)) session.dispose()
+    vi.mocked(progressPercent).mockReset()
+    resetReadingActor()
     vi.useRealTimers()
     vi.unstubAllGlobals()
     Object.defineProperty(window, 'innerHeight', { value: 768, configurable: true })
@@ -580,7 +656,7 @@ describe('navigation races', () => {
         await flush()
         expect(session.restoring).toBe(false)
 
-        scrollTo(100)
+        await userScroll(100)
         await flush()
         await session.dispose()
         expect(lastWrite().progress!.book).toMatchObject({ anchorId: 'p2' })
@@ -641,7 +717,6 @@ describe('failed navigations', () => {
         expect(session.standalone).toBeNull()
         expect(session.notice).toContain('unavailable')
         expect(session.restoring).toBe(false)
-
         await expectCapturing(session)
     })
 
@@ -690,11 +765,11 @@ describe('failed navigations', () => {
         expect(session.chapterIndex).toBe(0)
         expect(bodyOf(host).textContent).toContain('first')
 
-        window.dispatchEvent(new Event('pointerdown'))
-        scrollTo(10)
+        await userScroll(10)
         await flush()
         await session.dispose()
-        expect(lastWrite().status).toBe('reading')
+        expect(writes().length).toBeGreaterThan(0)
+        expect(completed()).toBe(false)
     })
 
     it('fetches a document again after a failed attempt, clearing the notice', async () => {
@@ -752,63 +827,182 @@ describe('failed navigations', () => {
 })
 
 describe('progress', () => {
-    it('merges the block the reader scrolled to into the existing progress', async () => {
-        vi.mocked(contentApi.get).mockResolvedValue(content({ current_page: 7 }, null))
+    it('counts a scroll not yet captured as reading when a check finds another device', async () => {
         const { session } = await startTimed()
-        scrollTo(150)
+        await userScroll(150)
+        server = {
+            ...server,
+            revision: 'srv:other',
+            progress: {
+                book: { version: 1, href: 'book.xhtml', textOffset: 5 },
+                progress_percent: 2,
+            },
+        }
+        session.sync.check()
+        await flush()
+        expect(Modals.show).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({ kind: 'moved' })
+        )
+    })
+
+    it('counts reading made while a check is out', async () => {
+        const { session } = await startTimed()
+        const read = Promise.withResolvers<ReadingStateResponse>()
+        vi.mocked(readingApi.get).mockReturnValueOnce(read.promise)
+        session.sync.check()
+        await userScroll(150)
+        read.resolve({
+            state: {
+                ...server,
+                revision: 'srv:other',
+                progress: {
+                    book: { version: 1, href: 'book.xhtml', textOffset: 5 },
+                    progress_percent: 2,
+                },
+            },
+            series: null,
+            writer: null,
+        })
+        await flush()
+        expect(Modals.show).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({ kind: 'moved' })
+        )
+    })
+
+    it('lets Mark completed replace a scroll not yet captured', async () => {
+        const { session } = await startTimed()
+        await userScroll(150)
+        await session.sync.command({ op: 'mark_completed' })
+        await vi.advanceTimersByTimeAsync(1500)
+        expect(vi.mocked(readingApi.post).mock.calls.map(([, req]) => req.op)).toEqual([
+            'mark_completed',
+        ])
+    })
+
+    it('writes the passage the reader scrolled to as a fresh position', async () => {
+        reading({ current_page: 7 }, null)
+        const { session } = await startTimed()
+        await userScroll(150)
         await flush()
         await session.leave()
         await session.dispose()
 
         expect(writes()).toHaveLength(1)
-        const [, payload, init] = writes()[0]!
-        expect(payload.progress!.current_page).toBe(7)
-        expect(payload.progress!.book).toMatchObject({
-            version: 1,
-            href: 'book.xhtml',
-            anchorId: 'p1b',
-        })
-        expect(payload.progress!.book!.textOffset).toBeGreaterThan(0)
+        const [, req] = writes()[0]!
+        expect(req.op).toBe('position')
+        expect(req.progress.current_page).toBeUndefined()
+        expect(req.progress.book).toMatchObject({ version: 1, href: 'book.xhtml', anchorId: 'p1b' })
+        expect(req.progress.book!.textOffset).toBeGreaterThan(0)
         // Partway through the only linear document.
-        expect(payload.progress!.progress_percent).toBeGreaterThan(0)
-        expect(payload.progress!.progress_percent).toBeLessThan(100)
-        expect(payload.status).toBe('reading')
-        expect(init).toEqual({ keepalive: true })
+        expect(req.progress.progress_percent).toBeGreaterThan(0)
+        expect(req.progress.progress_percent).toBeLessThan(100)
+        expect(req).toMatchObject({ base_revision: null, seq: expect.any(Number) })
     })
 
     it('flushes with keepalive when the tab is hidden, and resumes afterwards', async () => {
-        const { session } = start()
-        await flush()
+        const { session } = await startTimed()
         const visibility = (value: string) => {
             Object.defineProperty(document, 'visibilityState', { value, configurable: true })
             document.dispatchEvent(new Event('visibilitychange'))
         }
         visibility('hidden')
         await flush()
+        expect(writes()).toHaveLength(0)
+
+        await userScroll(150)
+        visibility('hidden')
+        await flush()
         expect(writes()).toHaveLength(1)
         expect(writes()[0]![2]).toEqual({ keepalive: true })
 
         visibility('visible')
-        scrollTo(150)
+        await flush()
+        await userScroll(250)
         await flush()
         await session.dispose()
-        expect(writes().length).toBeGreaterThan(1)
+        expect(writes()).toHaveLength(2)
+        expect(writes()[1]![1].seq).toBeGreaterThan(writes()[0]![1].seq!)
     })
 
-    it.each(['dropped', null])(
-        'leaves the status alone until the reader moves (%s)',
-        async status => {
-            vi.mocked(contentApi.get).mockResolvedValue(content({}, status))
-            const { session } = start()
+    it.each(['dropped', null] as const)('writes nothing on open and close (%s)', async status => {
+        reading({ book: { version: 1, href: 'book.xhtml', textOffset: 60 } }, status)
+        const { session } = await startTimed()
+        await session.dispose()
+        expect(writes()).toHaveLength(0)
+    })
+
+    it('reopens a finished book at its end, unless the URL names a passage', async () => {
+        reading({ book: { version: 1, href: 'book.xhtml', textOffset: 5 }, at_end: true })
+        const finished = start().session
+        await flush()
+        expect(finished.chapterIndex).toBe(2)
+        const linked = start({ ch: 'book.xhtml', frag: 'c2' }).session
+        await flush()
+        expect(linked.chapterIndex).toBe(1)
+    })
+
+    it.each([
+        ['a chapter', {}],
+        ['a passage in it', { frag: 'mid' }],
+    ])('lets a URL naming %s of a finished book beat its end', async (_name, entry) => {
+        serve(book(['a.xhtml', 'b.xhtml']), {
+            'a.xhtml': doc('<p>a</p>'),
+            'b.xhtml': doc('<p>b first</p> <p id="mid">b middle</p> <p id="late">b late</p>'),
+        })
+        const landing = async (progress: ReadingProgress) => {
+            reading(progress)
+            start({ ch: 'b.xhtml', ...entry })
             await flush()
-            await session.dispose()
-            expect(writes()[0]![1].status).toBeUndefined()
+            return scrollY
         }
-    )
+        const plain = await landing({})
+        const finished = await landing({
+            book: { version: 1, href: 'b.xhtml', textOffset: 99_999, anchorId: 'late' },
+            at_end: true,
+        })
+        expect(finished).toBe(plain)
+        expect(
+            await landing({
+                book: { version: 1, href: 'b.xhtml', textOffset: 99_999, anchorId: 'late' },
+            })
+        ).not.toBe(plain)
+    })
+
+    it('saves where a reading crossing lands, and nothing for a placement', async () => {
+        const { session } = await startTimed()
+        session.goToChapter(1)
+        await vi.advanceTimersByTimeAsync(300)
+        expect(session.chapterIndex).toBe(1)
+        session.goToChapter(2, { moved: true })
+        await vi.advanceTimersByTimeAsync(1500)
+        expect(session.chapterIndex).toBe(2)
+        expect(writes()).toHaveLength(1)
+        expect(lastWrite().progress.book).toMatchObject({ href: 'book.xhtml', anchorId: 'p3' })
+
+        // Back a chapter, as the on-page Previous chapter goes.
+        session.goToChapter(1, { moved: true })
+        await vi.advanceTimersByTimeAsync(1500)
+        expect(session.chapterIndex).toBe(1)
+        expect(writes()).toHaveLength(2)
+    })
+
+    it('writes nothing for scrolling after input in a drawer', async () => {
+        const { session } = await startTimed()
+        const drawer = document.createElement('div')
+        drawer.setAttribute('role', 'dialog')
+        document.body.append(drawer)
+        drawer.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+        scrollTo(150)
+        await vi.advanceTimersByTimeAsync(1500)
+        await session.dispose()
+        expect(writes()).toHaveLength(0)
+    })
 })
 
 describe('completion', () => {
-    it('completes only after the reader produces input on the final chapter', async () => {
+    it('finishes when an armed scroll brings the end into view', async () => {
         const { session } = start()
         await flush()
         session.goToChapter(2)
@@ -818,11 +1012,202 @@ describe('completion', () => {
         scrollTo(10)
         await flush()
         expect(completed()).toBe(false)
-
+        // Input with the end already in view is no finish.
         window.dispatchEvent(new Event('pointerdown'))
         await flush()
+        expect(completed()).toBe(false)
+
+        await userScroll(5000)
+        await userScroll(10)
+        await flush()
         await session.dispose()
-        expect(lastWrite().status).toBe('completed')
+        expect(lastWrite()).toMatchObject({
+            op: 'finish',
+            progress: { progress_percent: 100, at_end: true, book: { href: 'book.xhtml' } },
+        })
+    })
+
+    it('saves a turn back from the end, even within its last percent', async () => {
+        const { session } = start()
+        await flush()
+        session.goToChapter(2)
+        await flush()
+        scrollTo(10)
+        window.dispatchEvent(new Event('pointerdown'))
+        await userScroll(5000)
+        await userScroll(10)
+        await flush()
+        expect(lastWrite()).toMatchObject({ op: 'finish' })
+
+        vi.mocked(progressPercent).mockReturnValue(99.2)
+        await userScroll(200)
+        await flush()
+        await session.dispose()
+        expect(lastWrite()).toMatchObject({
+            op: 'position',
+            progress: { progress_percent: 99.2, book: { textOffset: 112 } },
+        })
+    })
+
+    it('finishes again after accepting a clear made elsewhere', async () => {
+        const { session } = start()
+        await flush()
+        const finishAtEnd = async () => {
+            session.goToChapter(2)
+            await flush()
+            scrollTo(10)
+            window.dispatchEvent(new Event('pointerdown'))
+            await userScroll(5000)
+            await userScroll(10)
+            await flush()
+        }
+        await finishAtEnd()
+        server = { ...server, revision: 'srv:clear', status: null, progress: {} }
+        session.sync.check()
+        await flush()
+        await finishAtEnd()
+        await session.dispose()
+        expect(writes().filter(([, req]) => req.op === 'finish')).toHaveLength(2)
+    })
+
+    it('follows another device to the end of a finished book, not to its locator', async () => {
+        reading({ book: { version: 1, href: 'book.xhtml', textOffset: 5 } }, 'completed')
+        const { session } = start()
+        await flush()
+        expect(session.chapterIndex).toBe(0)
+        // Finished elsewhere, under a layout whose finishing locator sits early in the book.
+        server = {
+            ...server,
+            revision: 'srv:other',
+            progress: {
+                book: { version: 1, href: 'book.xhtml', textOffset: 60 },
+                progress_percent: 100,
+                at_end: true,
+            },
+        }
+        session.sync.check()
+        await flush()
+        expect(session.chapterIndex).toBe(2)
+        await session.dispose()
+    })
+
+    it('tells a late locator in a chapter sharing the last file from the end', async () => {
+        reading({ progress_percent: 100, at_end: true }, 'completed')
+        const { session } = start()
+        await flush()
+        expect(session.chapterIndex).toBe(2)
+        server = {
+            ...server,
+            revision: 'srv:other',
+            progress: {
+                book: { version: 1, href: 'book.xhtml', textOffset: 60 },
+                progress_percent: 99.5,
+            },
+        }
+        session.sync.check()
+        await flush()
+        expect(session.chapterIndex).toBe(1)
+        await session.dispose()
+    })
+
+    it('finishes when key paging brings the end into view on its first scroll', async () => {
+        const { session } = start()
+        await flush()
+        session.goToChapter(2)
+        await flush()
+        scrollTo(5000)
+        await flush()
+        await new Promise(resolve => requestAnimationFrame(resolve))
+        session.arm()
+        scrollTo(10)
+        await flush()
+        await session.dispose()
+        expect(completed()).toBe(true)
+    })
+
+    it('opens again after its saved state failed to load', async () => {
+        reading({ progress_percent: 100, at_end: true }, 'completed')
+        vi.mocked(readingApi.get).mockRejectedValueOnce(new Error('down'))
+        const { session } = start()
+        await flush()
+        expect(session).toMatchObject({ error: 'down', openFailed: true, loading: false })
+        session.retry()
+        await flush()
+        expect(session).toMatchObject({ error: null, openFailed: false, loading: false })
+        expect(session.chapterIndex).toBe(2)
+        await session.dispose()
+    })
+
+    it('ignores crossings and turns before the saved position is placed', async () => {
+        reading({ progress_percent: 100, at_end: true }, 'completed')
+        const served = vi.mocked(readingApi.get).getMockImplementation()!
+        const gate = deferred<void>()
+        vi.mocked(readingApi.get).mockImplementationOnce(async id => {
+            await gate.promise
+            return served(id)
+        })
+        const { session } = start()
+        await flush()
+        expect(session.loading).toBe(true)
+        session.goToChapter(1, { moved: true })
+        session.turn('next')
+        gate.resolve()
+        await flush()
+        expect(session.chapterIndex).toBe(2)
+        await session.dispose()
+        expect(writes()).toHaveLength(0)
+    })
+
+    // Reading armed with the end out of view; a link in the last chapter then shows it.
+    it('does not finish for a link placed within the chapter', async () => {
+        const { session, host } = start()
+        await flush()
+        session.goToChapter(2)
+        await flush()
+        await userScroll(5000)
+        await flush()
+        clickNew(host, 'book.xhtml', 'legacy')
+        await flush()
+        await userScroll(scrollY - 10)
+        await flush()
+        await session.dispose()
+        expect(completed()).toBe(false)
+    })
+
+    it('does not finish for a link to the entry shown', async () => {
+        serve(book(['a.xhtml', 'b.xhtml']), {
+            'a.xhtml': doc('<p id="a1">first</p>'),
+            'b.xhtml': doc('<p id="b1">last</p>'),
+        })
+        const { session, host } = start({ ch: 'b.xhtml' })
+        await flush()
+        expect(session.chapterIndex).toBe(1)
+        await userScroll(5000)
+        await flush()
+        clickNew(host, 'b.xhtml', 'vanished')
+        await flush()
+        await userScroll(scrollY + 3)
+        await flush()
+        await session.dispose()
+        expect(completed()).toBe(false)
+    })
+
+    it('takes no reading or finish from scroll anchoring after a resize', async () => {
+        const { session } = start()
+        await flush()
+        session.goToChapter(2)
+        await flush()
+        await userScroll(4000)
+        await userScroll(5000)
+        await flush()
+        window.dispatchEvent(new Event('resize'))
+        await flush()
+        const before = writes().length
+        // Native anchoring brings the end into view, with no input.
+        scrollTo(10)
+        await flush()
+        await session.dispose()
+        expect(writes()).toHaveLength(before)
     })
 
     it('does not complete when the sentinel is above the viewport', async () => {
@@ -843,7 +1228,7 @@ describe('completion', () => {
         await flush()
         session.goToChapter(2)
         await flush()
-        scrollTo(10)
+        await userScroll(10)
         await flush()
 
         clickNew(host, 'notes.xhtml')
@@ -891,7 +1276,7 @@ describe('standalone documents', () => {
     it('never writes a standalone document into progress', async () => {
         const { session, host } = start()
         await flush()
-        scrollTo(150)
+        await userScroll(150)
         await flush()
         expect(writes()).toHaveLength(0)
 
@@ -907,9 +1292,7 @@ describe('standalone documents', () => {
         scrollTo(50)
         await flush()
         await session.dispose()
-        expect(writes().every(([, payload]) => payload.progress!.book!.href === 'book.xhtml')).toBe(
-            true
-        )
+        expect(writes().every(([, req]) => req.progress.book!.href === 'book.xhtml')).toBe(true)
     })
 
     it('opens an off-spine document and reports one that is missing', async () => {
@@ -985,7 +1368,7 @@ describe('history', () => {
             value: 4000,
             configurable: true,
         })
-        session.goToChapter(0, true)
+        session.goToChapter(0, { atEnd: true })
         await flush()
         expect(session.chapterIndex).toBe(0)
         expect(scrollY).toBe(4000)
@@ -1006,7 +1389,7 @@ describe('history', () => {
             value: 4000,
             configurable: true,
         })
-        session.goToChapter(0, true)
+        session.goToChapter(0, { atEnd: true })
         // Same chapter, but a deliberate anchor: it must not inherit the landing.
         session.setEntry({ ch: 'book.xhtml', frag: 'p1b' })
         await flush()
@@ -1079,6 +1462,17 @@ function withBook(body: string, locator?: Omit<BookLocator, 'version' | 'href'>)
 }
 
 describe('reflow', () => {
+    it('saves reading still waiting for its capture before a layout change', async () => {
+        const { session } = await startTimed()
+        await userScroll(150)
+        await vi.advanceTimersByTimeAsync(100) // inside the capture debounce
+        await changeText()
+        await vi.advanceTimersByTimeAsync(1500)
+        expect(lastWrite().op).toBe('position')
+        expect(lastWrite().progress!.book).toMatchObject({ anchorId: 'p1b' })
+        await session.dispose()
+    })
+
     it('restores the passage captured before the layout change', async () => {
         const { session } = await startTimed()
         scrollTo(150)
@@ -1261,7 +1655,7 @@ describe('character positions', () => {
         withBook(body)
         const { session } = start()
         await flush()
-        scrollTo(y)
+        await userScroll(y)
         await flush()
         await session.dispose()
         expect(lastWrite().progress!.book).toMatchObject(at)
@@ -1298,7 +1692,7 @@ describe('character positions', () => {
         })
         const { session } = start()
         await flush()
-        scrollTo(SLICE_HEIGHT - 10)
+        await userScroll(SLICE_HEIGHT - 10)
         await flush()
         await session.dispose()
         expect(lastWrite().progress!.book).toMatchObject({
@@ -1325,23 +1719,49 @@ describe('disposal', () => {
         expect(JSON.stringify(nav.entries)).toBe(stamped)
     })
 
-    it('cancels an in-flight write before the closing one', async () => {
-        const hanging = deferred<UserToContent>()
-        vi.mocked(contentApi.updateUserData).mockReturnValueOnce(hanging.promise)
+    it.each(['', ' behind a write in flight'])(
+        'keeps reading on both sides of a text setting change%s',
+        async busy => {
+            const hanging = deferred<ReadingResponse>()
+            if (busy) vi.mocked(readingApi.post).mockImplementationOnce(() => hanging.promise)
+            const { session } = await startTimed()
+            if (busy) {
+                await userScroll(50)
+                await vi.advanceTimersByTimeAsync(1500)
+            }
+            await userScroll(150)
+            await changeText()
+            await vi.advanceTimersByTimeAsync(300)
+            await userScroll(250)
+            await vi.advanceTimersByTimeAsync(100)
+            hanging.resolve(respond(writes()[0]![1]))
+            await vi.advanceTimersByTimeAsync(1500)
+            await session.dispose()
+            const positions = writes().filter(([, req]) => req.op === 'position')
+            expect(positions).toHaveLength(busy ? 3 : 2)
+            const [before, after] = positions.slice(-2).map(([, req]) => req)
+            expect(after!.seq).toBeGreaterThan(before!.seq!)
+            expect(after!.progress).not.toEqual(before!.progress)
+        }
+    )
+
+    it('sends the closing write after one in flight, later in sequence', async () => {
+        const hanging = deferred<ReadingResponse>()
+        vi.mocked(readingApi.post).mockImplementationOnce(() => hanging.promise)
         const { session } = await startTimed()
 
-        scrollTo(150)
+        await userScroll(150)
         await vi.advanceTimersByTimeAsync(1500)
         expect(writes()).toHaveLength(1)
-        const inFlight = writes()[0]![2]!.signal!
-        expect(inFlight.aborted).toBe(false)
 
-        void session.dispose()
+        await userScroll(250)
+        session.dispose()
         await flush()
-        expect(inFlight.aborted).toBe(true)
+        expect(writes()).toHaveLength(1)
+        hanging.resolve(respond(writes()[0]![1]))
+        await flush()
         expect(writes()).toHaveLength(2)
-        expect(writes()[1]![2]).toEqual({ keepalive: true })
-        hanging.resolve({ progress: {} } as UserToContent)
+        expect(writes()[1]![1].seq).toBeGreaterThan(writes()[0]![1].seq!)
     })
 
     it('does not leave a navigation waiting for a host that will never arrive', async () => {

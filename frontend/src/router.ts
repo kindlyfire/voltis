@@ -4,6 +4,7 @@ import AppLayout from './pages/_layout/Layout.vue'
 import PageLogin from './pages/auth/PageLogin.vue'
 import PageOidcComplete from './pages/auth/PageOidcComplete.vue'
 import PageRegister from './pages/auth/PageRegister.vue'
+import BrowsePage from './pages/BrowsePage.vue'
 import ContentPage from './pages/content/ContentPage.vue'
 import HomePage from './pages/HomePage.vue'
 import LibraryPage from './pages/LibraryPage.vue'
@@ -72,6 +73,11 @@ const router = createRouter({
                     path: '/r/:id(c_[^/]+)',
                     name: 'read-content',
                     component: ReadPage,
+                },
+                {
+                    path: '/browse',
+                    name: 'browse',
+                    component: BrowsePage,
                 },
                 {
                     path: '/lists',

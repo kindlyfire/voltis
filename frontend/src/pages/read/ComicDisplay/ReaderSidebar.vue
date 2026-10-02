@@ -11,23 +11,29 @@
                 <AIconButton :icon="IconClose" label="Close" @click="reader.sidebarOpen = false" />
             </div>
 
-            <div v-if="reader.siblings">
-                <div class="mb-2 flex items-center gap-2">
+            <ReaderStatusRow v-if="reader.sync" :sync="reader.sync" />
+
+            <div v-if="parentId">
+                <SiblingsRetry
+                    v-if="reader.siblings.status === 'error'"
+                    :siblings="reader.siblings"
+                />
+                <div v-else class="mb-2 flex items-center gap-2">
                     <AIconButton
                         :icon="IconChevronLeft"
                         label="Previous chapter"
                         variant="tonal"
                         size="sm"
-                        :disabled="reader.siblings.currentIndex === 0"
-                        @click="reader.goToSibling('prev', true)"
+                        :disabled="!reader.siblings.prev"
+                        @click="reader.goToSibling('prev')"
                     />
                     <ACombobox
-                        :model-value="reader.siblings.items[reader.siblings.currentIndex]?.id"
+                        :model-value="reader.state.contentId"
                         :options="chapterOptions"
                         label="Chapter"
                         size="sm"
                         class="grow"
-                        :loading="reader.state.loading || reader.qSiblings.isLoading"
+                        :loading="reader.state.loading || reader.siblings.status === 'loading'"
                         @update:model-value="id => id && reader.goToSibling(id)"
                     />
                     <AIconButton
@@ -35,12 +41,12 @@
                         label="Next chapter"
                         variant="tonal"
                         size="sm"
-                        :disabled="reader.siblings.currentIndex >= reader.siblings.items.length - 1"
+                        :disabled="!reader.siblings.next"
                         @click="reader.goToSibling('next')"
                     />
                 </div>
-                <div class="text-fg-muted text-center text-sm">
-                    {{ reader.siblings.currentIndex + 1 }} of
+                <div v-if="reader.siblings.index >= 0" class="text-fg-muted text-center text-sm">
+                    {{ reader.siblings.index + 1 }} of
                     {{ reader.siblings.items.length }}
                 </div>
             </div>
@@ -112,7 +118,9 @@ import type { Option } from '@/ui/options'
 import { contentApi } from '@/utils/api/content'
 import { readerExit } from '../readerExit'
 import ReaderHeading from '../ReaderHeading.vue'
+import ReaderStatusRow from '../ReaderStatusRow.vue'
 import { COMIC_SHORTCUTS as kbShortcuts } from '../shortcuts'
+import SiblingsRetry from '../SiblingsRetry.vue'
 import type { ReaderMode } from './types'
 import { useReaderStore } from './useComicDisplayStore'
 
@@ -126,8 +134,8 @@ const MODE_OPTIONS = [
     { value: 'auto', label: 'Auto' },
 ] as const satisfies readonly Option<ReaderMode | 'auto'>[]
 
-const chapterOptions = computed(
-    () => reader.siblings?.items.map(item => ({ value: item.id, label: item.title })) ?? []
+const chapterOptions = computed(() =>
+    reader.siblings.items.map(item => ({ value: item.id, label: item.title }))
 )
 
 const navbarHidden = layout.navbarHidden.useLayer('comicReaderSidebar')
@@ -177,6 +185,7 @@ function setLongstripWidth(width: number) {
     if (originalPage === null) {
         originalPage = reader.state?.page ?? null
     }
+    reader.placement()
     reader.settings.longstripWidth = width
     requestAnimationFrame(() => {
         if (originalPage !== null) {

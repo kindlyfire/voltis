@@ -213,17 +213,112 @@ export interface ReadingProgress {
     current_page?: number
     progress_percent?: number
     book?: BookLocator
+    /** Set when the item was finished; reading on removes it. */
+    at_end?: boolean
 }
 
-export interface UserToContent {
+export interface UserToContent extends ReadingState {
     starred: boolean
-    status: ReadingStatus | null
     notes: string | null
     rating: number | null
-    progress: ReadingProgress
 }
 
-export interface BrokenUserToContent extends UserToContent {
+/** The reading part of a user's row, as the reading endpoints return it. */
+export interface ReadingState {
+    revision: string | null
+    status: ReadingStatus | null
+    status_updated_at: string | null
+    progress: ReadingProgress
+    progress_updated_at: string | null
+    last_read_at: string | null
+}
+
+export interface SeriesReadingInfo {
+    id: string
+    status: ReadingStatus | null
+    revision: string | null
+    caught_up: boolean
+    children_count: number
+    completed_children_count: number
+    dropped_children_count: number
+}
+
+/** An item's state with its series', read together. */
+export interface ReadingStateResponse {
+    state: ReadingState
+    series: SeriesReadingInfo | null
+    /** The reader that wrote `state`, if one did. */
+    writer: string | null
+}
+
+/** What Undo restores. */
+export interface ReadingSnapshot {
+    status: ReadingStatus | null
+    progress: ReadingProgress
+    last_read_at: string | null
+}
+
+export interface SeriesPrevious {
+    revision: string | null
+    status: ReadingStatus | null
+    status_updated_at: string | null
+}
+
+/** A reader's writes carry its writer and send-time sequence number; page commands may omit them. */
+interface WriterFields {
+    base_revision?: string | null
+    writer_id?: string
+    seq?: number
+}
+
+export type ReadingRequest =
+    | ({ op: 'position' | 'finish'; progress: ReadingProgress } & WriterFields)
+    | ({ op: 'set_status'; status: ReadingStatus | null } & WriterFields)
+    | ({ op: 'mark_completed' | 'clear' } & WriterFields)
+    | ({ op: 'restore'; snapshot: ReadingSnapshot; series?: SeriesPrevious | null } & WriterFields)
+    /** The item's series, last writer wins. */
+    | ({ op: 'series_status'; status: ReadingStatus | null } & WriterFields)
+    /** Undoes the start of the item's series, if nothing wrote the series since. */
+    | ({ op: 'series_status'; series: SeriesPrevious } & WriterFields)
+
+export type ReadingOutcome =
+    | 'none'
+    | 'saved'
+    | 'started'
+    | 'moved_to_reading'
+    | 'completed'
+    | 'status_set'
+    | 'cleared'
+    | 'restored'
+    | 'series_status'
+
+export interface ReadingResponse extends ReadingStateResponse {
+    outcome: ReadingOutcome
+    /** For Undo: set when reading moved a planned, held or dropped item. */
+    previous: ReadingSnapshot | null
+    /** When the write started the series: its status before, and its revision after. */
+    series_previous: SeriesPrevious | null
+}
+
+export type SeriesReadingRequest = (
+    | { action: 'mark_through'; until_id: string }
+    | { action: 'mark_series_completed'; include_unread: boolean }
+    | { action: 'clear' }
+) &
+    Omit<WriterFields, 'base_revision'>
+
+export type ContinueAction = 'start' | 'resume' | 'next'
+
+export interface ContinueTarget {
+    target: Content | null
+    series_id: string | null
+    action: ContinueAction | null
+    reason: 'completed' | 'caught_up' | 'earlier_unread' | 'held' | 'empty' | null
+    is_new: boolean
+    earlier_unread_id: string | null
+}
+
+export interface BrokenUserToContent extends Omit<UserToContent, 'revision'> {
     id: string
     uri: string
     library_id: string | null
@@ -242,14 +337,14 @@ export interface LibraryUrisResponse {
 export interface BrokenRefsFixRequest {
     delete?: string[]
     update?: Record<string, string>
+    /** Per updated row: whose reading state survives a merge. Defaults to the newer. */
+    keep?: Record<string, 'source' | 'target'>
 }
 
 export interface UserToContentUpdate {
     starred?: boolean
-    status?: ReadingStatus | null
     notes?: string | null
     rating?: number | null
-    progress?: ReadingProgress
 }
 
 export interface ContentFileData {
@@ -282,11 +377,18 @@ export interface Content {
     file_data: ContentFileData
     parent_id: string | null
     library_id: string
+    /** A series' valid children; unread leaves out completed and dropped ones. */
     children_count: number | null
     unread_children_count: number | null
+    completed_children_count: number | null
+    dropped_children_count: number | null
+    /** Volumes added since the user completed the series. */
+    new_children_count: number | null
     user_data: UserToContent | null
     /** Only on a single-item fetch. */
     length?: ContentLength
+    /** Only in the continue and recently_updated sorts. */
+    continue: { action: ContinueAction; is_new: boolean; series: Content | null } | null
 }
 
 /** Words for books, pages for comics; `remaining` is what the user has left. */
@@ -296,10 +398,12 @@ export interface ContentLength {
     remaining: number
 }
 
-/** A "Recently Read" card: the item to read next, and its series unless standalone. */
-export interface RecentlyReadEntry {
+/** A "Continue reading" card: the item to read next, and its series unless standalone. */
+export interface ContinueEntry {
     item: Content
     series: Content | null
+    action: ContinueAction
+    is_new: boolean
 }
 
 export interface Paginated<T> {
@@ -330,7 +434,10 @@ export interface ContentListParams {
     sort?:
         | 'order'
         | 'created_at'
-        | 'progress_updated_at'
+        | 'last_read_at'
+        | 'history'
+        | 'continue'
+        | 'recently_updated'
         | 'rating'
         | 'user_rating'
         | 'unread_children_count'

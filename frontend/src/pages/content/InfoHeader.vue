@@ -44,7 +44,9 @@
                     <div class="flex flex-wrap justify-center gap-1.5 sm:justify-start">
                         <AChip size="sm">{{ displayContentType(content.type) }}</AChip>
                         <AChip v-if="meta.kind" size="sm">{{ capitalize(meta.kind) }}</AChip>
-                        <AChip v-if="meta.status" size="sm">{{ capitalize(meta.status) }}</AChip>
+                        <AChip v-if="meta.status" size="sm">
+                            Publication: {{ capitalize(meta.status) }}
+                        </AChip>
                         <AChip v-if="language" size="sm">{{ language }}</AChip>
                     </div>
                     <p
@@ -76,9 +78,10 @@
                     </p>
                 </header>
 
-                <div class="flex flex-wrap items-center gap-2">
+                <div class="flex flex-wrap items-start gap-2">
                     <ContinueReadingButton
                         :content-id="content.id"
+                        :type="content.type"
                         class="grow basis-full sm:grow-0 sm:basis-auto"
                     />
                     <ReadingStatusButton
@@ -98,7 +101,10 @@
                     <OptionsButton :content-id="content.id" />
                 </div>
 
-                <RatingButton :content-id="content.id" class="-ml-1 self-center sm:self-start" />
+                <RatingButton
+                    :content-id="content.id"
+                    class="-mt-3 -ml-1 self-center sm:self-start"
+                />
 
                 <div v-if="meta.description" class="flex max-w-[640px] flex-col items-start gap-1">
                     <p

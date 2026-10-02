@@ -1,13 +1,12 @@
-import { keepPreviousData } from '@tanstack/vue-query'
 import { acceptHMRUpdate, defineStore } from 'pinia'
 import { ref, computed, type Ref } from 'vue'
 import { useRouter } from 'vue-router'
 import z from 'zod'
-import { contentApi } from '@/utils/api/content'
 import { useLocalStorage } from '@/utils/localStorage'
-import { arrayAtNowrap, getLayoutTop } from '@/utils/misc'
+import { getLayoutTop } from '@/utils/misc'
+import { useSiblings } from '../useSiblings'
 import { createComicState, type ComicState } from './createComicState'
-import type { PageDimensions, ReaderMode, SiblingsInfo } from './types'
+import type { PageDimensions, ReaderMode } from './types'
 
 const zComicSettings = z.object({
     longstripWidth: z.number().min(10).max(100).default(100),
@@ -75,54 +74,52 @@ export const useReaderStore = defineStore('reader', () => {
     })
 
     const state: Ref<ComicState | null> = ref(null)
-    // Scrolls that place a longstrip on its restored page, until the first user input.
+    // A longstrip scroll of our own (a placement) is under way.
     const restoring = ref(false)
+    // On-page input since the last placement: only then is a longstrip scroll reading.
+    const armed = ref(false)
+    // Paged: past the last page with no next sibling, on the end card.
+    const atEnd = ref(false)
     const content = computed(() => state.value?.content || null)
+    const sync = computed(() => state.value?.sync ?? null)
 
-    const qSiblings = contentApi.useList(
-        () => {
-            if (content.value?.parent_id)
-                return { parent_id: content.value.parent_id, sort: 'order', sort_order: 'asc' }
-        },
-        {
-            placeholderData: keepPreviousData,
-        }
-    )
-    const siblings = computed<SiblingsInfo>(() => {
-        const siblings = qSiblings.data.value?.data
-        if ((content.value && !content.value?.parent_id) || !siblings)
-            return {
-                items: [],
-                currentIndex: 0,
-            }
-        const items = siblings.map(c => ({ id: c.id, title: c.title, order: c.order }))
-        const currentIndex = items.findIndex(item => item.id === state.value?.contentId)
-        return {
-            items,
-            currentIndex: currentIndex >= 0 ? currentIndex : 0,
-        }
-    })
+    const siblings = useSiblings(content)
+    /** Past the last page: on to the next sibling, or the end card, which waits for the siblings
+     * (or offers their Retry) and leaves the next press to go on. */
+    function goPastEnd() {
+        const next = siblings.value.next
+        if (next) return goToSibling('next')
+        atEnd.value = true
+    }
 
     const progress = computed(() => {
         const pagesVal = state.value?.pageDimensions
         if (!pagesVal?.length) return 0
-        return (((state.value?.page ?? 0) + 1) / pagesVal.length) * 100
+        return ((state.value?.page ?? 0) / pagesVal.length) * 100
     })
 
     function leave() {
-        return state.value?.leave()
+        state.value?.leave()
+    }
+
+    function reset() {
+        endPlacement?.()
+        restoring.value = true
+        armed.value = false
+        atEnd.value = false
     }
 
     function dispose() {
         sidebarOpen.value = false
-        const s = state.value
+        reset()
+        state.value?.dispose()
         state.value = null
-        return s?.dispose()
     }
 
     function setMode(mode: ReaderMode | null) {
         const c = state.value?.content
         if (!c) return
+        placement()
 
         if (mode == null) {
             if (settings.value.seriesSettings[c.parent_id || '']) {
@@ -142,28 +139,21 @@ export const useReaderStore = defineStore('reader', () => {
         if (options.contentId === state.value?.contentId) {
             return
         }
+        // The sibling's own load queues behind this exit write.
         state.value?.dispose()
         const s = createComicState(options.contentId, options.initialPage)
         state.value = s
-        restoring.value = true
+        reset()
         s.setHandlers({
+            onPlace: page => {
+                if (state.value === s) goToPage(page, 'instant')
+            },
             onReady: () => {
                 if (state.value !== s) return
 
                 if (mode.value === 'longstrip') {
-                    // Input during the load must not let this scroll count as navigation.
-                    restoring.value = true
                     requestAnimationFrame(() => {
-                        if (state.value !== s) return
-
-                        if (s.initialPage === 'last') {
-                            window.scrollTo({
-                                top: document.body.scrollHeight,
-                                behavior: 'instant',
-                            })
-                            return
-                        }
-                        goToPage(s.page, 'instant')
+                        if (state.value === s) goToPage(s.page, 'instant')
                     })
                 }
 
@@ -183,39 +173,67 @@ export const useReaderStore = defineStore('reader', () => {
         state.value?.setPage(page, options)
     }
 
+    /** Every move the reader didn't make: earlier reading goes out first, sealed, and the
+     * longstrip's scrolling is reading again only after new input. */
+    function placement() {
+        state.value?.sync.flush()
+        armed.value = false
+    }
+
+    /** A placement (slider, restore, layout change), which writes nothing. */
     function goToPage(page: number | null = null, behavior: ScrollBehavior = 'instant') {
         if (page === null) {
             page = state.value?.page ?? 0
         }
-        setPage(page)
+        placement()
+        atEnd.value = false
+        setPage(page, { restore: true })
         if (mode.value === 'longstrip') {
             const pageEl = document.getElementById(`longstrip-page-${page}`)
-            if (pageEl) {
-                window.scrollTo({
-                    top: pageEl.offsetTop - getLayoutTop(),
-                    behavior,
-                })
-            }
+            if (pageEl) placeScroll(pageEl.offsetTop - getLayoutTop(), behavior)
         }
     }
 
-    function goToSibling(id: (string & {}) | 'next' | 'prev', fromEnd = false) {
-        if (id === 'next' || id === 'prev') {
-            const sibling = arrayAtNowrap(
-                siblings.value.items,
-                siblings.value.currentIndex + (id === 'next' ? 1 : -1)
-            )
-            if (sibling) {
-                id = sibling.id
-            } else {
-                return
-            }
+    /** Scrolls the longstrip as a placement, until the scroll ends. */
+    let endPlacement: (() => void) | null = null
+    function placeScroll(top: number, behavior: ScrollBehavior) {
+        endPlacement?.()
+        restoring.value = true
+        armed.value = false
+        const max = document.documentElement.scrollHeight - window.innerHeight
+        const moves = Math.round(Math.min(Math.max(top, 0), max)) !== Math.round(window.scrollY)
+        window.scrollTo({ top, behavior })
+        if (!moves) return void requestAnimationFrame(() => (restoring.value = false))
+        // Safari < 26.2 has no scrollend: the scroll has ended once it pauses.
+        const hasScrollEnd = 'onscrollend' in window
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const onScroll = () => {
+            clearTimeout(timer)
+            timer = setTimeout(done, 150)
         }
-        router.push({
-            name: 'read-content',
-            params: { id },
-            query: fromEnd ? { page: 'last' } : {},
-        })
+        const done = () => {
+            clearTimeout(timer)
+            window.removeEventListener('scrollend', done)
+            window.removeEventListener('scroll', onScroll)
+            endPlacement = null
+            restoring.value = false
+        }
+        endPlacement = done
+        if (hasScrollEnd) window.addEventListener('scrollend', done, { once: true })
+        else {
+            window.addEventListener('scroll', onScroll, { passive: true })
+            onScroll()
+        }
+    }
+
+    function goToSibling(target: (string & {}) | 'next' | 'prev') {
+        let id: string | undefined = target
+        if (target === 'next' || target === 'prev') {
+            const { status, prev, next } = siblings.value
+            if (status !== 'ready') return
+            id = (target === 'next' ? next : prev)?.id
+        }
+        if (id) router.push({ name: 'read-content', params: { id }, query: { page: 'resume' } })
     }
 
     return {
@@ -228,15 +246,19 @@ export const useReaderStore = defineStore('reader', () => {
 
         // Content state (readonly)
         state,
-        qSiblings,
         siblings,
         progress,
         restoring,
+        armed,
+        atEnd,
+        sync,
 
         // Actions
         setContent,
         goToPage,
+        placement,
         goToSibling,
+        goPastEnd,
         leave,
         dispose,
         setPage,

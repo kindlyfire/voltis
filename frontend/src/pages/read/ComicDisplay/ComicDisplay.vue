@@ -1,10 +1,17 @@
 <template>
-    <div class="reader-main select-none" @click="controls.handleClick">
+    <AAlert v-if="reader.state?.error" tone="danger" class="m-4">
+        {{ reader.state.error }}
+        <AButton class="mt-2" size="sm" variant="tonal" @click="reader.state.retry()">
+            Retry
+        </AButton>
+    </AAlert>
+    <div v-else class="reader-main select-none" @click="controls.handleClick">
         <ReaderModePaged v-if="reader.mode === 'paged'" />
         <ReaderModeLongstrip v-else />
     </div>
 
     <ReaderSidebar />
+    <ReaderSaveBanner v-if="reader.sync" :sync="reader.sync" />
 
     <AProgressBar
         :value="progressValue / 100"
@@ -19,8 +26,10 @@ import { useScroll, useWindowSize } from '@vueuse/core'
 import { watch, computed, onUnmounted } from 'vue'
 import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import { useLayoutStore } from '@/pages/_layout/useLayoutStore'
+import AAlert from '@/ui/AAlert.vue'
+import AButton from '@/ui/AButton.vue'
 import AProgressBar from '@/ui/AProgressBar.vue'
-import { trackRecentlyReadWrite } from '@/utils/api/content'
+import ReaderSaveBanner from '../ReaderSaveBanner.vue'
 import { useReaderTutorial } from '../useReaderTutorial'
 import ReaderModeLongstrip from './ReaderModeLongstrip.vue'
 import ReaderModePaged from './ReaderModePaged.vue'
@@ -58,7 +67,7 @@ watch(
 
 // Not in dispose: unmounting runs after the next page has rendered the old order.
 onBeforeRouteLeave(() => {
-    trackRecentlyReadWrite(reader.leave())
+    reader.leave()
 })
 onUnmounted(() => {
     reader.dispose()

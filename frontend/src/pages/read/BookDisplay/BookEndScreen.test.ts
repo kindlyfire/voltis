@@ -2,15 +2,17 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 import { defineComponent, h, nextTick, ref } from 'vue'
 import type { Content } from '@/utils/api/types'
+import type { Siblings } from '../useSiblings'
 import BookEndScreen from './BookEndScreen.vue'
 
 const stubs = { AButton: { template: '<button v-bind="$attrs"><slot /></button>' } }
 const NEXT = { id: 'c_2', title: 'Volume 2' } as Content
 const EXIT = { to: '/c_1', label: 'Back to the book' }
+const SIBLINGS = { status: 'ready' } as Siblings
 
 function render(next: Content | null) {
     return mount(BookEndScreen, {
-        props: { exit: EXIT, next },
+        props: { exit: EXIT, next, siblings: SIBLINGS },
         global: { stubs },
         attachTo: document.body,
     })
@@ -41,7 +43,9 @@ describe('BookEndScreen', () => {
         const wrapper = mount(
             defineComponent({
                 setup: () => () =>
-                    shown.value ? h(BookEndScreen, { exit: EXIT, next: NEXT, onBlur }) : null,
+                    shown.value
+                        ? h(BookEndScreen, { exit: EXIT, next: NEXT, siblings: SIBLINGS, onBlur })
+                        : null,
             }),
             { global: { stubs }, attachTo: document.body }
         )

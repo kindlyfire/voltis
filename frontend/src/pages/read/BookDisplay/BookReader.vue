@@ -25,6 +25,15 @@
         </div>
         <AAlert v-else-if="session.error" tone="danger" class="m-4">
             {{ session.error }}
+            <AButton
+                v-if="session.openFailed"
+                class="mt-2"
+                size="sm"
+                variant="tonal"
+                @click.stop="session.retry()"
+            >
+                Retry
+            </AButton>
         </AAlert>
 
         <template v-if="session">
@@ -61,6 +70,8 @@
                     v-if="paged && session.atBookEnd"
                     :exit="exit"
                     :next="nextVolume"
+                    :siblings="siblings"
+                    :sync="session.sync"
                     @open="openVolume"
                     @leave="session.snapshotPassage()"
                     @blur="nextPageButton?.focus()"
@@ -84,8 +95,16 @@
                             {{ next.title }}
                         </span>
                     </template>
+                    <ReaderEndSummary
+                        v-if="!next && siblings.status === 'ready'"
+                        class="mt-2"
+                        :sync="session.sync"
+                        :exit="exit"
+                        @leave="session.snapshotPassage()"
+                    />
+                    <SiblingsRetry v-else-if="!next" class="mt-2" :siblings="siblings" />
                     <AButton
-                        v-if="!session.nextChapter"
+                        v-if="!session.nextChapter && (next || siblings.status !== 'ready')"
                         variant="tonal"
                         class="mt-2"
                         :to="exit.to"
@@ -134,6 +153,8 @@
 
     <BookReaderDrawer :exit="exit" />
 
+    <ReaderSaveBanner v-if="session" :sync="session.sync" />
+
     <AProgressBar
         v-if="session?.layoutMode === 'scroll' && session.firstChapterMounted"
         :value="chapterProgress"
@@ -153,7 +174,10 @@ import AProgressBar from '@/ui/AProgressBar.vue'
 import ASpinner from '@/ui/ASpinner.vue'
 import { IconArrowLeft } from '@/ui/icons'
 import { contentApi } from '@/utils/api/content'
+import ReaderEndSummary from '../ReaderEndSummary.vue'
 import { readerExit } from '../readerExit'
+import ReaderSaveBanner from '../ReaderSaveBanner.vue'
+import SiblingsRetry from '../SiblingsRetry.vue'
 import { useReaderTutorial } from '../useReaderTutorial'
 import BookEndScreen from './BookEndScreen.vue'
 import BookReaderDrawer from './BookReaderDrawer.vue'
@@ -182,7 +206,7 @@ const qContent = contentApi.useGet(() => props.contentId)
 const exit = computed(() =>
     readerExit(qContent.data.value?.parent_id, props.contentId, 'Back to the book')
 )
-const nextVolume = useNextVolume(
+const { siblings, next: nextVolume } = useNextVolume(
     () => session.value?.content ?? null,
     () => ready.value && !!session.value?.chapters.length && !session.value.nextChapter
 )
@@ -233,7 +257,8 @@ const next = computed(() => {
 function goChapter(event: MouseEvent, delta: number) {
     ;(event.currentTarget as HTMLElement).blur()
     const current = session.value
-    current?.goToChapter(current.chapterIndex + delta)
+    // Reading, either way, unlike the drawer's chapter controls.
+    current?.goToChapter(current.chapterIndex + delta, { moved: true })
 }
 
 /** Blurred for the same reason, unless it was reached by keyboard. */

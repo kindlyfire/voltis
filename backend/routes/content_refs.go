@@ -1,7 +1,9 @@
 package routes
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -21,6 +23,7 @@ type ContentRefRoutes struct {
 
 func (cr *ContentRefRoutes) Register(g *echo.Group) {
 	g.GET("/refs/:library_id", cr.listLibraryURIs)
+	g.GET("/refs/:library_id/user-data", cr.userDataAt)
 	g.GET("/broken-refs", cr.brokenRefsSummary)
 	g.GET("/broken-refs/:library_id", cr.listBrokenRefs)
 	g.POST("/broken-refs/:library_id", cr.fixBrokenRefs)
@@ -116,6 +119,7 @@ type brokenUserToContentDTO struct {
 	Rating            *int            `json:"rating"`
 	Progress          json.RawMessage `json:"progress"`
 	ProgressUpdatedAt *time.Time      `json:"progress_updated_at"`
+	LastReadAt        *time.Time      `json:"last_read_at"`
 }
 
 func brokenUTCToDTO(u models.UserToContent) brokenUserToContentDTO {
@@ -134,7 +138,34 @@ func brokenUTCToDTO(u models.UserToContent) brokenUserToContentDTO {
 		Rating:            u.Rating,
 		Progress:          progress,
 		ProgressUpdatedAt: u.ProgressUpdatedAt,
+		LastReadAt:        u.LastReadAt,
 	}
+}
+
+type userDataAtQuery struct {
+	URI string `query:"uri" validate:"required"`
+}
+
+// userDataAt previews the user's row at a URI, which a broken ref's repair would merge with.
+func (cr *ContentRefRoutes) userDataAt(c echo.Context) error {
+	user, err := requireUser(c)
+	if err != nil {
+		return err
+	}
+	q, err := BindQuery[userDataAtQuery](c)
+	if err != nil {
+		return err
+	}
+	u, err := db.SelectOne[models.UserToContent](reqCtx(c), cr.pool,
+		"SELECT * FROM user_to_content WHERE user_id = $1 AND library_id = $2 AND uri = $3",
+		user.ID, c.Param("library_id"), q.URI)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return c.JSON(http.StatusOK, nil)
+	}
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, brokenUTCToDTO(u))
 }
 
 type brokenRefsQuery struct {
@@ -204,6 +235,9 @@ func (cr *ContentRefRoutes) listBrokenRefs(c echo.Context) error {
 type brokenRefsFixRequest struct {
 	Delete []string          `json:"delete"`
 	Update map[string]string `json:"update"`
+	// Keep chooses, per updated row, whose reading state survives when the target already has a
+	// row: "source" or "target". The default is the more recently touched.
+	Keep map[string]string `json:"keep" validate:"dive,oneof=source target"`
 }
 
 func (cr *ContentRefRoutes) fixBrokenRefs(c echo.Context) error {
@@ -219,14 +253,17 @@ func (cr *ContentRefRoutes) fixBrokenRefs(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid JSON")
 	}
+	if err := ValidateStruct(req); err != nil {
+		return err
+	}
 
 	tx, err := cr.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	// Scans move refs under this lock; without it a target could be validated mid-rename.
-	if err := db.LockMetadata(ctx, tx, libraryID); err != nil {
+	// Scans move refs under the metadata lock; without it a target could be validated mid-rename.
+	if err := db.LockUserData(ctx, tx, user.ID, libraryID); err != nil {
 		return err
 	}
 
@@ -279,22 +316,9 @@ func (cr *ContentRefRoutes) fixBrokenRefs(c echo.Context) error {
 				fmt.Sprintf("No content with URIs %v in library '%s'", invalid, libraryID))
 		}
 
-		// Delete existing entries at target URIs to avoid conflicts
-		_, err = tx.Exec(ctx, `
-			DELETE FROM user_to_content
-			WHERE user_id = $1 AND library_id = $2 AND uri = ANY($3)
-		`, user.ID, libraryID, targetURIs)
-		if err != nil {
-			return err
-		}
-
-		// Update each ref
+		rev := db.ServerRevision()
 		for utcID, newURI := range req.Update {
-			_, err = tx.Exec(ctx, `
-				UPDATE user_to_content SET uri = $1
-				WHERE id = $2 AND user_id = $3 AND library_id = $4
-			`, newURI, utcID, user.ID, libraryID)
-			if err != nil {
+			if err := mergeUTC(ctx, tx, user.ID, libraryID, utcID, newURI, req.Keep[utcID], rev); err != nil {
 				return err
 			}
 		}
@@ -305,4 +329,24 @@ func (cr *ContentRefRoutes) fixBrokenRefs(c echo.Context) error {
 	}
 
 	return okResponse(c)
+}
+
+// mergeUTC moves the user's row srcID to dstURI. When the user already has a row there, the two
+// merge (see db.MergeUserToContentSQL) and the source goes.
+func mergeUTC(ctx context.Context, tx pgx.Tx, userID, libraryID, srcID, dstURI, keep, revision string) error {
+	srcURI, err := db.SelectScalar[string](ctx, tx,
+		"SELECT uri FROM user_to_content WHERE id = $1 AND user_id = $2 AND library_id = $3",
+		srcID, userID, libraryID)
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && srcURI == dstURI {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, db.MergeUserToContentSQL, libraryID, []string{srcURI}, []string{dstURI},
+		[]string{keep}, revision, userID); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, "UPDATE user_to_content SET uri = $1, revision = $3 WHERE id = $2", dstURI, srcID, revision)
+	return err
 }

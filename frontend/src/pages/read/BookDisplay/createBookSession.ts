@@ -1,4 +1,3 @@
-import { useDebounceFn } from '@vueuse/core'
 import {
     computed,
     markRaw,
@@ -11,21 +10,10 @@ import {
     type Ref,
 } from 'vue'
 import { isNavigationFailure, type NavigationFailure } from 'vue-router'
-import {
-    bumpRecentlyRead,
-    contentApi,
-    invalidateRecentlyRead,
-    invalidateStatusChange,
-} from '@/utils/api/content'
-import type {
-    BookLocator,
-    BookStructure,
-    Content,
-    ReadingStatus,
-    UserToContent,
-} from '@/utils/api/types'
-import { queryClient } from '@/utils/misc'
+import { contentApi } from '@/utils/api/content'
+import type { BookLocator, BookStructure, Content, ReadingProgress } from '@/utils/api/types'
 import { hasOpenModal } from '@/utils/modals'
+import { attachReading } from '../readingSync'
 import { chooseEntryChapter, entryKey, isBookLocator, type BookEntry } from './bookEntry'
 import { flowWeights, progressPercent, type FlowWeights } from './bookProgress'
 import type { BookSettings } from './bookSettings'
@@ -63,9 +51,9 @@ import {
 } from './readingLayout'
 
 const SETTLE_TIMEOUT = 2000
-const CAPTURE_DEBOUNCE = 250
-const PERSIST_DEBOUNCE = 1000
 const HISTORY_STAMP_INTERVAL = 500
+/** Keys that scroll the window when the page has focus. */
+const SCROLL_KEYS = new Set(['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', ' '])
 /** Content that shows without any text. */
 const VISIBLE_EMPTY = 'img, svg, video, picture, object, embed, hr, table, iframe'
 const LOAD_FAILED = 'That part of the book could not be loaded.'
@@ -97,6 +85,8 @@ export interface BookSessionValues {
     fallback: boolean
     loading: boolean
     error: string | null
+    /** Opening the book failed in a way `retry` may get past. */
+    openFailed: boolean
     notice: string | null
     percent: number
     /** Latched when content first mounts; `loading` can clear before the first
@@ -119,6 +109,8 @@ interface Navigation {
     entry: string | null
     /** Where it lands once settled; null after the reader moves meanwhile. */
     landing: Landing | null
+    /** A reading crossing (a turn onto the next chapter): its landing is saved as read. */
+    moveOnLand?: boolean
 }
 
 type Activity = Navigation | { phase: 'ready' | 'book-end' | 'disposed' }
@@ -168,6 +160,7 @@ export function createBookSession(
         fallback: false,
         loading: true,
         error: null,
+        openFailed: false,
         notice: null,
         percent: 0,
         firstChapterMounted: false,
@@ -177,19 +170,18 @@ export function createBookSession(
     let sentinel: HTMLElement | null = null
     let mounted: MountedSlice[] = []
     let ctx: PrepareContext | null = null
-    let userData: UserToContent | null = null
+    let savedProgress: ReadingProgress = {}
     let weights: FlowWeights = { weights: [], total: 0 }
     let pendingLocator: BookLocator | null = null
-    let writeChain = Promise.resolve()
-    let closing = false
-    let completed = false
-    // Opening or restoring a passage isn't reading: only the user's own moves set a status.
-    let navigated = false
-    let inputSinceChapter = false
+    // Only the reader's own input arms scrolling as reading; every placement disarms it.
+    let armed = false
+    // A move since the last capture, which the capture saves.
+    let userMoved = false
+    // The end sentinel has to come into view during an armed scroll, not be there already.
+    let sentinelHidden = false
     let currentEntryKey = entryKey(entry)
     let lastStamp = 0
     let stampTimer: ReturnType<typeof setTimeout> | null = null
-    let writeController: AbortController | null = null
 
     const activity = shallowRef<Activity>(
         shallowReactive({ phase: 'loading', entry: null, landing: null })
@@ -228,6 +220,7 @@ export function createBookSession(
     function finish(mine: Navigation) {
         if (!isCurrent(mine)) return
         const ready = (activity.value = { phase: 'ready' })
+        if (mine.moveOnLand) userMoved = true
         captureNow()
         if (!canCapture()) return
         prefetch.schedule(
@@ -303,7 +296,6 @@ export function createBookSession(
             if (disposed()) return false
 
             state.content = content
-            userData = content.user_data ?? null
             const version = fileVersion(content)
             ctx = {
                 contentId,
@@ -324,11 +316,15 @@ export function createBookSession(
             const chapters = buildChapters(source, docs)
             state.fallback = chapters.length === 0
             state.chapters = markRaw(chapters.length ? chapters : fallbackChapters(source))
-            state.loading = false
             if (!state.chapters.length) {
+                state.loading = false
                 state.error = 'This book has no readable content.'
                 return false
             }
+            // Positions compare by chapter, so the saved state is read, and reconciled, only now.
+            savedProgress = await sync.load()
+            if (disposed()) return false
+            state.loading = false
             state.entryChapters = Object.fromEntries(
                 mapEntriesToChapters(source, state.chapters, docs)
             )
@@ -337,6 +333,7 @@ export function createBookSession(
             if (disposed()) return false
             console.error(err)
             state.error = err instanceof Error ? err.message : String(err)
+            state.openFailed = true
             state.loading = false
             return false
         }
@@ -365,7 +362,7 @@ export function createBookSession(
     }
 
     function savedLocator(): BookLocator | null {
-        const value = userData?.progress?.book
+        const value = savedProgress.book
         return isBookLocator(value) && spineIndexOf(structure(), value.href) !== -1 ? value : null
     }
 
@@ -420,11 +417,21 @@ export function createBookSession(
             }
         }
 
+        // A finished book reopens at its end, unless the URL or history names a passage.
+        if (initial && savedProgress.at_end && !current.ch && !nav.historyLocator()) {
+            await navigateTo(state.chapters.length - 1, mine.landing ?? 'end', mine)
+            if (!isCurrent(mine)) return
+            canonicalize(null)
+            return finish(mine)
+        }
+
         const urlPosition = current.ch ? await positionFor(current.ch, current.frag ?? '') : null
         if (!isCurrent(mine)) return
         const urlChapter = urlPosition ? chapterIndexForPosition(state.chapters, urlPosition) : null
 
-        const locator = nav.historyLocator() ?? (initial ? savedLocator() : null)
+        // An explicit chapter or passage beats the finishing position saved in it.
+        const saved = initial && !(savedProgress.at_end && current.ch) ? savedLocator() : null
+        const locator = nav.historyLocator() ?? saved
         const locatorChapter = locator ? await chapterForLocator(locator) : null
         if (!isCurrent(mine)) return
 
@@ -519,10 +526,9 @@ export function createBookSession(
         landing: Landing,
         mine: Navigation
     ) {
-        host!.replaceChildren(...next.map(slice => slice.holder))
+        placement(() => host!.replaceChildren(...next.map(slice => slice.holder)))
         mounted = next
         state.firstChapterMounted = true
-        inputSinceChapter = false
         lastStamp = 0
         state.error = null
         // Other notices can be about this very destination (a missing fragment).
@@ -648,9 +654,10 @@ export function createBookSession(
         if (pendingLocator) stampLocator(pendingLocator, true)
     }
 
+    /** Sends reading not yet saved, before a placement moves the reader elsewhere. */
     function snapshotPassage() {
         stampNow()
-        persist.flush()
+        sync.flush()
     }
 
     function setLocator(locator: BookLocator, stamp: boolean) {
@@ -659,7 +666,13 @@ export function createBookSession(
         const doc = prepared.get(locator.href)
         const fraction = doc?.textLength ? locator.textOffset / doc.textLength : 0
         state.percent = progressPercent(weights, spineIndexOf(structure(), locator.href), fraction)
-        void persist()
+        const progress: ReadingProgress = { book: locator, progress_percent: state.percent }
+        if (userMoved) {
+            userMoved = false
+            sync.moved(progress)
+        } else {
+            sync.placed(progress)
+        }
     }
 
     function captureNow(stamp = true) {
@@ -668,117 +681,97 @@ export function createBookSession(
         if (locator) setLocator(locator, stamp)
     }
 
-    const captureSoon = useDebounceFn(captureNow, CAPTURE_DEBOUNCE)
-
-    function nextStatus(): ReadingStatus | undefined {
-        if (userData?.status && userData.status !== 'reading') return undefined
-        if (completed) return 'completed'
-        return navigated ? 'reading' : undefined
+    /** Every move the reader didn't make goes through here. Reading up to it goes to the sync
+     * first, sealed, and the scrolling after it is reading again only after new input. */
+    function placement<T>(change: () => T): T {
+        snapshotPassage()
+        armed = false
+        userMoved = false
+        sentinelHidden = false
+        return change()
     }
 
-    function write(final = false) {
-        if (!state.content || !pendingLocator || closing) return
+    /** Finishing is the reading that got here: no position write follows it, which would
+     * replace the end. */
+    function finishBook() {
+        userMoved = false
+        captureNow()
         const locator = pendingLocator
-        // Before the write: its response can arrive after the home page has mounted.
-        bumpRecentlyRead(state.content)
-        const status = nextStatus()
-        const statusChanged = !!status && status !== userData?.status
-        const parentId = state.content.parent_id
-        const payload = {
-            status,
-            progress: {
-                ...(userData?.progress ?? {}),
-                book: locator,
-                progress_percent: state.percent,
-            },
+        if (!locator) return
+        sync.finish({ book: locator, progress_percent: 100, at_end: true })
+    }
+
+    function sentinelInView(el: Element) {
+        const rect = el.getBoundingClientRect()
+        return rect.bottom > 0 && rect.top < window.innerHeight
+    }
+
+    /** Makes the scrolling that follows reading. */
+    function arm() {
+        if (!armed && sentinel && state.chapterIndex === state.chapters.length - 1) {
+            sentinelHidden = !sentinelInView(sentinel)
         }
-        if (final) {
-            closing = true
-            // An ordinary write already in flight could otherwise commit after
-            // this one and resurrect an older passage.
-            writeController?.abort()
-            const request = contentApi
-                .updateUserData(contentId, payload, { keepalive: true })
-                .then(() => {
-                    void (statusChanged
-                        ? invalidateStatusChange(parentId)
-                        : invalidateRecentlyRead())
-                })
-                .catch(err => {
-                    console.error('Failed to update reading progress', err)
-                })
-            writeChain = Promise.allSettled([writeChain, request]).then(() => {})
+        armed = true
+    }
+
+    /** Scroll mode: the end sentinel came into view while the reader scrolled. */
+    function checkCompletion() {
+        if (state.standalone || !sentinel) return
+        if (state.chapterIndex !== state.chapters.length - 1) return
+        if (!sentinelInView(sentinel)) {
+            sentinelHidden = true
             return
         }
-
-        writeChain = writeChain
-            .then(async () => {
-                if (closing) return
-                writeController = new AbortController()
-                userData = await contentApi.updateUserData(contentId, payload, {
-                    signal: writeController.signal,
-                })
-                writeController = null
-                queryClient.invalidateQueries({ queryKey: ['content', contentId] })
-                if (statusChanged) void invalidateStatusChange(parentId)
-            })
-            .catch(err => {
-                if (!closing) console.error('Failed to update reading progress', err)
-            })
-    }
-
-    const persist = useDebounceFn(() => write(), PERSIST_DEBOUNCE)
-
-    /** The debounce alone loses the last interval on a reload or a tab close,
-     * so the closing write goes out with `keepalive`. */
-    function flushProgress(final = false, stamp = true) {
-        captureNow(stamp)
-        if (final) {
-            persist.cancel()
-            write(true)
-        } else {
-            persist.flush()
-        }
-    }
-
-    function checkCompletion() {
-        if (completed || state.standalone || !inputSinceChapter || !sentinel) return
-        if (state.chapterIndex !== state.chapters.length - 1) return
-        const rect = sentinel.getBoundingClientRect()
-        if (rect.bottom <= 0 || rect.top >= window.innerHeight) return
-        completed = true
-        void persist()
+        if (!sentinelHidden) return
+        sentinelHidden = false
+        finishBook()
     }
 
     function onUserMove() {
-        navigated = true
         const current = activity.value
         if (current.phase === 'settling') current.landing = null
         if (!canCapture()) return
-        void captureSoon()
-        checkCompletion()
+        // Captured at once, reading or not: the history entry follows every move, and the reading
+        // goes to the sync now, ahead of any check or command after it.
+        userMoved = armed
+        captureNow()
+        if (armed) checkCompletion()
     }
 
-    function onInput() {
-        // The input that dismisses a modal isn't reading: without this, it can
-        // mark a short final chapter completed.
+    /** Input on the page, not in a drawer or dialog, makes the scrolling that follows reading. */
+    function onInput(event: Event) {
         if (restoring.value || hasOpenModal.value) return
-        inputSinceChapter = true
-        checkCompletion()
+        const target = event.target
+        if (target instanceof Element && target.closest('[role="dialog"], #overlays')) return
+        if (event instanceof KeyboardEvent) {
+            if (!SCROLL_KEYS.has(event.key)) return
+            if (target instanceof Element && target.closest('input, textarea, select, button')) {
+                return
+            }
+        }
+        arm()
     }
 
     function onVisibility() {
-        if (document.visibilityState === 'visible') {
-            closing = false
-            return
-        }
-        flushProgress(true)
+        if (document.visibilityState === 'visible') return sync.check()
+        onPageHide()
+    }
+
+    function onFocus() {
+        sync.check()
     }
 
     /** Restores the passage after a layout change of our own. A navigation
      * places the reader itself once it settles. */
     function reflow() {
-        if (!restoring.value) layout.value.reflow()
+        placement(() => {
+            if (!restoring.value) layout.value.reflow()
+        })
+    }
+
+    /** Native scroll anchoring moves the passage on a window resize. */
+    function onResize() {
+        placement(() => {})
     }
 
     function onClick(event: MouseEvent) {
@@ -804,7 +797,7 @@ export function createBookSession(
     /** Routes through the target's own index: the same href can live on
      * another chapter than the one the link sits on. */
     async function followLink(href: string, fragment: string) {
-        navigated = true
+        snapshotPassage()
         const mine = start('resolving')
         const source = structure()
         const index = spineIndexOf(source, href)
@@ -826,7 +819,7 @@ export function createBookSession(
         if (
             found &&
             !state.standalone &&
-            layout.value.place({ anchor: { href, fragment } }) === true
+            placement(() => layout.value.place({ anchor: { href, fragment } })) === true
         ) {
             return finish(mine)
         }
@@ -848,7 +841,7 @@ export function createBookSession(
         }
         const landing = { anchor, locator: anchor ? null : positionLocator(position) }
         if (chapter === state.chapterIndex && mounted.length && !state.standalone) {
-            layout.value.place(landing)
+            placement(() => layout.value.place(landing))
         } else {
             await navigateTo(chapter, landing, mine)
         }
@@ -869,15 +862,71 @@ export function createBookSession(
         )
     }
 
+    /** The closing write goes out with keepalive, which outlives the page; the history entry then
+     * gets the passage too. */
     function onPageHide() {
-        flushProgress(true)
+        sync.hide()
+        captureNow()
     }
 
-    function goToChapter(index: number, atEnd = false) {
+    /** `moved`: a reading crossing (turned or scrolled past the edge), whose landing is saved.
+     * Without it, a placement. */
+    function goToChapter(index: number, { atEnd = false, moved = false } = {}) {
         const target = state.chapters[index]?.target
-        if (!target || crossing()) return
-        push(target, start('routing', atEnd ? 'end' : null))
+        // Before the saved position is placed, a crossing would overwrite it.
+        if (!target || crossing() || state.loading) return
+        const mine = start('routing', atEnd ? 'end' : null)
+        mine.moveOnLand = moved
+        push(target, mine)
     }
+
+    /** Places the reader at saved progress, as a check against another device does. A finished
+     * book opens at its end, as on load: another device's finishing locator, under its own
+     * layout, can sit screens before it. */
+    async function restoreProgress(progress: ReadingProgress) {
+        if (!state.chapters.length) return
+        const mine = start('loading')
+        const last = state.chapters.length - 1
+        const locator = !progress.at_end && isBookLocator(progress.book) ? progress.book : null
+        const chapter = locator ? await chapterForLocator(locator) : null
+        if (!isCurrent(mine)) return
+        const index = progress.at_end ? last : (chapter ?? 0)
+        const landing: Landing = progress.at_end ? 'end' : chapter != null ? { locator } : 'start'
+        if (await navigateTo(index, landing, mine)) canonicalize(null)
+        finish(mine)
+    }
+
+    /** By text offset: chapters can share the last document. */
+    function inLastChapter(locator: BookLocator | undefined) {
+        if (!state.chapters.length || !isBookLocator(locator)) return false
+        const doc = docs.get(locator.href) ?? null
+        return chaptersContainingOffset(
+            state.chapters,
+            locator.href,
+            locator.textOffset,
+            doc
+        ).includes(state.chapters.length - 1)
+    }
+
+    const atEnd = (p: ReadingProgress) =>
+        !!p.at_end || ((p.progress_percent ?? 0) >= 99 && inLastChapter(p.book))
+
+    function samePlace(a: ReadingProgress, b: ReadingProgress) {
+        if (!a.book || !b.book) return !a.book && !b.book && !!a.at_end === !!b.at_end
+        return a.book.href === b.book.href && a.book.textOffset === b.book.textOffset
+    }
+
+    const sync = attachReading(contentId, {
+        content: () => state.content,
+        restore: progress => void restoreProgress(progress),
+        describe: p => `${Math.round(p.progress_percent ?? 0)} %`,
+        samePosition(a, b) {
+            if (atEnd(a) && atEnd(b)) return true
+            if (!a.book || !b.book) return !a.book && !b.book
+            return samePlace(a, b)
+        },
+        samePlace,
+    })
 
     async function closeStandalone() {
         const back = state.standalone?.returnTo
@@ -892,49 +941,53 @@ export function createBookSession(
     function endBook() {
         // Supersedes a navigation still settling, which would canonicalize.
         if (activity.value.phase === 'settling') canonicalize(null)
+        finishBook()
         activity.value = { phase: 'book-end' }
-        if (completed) return
-        completed = true
-        void persist()
     }
 
     /** Paged: one screen on, crossing chapters at either end. The end of the
      * book is one more screen, and turning onto it completes the book. */
     function turn(direction: 'next' | 'prev') {
-        if (crossing() || !mounted.length) return
+        if (crossing() || !mounted.length || state.loading) return
         if (activity.value.phase === 'book-end') {
             if (direction === 'prev') activity.value = { phase: 'ready' }
             return
         }
+        // A turn is reading.
+        arm()
         const result = layout.value.turn(direction)
         if (result === 'unavailable') return
         if (result === 'moved') return onUserMove()
         if (state.standalone) void closeStandalone()
         else if (result === 'start') {
-            if (state.chapterIndex > 0) goToChapter(state.chapterIndex - 1, true)
+            if (state.chapterIndex > 0) {
+                goToChapter(state.chapterIndex - 1, { atEnd: true, moved: true })
+            }
         } else if (state.chapterIndex < state.chapters.length - 1) {
-            goToChapter(state.chapterIndex + 1)
+            goToChapter(state.chapterIndex + 1, { moved: true })
         } else {
             endBook()
         }
     }
 
-    /** Paged: jumps within the chapter, clamped. */
+    /** Paged: jumps within the chapter, clamped. A placement, as the slider is. */
     function goToScreen(index: number) {
         if (crossing() || !mounted.length) return
         if (activity.value.phase === 'book-end') activity.value = { phase: 'ready' }
-        if (layout.value.showScreen(index)) onUserMove()
+        if (placement(() => layout.value.showScreen(index))) captureNow()
     }
 
     function setMode(preferred: LayoutKind) {
         if (activity.value.phase === 'book-end') activity.value = { phase: 'ready' }
-        const mode = modeFor(preferred)
-        if (mode === layout.value.kind) return
-        useLayout(mode, layout.value.capture())
-        const current = activity.value
-        if (current.phase === 'settling' && current.landing) {
-            layout.value.place(current.landing, true)
-        }
+        placement(() => {
+            const mode = modeFor(preferred)
+            if (mode === layout.value.kind) return
+            useLayout(mode, layout.value.capture())
+            const current = activity.value
+            if (current.phase === 'settling' && current.landing) {
+                layout.value.place(current.landing, true)
+            }
+        })
     }
 
     /** The new layout opens at `seed`, and binds once Vue has rendered its CSS. */
@@ -971,12 +1024,15 @@ export function createBookSession(
     // The rate-limited stamp can lag a turn by half a second.
     const removeLeaveGuard = nav.beforeLeave(stampNow)
     window.addEventListener('pagehide', onPageHide)
+    window.addEventListener('focus', onFocus)
+    window.addEventListener('resize', onResize)
+    window.addEventListener('orientationchange', onResize)
     document.addEventListener('visibilitychange', onVisibility)
     for (const name of inputEvents) window.addEventListener(name, onInput, { passive: true })
 
     const chapter = computed(() => state.chapters[state.chapterIndex] ?? null)
 
-    const booted = init()
+    let booted = init()
     void applyEntry(entry, activity.value as Navigation)
 
     return reactive({
@@ -992,6 +1048,15 @@ export function createBookSession(
         screen: computed(() => layout.value.screen),
         /** Paged: past the last screen of the book. */
         atBookEnd: computed(() => activity.value.phase === 'book-end'),
+        sync,
+
+        /** Opens the book again after it failed to. */
+        retry() {
+            if (!state.openFailed) return
+            Object.assign(state, { openFailed: false, error: null, loading: true })
+            booted = init()
+            void applyEntry(entry, start('loading'))
+        },
 
         setElements(elements: { host: HTMLElement | null; sentinel: HTMLElement | null }) {
             host = elements.host
@@ -1007,11 +1072,11 @@ export function createBookSession(
             const key = entryKey(next)
             // A restore's canonicalized entry comes back here with the same key.
             if (key === currentEntryKey) return
-            navigated = true
             currentEntryKey = key
             // The history entry has already moved, so this passage belongs to
             // the one we are leaving and must not be stamped onto it.
-            flushProgress(false, false)
+            captureNow(false)
+            sync.flush()
             clearStampTimer()
             const current = activity.value
             // A push of our own arrives here; it keeps its landing.
@@ -1023,6 +1088,8 @@ export function createBookSession(
         },
 
         snapshotPassage,
+        /** The scroll that follows is the reader's own (key and click-zone paging). */
+        arm,
         goToChapter,
         closeStandalone,
         turn,
@@ -1034,26 +1101,28 @@ export function createBookSession(
 
         // Unstamped: Back has already moved the entry.
         leave() {
-            flushProgress(true, false)
-            return writeChain
+            captureNow(false)
+            sync.flush()
         },
 
         dispose() {
-            if (disposed()) return writeChain
+            if (disposed()) return
             clearStampTimer()
-            flushProgress(true, false)
+            captureNow(false)
+            sync.detach()
             activity.value = { phase: 'disposed' }
             stopSettings()
             controller.abort()
             window.removeEventListener('pagehide', onPageHide)
+            window.removeEventListener('focus', onFocus)
+            window.removeEventListener('resize', onResize)
+            window.removeEventListener('orientationchange', onResize)
             removeLeaveGuard()
             document.removeEventListener('visibilitychange', onVisibility)
             for (const name of inputEvents) window.removeEventListener(name, onInput)
             while (hostWaiters.length) hostWaiters.pop()!()
-            captureSoon.cancel()
             prefetch.cancel()
             layout.value.dispose()
-            return writeChain
         },
     })
 }

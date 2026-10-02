@@ -133,10 +133,12 @@ describe('paged controls', () => {
         const store = useBookDisplayStore()
         const turn = vi.fn()
         const goToChapter = vi.fn()
+        const arm = vi.fn()
         store.session = {
             layoutMode,
             turn,
             goToChapter,
+            arm,
             chapterIndex: 1,
             standalone: null,
         } as unknown as BookSession
@@ -150,7 +152,7 @@ describe('paged controls', () => {
             }),
             { global: { plugins: [pinia, router] }, attachTo: document.body }
         )
-        return { store, turn, goToChapter, controls }
+        return { store, turn, goToChapter, arm, controls }
     }
 
     const key = (name: string, init: KeyboardEventInit = {}) =>
@@ -199,19 +201,30 @@ describe('paged controls', () => {
                 configurable: true,
             })
         height(5000)
-        const { turn, goToChapter } = setup('scroll')
+        const { turn, goToChapter, arm } = setup('scroll')
+        window.scrollBy = vi.fn(() => expect(arm).toHaveBeenCalledOnce())
         key('ArrowDown')
         expect(window.scrollBy).toHaveBeenCalledOnce()
-        // At the top, back into the previous chapter, landing at its end.
+        // At the top, back into the previous chapter, landing at its end: reading crossings.
         key('ArrowUp')
         height(800)
         key('ArrowDown')
         expect(goToChapter.mock.calls).toEqual([
-            [0, true],
-            [2, false],
+            [0, { atEnd: true, moved: true }],
+            [2, { atEnd: false, moved: true }],
         ])
         expect(turn).not.toHaveBeenCalled()
         Reflect.deleteProperty(document.documentElement, 'scrollHeight')
+    })
+
+    it('moves between chapters on , and . as placements', () => {
+        const { goToChapter } = setup('scroll')
+        key(',')
+        key('.')
+        expect(goToChapter.mock.calls).toEqual([
+            [0, {}],
+            [2, {}],
+        ])
     })
 
     it('turns on zone taps, except while zoomed in', () => {

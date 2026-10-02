@@ -196,8 +196,12 @@ CREATE TABLE user_to_content (
     rating INTEGER,
     progress JSONB NOT NULL DEFAULT '{}',
     progress_updated_at TIMESTAMPTZ,
+    revision TEXT,
+    last_read_at TIMESTAMPTZ,
     UNIQUE (user_id, library_id, uri)
 );
+CREATE INDEX idx_utc_user_last_read ON user_to_content (user_id, last_read_at)
+    WHERE last_read_at IS NOT NULL;
 
 CREATE TABLE custom_lists (
     id TEXT PRIMARY KEY,

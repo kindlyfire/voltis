@@ -98,21 +98,23 @@ export function useBookControls() {
         if (direction === 'next' ? atBottom() : atTop()) {
             // Backwards out of a chapter lands at the bottom of the one before,
             // so paging back doesn't skip it.
-            goToChapter(direction === 'next' ? 1 : -1, direction === 'prev')
+            goToChapter(direction === 'next' ? 1 : -1, { atEnd: direction === 'prev', moved: true })
             return
         }
+        session.arm()
         const step = (window.innerHeight - getLayoutTop()) * PAGE_FACTOR
         window.scrollBy({ top: direction === 'next' ? step : -step, behavior: 'smooth' })
     }
 
-    function goToChapter(delta: number, atEnd = false) {
+    /** `moved`: paged past the chapter's edge, which is reading; otherwise a placement. */
+    function goToChapter(delta: number, options: { atEnd?: boolean; moved?: boolean } = {}) {
         const session = store.session
         if (!session) return
         if (session.standalone) {
             void session.closeStandalone()
             return
         }
-        session.goToChapter(session.chapterIndex + delta, atEnd)
+        session.goToChapter(session.chapterIndex + delta, options)
     }
 
     function handleKeydown(e: KeyboardEvent) {

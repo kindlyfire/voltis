@@ -33,15 +33,18 @@
         </template>
     </div>
 
+    <ComicEndCard v-if="reader.state && !reader.state.loading && !reader.siblings.next" />
     <div class="browser-ui-padding"></div>
 </template>
 
 <script setup lang="ts">
-import { useDebounceFn, useEventListener } from '@vueuse/core'
+import { useEventListener } from '@vueuse/core'
 import { ref, onMounted } from 'vue'
 import { useNavbarScrollHide } from '@/pages/_layout/useLayoutStore'
 import AButton from '@/ui/AButton.vue'
 import ASpinner from '@/ui/ASpinner.vue'
+import { keysOwnedElsewhere } from '@/ui/overlay'
+import ComicEndCard from './ComicEndCard.vue'
 import { pageStyle, useReaderStore } from './useComicDisplayStore'
 
 const reader = useReaderStore()
@@ -53,35 +56,56 @@ function getPageStyle(index: number) {
     return page ? pageStyle(page, reader.settings.longstripWidth) : {}
 }
 
-// Update current page based on scroll position
-const updateCurrentPage = useDebounceFn(
-    () => {
-        if (!containerRef.value) return
+/** The page at the viewport's centre, taken at each scroll: reading, unless a placement or a
+ * reflow moved the strip. */
+function updateCurrentPage() {
+    const children = containerRef.value?.children
+    if (!children?.length) return
+    const centre = window.scrollY + window.innerHeight / 2
+    let lo = 0
+    let hi = children.length - 1
+    while (lo < hi) {
+        const mid = Math.ceil((lo + hi) / 2)
+        if ((children[mid] as HTMLElement).offsetTop <= centre) lo = mid
+        else hi = mid - 1
+    }
+    reader.setPage(lo, { restore: reader.restoring || !reader.armed })
+}
 
-        const container = containerRef.value
-        const children = Array.from(container.children) as HTMLElement[]
-        const viewportCenter = window.scrollY + window.innerHeight / 2
+const SCROLL_KEYS = new Set(['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', ' ', 'Home', 'End'])
 
-        // Find page at center of viewport
-        for (let i = children.length - 1; i >= 0; i--) {
-            const el = children[i]!
-            if (el.offsetTop <= viewportCenter) {
-                reader.setPage(i, { restore: reader.restoring })
-                break
-            }
-        }
-    },
-    50,
-    { maxWait: 150 }
-)
+/** Input on the strip itself (or its scrollbar), not on the sidebar, a drawer or a dialog. */
+function arm(e: Event) {
+    const target = e.target
+    if (e instanceof KeyboardEvent) {
+        if (!SCROLL_KEYS.has(e.key) || reader.sidebarOpen || keysOwnedElsewhere(e)) return
+    } else if (
+        target !== document.documentElement &&
+        !(target instanceof Node && document.querySelector('.reader-main')?.contains(target))
+    ) {
+        return
+    }
+    reader.armed = true
+}
 
-useEventListener(window, 'scroll', updateCurrentPage)
-useEventListener(
-    window,
-    ['wheel', 'touchstart', 'keydown', 'pointerdown'],
-    () => (reader.restoring = false),
-    { passive: true }
-)
+let lastScrollY = window.scrollY
+/** Scrolled down by the reader until the last page's bottom is in view: a deliberate finish. */
+function checkFinish() {
+    const down = window.scrollY > lastScrollY
+    lastScrollY = window.scrollY
+    if (!down || !reader.armed || reader.restoring || !containerRef.value) return
+    const last = containerRef.value.lastElementChild
+    if (!last || last.getBoundingClientRect().bottom > window.innerHeight) return
+    reader.state?.finish()
+}
+
+useEventListener(window, 'scroll', () => {
+    updateCurrentPage()
+    checkFinish()
+})
+useEventListener(window, ['wheel', 'touchstart', 'pointerdown', 'keydown'], arm, { passive: true })
+// A reflow moves the strip under the reader: not reading until the next input.
+useEventListener(window, ['resize', 'orientationchange'], () => reader.placement())
 
 onMounted(() => {
     reader.goToPage()

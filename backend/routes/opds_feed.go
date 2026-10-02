@@ -670,7 +670,7 @@ func (o *OPDSRoutes) entryFor(r contentListRow, parent *contentListRow, l opdsLi
 			Count: len(names)}
 		// Read directly: r.utc() is nil without a user row.
 		if e.PSE.LastRead = opdsLastRead(r.UTCProgress, len(names)); e.PSE.LastRead > 0 {
-			e.PSE.LastReadAt = r.UTCProgressUpdatedAt
+			e.PSE.LastReadAt = r.UTCLastReadAt
 		}
 	}
 	return e, true

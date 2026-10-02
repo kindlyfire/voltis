@@ -14,6 +14,8 @@
                 <AIconButton :icon="IconClose" label="Close" @click="store.sidebarOpen = false" />
             </div>
 
+            <ReaderStatusRow v-if="session" :sync="session.sync" class="mb-3" />
+
             <div v-if="session?.chapters.length">
                 <div class="mb-2 flex items-center gap-2">
                     <AIconButton
@@ -110,6 +112,7 @@ import ATabs from '@/ui/ATabs.vue'
 import { IconArrowLeft, IconChevronLeft, IconChevronRight, IconClose } from '@/ui/icons'
 import type { ReaderExit } from '../readerExit'
 import ReaderHeading from '../ReaderHeading.vue'
+import ReaderStatusRow from '../ReaderStatusRow.vue'
 import { bookShortcuts, type Shortcut } from '../shortcuts'
 import BookContents from './BookContents.vue'
 import BookSettings from './BookSettings.vue'

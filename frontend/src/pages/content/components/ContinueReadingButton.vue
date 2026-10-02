@@ -1,94 +1,113 @@
 <template>
-    <AButton :leading-icon="IconBookOpen" :loading="readingStatus == null" @click="onClick">
-        {{ resume ? 'Continue reading' : 'Start reading' }}
+    <AButton v-if="failed" :leading-icon="IconRefresh" tone="danger" @click="retry">
+        Couldn't load · Retry
+    </AButton>
+    <AButton
+        v-else-if="qContinue.data.value?.reason === 'empty'"
+        :leading-icon="IconBookOpen"
+        disabled
+    >
+        No readable {{ childNoun(type, 2) }}
+    </AButton>
+    <AButton
+        v-else
+        :leading-icon="IconBookOpen"
+        :loading="!qContinue.data.value && qContinue.isFetching.value"
+        @click="onClick"
+    >
+        {{ label }}
     </AButton>
 </template>
 
 <script setup lang="ts">
 import { useKeyModifier } from '@vueuse/core'
-import { computed } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { isBookLocator } from '@/pages/read/BookDisplay/bookEntry'
 import AButton from '@/ui/AButton.vue'
-import { IconBookOpen } from '@/ui/icons'
+import { IconBookOpen, IconRefresh } from '@/ui/icons'
 import { contentApi } from '@/utils/api/content'
-import { showResetReadingModal } from './ResetReadingModal.vue'
+import { readingApi } from '@/utils/api/reading'
+import type { ContentType } from '@/utils/api/types'
+import { childNoun } from '@/utils/contentProgress'
+import { showClearReadingModal } from './ClearReadingModal.vue'
 
 const props = defineProps<{
     contentId: string
+    type: ContentType
 }>()
 
 const router = useRouter()
-const qContent = contentApi.useGet(() => props.contentId)
-const qChildren = contentApi.useList(() => ({
-    parent_id: props.contentId,
-    sort: 'order',
-    sort_order: 'asc',
-}))
+const qContinue = readingApi.useContinue(() => props.contentId)
+// Read again couldn't find the series' first volume; nothing was cleared.
+const lookupFailed = ref(false)
+watch(
+    () => props.contentId,
+    () => (lookupFailed.value = false)
+)
+let unmounted = false
+onUnmounted(() => (unmounted = true))
+const failed = computed(
+    () =>
+        lookupFailed.value ||
+        (!qContinue.data.value && qContinue.isError.value && !qContinue.isFetching.value)
+)
 
-const readingStatus = computed(() => {
-    const content = qContent.data.value
-    if (!content) return null
-    const children = qChildren.data.value?.data ?? []
-    if (!qChildren.data.value) return null
+function retry() {
+    if (lookupFailed.value) void readAgain()
+    else void qContinue.refetch()
+}
 
-    if (content.type.includes('series')) {
-        const firstUnread = children.findIndex(child => {
-            return child.user_data?.status !== 'completed'
-        })
-        if (firstUnread === -1) {
-            return 'all-completed'
-        } else if (firstUnread === 0 && children[firstUnread]!.user_data?.status != 'reading') {
-            return 'starting'
-        } else {
-            return 'resume'
-        }
-    } else {
-        // `0` is a real position for both a comic page and a book offset.
-        const progress = content.user_data?.progress
-        const started = typeof progress?.current_page === 'number' || isBookLocator(progress?.book)
-        return started ? 'resume' : 'starting'
-    }
+const ACTION_LABELS = { start: 'Start reading', resume: 'Continue reading', next: 'Read next' }
+
+const label = computed(() => {
+    const c = qContinue.data.value
+    if (!c) return 'Continue reading'
+    if (c.reason === 'held' && c.target) return `Resume ${c.target.title}`
+    if (c.reason === 'earlier_unread') return 'Read earlier volume'
+    if (c.reason === 'completed' || c.reason === 'caught_up') return 'Read again'
+    if (!c.action) return 'Start reading'
+    return ACTION_LABELS[c.action]
 })
-
-const resume = computed(() => readingStatus.value === 'resume')
 
 const ctrlModifier = useKeyModifier('Control')
 
-async function onClick() {
-    const content = qContent.data.value
-    const rs = readingStatus.value
-    if (rs == null || !content) return
+function open(id: string) {
+    if (ctrlModifier.value) window.open(`/r/${id}?page=resume`, '_blank')
+    else void router.push({ path: `/r/${id}`, query: { page: 'resume' } })
+}
 
-    if (rs === 'all-completed') {
-        const confirmed = await showResetReadingModal(props.contentId)
-        if (confirmed) {
-            const firstChild = qChildren.data.value?.data[0]
-            if (firstChild) {
-                router.push('/r/' + firstChild.id)
-            }
+/** Read again starts over: the item itself, or a series' first volume, found before clearing. */
+async function readAgain() {
+    const id = props.contentId
+    // The page may have moved on to other content meanwhile.
+    const left = () => unmounted || props.contentId !== id
+    lookupFailed.value = false
+    let target = id
+    if (qContinue.data.value?.series_id === id) {
+        try {
+            const first = await contentApi.ids(
+                { parent_id: id, valid: true, sort: 'order', sort_order: 'asc' },
+                0,
+                1
+            )
+            if (!first.ids[0]) throw new Error('No readable volume')
+            target = first.ids[0]
+        } catch {
+            if (!left()) lookupFailed.value = true
+            return
         }
-        return
+        if (left()) return
     }
+    if ((await showClearReadingModal(id)) && !left()) open(target)
+}
 
-    let targetId = props.contentId
-    if (content.type.includes('series')) {
-        const firstUnread = qChildren.data.value!.data.find(child => {
-            return child.user_data?.status !== 'completed'
-        })
-        if (!firstUnread) return
-        targetId = firstUnread.id
+async function onClick() {
+    const c = qContinue.data.value
+    if (!c) return
+    if (c.target) return open(c.target.id)
+    if (c.reason === 'earlier_unread' && c.earlier_unread_id) {
+        return void router.push(`/${c.earlier_unread_id}`)
     }
-
-    if (ctrlModifier.value) {
-        window.open(`/r/${targetId}?page=resume`, '_blank')
-    } else {
-        router.push({
-            path: `/r/${targetId}`,
-            query: {
-                page: 'resume',
-            },
-        })
-    }
+    if (c.reason === 'completed' || c.reason === 'caught_up') await readAgain()
 }
 </script>

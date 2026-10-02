@@ -1,13 +1,8 @@
-import { useDebounceFn } from '@vueuse/core'
 import { reactive, readonly, toRefs } from 'vue'
-import {
-    bumpRecentlyRead,
-    contentApi,
-    invalidateRecentlyRead,
-    invalidateStatusChange,
-} from '@/utils/api/content'
-import type { Content, ReadingStatus, UserToContent } from '@/utils/api/types'
+import { contentApi } from '@/utils/api/content'
+import type { Content, ReadingProgress } from '@/utils/api/types'
 import { API_URL } from '@/utils/fetch'
+import { attachReading } from '../readingSync'
 import type { PageDimensions } from './types'
 import { createPageLoader, getPagesInPreloadOrder, type PageLoaderState } from './usePageLoader'
 
@@ -20,6 +15,8 @@ export interface ComicStateValues {
     loading: boolean
     handlers: {
         onReady: () => void
+        /** Places the reader on a page, writing nothing. */
+        onPlace: (page: number) => void
     } | null
     loaders: PageLoaderState[]
     pageDimensions: PageDimensions[]
@@ -42,96 +39,98 @@ export function createComicState(contentId: string, initialPage: number | 'last'
         pageDimensions: [],
     })
 
-    let userData: UserToContent | null = null
-    let updateProgressPromise = Promise.resolve()
     let disposed = false
-    // Opening or restoring a position isn't reading: only a page change by the user sets a status.
-    let navigated = false
     const contentController = new AbortController()
 
-    // Mirrored for OPDS page streaming by recordComicPage (backend/routes/opds_progress.go).
-    const updateProgress = useDebounceFn(() => {
-        if (!state.content) return
-        // Before the write: its response can arrive after the home page has mounted.
-        bumpRecentlyRead(state.content)
+    const pages = () => state.pageDimensions.length
+    const clamp = (page: number) => Math.min(Math.max(0, page), pages() - 1)
 
-        updateProgressPromise = updateProgressPromise
-            .then(async () => {
-                const pages = state.pageDimensions.length
-                const status: ReadingStatus | undefined =
-                    navigated && (!userData?.status || userData.status === 'reading')
-                        ? state.page === pages - 1
-                            ? 'completed'
-                            : 'reading'
-                        : undefined
+    function pageFor(progress: ReadingProgress): number {
+        if (progress.at_end) return Math.max(0, pages() - 1)
+        const page = progress.current_page
+        return typeof page === 'number' && !isNaN(page) ? clamp(page) : 0
+    }
 
-                const previous = userData?.status ?? null
-                userData = await contentApi.updateUserData(state.content!.id, {
-                    status,
-                    progress: {
-                        ...userData?.progress,
-                        current_page: state.page,
-                        ...(pages > 0 && {
-                            progress_percent: Math.round(((state.page + 1) / pages) * 1000) / 10,
-                        }),
-                    },
-                })
-                if (status && status !== previous) invalidateStatusChange(state.content!.parent_id)
-                else invalidateRecentlyRead()
-            })
-            .catch(err => {
-                console.error('Failed to update reading progress', err)
-            })
-    }, 1000)
+    function position(page: number): ReadingProgress {
+        return {
+            current_page: page,
+            // Only a finish reaches 100%.
+            ...(pages() > 0 && {
+                progress_percent: Math.min(Math.round((page / pages()) * 1000) / 10, 99.9),
+            }),
+        }
+    }
 
-    contentApi
-        .get(contentId, { signal: contentController.signal }, { pageSizes: true })
-        .then(content => {
-            if (disposed) return
-            if (!state.handlers) {
-                throw new Error('Comic handlers not set')
-            }
+    const samePage = (a: ReadingProgress, b: ReadingProgress) => pageFor(a) === pageFor(b)
 
-            state.content = content
-            userData = content.user_data ?? null
-            state.pageDimensions = (content.file_data.pages ?? []).map(p => ({
-                width: p[1] ?? 0,
-                height: p[2] ?? 0,
-            }))
-            // We just use `reactive` to turn it into UnwrapNestedRefs<_>
-            state.loaders = reactive(
-                state.pageDimensions.map((_, index) => createPageLoader(index, getPageUrl(index)))
-            )
-            state.error = null
-            state.loading = false
-            let initialPage = 0
-            if (state.initialPage === 'resume') {
-                const progress = userData?.progress?.current_page ?? 0
-                if (typeof progress === 'number' && !isNaN(progress)) {
-                    initialPage = progress
+    const sync = attachReading(contentId, {
+        content: () => state.content,
+        restore: progress => state.handlers?.onPlace(pageFor(progress)),
+        describe: progress => `p.${pageFor(progress) + 1}`,
+        samePosition: samePage,
+        samePlace: samePage,
+    })
+
+    /** Reads the content and its saved state, then places the reader; again after a failure. */
+    function open() {
+        state.error = null
+        state.loading = true
+        contentApi
+            .get(contentId, { signal: contentController.signal }, { pageSizes: true })
+            .then(async content => {
+                if (disposed) return
+                if (!state.handlers) {
+                    throw new Error('Comic handlers not set')
                 }
-            } else if (state.initialPage === 'last') {
-                initialPage = state.pageDimensions.length - 1
-            } else {
-                initialPage = state.initialPage
-            }
-            setPage(initialPage, { restore: true })
-            state.handlers.onReady()
-        })
-        .catch(e => {
-            if (disposed) return
-            console.error(e)
-            state.error = e instanceof Error ? e.message : String(e)
-            state.loading = false
-        })
 
-    /** `restore` places the reader without counting as navigation. */
+                state.content = content
+                state.pageDimensions = (content.file_data.pages ?? []).map(p => ({
+                    width: p[1] ?? 0,
+                    height: p[2] ?? 0,
+                }))
+                // Positions compare by page, so the saved state is read, and reconciled, only now.
+                const saved = await sync.load()
+                if (disposed) return
+                // We just use `reactive` to turn it into UnwrapNestedRefs<_>
+                state.loaders = reactive(
+                    state.pageDimensions.map((_, index) =>
+                        createPageLoader(index, getPageUrl(index))
+                    )
+                )
+                state.error = null
+                state.loading = false
+                let initialPage = 0
+                if (state.initialPage === 'resume') {
+                    initialPage = pageFor(saved)
+                } else if (state.initialPage === 'last') {
+                    initialPage = pages() - 1
+                } else {
+                    initialPage = state.initialPage
+                }
+                setPage(initialPage, { restore: true })
+                state.handlers.onReady()
+            })
+            .catch(e => {
+                if (disposed) return
+                console.error(e)
+                state.error = e instanceof Error ? e.message : String(e)
+                state.loading = false
+            })
+    }
+    open()
+
+    /** Real reading unless `restore`, which places the reader without writing. */
     function setPage(page: number, { restore = false } = {}) {
-        if (!restore) navigated = true
-        state.page = Math.min(Math.max(0, page), state.pageDimensions.length - 1)
+        state.page = clamp(page)
         cleanupDistantLoaders()
         preloadPages()
-        updateProgress()
+        if (restore) sync.placed(position(state.page))
+        else sync.moved(position(state.page))
+    }
+
+    function finish() {
+        if (!state.content) return
+        sync.finish({ current_page: pages() - 1, progress_percent: 100, at_end: true })
     }
 
     function cleanupDistantLoaders() {
@@ -159,25 +158,41 @@ export function createComicState(contentId: string, initialPage: number | 'last'
         return `${API_URL}/files/comic-page/${state.contentId}/${index}?v=${state.content?.file_mtime ?? ''}`
     }
 
+    function onVisibility() {
+        if (document.visibilityState === 'hidden') sync.hide()
+        else sync.check()
+    }
+    const onPageHide = () => sync.hide()
+    const onFocus = () => sync.check()
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pagehide', onPageHide)
+    window.addEventListener('focus', onFocus)
+
     return reactive({
         ...toRefs(readonly(state)),
+        sync,
         setPage,
+        finish,
+        retry() {
+            if (state.error) open()
+        },
         setHandlers(handlers: ComicStateValues['handlers']) {
             state.handlers = handlers
         },
-        /** Bumps and starts the exit write; the returned promise settles when it lands. */
+        /** Sends the exit write before the next page reads. */
         leave() {
-            updateProgress.flush()
-            return updateProgressPromise
+            sync.flush()
         },
         dispose() {
             disposed = true
             contentController.abort()
-            updateProgress.flush()
+            document.removeEventListener('visibilitychange', onVisibility)
+            window.removeEventListener('pagehide', onPageHide)
+            window.removeEventListener('focus', onFocus)
             for (const loader of state.loaders) {
                 loader.dispose()
             }
-            return updateProgressPromise
+            sync.detach()
         },
     })
 }

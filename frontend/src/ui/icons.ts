@@ -10,6 +10,7 @@ export { default as IconAccountGroupFilled } from '~icons/material-symbols-light
 export { default as IconAlert } from '~icons/material-symbols-light/warning-outline'
 export { default as IconAlertCircle } from '~icons/material-symbols-light/error-outline'
 export { default as IconArrowLeft } from '~icons/material-symbols-light/arrow-back'
+export { default as IconArrowRight } from '~icons/material-symbols-light/arrow-forward'
 export { default as IconArrowUp } from '~icons/material-symbols-light/arrow-upward'
 export { default as IconAutoStories } from '~icons/material-symbols-light/auto-stories-outline'
 export { default as IconBookOpen } from '~icons/material-symbols-light/menu-book-outline'

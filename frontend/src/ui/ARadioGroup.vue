@@ -112,12 +112,14 @@ async function select(value: V) {
         font-size: 12px;
     }
 
+    /* Top-aligned, so the control stays on the first line when the text wraps or has a
+       description; the padding still makes a one-line row 36px. */
     .a-radio {
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         gap: 12px;
         min-height: 36px;
-        padding-block: 4px;
+        padding-block: 7px;
         font-size: 15px;
         cursor: pointer;
     }

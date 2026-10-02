@@ -68,6 +68,13 @@ function fakeSession(structure: BookStructure | null = STRUCTURE) {
         snapshotPassage: vi.fn(),
         dispose: vi.fn(),
         layoutMode: 'paged',
+        sync: {
+            acked: { status: 'reading' },
+            series: null,
+            tracking: true,
+            command: vi.fn(),
+            seriesCommand: vi.fn(),
+        },
     })
 }
 
@@ -180,5 +187,19 @@ describe('BookReaderDrawer tabs', () => {
         await nextTick()
         await pick('Contents')
         expect(panel('Contents').scrollTop).toBe(310)
+    })
+})
+
+describe('BookReaderDrawer status row', () => {
+    it("shows the item's status and marks it completed through the sync", async () => {
+        const { session } = render()
+        await setOpen(true)
+        const row = document.querySelector('.a-drawer')!
+        expect(row.textContent).toContain('Reading')
+        const button = [...row.querySelectorAll('button')].find(
+            b => b.textContent?.trim() === 'Mark completed'
+        )!
+        button.click()
+        expect(session.sync.command).toHaveBeenCalledWith({ op: 'mark_completed' })
     })
 })

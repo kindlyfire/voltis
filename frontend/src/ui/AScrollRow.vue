@@ -22,6 +22,14 @@
                 focusable-when-disabled
                 @click="scroll(1)"
             />
+            <AIconButton
+                v-if="seeAll"
+                :icon="IconArrowRight"
+                :label="`See all ${title}`"
+                :to="seeAll"
+                variant="tonal"
+                size="sm"
+            />
         </div>
         <div
             ref="track"
@@ -44,8 +52,9 @@
 <script setup lang="ts">
 import { useDebounceFn, useEventListener, useResizeObserver } from '@vueuse/core'
 import { onMounted, onUpdated, ref, useId, useTemplateRef } from 'vue'
+import type { RouteLocationRaw } from 'vue-router'
 import AIconButton from './AIconButton.vue'
-import { IconChevronLeft, IconChevronRight } from './icons'
+import { IconArrowRight, IconChevronLeft, IconChevronRight } from './icons'
 
 /** A titled, horizontally scrolling row of equal-width items (home page sections). */
 withDefaults(
@@ -53,6 +62,8 @@ withDefaults(
         /** Also names the region and the scroll buttons. */
         title: string
         itemWidth?: number
+        /** The full listing, linked from the end of the header. */
+        seeAll?: RouteLocationRaw
     }>(),
     { itemWidth: 176 }
 )

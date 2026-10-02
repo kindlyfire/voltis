@@ -19,7 +19,13 @@ function mountWith(links: MetadataLink[]) {
     queryClient.setQueryData(['content', 'metadata', 'c_1'], { links, layers: [] })
     return shallowMount(InfoHeader, {
         props: { content },
-        global: { plugins: [[VueQueryPlugin, { queryClient }]], stubs: { RouterLink: true } },
+        global: {
+            plugins: [[VueQueryPlugin, { queryClient }]],
+            stubs: {
+                RouterLink: { template: '<a><slot /></a>' },
+                AChip: { template: '<span><slot /></span>' },
+            },
+        },
     })
 }
 

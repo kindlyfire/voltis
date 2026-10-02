@@ -17,7 +17,12 @@ export default defineConfig({
         coverage: {
             provider: 'istanbul',
             include: ['src/**'],
-            exclude: ['**/*.test.ts', '**/browserFixture.ts', '**/fakeNav.ts'],
+            exclude: [
+                '**/*.test.ts',
+                '**/browserFixture.ts',
+                '**/fakeNav.ts',
+                '**/fakeReadingServer.ts',
+            ],
         },
         projects: [
             {

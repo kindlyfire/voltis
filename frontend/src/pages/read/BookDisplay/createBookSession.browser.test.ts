@@ -1,7 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick, reactive, ref, watch } from 'vue'
 import { contentApi } from '@/utils/api/content'
-import type { BookLocator, BookStructure, Content, UserToContent } from '@/utils/api/types'
+import { readingApi } from '@/utils/api/reading'
+import type {
+    BookLocator,
+    BookStructure,
+    Content,
+    ReadingProgress,
+    ReadingRequest,
+    ReadingResponse,
+} from '@/utils/api/types'
+import { resetReadingActor } from '../readingSync'
 import type { BookEntry } from './bookEntry'
 import { zBookSettings, type BookSettings } from './bookSettings'
 import { mountReader, words } from './browserFixture'
@@ -15,11 +24,15 @@ vi.mock('@/utils/api/content', () => ({
         get: vi.fn(),
         bookStructure: vi.fn(),
         bookDocument: vi.fn(),
-        updateUserData: vi.fn(),
     },
-    bumpRecentlyRead: vi.fn(),
-    invalidateRecentlyRead: vi.fn(),
-    invalidateStatusChange: vi.fn(),
+}))
+
+vi.mock('@/utils/api/reading', () => ({
+    readingApi: { get: vi.fn(), post: vi.fn() },
+    bumpContinueReading: vi.fn(),
+    invalidateReading: vi.fn(),
+    markPositionSaved: vi.fn(),
+    ReadingConflict: class extends Error {},
 }))
 
 const STRUCTURE: BookStructure = {
@@ -49,15 +62,28 @@ const DOCS: Record<string, string> = {
     'notes.xhtml': `<html><head>${BASE}</head><body><p>${words(20, 'n')}</p></body></html>`,
 }
 
-function content(progress: Record<string, unknown> = {}): Content {
-    return {
-        id: 'c_1',
-        file_mtime: '2026-01-01',
-        title: 'A Book',
-        type: 'book',
-        user_data: { status: 'reading', progress },
-    } as unknown as Content
+const CONTENT = { id: 'c_1', file_mtime: '2026-01-01', title: 'A Book', type: 'book' } as Content
+
+/** The saved reading state the session restores. */
+function reading(progress: ReadingProgress = {}) {
+    vi.mocked(readingApi.get).mockResolvedValue({
+        state: {
+            revision: null,
+            status: 'reading',
+            status_updated_at: null,
+            progress,
+            progress_updated_at: null,
+            last_read_at: null,
+        },
+        series: null,
+        writer: null,
+    })
 }
+
+const lastWrite = () =>
+    vi.mocked(readingApi.post).mock.calls.at(-1)![1] as ReadingRequest & {
+        progress: ReadingProgress
+    }
 
 function deferred<T>() {
     let resolve!: (value: T) => void
@@ -72,15 +98,27 @@ const frames = async (n = 2) => {
 let cleanup: (() => Promise<void>) | null = null
 
 beforeEach(() => {
-    vi.mocked(contentApi.get).mockResolvedValue(content())
+    vi.mocked(contentApi.get).mockResolvedValue(CONTENT)
+    reading()
     vi.mocked(contentApi.bookStructure).mockResolvedValue(STRUCTURE)
     vi.mocked(contentApi.bookDocument).mockImplementation(async (_id, href) => DOCS[href]!)
-    vi.mocked(contentApi.updateUserData).mockResolvedValue({ progress: {} } as UserToContent)
+    vi.mocked(readingApi.post).mockImplementation(
+        async (_id, req) =>
+            ({
+                state: { revision: `${req.writer_id}:${req.seq}`, status: 'reading', progress: {} },
+                outcome: 'saved',
+                previous: null,
+                series: null,
+                writer: req.writer_id ?? null,
+                series_previous: null,
+            }) as unknown as ReadingResponse
+    )
 })
 
 afterEach(async () => {
     await cleanup?.()
     cleanup = null
+    resetReadingActor()
     Reflect.deleteProperty(document, 'fonts')
     window.scrollTo({ top: 0, behavior: 'instant' })
 })
@@ -100,7 +138,7 @@ function holdFonts() {
 async function openSettling() {
     const release = holdFonts()
     const saved: BookLocator = { version: 1, href: 'a.xhtml', textOffset: 'a0 '.length * 300 }
-    vi.mocked(contentApi.get).mockResolvedValue(content({ book: saved }))
+    reading({ book: saved })
     const opened = await open({}, { settle: false })
     await vi.waitFor(() => expect(opened.session.firstChapterMounted).toBe(true))
     return { ...opened, saved, release }
@@ -241,7 +279,7 @@ describe('paged session', () => {
 
     it('restores a saved locator to the screen containing it', async () => {
         const saved: BookLocator = { version: 1, href: 'a.xhtml', textOffset: 'a0 '.length * 400 }
-        vi.mocked(contentApi.get).mockResolvedValue(content({ book: saved }))
+        reading({ book: saved })
         const { session, host } = await open()
         expect(session.screen!.index).toBeGreaterThan(0)
         expect(onScreen(host, saved)).toBe(true)
@@ -263,7 +301,7 @@ describe('paged session', () => {
         const { session, saved } = await openSettling()
         session.turn('next')
         await session.dispose()
-        const written = vi.mocked(contentApi.updateUserData).mock.calls.at(-1)![1].progress!.book!
+        const written = lastWrite().progress.book!
         expect(written.textOffset).toBeGreaterThan(saved.textOffset)
     })
 
@@ -327,7 +365,11 @@ describe('paged end of book', () => {
         expect(session.atBookEnd).toBe(false)
         await settled(session, 0)
         await session.dispose()
-        expect(vi.mocked(contentApi.updateUserData).mock.calls.at(-1)![1].status).toBe('completed')
+        const finishes = vi
+            .mocked(readingApi.post)
+            .mock.calls.filter(([, req]) => req.op === 'finish')
+        expect(finishes).toHaveLength(1)
+        expect(finishes[0]![1]).toMatchObject({ progress: { at_end: true, progress_percent: 100 } })
     })
 
     it('is left by a mode change', async () => {
@@ -373,6 +415,26 @@ describe('switching layouts', () => {
         await frames()
         expect(session.screen!.index).toBe(2)
         expect(onScreen(host, before)).toBe(true)
+    })
+
+    it('keeps reading on both sides of a mode change', async () => {
+        const { session, settings } = await open()
+        session.turn('next')
+        await frames()
+        await setMode(settings, 'scroll')
+        await frames()
+        await setMode(settings, 'paged')
+        await settled(session)
+        session.turn('next')
+        await vi.waitFor(() => expect(vi.mocked(readingApi.post).mock.calls.length).toBe(2), {
+            timeout: 3000,
+        })
+        const [first, second] = vi
+            .mocked(readingApi.post)
+            .mock.calls.map(([, req]) => req as ReadingRequest & { progress: ReadingProgress })
+        expect([first!.op, second!.op]).toEqual(['position', 'position'])
+        expect(second!.seq).toBeGreaterThan(first!.seq!)
+        expect(second!.progress).not.toEqual(first!.progress)
     })
 
     it('keeps the passage through rapid switches', async () => {

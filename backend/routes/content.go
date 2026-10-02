@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -30,14 +31,17 @@ type ContentRoutes struct {
 
 func (cr *ContentRoutes) Register(g *echo.Group) {
 	g.GET("", cr.list)
-	g.GET("/recently-read", cr.recentlyRead)
+	g.GET("/continue-reading", cr.continueList)
 	g.GET("/buckets", cr.buckets)
 	g.GET("/ids", cr.ids)
 	g.POST("/bulk/user-data", cr.bulkUserData)
 	g.GET("/:content_id", cr.get)
 	g.GET("/:content_id/lists", cr.listsForContent)
 	g.POST("/:content_id/user-data", cr.updateUserData)
-	g.POST("/:content_id/series-item-statuses", cr.setSeriesItemStatuses)
+	g.GET("/:content_id/reading", cr.readingGet)
+	g.POST("/:content_id/reading", cr.readingPost)
+	g.POST("/:content_id/series-reading", cr.seriesReading)
+	g.GET("/:content_id/continue", cr.continueOne)
 }
 
 type UserToContentDTO struct {
@@ -48,6 +52,8 @@ type UserToContentDTO struct {
 	Rating            *int            `json:"rating"`
 	Progress          json.RawMessage `json:"progress"`
 	ProgressUpdatedAt *time.Time      `json:"progress_updated_at"`
+	Revision          *string         `json:"revision"`
+	LastReadAt        *time.Time      `json:"last_read_at"`
 }
 
 func utcToDTO(u *models.UserToContent) *UserToContentDTO {
@@ -66,32 +72,51 @@ func utcToDTO(u *models.UserToContent) *UserToContentDTO {
 		Rating:            u.Rating,
 		Progress:          progress,
 		ProgressUpdatedAt: u.ProgressUpdatedAt,
+		Revision:          u.Revision,
+		LastReadAt:        u.LastReadAt,
 	}
 }
 
 type ContentDTO struct {
-	ID                  string            `json:"id"`
-	CreatedAt           time.Time         `json:"created_at"`
-	UpdatedAt           time.Time         `json:"updated_at"`
-	URIPart             string            `json:"uri_part"`
-	Title               string            `json:"title"`
-	Valid               bool              `json:"valid"`
-	FileURI             *string           `json:"file_uri"`
-	FileMtime           *time.Time        `json:"file_mtime"`
-	FileSize            *int              `json:"file_size"`
-	CoverURI            *string           `json:"cover_uri"`
-	CoverVersion        *string           `json:"cover_version"`
-	Type                string            `json:"type"`
-	Order               *int              `json:"order"`
-	OrderParts          []*float32        `json:"order_parts"`
-	Meta                json.RawMessage   `json:"meta"`
-	FileData            json.RawMessage   `json:"file_data"`
-	ParentID            *string           `json:"parent_id"`
-	LibraryID           string            `json:"library_id"`
-	ChildrenCount       *int              `json:"children_count"`
-	UnreadChildrenCount *int              `json:"unread_children_count"`
-	UserData            *UserToContentDTO `json:"user_data"`
-	Length              *ContentLength    `json:"length,omitempty"`
+	ID           string          `json:"id"`
+	CreatedAt    time.Time       `json:"created_at"`
+	UpdatedAt    time.Time       `json:"updated_at"`
+	URIPart      string          `json:"uri_part"`
+	Title        string          `json:"title"`
+	Valid        bool            `json:"valid"`
+	FileURI      *string         `json:"file_uri"`
+	FileMtime    *time.Time      `json:"file_mtime"`
+	FileSize     *int            `json:"file_size"`
+	CoverURI     *string         `json:"cover_uri"`
+	CoverVersion *string         `json:"cover_version"`
+	Type         string          `json:"type"`
+	Order        *int            `json:"order"`
+	OrderParts   []*float32      `json:"order_parts"`
+	Meta         json.RawMessage `json:"meta"`
+	FileData     json.RawMessage `json:"file_data"`
+	ParentID     *string         `json:"parent_id"`
+	LibraryID    string          `json:"library_id"`
+	childCounts
+	UserData *UserToContentDTO `json:"user_data"`
+	Length   *ContentLength    `json:"length,omitempty"`
+	Continue *ContinueDTO      `json:"continue"`
+}
+
+// childCounts counts a series' valid children. new_children_count is the unfinished volumes
+// added since the user completed the series, or 0 past newGuard.
+type childCounts struct {
+	ChildrenCount          *int `json:"children_count"           db:"children_count"`
+	UnreadChildrenCount    *int `json:"unread_children_count"    db:"unread_children_count"`
+	CompletedChildrenCount *int `json:"completed_children_count" db:"completed_children_count"`
+	DroppedChildrenCount   *int `json:"dropped_children_count"   db:"dropped_children_count"`
+	NewChildrenCount       *int `json:"new_children_count"       db:"new_children_count"`
+}
+
+// ContinueDTO is set on the rows of the continue and recently_updated sorts.
+type ContinueDTO struct {
+	Action string      `json:"action"`
+	IsNew  bool        `json:"is_new"`
+	Series *ContentDTO `json:"series"`
 }
 
 // ContentLength is in words for books and pages for comics; the frontend converts it to time.
@@ -102,12 +127,11 @@ type ContentLength struct {
 }
 
 type contentDTOOpts struct {
-	meta                json.RawMessage
-	childrenCount       *int
-	unreadChildrenCount *int
-	userToContent       *models.UserToContent
-	includeFileData     bool
-	includeMeta         bool
+	meta            json.RawMessage
+	counts          childCounts
+	userToContent   *models.UserToContent
+	includeFileData bool
+	includeMeta     bool
 }
 
 func contentToDTO(c models.Content, opts contentDTOOpts) ContentDTO {
@@ -134,54 +158,83 @@ func contentToDTO(c models.Content, opts contentDTOOpts) ContentDTO {
 	}
 
 	return ContentDTO{
-		ID:                  c.ID,
-		CreatedAt:           c.CreatedAt,
-		UpdatedAt:           c.UpdatedAt,
-		URIPart:             c.URIPart,
-		Title:               m.Title,
-		Valid:               c.Valid,
-		FileURI:             c.FileURI,
-		FileMtime:           c.FileMtime,
-		FileSize:            c.FileSize,
-		CoverURI:            c.CoverURI,
-		CoverVersion:        covers.Version(m.Cover, c.CoverURI != nil, c.FileMtime),
-		Type:                c.Type,
-		Order:               c.Order,
-		OrderParts:          orderParts,
-		Meta:                meta,
-		FileData:            fileData,
-		ParentID:            c.ParentID,
-		LibraryID:           c.LibraryID,
-		ChildrenCount:       opts.childrenCount,
-		UnreadChildrenCount: opts.unreadChildrenCount,
-		UserData:            utcToDTO(opts.userToContent),
+		ID:           c.ID,
+		CreatedAt:    c.CreatedAt,
+		UpdatedAt:    c.UpdatedAt,
+		URIPart:      c.URIPart,
+		Title:        m.Title,
+		Valid:        c.Valid,
+		FileURI:      c.FileURI,
+		FileMtime:    c.FileMtime,
+		FileSize:     c.FileSize,
+		CoverURI:     c.CoverURI,
+		CoverVersion: covers.Version(m.Cover, c.CoverURI != nil, c.FileMtime),
+		Type:         c.Type,
+		Order:        c.Order,
+		OrderParts:   orderParts,
+		Meta:         meta,
+		FileData:     fileData,
+		ParentID:     c.ParentID,
+		LibraryID:    c.LibraryID,
+		childCounts:  opts.counts,
+		UserData:     utcToDTO(opts.userToContent),
 	}
 }
 
-// unfinishedChildren selects the children of content c that @user_id hasn't completed or dropped.
-const unfinishedChildren = `FROM content child
-	LEFT JOIN user_to_content child_utc
-		ON child_utc.library_id = child.library_id
-		AND child_utc.uri = child.uri
-		AND child_utc.user_id = @user_id
-	WHERE child.parent_id = c.id
-		AND (child_utc.status IS NULL OR child_utc.status NOT IN ('completed', 'dropped'))`
+// dto maps a hydrated row, with its continue info when it has one.
+func (r contentListRow) dto(includeFileData, includeMeta bool) ContentDTO {
+	dto := contentToDTO(r.Content, contentDTOOpts{
+		meta:            r.MetaData,
+		counts:          r.childCounts,
+		userToContent:   r.utc(),
+		includeFileData: includeFileData,
+		includeMeta:     includeMeta,
+	})
+	if r.Continue != nil {
+		dto.Continue = &ContinueDTO{Action: r.Continue.Action, IsNew: r.Continue.IsNew}
+		if r.Continue.Series != nil {
+			series := r.Continue.Series.dto(false, false)
+			dto.Continue.Series = &series
+		}
+	}
+	return dto
+}
 
-// contentRowColumns selects a contentListRow from content c and user_to_content utc (for @user_id).
+// childCountsJoin counts the valid children of content c in cc, for @user_id, with utc joined.
+const childCountsJoin = `
+	LEFT JOIN LATERAL (
+		SELECT COUNT(*) AS children_count,
+			COUNT(*) FILTER (WHERE child_utc.status = 'completed') AS completed_children_count,
+			COUNT(*) FILTER (WHERE child_utc.status = 'dropped') AS dropped_children_count,
+			COUNT(*) FILTER (WHERE utc.status = 'completed' AND child.created_at > utc.status_updated_at
+				AND (child_utc.status IS NULL OR child_utc.status NOT IN ('completed', 'dropped'))) AS new_count
+		FROM content child
+		LEFT JOIN user_to_content child_utc ON child_utc.library_id = child.library_id
+			AND child_utc.uri = child.uri AND child_utc.user_id = @user_id
+		WHERE child.parent_id = c.id AND child.valid
+	) cc ON true`
+
+// contentRowColumns selects a contentListRow from content c, user_to_content utc (for @user_id)
+// and childCountsJoin.
 var contentRowColumns = models.ContentColumns("c") + `,
-	(SELECT COUNT(*) FROM content child WHERE child.parent_id = c.id) AS children_count,
-	(SELECT COUNT(*) ` + unfinishedChildren + `) AS unread_children_count,
+	cc.children_count, cc.completed_children_count, cc.dropped_children_count,
+	cc.children_count - cc.completed_children_count - cc.dropped_children_count AS unread_children_count,
+	CASE WHEN ` + newGuard("cc.new_count", "cc.children_count") + ` THEN cc.new_count ELSE 0 END
+		AS new_children_count,
 	utc.id AS utc_id, utc.user_id AS utc_user_id, utc.library_id AS utc_library_id,
 	utc.uri AS utc_uri, utc.starred AS utc_starred, utc.status AS utc_status,
 	utc.status_updated_at AS utc_status_updated_at, utc.notes AS utc_notes,
 	utc.rating AS utc_rating, utc.progress AS utc_progress,
-	utc.progress_updated_at AS utc_progress_updated_at,
-	c.data AS meta_data, c.meta_updated_at`
+	utc.progress_updated_at AS utc_progress_updated_at, utc.revision AS utc_revision,
+	utc.last_read_at AS utc_last_read_at, c.data AS meta_data, c.meta_updated_at`
 
 func selectContentRows(ctx context.Context, q db.Querier, userID string, ids []string) (map[string]contentListRow, error) {
+	if len(ids) == 0 { // ANY(NULL) fails pg_search's pushdown
+		return map[string]contentListRow{}, nil
+	}
 	rows, err := db.Select[contentListRow](ctx, q, `
 		SELECT `+contentRowColumns+`
-		FROM content c`+utcJoin+`
+		FROM content c`+utcJoin+childCountsJoin+`
 		WHERE c.id = ANY(@ids)
 	`, pgx.NamedArgs{"user_id": userID, "ids": ids})
 	if err != nil {
@@ -205,7 +258,7 @@ func (cr *ContentRoutes) get(c echo.Context) error {
 
 	r, err := db.SelectOne[contentListRow](ctx, cr.pool, `
 		SELECT `+contentRowColumns+`
-		FROM content c`+utcJoin+`
+		FROM content c`+utcJoin+childCountsJoin+`
 		WHERE c.id = @id
 	`, pgx.NamedArgs{"user_id": user.ID, "id": contentID})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -238,14 +291,7 @@ func (cr *ContentRoutes) get(c echo.Context) error {
 		return err
 	}
 
-	dto := contentToDTO(r.Content, contentDTOOpts{
-		meta:                r.MetaData,
-		childrenCount:       r.ChildrenCount,
-		unreadChildrenCount: r.UnreadChildrenCount,
-		userToContent:       r.utc(),
-		includeFileData:     true,
-		includeMeta:         true,
-	})
+	dto := r.dto(true, true)
 	dto.Length = length
 	return c.JSON(http.StatusOK, dto)
 }
@@ -421,32 +467,49 @@ type contentListQuery struct {
 	Search        string   `query:"search"          validate:"max=200"`
 	Limit         *int     `query:"limit"           validate:"omitempty,min=0"`
 	Offset        int      `query:"offset"          validate:"min=0"`
-	Sort          string   `query:"sort"            validate:"omitempty,oneof=progress_updated_at created_at order rating user_rating unread_children_count release_date title relevance"`
+	Sort          string   `query:"sort"            validate:"omitempty,oneof=last_read_at progress_updated_at history continue recently_updated created_at order rating user_rating unread_children_count release_date title relevance"`
 	SortOrder     string   `query:"sort_order"      validate:"omitempty,oneof=asc desc" default:"desc"`
 	Count         string   `query:"count"           validate:"omitempty,oneof=true false"`
 	Include       string   `query:"include"`
 	ListID        string   // set by code only
+	// IgnoreSeriesStatus is the user's home preference, set by code for the continue sorts.
+	IgnoreSeriesStatus bool
 }
 
+// filter is the query's filter. The history, continue and recently_updated sorts also restrict
+// the rows; the last two list continue targets, wherever they sit, so they ignore parent_id.
 func (q contentListQuery) filter() contentFilter {
-	return contentFilter{
-		ParentID:      q.ParentID,
-		LibraryID:     q.LibraryID,
-		Type:          q.Type,
-		Valid:         optBool(q.Valid),
-		ReadingStatus: q.ReadingStatus,
-		Starred:       optBool(q.Starred),
-		HasStatus:     optBool(q.HasStatus),
-		HasRating:     optBool(q.HasRating),
-		Search:        strings.TrimSpace(q.Search),
-		ListID:        q.ListID,
+	f := contentFilter{
+		ParentID:           q.ParentID,
+		LibraryID:          q.LibraryID,
+		Type:               q.Type,
+		Valid:              optBool(q.Valid),
+		ReadingStatus:      q.ReadingStatus,
+		Starred:            optBool(q.Starred),
+		HasStatus:          optBool(q.HasStatus),
+		HasRating:          optBool(q.HasRating),
+		Search:             strings.TrimSpace(q.Search),
+		ListID:             q.ListID,
+		IgnoreSeriesStatus: q.IgnoreSeriesStatus,
 	}
+	switch q.Sort {
+	case "history":
+		f.LastReadOnly = true
+	case "continue":
+		f.Continue, f.ParentID = true, ""
+	case "recently_updated":
+		f.RecentlyUpdated, f.ParentID = true, ""
+	}
+	return f
 }
 
 // order resolves the sort: an explicit one; else relevance for a search, list order in a list, or
-// title asc (sort_order defaults to desc, so it is ignored).
+// title asc (sort_order defaults to desc, so it is ignored). progress_updated_at is the old name
+// of last_read_at, and history sorts by it.
 func (q contentListQuery) order() (sort, dir string) {
 	switch {
+	case q.Sort == "progress_updated_at" || q.Sort == "history":
+		return "last_read_at", q.SortOrder
 	case q.Sort != "" && q.Sort != "relevance":
 		return q.Sort, q.SortOrder
 	case strings.TrimSpace(q.Search) != "":
@@ -478,6 +541,17 @@ type contentFilter struct {
 	HasRating     *bool
 	Search        string
 	ListID        string // joins the list's entries as clc
+	LastReadOnly  bool   // only content the user has read
+	// Continue keeps only continue targets, joined as ct; RecentlyUpdated only the new ones.
+	Continue, RecentlyUpdated bool
+	IgnoreSeriesStatus        bool
+}
+
+// joins are the optional joins of a grid query.
+type joins struct{ utc, unread, lastRead bool }
+
+func (j joins) or(o joins) joins {
+	return joins{j.utc || o.utc, j.unread || o.unread, j.lastRead || o.lastRead}
 }
 
 const (
@@ -495,13 +569,28 @@ const (
 			FROM content child
 			LEFT JOIN user_to_content child_utc ON child_utc.library_id = child.library_id
 				AND child_utc.uri = child.uri AND child_utc.user_id = @user_id
-			WHERE child.parent_id IS NOT NULL%s
+			WHERE child.parent_id IS NOT NULL AND child.valid%s
 			GROUP BY child.parent_id
 		) uc ON uc.parent_id = c.id`
+	// lastReadSQL is when the user last read each item, or for a series its children's latest
+	// (else its own), as lr. It starts from the user's rows, not the catalog, so the history,
+	// which joins it, reads only what the user has read.
+	lastReadSQL = `
+		SELECT r.id, COALESCE(MAX(cu.last_read_at) FILTER (WHERE r.child),
+			MAX(cu.last_read_at) FILTER (WHERE NOT r.child)) AS last_read_at
+		FROM user_to_content cu
+		JOIN content k ON k.library_id = cu.library_id AND k.uri = cu.uri
+		CROSS JOIN LATERAL (VALUES (k.id, false), (k.parent_id, true)) r(id, child)
+		WHERE cu.user_id = @user_id AND cu.last_read_at IS NOT NULL AND r.id IS NOT NULL
+		GROUP BY r.id`
+	lastReadJoin = " LEFT JOIN (" + lastReadSQL + ") lr ON lr.id = c.id"
+	historyFrom  = "FROM (" + lastReadSQL + ") lr JOIN content c ON c.id = lr.id"
+	lastReadExpr = "lr.last_read_at"
 )
 
-// where appends the filter's conditions and args; needsUTC says whether it reads utc.
-func (f contentFilter) where(args pgx.NamedArgs) (cond string, needsUTC bool) {
+// where appends the filter's conditions and args, and returns the joins they read.
+func (f contentFilter) where(args pgx.NamedArgs) (cond string, j joins) {
+	needsUTC := false
 	args["valid"] = f.Valid == nil || *f.Valid
 	where := []string{"c.valid = @valid"}
 
@@ -543,27 +632,42 @@ func (f contentFilter) where(args pgx.NamedArgs) (cond string, needsUTC bool) {
 		args["search"] = f.Search
 		where = append(where, metadata.TitleMatch("c", f.ParentID == "null"))
 	}
-	return strings.Join(where, " AND "), needsUTC
+	if f.RecentlyUpdated {
+		where = append(where, "ct.is_new AND ct.series_status = 'reading'")
+	}
+	j.utc = needsUTC
+	return strings.Join(where, " AND "), j
 }
 
 // from returns the FROM and WHERE clauses of a grid query, with the joins that the filter or the
-// caller (utc, unread) reads.
-func (f contentFilter) from(args pgx.NamedArgs, utc, unread bool) string {
-	cond, fUTC := f.where(args)
+// caller reads.
+func (f contentFilter) from(args pgx.NamedArgs, j joins) string {
+	cond, fj := f.where(args)
+	j = j.or(fj)
 	from := "FROM content c"
+	if f.LastReadOnly {
+		from = historyFrom
+	}
+	if f.Continue || f.RecentlyUpdated {
+		args["ignore_series_status"] = f.IgnoreSeriesStatus
+		from += " JOIN (" + continueTargetsSQL + ") ct ON ct.target_id = c.id"
+	}
 	if f.ListID != "" {
 		args["list_id"] = f.ListID
 		from += listJoin
 	}
-	if utc || fUTC {
+	if j.utc {
 		from += utcJoin
 	}
-	if unread {
+	if j.unread {
 		lib := ""
 		if f.LibraryID != "" {
 			lib = " AND child.library_id = @library_id"
 		}
 		from += fmt.Sprintf(unreadJoin, lib)
+	}
+	if j.lastRead && !f.LastReadOnly {
+		from += lastReadJoin
 	}
 	return from + " WHERE " + cond
 }
@@ -577,14 +681,18 @@ func nullsOrder(dir string) string {
 }
 
 // contentOrder returns the ORDER BY for a resolved sort (see contentListQuery.order), always
-// ending in c.id, and the joins it reads.
-func contentOrder(sort, dir string) (clause string, needsUTC, needsUnread bool) {
+// ending in c.id, and the joins it reads. The continue sorts read ct, which their filter joins.
+func contentOrder(sort, dir string) (clause string, j joins) {
 	col, nullable := "", true
 	switch sort {
 	case "relevance":
-		return metadata.TitleScore("c") + ` DESC, c.search_title_len, c.sort_title, c.id COLLATE "C"`, false, false
+		return metadata.TitleScore("c") + ` DESC, c.search_title_len, c.sort_title, c.id COLLATE "C"`, j
 	case "list":
-		return `(clc."order" IS NULL), clc."order", clc.created_at, c.id`, false, false
+		return `(clc."order" IS NULL), clc."order", clc.created_at, c.id`, j
+	case "continue":
+		return continueOrder(dir), j
+	case "recently_updated":
+		return "ct.new_added_at " + dir + " " + nullsOrder(dir) + ", ct.target_id " + dir, j
 	case "title":
 		col = "c.sort_title"
 	case "rating":
@@ -592,21 +700,21 @@ func contentOrder(sort, dir string) (clause string, needsUTC, needsUnread bool) 
 	case "release_date":
 		col = "c.release_date"
 	case "user_rating":
-		col, needsUTC = "utc.rating", true
-	case "progress_updated_at":
-		col, needsUTC = "utc.progress_updated_at", true
+		col, j.utc = "utc.rating", true
+	case "last_read_at":
+		col, j.lastRead = lastReadExpr, true
 	case "created_at":
 		col, nullable = "c.created_at", false
 	case "order":
 		col, nullable = `c."order"`, false
 	case "unread_children_count":
-		col, nullable, needsUnread = "COALESCE(uc.unread, 0)", false, true
+		col, nullable, j.unread = "COALESCE(uc.unread, 0)", false, true
 	}
 	clause = col + " " + dir
 	if nullable {
 		clause += " " + nullsOrder(dir)
 	}
-	return clause + ", c.id " + dir, needsUTC, needsUnread
+	return clause + ", c.id " + dir, j
 }
 
 // listContentIDs sorts and paginates the filtered ids, reading only the joins the filter and the
@@ -615,8 +723,28 @@ func listContentIDs(ctx context.Context, q db.Querier, userID string, f contentF
 	sort, dir string, limit *int, offset int,
 ) ([]string, error) {
 	args := pgx.NamedArgs{"user_id": userID}
-	order, utc, unread := contentOrder(sort, dir)
-	sql := "SELECT c.id " + f.from(args, utc, unread) + " ORDER BY " + order
+	return db.SelectScalars[string](ctx, q, contentIDsSQL("c.id", f, sort, dir, limit, offset, args), args)
+}
+
+// continueID is a row of the continue sorts, with its target info.
+type continueID struct {
+	ID       string  `db:"id"`
+	Action   string  `db:"action"`
+	IsNew    bool    `db:"is_new"`
+	SeriesID *string `db:"series_id"`
+}
+
+func listContinueIDs(ctx context.Context, q db.Querier, userID string, f contentFilter,
+	sort, dir string, limit *int, offset int,
+) ([]continueID, error) {
+	args := pgx.NamedArgs{"user_id": userID}
+	return db.Select[continueID](ctx, q,
+		contentIDsSQL("c.id, ct.action, ct.is_new, ct.series_id", f, sort, dir, limit, offset, args), args)
+}
+
+func contentIDsSQL(cols string, f contentFilter, sort, dir string, limit *int, offset int, args pgx.NamedArgs) string {
+	order, j := contentOrder(sort, dir)
+	sql := "SELECT " + cols + " " + f.from(args, j) + " ORDER BY " + order
 	if limit == nil && f.Search != "" {
 		// pg_search 0.25.10's scan fails a generic plan without a LIMIT ("unrecognized node type"),
 		// and allocates its top-k heap by the LIMIT, so it can't be huge either.
@@ -628,12 +756,12 @@ func listContentIDs(ctx context.Context, q db.Querier, userID string, f contentF
 	if offset > 0 {
 		sql += fmt.Sprintf(" OFFSET %d", offset)
 	}
-	return db.SelectScalars[string](ctx, q, sql, args)
+	return sql
 }
 
 func countContent(ctx context.Context, q db.Querier, userID string, f contentFilter) (int, error) {
 	args := pgx.NamedArgs{"user_id": userID}
-	return db.SelectScalar[int](ctx, q, "SELECT COUNT(*) "+f.from(args, false, false), args)
+	return db.SelectScalar[int](ctx, q, "SELECT COUNT(*) "+f.from(args, joins{}), args)
 }
 
 // SearchEvalResult is one root-level search's first page of ids, its total and the time each took.
@@ -677,6 +805,7 @@ func (cr *ContentRoutes) list(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	q.IgnoreSeriesStatus = homePrefs(user.Preferences)
 
 	includes := map[string]bool{}
 	for part := range strings.SplitSeq(q.Include, ",") {
@@ -686,31 +815,27 @@ func (cr *ContentRoutes) list(c echo.Context) error {
 		}
 	}
 
-	ctx := reqCtx(c)
+	g, ctx := errgroup.WithContext(reqCtx(c))
 	var total *int
 	if q.Count != "false" {
-		n, err := countContent(ctx, cr.pool, user.ID, q.filter())
-		if err != nil {
+		g.Go(func() error {
+			n, err := countContent(ctx, cr.pool, user.ID, q.filter())
+			total = &n
 			return err
-		}
-		total = &n
+		})
 	}
-
-	rows, err := listContent(ctx, cr.pool, user.ID, q)
-	if err != nil {
+	var rows []contentListRow
+	g.Go(func() (err error) {
+		rows, err = listContent(ctx, cr.pool, user.ID, q)
+		return err
+	})
+	if err := g.Wait(); err != nil {
 		return err
 	}
 
 	dtos := make([]ContentDTO, len(rows))
 	for i, r := range rows {
-		dtos[i] = contentToDTO(r.Content, contentDTOOpts{
-			meta:                r.MetaData,
-			childrenCount:       r.ChildrenCount,
-			unreadChildrenCount: r.UnreadChildrenCount,
-			userToContent:       r.utc(),
-			includeFileData:     includes["file_data"],
-			includeMeta:         includes["meta"],
-		})
+		dtos[i] = r.dto(includes["file_data"], includes["meta"])
 	}
 
 	return c.JSON(http.StatusOK, contentPageResponse{Data: dtos, Total: total})
@@ -730,6 +855,7 @@ func (cr *ContentRoutes) ids(c echo.Context) error {
 	if q.Limit == nil || *q.Limit > maxContentIDs {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("limit must be at most %d", maxContentIDs))
 	}
+	q.IgnoreSeriesStatus = homePrefs(user.Preferences)
 
 	sort, dir := q.order()
 	ids, err := listContentIDs(reqCtx(c), cr.pool, user.ID, q.filter(), sort, dir, q.Limit, q.Offset)
@@ -742,19 +868,24 @@ func (cr *ContentRoutes) ids(c echo.Context) error {
 // bucketKey groups a resolved sort's rows into rail segments. Each key is a prefix of the sort
 // key (or monotonic in it), so segments are contiguous in the list. It is "" for sorts without
 // segments.
-func bucketKey(sort string) (key string, needsUTC bool) {
+func bucketKey(sort string) (key string, j joins) {
+	year := func(col string) string { return "to_char(" + col + " AT TIME ZONE 'UTC', 'YYYY')" }
 	switch sort {
 	case "title":
 		// Rows without metadata sort next to '#'.
-		return "COALESCE(left(c.sort_title, 1), '#')", false
+		return "COALESCE(left(c.sort_title, 1), '#')", j
 	case "created_at":
-		return "to_char(c.created_at AT TIME ZONE 'UTC', 'YYYY')", false
-	case "progress_updated_at":
-		return "to_char(utc.progress_updated_at AT TIME ZONE 'UTC', 'YYYY')", true
+		return year("c.created_at"), j
+	case "last_read_at":
+		return year(lastReadExpr), joins{lastRead: true}
+	case "continue":
+		return year("ct.recency"), j
+	case "recently_updated":
+		return year("ct.new_added_at"), j
 	case "release_date":
-		return "left(c.release_date, 4)", false
+		return "left(c.release_date, 4)", j
 	}
-	return "", false
+	return "", j
 }
 
 type contentBucket struct {
@@ -777,10 +908,11 @@ func (cr *ContentRoutes) buckets(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	q.IgnoreSeriesStatus = homePrefs(user.Preferences)
 
 	f := q.filter()
 	sort, dir := q.order()
-	key, utc := bucketKey(sort)
+	key, j := bucketKey(sort)
 	res := contentBucketsResponse{Buckets: []contentBucket{}}
 	if key == "" {
 		res.Total, err = countContent(ctx, cr.pool, user.ID, f)
@@ -793,7 +925,7 @@ func (cr *ContentRoutes) buckets(c echo.Context) error {
 	args := pgx.NamedArgs{"user_id": user.ID}
 	res.Buckets, err = db.Select[contentBucket](ctx, cr.pool, fmt.Sprintf(
 		"SELECT %s AS key, COUNT(*) AS count %s GROUP BY 1 ORDER BY 1 %s %s",
-		key, f.from(args, utc, false), dir, nullsOrder(dir)), args)
+		key, f.from(args, j), dir, nullsOrder(dir)), args)
 	if err != nil {
 		return err
 	}
@@ -814,7 +946,7 @@ const kindCountColumns = `COUNT(*) FILTER (WHERE c.type IN ('comic_series', 'boo
 
 func countContentKinds(ctx context.Context, pool *pgxpool.Pool, userID string, f contentFilter) (k kindCounts, err error) {
 	args := pgx.NamedArgs{"user_id": userID}
-	sql := "SELECT " + kindCountColumns + " " + f.from(args, false, false)
+	sql := "SELECT " + kindCountColumns + " " + f.from(args, joins{})
 	err = db.WithTx(ctx, pool, func(tx pgx.Tx) error {
 		// pg_search 0.25.10's aggregate scan miscounts FILTER aggregates under generic plans.
 		if _, err := tx.Exec(ctx, "SET LOCAL paradedb.enable_aggregate_custom_scan = off"); err != nil {
@@ -827,10 +959,24 @@ func countContentKinds(ctx context.Context, pool *pgxpool.Pool, userID string, f
 }
 
 // listContent runs one page of lq: the ids query sorts and pages, then only those rows hydrate.
+// Rows of the continue sorts carry their continue info, with the series hydrated alongside.
 func listContent(ctx context.Context, q db.Querier, userID string, lq contentListQuery) ([]contentListRow, error) {
 	sort, dir := lq.order()
-	ids, err := listContentIDs(ctx, q, userID, lq.filter(), sort, dir, lq.Limit, lq.Offset)
-	if err != nil {
+	f := lq.filter()
+	var cids []continueID
+	var ids []string
+	var err error
+	if f.Continue || f.RecentlyUpdated {
+		if cids, err = listContinueIDs(ctx, q, userID, f, sort, dir, lq.Limit, lq.Offset); err != nil {
+			return nil, err
+		}
+		for _, r := range cids {
+			ids = append(ids, r.ID)
+			if r.SeriesID != nil {
+				ids = append(ids, *r.SeriesID)
+			}
+		}
+	} else if ids, err = listContentIDs(ctx, q, userID, f, sort, dir, lq.Limit, lq.Offset); err != nil {
 		return nil, err
 	}
 	byID, err := selectContentRows(ctx, q, userID, ids)
@@ -838,10 +984,29 @@ func listContent(ctx context.Context, q db.Querier, userID string, lq contentLis
 		return nil, err
 	}
 	rows := make([]contentListRow, 0, len(ids))
-	for _, id := range ids {
-		if r, ok := byID[id]; ok { // gone if deleted since the ids query
-			rows = append(rows, r)
+	if cids == nil {
+		for _, id := range ids {
+			if r, ok := byID[id]; ok { // gone if deleted since the ids query
+				rows = append(rows, r)
+			}
 		}
+		return rows, nil
+	}
+	for _, cid := range cids {
+		// A scan may have deleted, invalidated or reparented the target since the ids query.
+		r, ok := byID[cid.ID]
+		if !ok || !r.Valid || !fp.PtrEq(r.ParentID, cid.SeriesID) {
+			continue
+		}
+		r.Continue = &continueInfo{Action: cid.Action, IsNew: cid.IsNew}
+		if cid.SeriesID != nil {
+			series, ok := byID[*cid.SeriesID]
+			if !ok {
+				continue
+			}
+			r.Continue.Series = &series
+		}
+		rows = append(rows, r)
 	}
 	return rows, nil
 }
@@ -860,174 +1025,14 @@ func queryContent(ctx context.Context, pool *pgxpool.Pool, userID string, lq con
 	return rows, counts.Series + counts.items(), err
 }
 
-type RecentlyReadEntryDTO struct {
-	Item   ContentDTO  `json:"item"`
-	Series *ContentDTO `json:"series"`
-}
-
-type recentlyReadQuery struct {
-	Limit int `query:"limit" default:"10" validate:"min=1,max=50"`
-}
-
-// homePrefs reads the user's home preferences; malformed preferences mean the defaults.
-func homePrefs(raw models.JSONB) (ignoreSeriesStatus bool) {
-	var p struct {
-		Home struct {
-			IgnoreSeriesStatus bool `json:"ignoreSeriesStatus"`
-		} `json:"home"`
-	}
-	if json.Unmarshal(raw, &p) != nil {
-		return false
-	}
-	return p.Home.IgnoreSeriesStatus
-}
-
-func (cr *ContentRoutes) recentlyRead(c echo.Context) error {
-	user, err := requireUser(c)
-	if err != nil {
-		return err
-	}
-	q, err := BindQuery[recentlyReadQuery](c)
-	if err != nil {
-		return err
-	}
-	picks, err := continueReading(reqCtx(c), cr.pool, user, q.Limit)
-	if err != nil {
-		return err
-	}
-	toDTO := func(r contentListRow) ContentDTO {
-		return contentToDTO(r.Content, contentDTOOpts{
-			meta:                r.MetaData,
-			childrenCount:       r.ChildrenCount,
-			unreadChildrenCount: r.UnreadChildrenCount,
-			userToContent:       r.utc(),
-		})
-	}
-	entries := make([]RecentlyReadEntryDTO, len(picks))
-	for i, p := range picks {
-		entries[i] = RecentlyReadEntryDTO{Item: toDTO(p.Item)}
-		if p.Series != nil {
-			dto := toDTO(*p.Series)
-			entries[i].Series = &dto
-		}
-	}
-	return c.JSON(http.StatusOK, entries)
-}
-
-type readingPick struct {
-	Item   contentListRow
-	Series *contentListRow // nil for a standalone item
-}
-
-// continueReading lists the items in progress, one per series. A series' item is its first
-// eligible (unread, valid, not on hold) child from the anchor onwards, wrapping to the start,
-// where the anchor is the active child with the latest status change or, while eligible, activity.
-func continueReading(ctx context.Context, pool *pgxpool.Pool, user *models.User, limit int) ([]readingPick, error) {
-	type pickRow struct {
-		ItemID   string  `db:"item_id"`
-		SeriesID *string `db:"series_id"`
-	}
-	picks, err := db.Select[pickRow](ctx, pool, `
-		WITH last AS (
-			SELECT DISTINCT ON (c.parent_id)
-				c.parent_id AS series_id, c.id AS last_id,
-				MAX(COALESCE(utc.progress_updated_at, utc.status_updated_at))
-					OVER (PARTITION BY c.parent_id) AS sort_at
-			FROM user_to_content utc
-			JOIN content c ON c.library_id = utc.library_id AND c.uri = utc.uri
-			WHERE utc.user_id = @user_id
-				AND c.parent_id IS NOT NULL AND c.type IN ('book', 'comic')
-				AND (utc.progress_updated_at IS NOT NULL OR utc.status IN ('reading', 'completed'))
-			ORDER BY c.parent_id,
-				CASE WHEN utc.status IS NULL OR utc.status IN ('reading', 'plan_to_read')
-					THEN GREATEST(utc.progress_updated_at, utc.status_updated_at)
-					ELSE utc.status_updated_at END DESC NULLS LAST,
-				c."order" DESC NULLS FIRST, c.id DESC
-		), series_pick AS (
-			-- Ordering last by recency lets an incremental-sort plan stop picking children early.
-			SELECT l.series_id, l.sort_at, p.item_id
-			FROM (SELECT * FROM last ORDER BY sort_at DESC NULLS LAST) l
-			JOIN content s ON s.id = l.series_id
-			LEFT JOIN user_to_content sutc
-				ON sutc.library_id = s.library_id AND sutc.uri = s.uri AND sutc.user_id = @user_id
-			CROSS JOIN LATERAL (
-				-- Children from the anchor onwards first (false < true), then the earlier ones.
-				SELECT k.id AS item_id FROM (
-					SELECT k.*, max(k.pos) FILTER (WHERE k.id = l.last_id) OVER () AS last_pos
-					FROM (
-						SELECT c.id,
-							row_number() OVER (ORDER BY c."order" ASC NULLS LAST, c.id) AS pos,
-							c.valid AND (utc.status IS NULL OR utc.status IN ('reading', 'plan_to_read')) AS eligible
-						FROM content c
-						LEFT JOIN user_to_content utc
-							ON utc.library_id = c.library_id AND utc.uri = c.uri AND utc.user_id = @user_id
-						WHERE c.parent_id = l.series_id AND c.type IN ('book', 'comic')
-					) k
-				) k
-				WHERE k.eligible
-				ORDER BY k.pos < k.last_pos, k.pos
-				LIMIT 1
-			) p
-			WHERE @ignore_series_status OR sutc.status IS NULL OR sutc.status NOT IN ('dropped', 'on_hold')
-			ORDER BY l.sort_at DESC NULLS LAST, p.item_id
-			LIMIT @limit
-		), standalone AS (
-			SELECT NULL::text AS series_id,
-				COALESCE(utc.progress_updated_at, utc.status_updated_at) AS sort_at, c.id AS item_id
-			FROM user_to_content utc
-			JOIN content c ON c.library_id = utc.library_id AND c.uri = utc.uri
-			WHERE utc.user_id = @user_id AND utc.status = 'reading'
-				AND c.parent_id IS NULL AND c.valid AND c.type IN ('book', 'comic')
-		)
-		SELECT item_id, series_id FROM (TABLE series_pick UNION ALL TABLE standalone) g
-		ORDER BY sort_at DESC NULLS LAST, item_id
-		LIMIT @limit
-	`, pgx.NamedArgs{"user_id": user.ID, "limit": limit, "ignore_series_status": homePrefs(user.Preferences)})
-	if err != nil {
-		return nil, err
-	}
-
-	ids := make([]string, 0, 2*len(picks))
-	for _, p := range picks {
-		ids = append(ids, p.ItemID)
-		if p.SeriesID != nil {
-			ids = append(ids, *p.SeriesID)
-		}
-	}
-	rows, err := selectContentRows(ctx, pool, user.ID, ids)
-	if err != nil {
-		return nil, err
-	}
-
-	out := []readingPick{}
-	for _, p := range picks {
-		// A scan may have deleted, invalidated or reparented the item, or deleted the series, since
-		// the pick.
-		item, ok := rows[p.ItemID]
-		if !ok || !item.Valid || !fp.PtrEq(item.ParentID, p.SeriesID) {
-			continue
-		}
-		pick := readingPick{Item: item}
-		if p.SeriesID != nil {
-			series, ok := rows[*p.SeriesID]
-			if !ok {
-				continue
-			}
-			pick.Series = &series
-		}
-		out = append(out, pick)
-	}
-	return out, nil
-}
-
 type userToContentRequest struct {
-	Starred  *bool            `json:"starred"`
-	Status   *string          `json:"status"   validate:"omitempty,oneof=reading completed on_hold dropped plan_to_read"`
-	Notes    *string          `json:"notes"`
-	Rating   *int             `json:"rating"   validate:"omitempty,min=1,max=10"`
-	Progress *json.RawMessage `json:"progress"`
+	Starred *bool   `json:"starred"`
+	Notes   *string `json:"notes"`
+	Rating  *int    `json:"rating"  validate:"omitempty,min=1,max=10"`
 }
 
+// updateUserData sets the user's star, notes and rating. Status and progress go through the
+// reading endpoints.
 func (cr *ContentRoutes) updateUserData(c echo.Context) error {
 	user, err := requireUser(c)
 	if err != nil {
@@ -1043,6 +1048,11 @@ func (cr *ContentRoutes) updateUserData(c echo.Context) error {
 	if err := json.NewDecoder(body).Decode(&rawBody); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid JSON")
 	}
+	for _, field := range []string{"status", "progress"} {
+		if _, ok := rawBody[field]; ok {
+			return echo.NewHTTPError(http.StatusBadRequest, field+" is set through /reading")
+		}
+	}
 
 	var req userToContentRequest
 	rawFull, _ := json.Marshal(rawBody)
@@ -1052,8 +1062,6 @@ func (cr *ContentRoutes) updateUserData(c echo.Context) error {
 	if err := ValidateStruct(req); err != nil {
 		return err
 	}
-
-	now := time.Now().UTC()
 
 	cols := []string{"id", "user_id", "library_id", "uri"}
 	vals := []string{"@utc_id", "@user_id", "@library_id", "@uri"}
@@ -1072,36 +1080,16 @@ func (cr *ContentRoutes) updateUserData(c echo.Context) error {
 	if _, ok := rawBody["starred"]; ok && req.Starred != nil {
 		set("starred", *req.Starred)
 	}
-	if _, ok := rawBody["status"]; ok {
-		set("status", req.Status)
-		set("status_updated_at", now)
-	}
 	if _, ok := rawBody["notes"]; ok {
 		set("notes", req.Notes)
 	}
 	if _, ok := rawBody["rating"]; ok {
 		set("rating", req.Rating)
 	}
-	if _, ok := rawBody["progress"]; ok {
-		progress := []byte("{}")
-		if req.Progress != nil {
-			var m map[string]json.RawMessage
-			if err := json.Unmarshal(*req.Progress, &m); err != nil {
-				return echo.NewHTTPError(http.StatusBadRequest, "progress must be a JSON object")
-			}
-			progress = []byte(*req.Progress)
-		}
-		set("progress", progress)
-		if string(progress) == "{}" {
-			set("progress_updated_at", nil)
-		} else {
-			set("progress_updated_at", now)
-		}
-	}
 
 	var utc models.UserToContent
 	err = db.WithTx(ctx, cr.pool, func(tx pgx.Tx) error {
-		if err := lockContentLibraries(ctx, tx, contentID); err != nil {
+		if err := lockUserData(ctx, tx, user.ID, contentID); err != nil {
 			return err
 		}
 		libraryID, uri, err := contentURI(ctx, tx, contentID)
@@ -1109,33 +1097,13 @@ func (cr *ContentRoutes) updateUserData(c echo.Context) error {
 			return err
 		}
 		args["library_id"], args["uri"] = libraryID, uri
-		var parentID, prevStatus *string
-		if req.Status != nil {
-			err = tx.QueryRow(ctx, `
-				SELECT c.parent_id, utc.status FROM content c
-				LEFT JOIN user_to_content utc
-					ON utc.library_id = c.library_id AND utc.uri = c.uri AND utc.user_id = $2
-				WHERE c.id = $1
-			`, contentID, user.ID).Scan(&parentID, &prevStatus)
-			if err != nil {
-				return err
-			}
-		}
 		utc, err = db.SelectOne[models.UserToContent](ctx, tx, fmt.Sprintf(`
 			INSERT INTO user_to_content (%s)
 			VALUES (%s)
 			ON CONFLICT (user_id, library_id, uri) DO UPDATE SET %s
 			RETURNING *
 		`, strings.Join(cols, ", "), strings.Join(vals, ", "), strings.Join(sets, ", ")), args)
-		if err != nil {
-			return err
-		}
-		// Only a change propagates: readers resend 'reading' on every progress save, which
-		// would otherwise restore a series status the user cleared.
-		if parentID != nil && (prevStatus == nil || *prevStatus != *req.Status) {
-			return propagateSeriesStatus(ctx, tx, user.ID, *parentID, *req.Status, now)
-		}
-		return nil
+		return err
 	})
 	if err != nil {
 		return err
@@ -1144,153 +1112,16 @@ func (cr *ContentRoutes) updateUserData(c echo.Context) error {
 	return c.JSON(http.StatusOK, utcToDTO(&utc))
 }
 
-type seriesItemStatusesRequest struct {
-	Status  *string `json:"status"   validate:"omitempty,oneof=reading completed on_hold dropped plan_to_read"`
-	UntilID *string `json:"until_id"`
-}
-
-func (cr *ContentRoutes) setSeriesItemStatuses(c echo.Context) error {
-	user, err := requireUser(c)
-	if err != nil {
-		return err
-	}
-
-	ctx := reqCtx(c)
-	contentID := c.Param("content_id")
-
-	var req seriesItemStatusesRequest
-	if err := c.Bind(&req); err != nil {
-		return err
-	}
-	if err := ValidateStruct(req); err != nil {
-		return err
-	}
-
-	tx, err := cr.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if err := lockContentLibraries(ctx, tx, contentID); err != nil {
-		return err
-	}
-	if _, _, err := contentURI(ctx, tx, contentID); err != nil {
-		return err
-	}
-
-	type childRow struct {
-		ID        string `db:"id"`
-		LibraryID string `db:"library_id"`
-		URI       string `db:"uri"`
-	}
-	children, err := db.Select[childRow](ctx, tx, `
-		SELECT id, library_id, uri FROM content
-		WHERE parent_id = $1 ORDER BY "order" ASC
-	`, contentID)
-	if err != nil {
-		return err
-	}
-	if len(children) == 0 {
-		return okResponse(c)
-	}
-
-	setChildren := children
-	if req.UntilID != nil {
-		splitIdx := -1
-		for i, ch := range children {
-			if ch.ID == *req.UntilID {
-				splitIdx = i
-				break
-			}
-		}
-		if splitIdx == -1 {
-			return echo.NewHTTPError(http.StatusNotFound, "Target child not found")
-		}
-		setChildren = children[:splitIdx+1]
-	}
-
-	now := time.Now().UTC()
-
-	// Clear statuses if status is nil or until_id is set
-	if req.Status == nil || req.UntilID != nil {
-		allLibIDs := make([]string, len(children))
-		allURIs := make([]string, len(children))
-		for i, ch := range children {
-			allLibIDs[i] = ch.LibraryID
-			allURIs[i] = ch.URI
-		}
-		_, err = tx.Exec(ctx, `
-			UPDATE user_to_content
-			SET status = NULL, status_updated_at = $1, progress = '{}', progress_updated_at = NULL
-			WHERE user_id = $2
-				AND (library_id, uri) IN (SELECT UNNEST($3::text[]), UNNEST($4::text[]))
-		`, now, user.ID, allLibIDs, allURIs)
-		if err != nil {
-			return err
-		}
-	}
-
-	// Upsert target items with the given status
-	if req.Status != nil {
-		for _, ch := range setChildren {
-			_, err = tx.Exec(ctx, `
-				INSERT INTO user_to_content (id, user_id, library_id, uri, status, status_updated_at)
-				VALUES ($1, $2, $3, $4, $5, $6)
-				ON CONFLICT (user_id, library_id, uri)
-				DO UPDATE SET status = $5, status_updated_at = $6
-			`, models.MakeUserToContentID(), user.ID, ch.LibraryID, ch.URI, *req.Status, now)
-			if err != nil {
-				return err
-			}
-		}
-		if err := propagateSeriesStatus(ctx, tx, user.ID, contentID, *req.Status, now); err != nil {
-			return err
-		}
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return err
-	}
-
-	return okResponse(c)
-}
-
-// propagateSeriesStatus applies a child's new status to its series: a 'reading' or 'completed'
-// child starts a series without a status, and completing the last unfinished child completes a
-// 'reading' series. Other series statuses are the user's choice and stay untouched.
-func propagateSeriesStatus(ctx context.Context, tx pgx.Tx, userID, seriesID, childStatus string, now time.Time) error {
-	if childStatus != "reading" && childStatus != "completed" {
-		return nil
-	}
-	args := pgx.NamedArgs{"utc_id": models.MakeUserToContentID(), "user_id": userID, "series_id": seriesID, "now": now}
-	_, err := tx.Exec(ctx, `
-		INSERT INTO user_to_content (id, user_id, library_id, uri, status, status_updated_at)
-		SELECT @utc_id, @user_id, library_id, uri, 'reading', @now FROM content WHERE id = @series_id
-		ON CONFLICT (user_id, library_id, uri) DO UPDATE
-			SET status = 'reading', status_updated_at = EXCLUDED.status_updated_at
-			WHERE user_to_content.status IS NULL
-	`, args)
-	if err != nil || childStatus != "completed" {
-		return err
-	}
-	_, err = tx.Exec(ctx, `
-		UPDATE user_to_content utc SET status = 'completed', status_updated_at = @now
-		FROM content c
-		WHERE c.id = @series_id AND utc.user_id = @user_id
-			AND utc.library_id = c.library_id AND utc.uri = c.uri AND utc.status = 'reading'
-			AND NOT EXISTS (SELECT 1 `+unfinishedChildren+`)
-	`, args)
-	return err
-}
-
 type bulkUserDataRequest struct {
-	IDs    []string `json:"ids"    validate:"required,min=1"`
-	Action string   `json:"action" validate:"required,oneof=set_status reset"`
-	Status *string  `json:"status" validate:"omitempty,oneof=reading completed on_hold dropped plan_to_read"`
+	IDs             []string `json:"ids"              validate:"required,min=1"`
+	Action          string   `json:"action"           validate:"required,oneof=set_status reset"`
+	Status          *string  `json:"status"           validate:"omitempty,oneof=reading completed on_hold dropped plan_to_read"`
+	IncludeChildren bool     `json:"include_children"`
 }
 
-// bulkUserData sets or resets the user's status on the given content. Reset also clears progress,
-// and the statuses and progress of the children of selected series.
+// bulkUserData sets or clears the user's status on the given content, as the reading commands
+// do. Completing also ends the items, and with include_children the unfinished volumes of
+// selected series; reset clears the content and the children of selected series.
 func (cr *ContentRoutes) bulkUserData(c echo.Context) error {
 	user, err := requireUser(c)
 	if err != nil {
@@ -1306,74 +1137,75 @@ func (cr *ContentRoutes) bulkUserData(c echo.Context) error {
 	}
 
 	ids := fp.Dedup(req.IDs)
-	utcIDs := make([]string, len(ids))
-	for i := range utcIDs {
-		utcIDs[i] = models.MakeUserToContentID()
-	}
-	now := time.Now().UTC()
-	args := pgx.NamedArgs{
-		"user_id": user.ID, "content_ids": ids, "utc_ids": utcIDs, "status": req.Status, "now": now,
-	}
-	sets := "status = EXCLUDED.status, status_updated_at = EXCLUDED.status_updated_at"
-	reset := req.Action == "reset"
-	if reset {
-		args["status"] = nil
-		sets += ", progress = EXCLUDED.progress, progress_updated_at = EXCLUDED.progress_updated_at"
-	}
+	rev, now := db.ServerRevision(), time.Now().UTC()
+	args := pgx.NamedArgs{"user_id": user.ID, "ids": ids, "status": req.Status, "now": now, "rev": rev}
+	completing := req.Action == "set_status" && req.Status != nil && *req.Status == "completed"
 
 	ctx := reqCtx(c)
-	var count int64
+	var count int
 	err = db.WithTx(ctx, cr.pool, func(tx pgx.Tx) error {
-		if err := lockContentLibraries(ctx, tx, ids...); err != nil {
+		if err := lockUserData(ctx, tx, user.ID, ids...); err != nil {
 			return err
 		}
-		// As in updateUserData, only a changed child status propagates to its series.
-		var parents []string
-		if !reset && req.Status != nil {
-			var err error
-			parents, err = db.SelectScalars[string](ctx, tx, `
-				SELECT DISTINCT c.parent_id FROM content c
-				LEFT JOIN user_to_content utc
-					ON utc.library_id = c.library_id AND utc.uri = c.uri AND utc.user_id = @user_id
-				WHERE c.id = ANY(@content_ids) AND c.parent_id IS NOT NULL
-					AND utc.status IS DISTINCT FROM @status
+		rows, err := db.Select[completionRow](ctx, tx,
+			"SELECT "+completionColumns+" FROM content c WHERE c.id = ANY(@ids)", args)
+		if err != nil {
+			return err
+		}
+		count = len(rows)
+
+		switch {
+		case req.Action == "reset":
+			return clearContent(ctx, tx, user.ID, ids, rev)
+		case completing:
+			if req.IncludeChildren {
+				children, err := db.Select[completionRow](ctx, tx, unfinishedChildRows, args)
+				if err != nil {
+					return err
+				}
+				// A selected child is also a child of a selected series.
+				rows = fp.Dedup(append(rows, children...))
+			}
+			if err := markCompleted(ctx, tx, user.ID, rows, rev, now); err != nil {
+				return err
+			}
+		default:
+			args["utc_ids"] = fp.Map(ids, func(string) string { return models.MakeUserToContentID() })
+			_, err := tx.Exec(ctx, `
+				INSERT INTO user_to_content AS utc (id, user_id, library_id, uri, status, status_updated_at, revision)
+				SELECT r.id, @user_id, c.library_id, c.uri, @status, @now, @rev
+				FROM unnest(@utc_ids::text[], @ids::text[]) r(id, cid)
+				JOIN content c ON c.id = r.cid
+				ON CONFLICT (user_id, library_id, uri) DO UPDATE SET status = EXCLUDED.status,
+					status_updated_at = CASE WHEN utc.status IS DISTINCT FROM EXCLUDED.status
+						THEN EXCLUDED.status_updated_at ELSE utc.status_updated_at END,
+					revision = EXCLUDED.revision
 			`, args)
 			if err != nil {
 				return err
 			}
+			if req.Status == nil || *req.Status != "reading" {
+				return nil
+			}
 		}
-		tag, err := tx.Exec(ctx, `
-			INSERT INTO user_to_content (id, user_id, library_id, uri, status, status_updated_at)
-			SELECT r.id, @user_id, c.library_id, c.uri, @status, @now
-			FROM unnest(@utc_ids::text[], @content_ids::text[]) r(id, cid)
-			JOIN content c ON c.id = r.cid
-			ON CONFLICT (user_id, library_id, uri) DO UPDATE SET `+sets, args)
+		// Reading or completed volumes start their series, after any series status set above.
+		parents, err := db.SelectScalars[string](ctx, tx,
+			"SELECT DISTINCT parent_id FROM content WHERE id = ANY(@ids) AND parent_id IS NOT NULL", args)
 		if err != nil {
 			return err
 		}
-		count = tag.RowsAffected()
 		for _, p := range parents {
-			if err := propagateSeriesStatus(ctx, tx, user.ID, p, *req.Status, now); err != nil {
+			if _, err := startSeries(ctx, tx, user.ID, p, rev, now, false); err != nil {
 				return err
 			}
 		}
-		if !reset {
-			return nil
-		}
-		_, err = tx.Exec(ctx, `
-			UPDATE user_to_content utc
-			SET status = NULL, status_updated_at = @now, progress = '{}', progress_updated_at = NULL
-			FROM content child
-			WHERE child.parent_id = ANY(@content_ids) AND utc.user_id = @user_id
-				AND utc.library_id = child.library_id AND utc.uri = child.uri
-		`, args)
-		return err
+		return nil
 	})
 	if err != nil {
 		return err
 	}
 
-	return c.JSON(http.StatusOK, map[string]int64{"count": count})
+	return c.JSON(http.StatusOK, map[string]int{"count": count})
 }
 
 type contentWithUTCRow struct {
@@ -1389,6 +1221,8 @@ type contentWithUTCRow struct {
 	UTCRating            *int       `db:"utc_rating"`
 	UTCProgress          []byte     `db:"utc_progress"`
 	UTCProgressUpdatedAt *time.Time `db:"utc_progress_updated_at"`
+	UTCRevision          *string    `db:"utc_revision"`
+	UTCLastReadAt        *time.Time `db:"utc_last_read_at"`
 	MetaData             []byte     `db:"meta_data"`
 	MetaUpdatedAt        *time.Time `db:"meta_updated_at"`
 }
@@ -1409,32 +1243,40 @@ func (r *contentWithUTCRow) utc() *models.UserToContent {
 		Rating:            r.UTCRating,
 		Progress:          r.UTCProgress,
 		ProgressUpdatedAt: r.UTCProgressUpdatedAt,
+		Revision:          r.UTCRevision,
+		LastReadAt:        r.UTCLastReadAt,
 	}
 }
 
 type contentListRow struct {
 	contentWithUTCRow
-	ChildrenCount       *int `db:"children_count"`
-	UnreadChildrenCount *int `db:"unread_children_count"`
+	childCounts
+	Continue *continueInfo `db:"-"`
 }
 
-// lockContentLibraries takes the metadata locks, under which scans move refs, of the libraries
-// holding the content, in sorted order so that concurrent batches cannot deadlock.
-func lockContentLibraries(ctx context.Context, tx pgx.Tx, contentIDs ...string) error {
+type continueInfo struct {
+	Action string
+	IsNew  bool
+	Series *contentListRow
+}
+
+// lockUserData takes db.LockUserData for the libraries holding the content, in sorted order so
+// that concurrent batches cannot deadlock.
+func lockUserData(ctx context.Context, tx pgx.Tx, userID string, contentIDs ...string) error {
 	libs, err := db.SelectScalars[string](ctx, tx,
 		"SELECT DISTINCT library_id FROM content WHERE id = ANY($1) ORDER BY library_id", contentIDs)
 	if err != nil {
 		return err
 	}
 	for _, lib := range libs {
-		if err := db.LockMetadata(ctx, tx, lib); err != nil {
+		if err := db.LockUserData(ctx, tx, userID, lib); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// contentURI reads the content's current URI; under lockContentLibraries, a ref written with it
+// contentURI reads the content's current URI; under lockUserData, a ref written with it
 // cannot land on a URI a scan has since moved away from.
 func contentURI(ctx context.Context, tx pgx.Tx, contentID string) (libraryID, uri string, err error) {
 	err = tx.QueryRow(ctx, "SELECT library_id, uri FROM content WHERE id = $1", contentID).Scan(&libraryID, &uri)

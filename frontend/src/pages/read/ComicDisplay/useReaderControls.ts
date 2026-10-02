@@ -30,44 +30,38 @@ export function useReaderControls() {
     const reader = useReaderStore()
 
     function handleMove(direction: 'next' | 'prev') {
-        let switchToSibling = false
-        const mode = reader.mode
-        if (mode === 'longstrip') {
-            if (direction === 'next') {
-                if (isAtBottom()) {
-                    switchToSibling = true
-                } else {
-                    scrollByViewport(0.85)
-                }
+        const state = reader.state
+        // Before the saved page is placed, input would overwrite it.
+        if (!state || state.loading || state.error) return
+        if (reader.mode === 'longstrip') {
+            // Key and click scrolls are reading, so they arm the strip before it moves.
+            reader.armed = true
+            if (direction === 'next' ? !isAtBottom() : !isAtTop()) {
+                scrollByViewport(direction === 'next' ? 0.85 : -0.85)
+            } else if (direction === 'prev') {
+                reader.goToSibling('prev')
             } else {
-                if (isAtTop()) {
-                    switchToSibling = true
-                } else {
-                    scrollByViewport(-0.85)
-                }
+                state.finish()
+                reader.goPastEnd()
             }
-        } else {
-            // Paged mode
-            const currentPage = reader.state?.page ?? 0
-            const pages = reader.state?.pageDimensions ?? []
-
-            const newPage = direction === 'next' ? currentPage + 1 : currentPage - 1
-            if (newPage >= 0 && newPage < pages.length) {
-                reader.setPage(newPage)
-            } else {
-                switchToSibling = true
-            }
+            return
         }
 
-        if (switchToSibling) {
-            // This makes sure that, on .dispose(), we correctly mark the
-            // chapter as completed. Since progress in longstrip mode is based
-            // on which image is in the middle of the viewport, we may be at the
-            // end even though it hasn't set the page to the last one.
-            if (direction == 'next' && reader.mode === 'longstrip' && reader.state) {
-                reader.setPage(reader.state?.pageDimensions.length - 1)
-            }
-            reader.goToSibling(direction, direction === 'prev')
+        if (reader.atEnd) {
+            if (direction === 'prev') reader.atEnd = false
+            // The next sibling may have arrived since.
+            else reader.goPastEnd()
+            return
+        }
+        const newPage = state.page + (direction === 'next' ? 1 : -1)
+        if (newPage >= 0 && newPage < state.pageDimensions.length) {
+            reader.setPage(newPage)
+        } else if (direction === 'prev') {
+            reader.goToSibling('prev')
+        } else if (state.pageDimensions.length) {
+            // Past the last page: a deliberate finish.
+            state.finish()
+            reader.goPastEnd()
         }
     }
 
@@ -88,10 +82,10 @@ export function useReaderControls() {
                 handleMove('next')
                 break
             case ',':
-                reader.goToSibling('prev', true)
+                reader.goToSibling('prev')
                 break
             case '.':
-                reader.goToSibling('next', false)
+                reader.goToSibling('next')
                 break
         }
     }

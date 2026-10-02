@@ -1,5 +1,4 @@
-import { useMutation, useQuery, type Query } from '@tanstack/vue-query'
-import { promiseTimeout } from '@vueuse/core'
+import { useMutation, useQuery } from '@tanstack/vue-query'
 import { computed, toValue, type MaybeRefOrGetter } from 'vue'
 import { API_URL, apiFetch } from '../fetch'
 import { queryClient } from '../misc'
@@ -19,7 +18,6 @@ import type {
     LibraryUrisResponse,
     Paginated,
     ReadingStatus,
-    RecentlyReadEntry,
     UncountedPage,
     UserToContent,
     UserToContentUpdate,
@@ -42,46 +40,6 @@ function pageQuery(p: PageParams): string {
     if (p.offset !== undefined) searchParams.append('offset', String(p.offset))
     const query = searchParams.toString()
     return query ? `?${query}` : ''
-}
-
-/** Only the recently-read query: the readers keep sibling lists active under ['content', 'list']. */
-const recentlyReadFilters = {
-    queryKey: ['content', 'list'],
-    predicate: (q: Query) => q.queryKey[3] === 'recently-read',
-}
-
-export async function invalidateRecentlyRead() {
-    // Without data, invalidating joins an in-flight fetch, whose response may predate the write.
-    await queryClient.cancelQueries(recentlyReadFilters)
-    await queryClient.invalidateQueries(recentlyReadFilters)
-}
-
-// A reader's exit write, which the recently-read fetch waits for so it can't return the old order.
-let pendingRecentlyRead: Promise<unknown> = Promise.resolve()
-
-export function trackRecentlyReadWrite(p?: Promise<unknown>) {
-    if (!p) return
-    // Chained: a second reader's write mustn't replace the first.
-    pendingRecentlyRead = Promise.allSettled([pendingRecentlyRead, p]).then(() => {})
-}
-
-/** Moves `item`'s entry to the front so HomePage mounts in the new order; the refetch adds missing ones. */
-export function bumpRecentlyRead(item: Content) {
-    queryClient.setQueriesData<RecentlyReadEntry[]>(recentlyReadFilters, entries => {
-        if (!entries) return entries
-        const i = entries.findIndex(e =>
-            e.series ? e.series.id === item.parent_id : e.item.id === item.id
-        )
-        return i > 0 ? [entries[i], ...entries.toSpliced(i, 1)] : entries
-    })
-}
-
-/** A status write can change its series' status too (backend propagation), and a reader's last
- * write can land after the grid it returns to has fetched. */
-export async function invalidateStatusChange(parentId: string | null) {
-    const keys = [['content', 'list'], ...(parentId ? [['content', parentId]] : [])]
-    await Promise.all(keys.map(queryKey => queryClient.cancelQueries({ queryKey })))
-    await Promise.all(keys.map(queryKey => queryClient.invalidateQueries({ queryKey })))
 }
 
 export const invalidateContentWindow = () => invalidateMatching(queryClient, isContentWindow)
@@ -175,7 +133,7 @@ export const contentApi = {
     /** Returns how many items changed, once the content queries have refetched. */
     bulkUserData: async (
         body: { ids: string[] } & (
-            | { action: 'set_status'; status: ReadingStatus | null }
+            | { action: 'set_status'; status: ReadingStatus | null; include_children?: boolean }
             | { action: 'reset' }
         )
     ) => {
@@ -186,19 +144,6 @@ export const contentApi = {
         await invalidateMatching(queryClient, key => key[0] === 'content')
         return res
     },
-
-    useRecentlyRead: (limit = 10) =>
-        useQuery({
-            // Under ['content', 'list'], so the list invalidations cover it too.
-            queryKey: ['content', 'list', libraryScope(undefined), 'recently-read', limit],
-            queryFn: async ({ signal }) => {
-                // apiFetch has no timeout, so a hung write mustn't hold the row back forever.
-                await Promise.race([pendingRecentlyRead, promiseTimeout(3000)])
-                return apiFetch<RecentlyReadEntry[]>(`/content/recently-read?limit=${limit}`, {
-                    signal,
-                })
-            },
-        }),
 
     useDownloadInfo: (id: MaybeRefOrGetter<string | undefined | null>) =>
         useQuery({
@@ -267,17 +212,6 @@ export const contentApi = {
         })
     },
 
-    setSeriesItemStatuses: async (
-        contentId: string,
-        status: ReadingStatus | null,
-        untilId?: string
-    ): Promise<void> => {
-        await apiFetch(`/content/${contentId}/series-item-statuses`, {
-            method: 'POST',
-            body: JSON.stringify({ status, until_id: untilId }),
-        })
-    },
-
     listLibraryUris: async (libraryId: string): Promise<LibraryUrisResponse> => {
         return apiFetch<LibraryUrisResponse>(`/content/refs/${libraryId}`)
     },
@@ -310,6 +244,12 @@ export const contentApi = {
             enabled: isEnabled(libraryId),
             ...options,
         }),
+
+    /** The user's row at `uri`, which repairing a broken ref onto it would merge with. */
+    userDataAt: async (libraryId: string, uri: string) =>
+        apiFetch<BrokenUserToContent | null>(
+            `/content/refs/${libraryId}/user-data?${new URLSearchParams({ uri })}`
+        ),
 
     fixBrokenRefs: async (libraryId: string, body: BrokenRefsFixRequest): Promise<void> => {
         await apiFetch(`/content/broken-refs/${libraryId}`, {

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"slices"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -19,7 +20,21 @@ func Connect(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
-	config.MaxConns = 20
+	// Postgres allows 100 connections by default. A `pool_max_conns` parameter in the database URL
+	// overrides this; pgxpool consumes it, so it is looked for in a plain parse.
+	plain, err := pgconn.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	if _, ok := plain.RuntimeParams["pool_max_conns"]; !ok {
+		config.MaxConns = 50
+	}
+	// Compiling a plan costs more than the short queries here gain from it: hundreds of ms on
+	// reading-list queries whose estimated cost crosses the JIT threshold. A `jit` parameter in
+	// the database URL, as any unknown one a server setting, overrides this.
+	if _, ok := config.ConnConfig.RuntimeParams["jit"]; !ok {
+		config.ConnConfig.RuntimeParams["jit"] = "off"
+	}
 
 	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {

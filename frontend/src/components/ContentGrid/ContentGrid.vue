@@ -39,7 +39,7 @@
             <AMenuItem
                 :leading-icon="IconBookOpen"
                 :disabled="selectedIds.size === 0"
-                @select="bulk(showBulkStatusModal)"
+                @select="bulk(ids => showBulkStatusModal(ids, selectionMayHaveSeries()))"
             >
                 Set reading status
             </AMenuItem>
@@ -58,7 +58,7 @@
                 :disabled="selectedIds.size === 0"
                 @select="bulk(ids => showBulkResetProgressModal(ids, selectedTitles()))"
             >
-                Reset reading progress
+                Clear status and position
             </AMenuItem>
         </AMenu>
     </DefineToolbar>
@@ -159,7 +159,9 @@
                             v-if="itemAt(i)"
                             :data-index="i"
                             :content="itemAt(i)!"
-                            :to-read-route="toReadRoute"
+                            :series="itemAt(i)!.continue?.series"
+                            :is-new="itemAt(i)!.continue?.is_new"
+                            :to-read-route="toReadRoute || !!itemAt(i)!.continue"
                             :store-key="storeKey"
                             :selecting="selectMode"
                             :selected="selectedIds.has(itemAt(i)!.id)"
@@ -266,6 +268,8 @@ const props = withDefaults(
         title?: string
         toReadRoute?: boolean
         storeKey?: string
+        /** Sorts offered before the library ones, descending by default. */
+        extraSorts?: { label: string; value: NonNullable<ContentListParams['sort']> }[]
     }>(),
     { storeKey: 'default' }
 )
@@ -319,22 +323,26 @@ const ratingOptions = [
 const SORT_DEFAULTS: Record<string, 'asc' | 'desc'> = {
     title: 'asc',
     created_at: 'desc',
-    progress_updated_at: 'desc',
+    last_read_at: 'desc',
+    history: 'desc',
+    continue: 'desc',
+    recently_updated: 'desc',
     rating: 'desc',
     user_rating: 'desc',
     release_date: 'desc',
     unread_children_count: 'desc',
 }
 
-const sortOptions = [
+const sortOptions = computed(() => [
+    ...(props.extraSorts ?? []),
     { label: 'Title', value: 'title' },
     { label: 'Recently added', value: 'created_at' },
-    { label: 'Recently read', value: 'progress_updated_at' },
+    { label: 'Recently read', value: 'last_read_at' },
     { label: 'Rating', value: 'rating' },
     { label: 'My rating', value: 'user_rating' },
     { label: 'Release date', value: 'release_date' },
     { label: 'Unread count', value: 'unread_children_count' },
-]
+])
 
 function onSortChange(value: string | null) {
     if (value == null) {
@@ -396,16 +404,27 @@ async function bulk(action: (ids: string[]) => Promise<boolean>) {
 
 const queryClient = useQueryClient()
 
+function cachedContent(): Map<string, Content> {
+    const byId = new Map<string, Content>()
+    const key = contentWindowKey(queryParams.value)
+    for (const [, page] of queryClient.getQueriesData<{ data?: Content[] }>({ queryKey: key })) {
+        for (const c of page?.data ?? []) byId.set(c.id, c)
+    }
+    return byId
+}
+
 // From the cached pages, for a short selection; otherwise the modal shows only the count.
 function selectedTitles(): string[] | undefined {
     if (selectedIds.value.size > 50) return
-    const titles = new Map<string, string>()
-    const key = contentWindowKey(queryParams.value)
-    for (const [, page] of queryClient.getQueriesData<{ data?: Content[] }>({ queryKey: key })) {
-        for (const c of page?.data ?? []) titles.set(c.id, c.title)
-    }
-    const out = [...selectedIds.value].map(id => titles.get(id))
+    const byId = cachedContent()
+    const out = [...selectedIds.value].map(id => byId.get(id)?.title)
     return out.every(t => t !== undefined) ? out : undefined
+}
+
+/** True unless the cached pages show the selection holds no series. */
+function selectionMayHaveSeries(): boolean {
+    const byId = cachedContent()
+    return [...selectedIds.value].some(id => byId.get(id)?.type.includes('series') ?? true)
 }
 
 const COL_GAP = 18
@@ -570,7 +589,7 @@ const scrollRange = computed(() => Math.max(1, pageHeight.value - windowHeight.v
 const railValue = computed(() => Math.min(1, Math.max(0, scrollY.value / scrollRange.value)))
 
 const NULL_LABELS: Partial<Record<string, [label: string, bubble: string]>> = {
-    progress_updated_at: ['–', 'Never'],
+    last_read_at: ['–', 'Never'],
     release_date: ['?', 'Unknown'],
 }
 

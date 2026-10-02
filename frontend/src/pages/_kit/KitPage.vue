@@ -1076,7 +1076,7 @@
                     :min="600"
                 >
                     <KitDemo label="with cards" wide stack>
-                        <AScrollRow title="Recently read">
+                        <AScrollRow title="Recently read" see-all="/_kit#media">
                             <RouterLink
                                 v-for="(title, i) in TITLES"
                                 :key="title"

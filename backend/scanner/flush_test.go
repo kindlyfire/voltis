@@ -404,7 +404,8 @@ func TestFlushRenameMovesAnnotationsWithChildKeyChange(t *testing.T) {
 	series := r.w.byURI["comic/S"]
 	leaf := r.w.keys[Key{series, "ch1"}]
 	exec(t, r.pool, "INSERT INTO metadata_links (library_id, content_id, provider, state) VALUES ($1, $2, 'p', 'review')", r.lib, series)
-	// A stale user row at the destination gives way to the source's.
+	// A user row at the destination merges with the source's; neither was read, so the source's
+	// state and notes win.
 	exec(t, r.pool, "INSERT INTO user_to_content (id, user_id, library_id, uri, notes) VALUES ('dst', 'u1', $1, 'comic/S_2019/ch2', 'destination')", r.lib)
 
 	r.reload()
@@ -415,6 +416,10 @@ func TestFlushRenameMovesAnnotationsWithChildKeyChange(t *testing.T) {
 	assertCatalog(t, r.pool, r.lib, want)
 
 	assertRefs(t, r, map[string]string{"comic/S_2019": "comic/S", "comic/S_2019/ch2": "comic/S/ch1"})
+	if fresh, err := db.SelectScalar[bool](context.Background(), r.pool,
+		"SELECT bool_and(revision LIKE 'srv:%') FROM user_to_content"); err != nil || !fresh {
+		t.Fatalf("moved rows without a fresh revision (%v)", err)
+	}
 	if id := contentIDByURI(t, r.pool, r.lib, "comic/S_2019/ch2"); id != leaf {
 		t.Fatalf("leaf id = %s, want %s", id, leaf)
 	}
@@ -447,6 +452,30 @@ func TestFlushRenameMovesAnnotationsWithChildKeyChange(t *testing.T) {
 	}
 	if got := readData(t, r.pool, r.lib, "comic/S_2019/ch2"); got.Title.V != "comic/S/ch1" || got.Volume.V != "7" {
 		t.Fatalf("leaf data = %+v, want the file layer under its override", got)
+	}
+}
+
+// A rename onto a URI where the user has a more recently read row keeps that row's reading state.
+func TestFlushRenameMergesNewerUserRow(t *testing.T) {
+	r := newTestScan(t, "comics")
+	r.place(comicResult("/lib/S/ch1.cbz", "ch1", "S", "/lib/S"))
+	r.commit(false)
+	seedRefs(t, r, "comic/S/ch1")
+	exec(t, r.pool, `UPDATE user_to_content SET status = 'reading', last_read_at = now() - interval '1 day',
+		progress = '{"current_page": 3}' WHERE uri = 'comic/S/ch1'`)
+	exec(t, r.pool, `INSERT INTO user_to_content (id, user_id, library_id, uri, status, last_read_at, progress, starred)
+		VALUES ('dst', 'u1', $1, 'comic/S/ch2', 'completed', now(), '{"current_page": 9}', true)`, r.lib)
+
+	r.reload()
+	r.place(comicResult("/lib/S/ch1.cbz", "ch2", "S", "/lib/S"))
+	r.commit(false)
+
+	var got string
+	must(t, r.pool.QueryRow(context.Background(), `
+		SELECT string_agg(concat_ws(' ', id, uri, status, progress::text, starred, notes, revision LIKE 'srv:%'), ',')
+		FROM user_to_content WHERE library_id = $1`, r.lib).Scan(&got))
+	if want := `dst comic/S/ch2 completed {"current_page": 9} t comic/S/ch1 t`; got != want {
+		t.Fatalf("rows = %s, want %s", got, want)
 	}
 }
 

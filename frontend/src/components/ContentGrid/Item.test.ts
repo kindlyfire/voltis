@@ -13,6 +13,8 @@ const series = {
     title: 'Harbor Lights',
     children_count: 10,
     unread_children_count: 7,
+    completed_children_count: 2,
+    dropped_children_count: 1,
     user_data: null,
 } as unknown as Content
 
@@ -52,10 +54,12 @@ describe('ContentGrid Item', () => {
         const w = mountItem(item(), true, { highlightReading: true })
         const { card, details } = links(w)
         expect(card.props('to')).toBe('/r/c_item?page=resume')
-        expect(card.attributes('aria-label')).toBe('Read Harbor Lights, Vol. 4, 3 of 10 read')
+        expect(card.attributes('aria-label')).toBe(
+            'Read Harbor Lights, Vol. 4, 2/10 read · 1 dropped'
+        )
         expect(details.props('to')).toBe('/c_series')
         expect(w.find('.content-card__title').text()).toBe('Harbor Lights')
-        expect(w.find('.content-card__subtitle').text()).toBe('Vol. 4 · 3 / 10')
+        expect(w.find('.content-card__subtitle').text()).toBe('Vol. 4 · 2/10 read · 1 dropped')
         expect(w.findComponent(ACover).props('progress')).toBeUndefined()
         expect(w.findComponent(ABadge).exists()).toBe(false)
         expect(w.classes()).not.toContain('reading')
@@ -64,7 +68,7 @@ describe('ContentGrid Item', () => {
     it('names the status of a series item being read', async () => {
         const w = mountItem(item('reading'), true, { highlightReading: true })
         expect(links(w).card.attributes('aria-label')).toBe(
-            'Read Harbor Lights, Vol. 4, 3 of 10 read, Reading'
+            'Read Harbor Lights, Vol. 4, 2/10 read · 1 dropped, Reading'
         )
         expect(w.findComponent(ACover).props('progress')).toBeCloseTo(0.4)
         expect(w.classes()).toContain('reading')
@@ -89,5 +93,41 @@ describe('ContentGrid Item', () => {
         expect(details.props('to')).toBe('/c_item')
         expect(w.find('.content-card__subtitle').exists()).toBe(false)
         expect(w.classes()).not.toContain('reading')
+    })
+
+    it('badges new volumes', () => {
+        const w = mount(Item, {
+            props: { content: item(), series, toReadRoute: true, isNew: true },
+            global: { stubs: { RouterLink: RouterLinkStub, ATooltip: { template: '<slot />' } } },
+        })
+        expect(w.find('.content-card__new').text()).toBe('New')
+        expect(links(w).card.attributes('aria-label')).toBe(
+            'Read Harbor Lights, Vol. 4, 2/10 read · 1 dropped, New'
+        )
+
+        const completed = {
+            ...series,
+            new_children_count: 2,
+            user_data: { status: 'completed', progress: {} },
+        } as unknown as Content
+        const s = mount(Item, {
+            props: { content: completed },
+            global: { stubs: { RouterLink: RouterLinkStub, ATooltip: { template: '<slot />' } } },
+        })
+        expect(s.find('.content-card__new').text()).toBe('2 new')
+    })
+
+    it('labels a caught-up series being read', () => {
+        const caughtUp = {
+            ...series,
+            unread_children_count: 0,
+            completed_children_count: 9,
+            user_data: { status: 'reading', progress: {} },
+        } as unknown as Content
+        const w = mount(Item, {
+            props: { content: caughtUp },
+            global: { stubs: { RouterLink: RouterLinkStub, ATooltip: { template: '<slot />' } } },
+        })
+        expect(links(w).card.attributes('aria-label')).toContain('Reading · Caught up')
     })
 })

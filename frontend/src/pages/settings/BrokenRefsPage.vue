@@ -110,21 +110,34 @@
                             </td>
                             <td class="py-2">
                                 <div class="flex items-start gap-1">
-                                    <ACombobox
-                                        :model-value="target(item.id)"
-                                        :options="contentUris"
-                                        :label="`New ref for ${item.uri}`"
-                                        placeholder="Replace with…"
-                                        size="sm"
-                                        clearable
-                                        :disabled="edits.get(item.id) === null"
-                                        :hint="actionHint(item.id)"
-                                        hint-tone="warning"
-                                        class="min-w-64 flex-1"
-                                        @update:model-value="
-                                            v => setTarget(item.id, v ?? undefined)
-                                        "
-                                    />
+                                    <div class="flex min-w-64 flex-1 flex-col gap-2">
+                                        <ACombobox
+                                            :model-value="target(item.id)"
+                                            :options="contentUris"
+                                            :label="`New ref for ${item.uri}`"
+                                            placeholder="Replace with…"
+                                            size="sm"
+                                            clearable
+                                            :disabled="edits.get(item.id) === null"
+                                            :hint="
+                                                edits.get(item.id) === null
+                                                    ? 'Saving deletes this data.'
+                                                    : undefined
+                                            "
+                                            hint-tone="warning"
+                                            @update:model-value="
+                                                v => setTarget(item.id, v ?? undefined)
+                                            "
+                                        />
+                                        <BrokenRefMerge
+                                            v-if="selectedLibraryId && collides(item.id)"
+                                            :source="item"
+                                            :library-id="selectedLibraryId"
+                                            :uri="target(item.id)!"
+                                            :keep="keeps.get(item.id) ?? 'newer'"
+                                            @update:keep="k => keeps.set(item.id, k)"
+                                        />
+                                    </div>
                                     <AIconButton
                                         :icon="IconDelete"
                                         :label="`Delete the data for ${item.uri}`"
@@ -169,12 +182,14 @@ import ATable from '@/ui/ATable.vue'
 import ATextField from '@/ui/ATextField.vue'
 import { IconChevronDown, IconDelete, IconEye, IconMagnify, IconRestart } from '@/ui/icons'
 import { useToast } from '@/ui/useToast'
+import { invalidateMatching } from '@/utils/api/catalog'
 import { contentApi } from '@/utils/api/content'
 import { librariesApi } from '@/utils/api/libraries'
 import { READING_STATUS_LABELS } from '@/utils/api/types'
 import type { BrokenUserToContent } from '@/utils/api/types'
 import { plural } from '@/utils/misc'
 import { showBrokenRefDetailModal } from './BrokenRefDetailModal.vue'
+import BrokenRefMerge, { previewKey, type Keep } from './BrokenRefMerge.vue'
 
 useHead({ title: 'Broken references' })
 
@@ -191,6 +206,8 @@ const search = refDebounced(searchInput, 300)
 const page = ref(1)
 // Each edited ref id points at a content URI, or at null to delete it.
 const edits = reactive(new Map<string, string | null>())
+// Whose reading state survives a repair onto a URI that has the user's data already.
+const keeps = reactive(new Map<string, Keep>())
 
 const libraryOptions = computed(() =>
     // Refs whose library was deleted have no library to fix them in.
@@ -229,6 +246,7 @@ watch(
 
 watch([selectedLibraryId, search], () => {
     edits.clear()
+    keeps.clear()
     page.value = 1
 })
 
@@ -236,7 +254,9 @@ function target(id: string): string | null {
     return edits.get(id) ?? null
 }
 
+/** A side chosen for one destination says nothing about another. */
 function setTarget(id: string, uri: string | undefined) {
+    keeps.delete(id)
     if (uri) {
         edits.set(id, uri)
     } else {
@@ -269,13 +289,9 @@ function unmarkAllDeletes() {
     }
 }
 
-// Shown under the field, not in a tooltip, so touch users see it too.
-function actionHint(id: string) {
-    if (edits.get(id) === null) return 'Saving deletes this data.'
+function collides(id: string) {
     const edit = target(id)
-    if (edit && userUriSet.value.has(edit)) {
-        return 'This ref already has user data. Saving replaces it with this older entry.'
-    }
+    return !!edit && userUriSet.value.has(edit)
 }
 
 const mSave = useMutation({
@@ -283,22 +299,27 @@ const mSave = useMutation({
         if (!selectedLibraryId.value) return
         const deletes: string[] = []
         const update: Record<string, string> = {}
+        const keep: Record<string, 'source' | 'target'> = {}
         for (const [id, value] of edits) {
             if (value === null) {
                 deletes.push(id)
-            } else {
-                update[id] = value
+                continue
             }
+            update[id] = value
+            const k = keeps.get(id)
+            const previewed =
+                queryClient.getQueryState(previewKey(selectedLibraryId.value, value))?.status ===
+                'success'
+            if (collides(id) && previewed && k && k !== 'newer') keep[id] = k
         }
-        await contentApi.fixBrokenRefs(selectedLibraryId.value, { delete: deletes, update })
+        await contentApi.fixBrokenRefs(selectedLibraryId.value, { delete: deletes, update, keep })
     },
     onSuccess: async () => {
         toast.show({ message: `Saved ${plural(edits.size, 'change', 'changes')}` })
         edits.clear()
-        await Promise.all([
-            queryClient.invalidateQueries({ queryKey: ['content', 'broken-refs'] }),
-            queryClient.invalidateQueries({ queryKey: ['content', 'broken-refs-summary'] }),
-        ])
+        keeps.clear()
+        // Repairs move user data: the URIs that have some, their previews, and what reads them.
+        await invalidateMatching(queryClient, key => key[0] === 'content')
         // Saving the last refs removes the table, and the focused button with it.
         await nextTick()
         emptyHeading.value?.focus()

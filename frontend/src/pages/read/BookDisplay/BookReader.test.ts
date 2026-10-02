@@ -3,7 +3,8 @@ import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import { contentApi } from '@/utils/api/content'
-import type { BookStructure, Content, UserToContent } from '@/utils/api/types'
+import type { BookStructure, Content } from '@/utils/api/types'
+import { resetReadingActor } from '../readingSync'
 import BookReader from './BookReader.vue'
 import { useBookDisplayStore } from './useBookDisplayStore'
 
@@ -12,19 +13,39 @@ vi.mock('@/utils/api/content', () => ({
         get: vi.fn(),
         bookStructure: vi.fn(),
         bookDocument: vi.fn(),
-        updateUserData: vi.fn(),
         useGet: () => ({ data: { value: undefined } }),
     },
-    bumpRecentlyRead: vi.fn(),
-    invalidateRecentlyRead: vi.fn(),
-    invalidateStatusChange: vi.fn(),
+}))
+
+vi.mock('@/utils/api/reading', () => ({
+    readingApi: {
+        get: async () => ({
+            state: {
+                revision: null,
+                status: null,
+                status_updated_at: null,
+                progress: {},
+                progress_updated_at: null,
+                last_read_at: null,
+            },
+            series: null,
+            writer: null,
+        }),
+        post: vi.fn(),
+    },
+    bumpContinueReading: vi.fn(),
+    invalidateReading: vi.fn(),
+    markPositionSaved: vi.fn(),
+    ReadingConflict: class extends Error {},
 }))
 
 // Real, it would pull in Vue Query with no provider.
 vi.mock('../useReaderTutorial', () => ({ useReaderTutorial: vi.fn() }))
 vi.mock('./useNextVolume', async () => {
     const { ref } = await import('vue')
-    return { useNextVolume: () => ref(null) }
+    return {
+        useNextVolume: () => ({ siblings: ref({ status: 'ready', items: [] }), next: ref(null) }),
+    }
 })
 
 const stubs = {
@@ -34,6 +55,8 @@ const stubs = {
     AAlert: { template: '<div class="alert"><slot /></div>' },
     AProgressBar: { template: '<div class="progress" />' },
     BookReaderDrawer: true,
+    ReaderSaveBanner: true,
+    ReaderEndSummary: true,
 }
 
 const STRUCTURE: BookStructure = {
@@ -70,7 +93,6 @@ beforeEach(async () => {
         user_data: null,
     } as unknown as Content)
     vi.mocked(contentApi.bookStructure).mockResolvedValue(STRUCTURE)
-    vi.mocked(contentApi.updateUserData).mockResolvedValue({ progress: {} } as UserToContent)
     window.scrollTo = vi.fn() as unknown as typeof window.scrollTo
     vi.stubGlobal(
         'ResizeObserver',
@@ -90,6 +112,7 @@ let wrapper: ReturnType<typeof mount>
 afterEach(async () => {
     wrapper.unmount()
     await useBookDisplayStore(pinia).dispose()
+    resetReadingActor()
 })
 
 /** The reader, showing `contentId` in `mode`, once its loads have settled. */
@@ -159,6 +182,24 @@ describe('BookReader host lifecycle', () => {
         expect(wrapper.find('.h-px').exists()).toBe(true)
         expect(wrapper.text()).toContain('Previous chapter')
         expect(wrapper.text()).toContain('End of book')
+    })
+})
+
+describe('BookReader chapter buttons', () => {
+    it('reads on into the previous chapter, as into the next', async () => {
+        vi.mocked(contentApi.bookDocument).mockImplementation(
+            async (_id, href) => `<html><body><p id="p">${href} text</p></body></html>`
+        )
+        const store = await open('scroll')
+        store.session!.setEntry({ ch: 'b.xhtml', frag: null })
+        await settle()
+        const goToChapter = vi.spyOn(store.session!, 'goToChapter')
+
+        await wrapper
+            .findAll('button')
+            .find(b => b.text() === 'Previous chapter')!
+            .trigger('click')
+        expect(goToChapter).toHaveBeenCalledWith(0, { moved: true })
     })
 })
 

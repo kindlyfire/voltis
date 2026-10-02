@@ -453,8 +453,9 @@ func identityStep(ctx context.Context, tx pgx.Tx, libraryID string, set *SeriesC
 
 // applyRenames moves user and list refs in two phases: every source first moves to its own
 // temporary URI, which no real URI can equal, so chains and swaps never overwrite a live source;
-// then each moves to its destination. A row left there by removed content goes when the source
-// brings its own for the same user or list.
+// then each moves to its destination. A row already at a destination, left by removed content,
+// merges with the source's for the same user, keeping the more recent reading state; a list's
+// goes when the source brings its own. Moved user rows get a fresh revision.
 func applyRenames(ctx context.Context, tx pgx.Tx, libraryID string, pairs []rename) error {
 	if len(pairs) == 0 {
 		return nil
@@ -465,22 +466,34 @@ func applyRenames(ctx context.Context, tx pgx.Tx, libraryID string, pairs []rena
 	for i := range tmps {
 		tmps[i] = fmt.Sprintf("\x01rename/%d", i)
 	}
+	rev := db.ServerRevision()
 	for _, t := range []struct{ table, owner string }{
 		{"user_to_content", "user_id"},
 		{"custom_list_to_content", "custom_list_id"},
 	} {
-		move := `UPDATE ` + t.table + ` m SET uri = r.dst FROM unnest($2::text[], $3::text[]) AS r(src, dst)
+		set, args := "", []any{}
+		if t.table == "user_to_content" {
+			set, args = ", revision = $4", []any{rev}
+		}
+		move := `UPDATE ` + t.table + ` m SET uri = r.dst` + set + ` FROM unnest($2::text[], $3::text[]) AS r(src, dst)
 			WHERE m.library_id = $1 AND m.uri = r.src`
-		orphans := `DELETE FROM ` + t.table + ` d USING unnest($2::text[], $3::text[]) AS r(src, dst)
-			WHERE d.library_id = $1 AND d.uri = r.dst AND EXISTS (SELECT 1 FROM ` + t.table + ` s
-				WHERE s.library_id = $1 AND s.uri = r.src AND s.` + t.owner + ` = d.` + t.owner + `)`
-		for _, st := range []struct {
-			sql      string
-			src, dst []string
-		}{{move, olds, tmps}, {orphans, tmps, news}, {move, tmps, news}} {
-			if _, err := tx.Exec(ctx, st.sql, libraryID, st.src, st.dst); err != nil {
-				return err
-			}
+		if _, err := tx.Exec(ctx, move, append([]any{libraryID, olds, tmps}, args...)...); err != nil {
+			return err
+		}
+		var err error
+		if t.table == "user_to_content" {
+			_, err = tx.Exec(ctx, db.MergeUserToContentSQL, libraryID, tmps, news, make([]string, len(pairs)), rev, nil)
+		} else {
+			_, err = tx.Exec(ctx, `DELETE FROM `+t.table+` d USING unnest($2::text[], $3::text[]) AS r(src, dst)
+				WHERE d.library_id = $1 AND d.uri = r.dst AND EXISTS (SELECT 1 FROM `+t.table+` s
+					WHERE s.library_id = $1 AND s.uri = r.src AND s.`+t.owner+` = d.`+t.owner+`)`,
+				libraryID, tmps, news)
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, move, append([]any{libraryID, tmps, news}, args...)...); err != nil {
+			return err
 		}
 	}
 	return nil

@@ -1,8 +1,8 @@
 <template>
     <ADialog
         :open="open"
-        title="Reset reading progress"
-        :description="`This clears the reading status and progress of ${plural(contentIds.length, 'item')}${contentTitles ? ':' : '.'}`"
+        title="Clear status and position"
+        :description="`This clears the status, position and reading time of ${plural(contentIds.length, 'item')}, and of the volumes of any series among them${contentTitles ? ':' : '.'}`"
         :dismissible="!mBulk.isPending.value"
         @update:open="v => !v && close()"
     >
@@ -33,7 +33,7 @@
                 Cancel
             </AButton>
             <AButton tone="danger" :loading="mBulk.isPending.value" @click="mBulk.mutate()">
-                Reset
+                Clear
             </AButton>
         </template>
     </ADialog>
@@ -61,7 +61,7 @@ const toast = useToast()
 const mBulk = useMutation({
     mutationFn: () => contentApi.bulkUserData({ ids: props.contentIds, action: 'reset' }),
     onSuccess: ({ count }) => {
-        toast.show({ message: `Reset the progress of ${plural(count, 'item')}` })
+        toast.show({ message: `Cleared the status and position of ${plural(count, 'item')}` })
         props.close(true)
     },
 })
