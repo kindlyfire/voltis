@@ -1,0 +1,165 @@
+/* Values copied from frontend/src/ui/tokens.css; keep them in sync by hand. */
+:root {
+	--color-primary: oklch(0.51 0.15 45);
+	--color-on-primary: oklch(0.985 0.01 45);
+	--color-primary-container: oklch(0.92 0.0525 45);
+
+	--color-bg: oklch(0.975 0.014 75);
+	--color-surface-2: oklch(0.955 0.014 75);
+	--color-surface-3: oklch(0.94 0.014 75);
+	--color-surface-4: oklch(0.92 0.014 75);
+	--color-raised: oklch(0.997 0.0056 75);
+	--color-sidebar: oklch(0.96 0.0154 75);
+	--color-card-line: oklch(0.92 0.014 75);
+
+	--color-fg: oklch(0.22 0.0168 75);
+	--color-fg-muted: oklch(0.45 0.028 75);
+	--color-outline: oklch(0.6 0.028 75);
+	--color-outline-variant: oklch(0.88 0.021 75);
+
+	--color-error: oklch(0.52 0.18 25);
+	--color-error-container: oklch(0.93 0.05 25);
+	--color-success: oklch(0.5 0.13 145);
+	--color-success-container: oklch(0.93 0.05 145);
+	--color-warning: oklch(0.52 0.12 70);
+	--color-warning-container: oklch(0.93 0.06 80);
+	--color-info: oklch(0.52 0.13 245);
+	--color-info-container: oklch(0.93 0.04 245);
+
+	--shadow-card:
+		0 0 0 1px var(--color-card-line), 0 1px 2px oklch(0.2 0.02 75 / 0.06),
+		0 2px 6px oklch(0.2 0.02 75 / 0.05), 0 8px 24px oklch(0.2 0.02 75 / 0.05);
+
+	--font-sans: 'Figtree Variable', ui-sans-serif, system-ui, sans-serif;
+	--font-display: 'Source Serif 4 Variable', ui-serif, Georgia, serif;
+}
+
+.dark {
+	--color-primary: oklch(0.8 0.105 45);
+	--color-on-primary: oklch(0.28 0.075 45);
+	--color-primary-container: oklch(0.36 0.0825 45);
+
+	--color-bg: oklch(0.155 0.014 75);
+	--color-surface-2: oklch(0.215 0.014 75);
+	--color-surface-3: oklch(0.245 0.014 75);
+	--color-surface-4: oklch(0.275 0.014 75);
+	--color-raised: oklch(0.275 0.014 75);
+	--color-sidebar: oklch(0.21 0.014 75);
+	--color-card-line: oklch(0.345 0.014 75);
+
+	--color-fg: oklch(0.93 0.014 75);
+	--color-fg-muted: oklch(0.76 0.021 75);
+	--color-outline: oklch(0.64 0.021 75);
+	--color-outline-variant: oklch(0.32 0.0168 75);
+
+	--color-error: oklch(0.75 0.14 25);
+	--color-error-container: oklch(0.32 0.08 25);
+	--color-success: oklch(0.78 0.13 145);
+	--color-success-container: oklch(0.32 0.06 145);
+	--color-warning: oklch(0.8 0.13 80);
+	--color-warning-container: oklch(0.32 0.06 80);
+	--color-info: oklch(0.78 0.1 245);
+	--color-info-container: oklch(0.32 0.06 245);
+
+	--shadow-card: 0 0 0 1px var(--color-card-line), 0 2px 8px oklch(0 0 0 / 0.3);
+}
+
+/* Repeated on .dark because VitePress redefines these there. */
+:root,
+.dark {
+	--vp-font-family-base: var(--font-sans);
+
+	--vp-c-brand-1: var(--color-primary);
+	--vp-c-brand-2: color-mix(in oklch, var(--color-primary) 85%, var(--color-fg));
+	--vp-c-brand-3: var(--color-primary);
+	--vp-c-brand-soft: var(--color-primary-container);
+	--vp-button-brand-text: var(--color-on-primary);
+	--vp-button-brand-hover-text: var(--color-on-primary);
+	--vp-button-brand-active-text: var(--color-on-primary);
+
+	--vp-c-bg: var(--color-bg);
+	--vp-c-bg-alt: var(--color-sidebar);
+	--vp-c-bg-elv: var(--color-raised);
+	--vp-c-bg-soft: var(--color-surface-2);
+	--vp-code-block-bg: var(--color-surface-3);
+
+	--vp-c-text-1: var(--color-fg);
+	--vp-c-text-2: var(--color-fg-muted);
+	--vp-c-text-3: var(--color-outline);
+	--vp-c-border: var(--color-outline);
+	--vp-c-divider: var(--color-outline-variant);
+	--vp-c-gutter: var(--color-outline-variant);
+	--vp-c-gray-1: var(--color-outline-variant);
+	--vp-c-gray-2: var(--color-surface-4);
+	--vp-c-gray-3: var(--color-surface-3);
+	--vp-c-gray-soft: var(--color-surface-3);
+
+	--vp-c-success-1: var(--color-success);
+	--vp-c-success-2: var(--color-success);
+	--vp-c-success-3: var(--color-success);
+	--vp-c-success-soft: var(--color-success-container);
+	--vp-c-warning-1: var(--color-warning);
+	--vp-c-warning-2: var(--color-warning);
+	--vp-c-warning-3: var(--color-warning);
+	--vp-c-warning-soft: var(--color-warning-container);
+	--vp-c-danger-1: var(--color-error);
+	--vp-c-danger-2: var(--color-error);
+	--vp-c-danger-3: var(--color-error);
+	--vp-c-danger-soft: var(--color-error-container);
+	--vp-c-caution-1: var(--color-error);
+	--vp-c-caution-2: var(--color-error);
+	--vp-c-caution-3: var(--color-error);
+	--vp-c-caution-soft: var(--color-error-container);
+	--vp-c-important-1: var(--color-info);
+	--vp-c-important-2: var(--color-info);
+	--vp-c-important-3: var(--color-info);
+	--vp-c-important-soft: var(--color-info-container);
+}
+
+.vp-doc h1,
+.vp-doc h2,
+.vp-doc h3,
+.VPHero .main .name {
+	font-family: var(--font-display);
+}
+
+.custom-block {
+	border-radius: 12px;
+}
+
+@media (min-width: 640px) {
+	.vp-doc div[class*='language-'] {
+		border-radius: 12px;
+	}
+}
+
+.VPFeatures .VPFeature {
+	border-radius: 18px;
+}
+
+.hero-shot {
+	max-width: 1152px;
+	margin: 0 auto;
+	padding: 0 24px 48px;
+	box-sizing: content-box;
+}
+
+@media (min-width: 640px) {
+	.hero-shot {
+		padding: 0 48px 64px;
+	}
+}
+
+@media (min-width: 960px) {
+	.hero-shot {
+		padding: 0 64px 64px;
+	}
+}
+
+.hero-shot .hero-shot-img {
+	display: block;
+	width: 100%;
+	height: auto;
+	border-radius: 18px;
+	box-shadow: var(--shadow-card);
+}

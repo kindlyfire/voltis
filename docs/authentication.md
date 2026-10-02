@@ -9,9 +9,8 @@ Voltis supports three ways of signing in, and they can be used together:
   Authentik or oauth2-proxy authenticates the user and passes their identity to
   Voltis in HTTP headers
 
-Everything except the forwarded-auth trust boundary is configured under
-**Settings → General** in the web interface, or with
-[`voltis settings`](/cli#settings).
+Everything except the forwarded-auth header names is configured under **Settings
+→ General** in the web interface, or with [`voltis settings`](/cli#settings).
 
 [OPDS apps](/opds) use per-user keys instead of these methods.
 
@@ -85,14 +84,6 @@ sign in again:
 ./voltis settings set auth.oidc.issuer https://new.example.com
 ./voltis identities set-issuer https://old.example.com https://new.example.com
 ```
-
-A user who signs in between the two steps gets an identity under the new
-issuer, often on a new account. The command then changes nothing and lists
-each conflict: the account with the old-issuer identity, the subject, and the
-account holding the new-issuer identity. Inspect each pair. If the new-issuer
-owner is a throwaway duplicate, delete that account. Otherwise unlink the
-redundant identity, making sure its account keeps a usable way to log in. Then
-run the command again.
 
 ## Forwarded authentication
 
@@ -172,10 +163,6 @@ An account that is not matched falls through to the next step. The first kind
 is one an admin pre-created for this user, with
 [`users create --no-password`](/cli#users-create) or from the web interface.
 
-The password prompt allows five wrong passwords per sign-in. A new login at the
-provider starts a new sign-in, so this slows guessing down rather than bounding
-it.
-
 Through a proxy, an existing account with a password is never linked
 automatically. Before enabling forwarded auth on a server with password
 accounts, link each one with [`voltis users link`](/cli#users-link):
@@ -220,7 +207,3 @@ Everything needed to recover is available from the CLI:
 # without admin. If the proxy sends groups, they must include auth.admin_group
 ./voltis users update proxy-name --admin
 ```
-
-Public registration of the first admin closes for good once any admin exists,
-whether that admin was created by registration, by the CLI or by a group
-mapping, so this is the only way back in.

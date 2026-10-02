@@ -31,7 +31,12 @@ export default defineConfig({
 				link: '/cli',
 			},
 			{
+				text: 'Metadata',
+				link: '/metadata',
+			},
+			{
 				text: 'Libraries',
+				link: '/lib/',
 				items: [
 					{ text: 'Comics', link: '/lib/comics' },
 					{ text: 'Books', link: '/lib/books' },

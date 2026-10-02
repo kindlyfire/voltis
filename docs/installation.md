@@ -13,9 +13,11 @@ services:
             - '127.0.0.1:8080:8080'
         environment:
             APP_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/voltis
+            APP_CACHE_DIR: /app/cache
         depends_on:
             - postgres
         volumes:
+            - ./data_cache:/app/cache
             - /my/library/1:/app/library/1
             - /my/library/2:/app/library/2
 

@@ -19,13 +19,10 @@ exist only in the 1.2 feed.
 
 ::: warning The key is a password
 The key is part of the URL, so anyone who sees the URL can read your libraries
-and change your progress. Voltis keeps keys out of its own logs, but a reverse
-proxy's access log records the full path.
+and change your progress.
 
-Keys are independent of your session: signing out, changing your password or
-changing your linked identity does not revoke them. Revoke a key on the OPDS
-settings page when a device is lost or retired. Deleting the user removes all
-of their keys.
+Signing out, changing your password or changing your linked identity does not
+revoke your keys.
 :::
 
 ## Reading progress
@@ -35,17 +32,8 @@ they fetch pages:
 
 - Progress only moves forward. Going back to an earlier page leaves it where it
   was.
-- Page 1 records nothing unless it is the only page, since apps fetch it as a
-  preview.
 - Fetching the last page marks the comic _completed_, unless its status is
   already something other than _reading_.
-
-Some apps fetch every page of a comic up front to read it offline. Voltis cannot
-tell that from reading, so the comic is marked completed as soon as the
-download finishes. Downloads and the 2.0 feed never change progress.
-
-Pages are sent as JPEG unless every page of the comic is PNG or every page is
-GIF. Other pages are converted.
 
 ## Reverse proxies
 

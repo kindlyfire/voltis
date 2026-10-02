@@ -21,7 +21,7 @@ docker compose exec app sh
 | `APP_DATABASE_URL`         | _(required)_        | PostgreSQL connection URL                                                                 |
 | `APP_HOST`                 | _(empty)_           | HTTP server listen address; empty listens on all interfaces                               |
 | `APP_PORT`                 | `8080`              | HTTP server port                                                                          |
-| `APP_CACHE_DIR`            | `/tmp/voltis_cache` | Directory for cached cover images                                                         |
+| `APP_CACHE_DIR`            | `/tmp/voltis_cache` | Directory for cached cover images. Mount it to keep covers when the container is recreated |
 | `APP_REGISTRATION_ENABLED` | `false`             | Allow open user registration. If no accounts exist, one user will be allowed to register¹ |
 | `APP_STATIC_DIR`           | _(empty)_           | Path to frontend static files (set automatically in the Docker image)                     |
 
@@ -47,6 +47,20 @@ Starts the HTTP server. This is what the container runs by default.
 ```bash
 ./voltis server
 ```
+
+### `metadata match`
+
+Matches every pending series of a library with the metadata providers, even when
+[automatic matching](/metadata#automatic-matching) is off for it. Copy the
+library ID from its row under Settings → Libraries.
+
+```bash
+./voltis metadata match --library <id> [--dry-run]
+```
+
+- `--dry-run` prints each decision without saving it: `linked`, `review`,
+  `unmatched` or `failed`
+- Libraries being scanned are skipped
 
 ### `users create`
 
