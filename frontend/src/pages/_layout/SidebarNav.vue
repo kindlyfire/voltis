@@ -50,6 +50,11 @@
                     label="Tasks"
                 />
             </template>
+            <ADivider class="mx-3.5 my-2.5" />
+            <ANavItem href="https://voltis.tijlvdb.me/" :icon="IconOpenInNew" label="Docs" />
+            <p v-if="qInfo.data.value" class="text-fg-muted mt-2 text-center text-xs">
+                Voltis {{ qInfo.data.value.version }}
+            </p>
         </template>
         <template v-else>
             <ANavItem to="/" exact :icon="IconHome" :active-icon="IconHomeFilled" label="Home" />
@@ -138,6 +143,7 @@ import {
     IconLogout,
     IconMonitor,
     IconMonitorFilled,
+    IconOpenInNew,
     IconRss,
     IconTune,
     IconWeatherNight,
@@ -145,6 +151,7 @@ import {
 } from '@/ui/icons'
 import { contentApi } from '@/utils/api/content'
 import { metadataApi } from '@/utils/api/metadata'
+import { miscApi } from '@/utils/api/misc'
 import { usersApi } from '@/utils/api/users'
 import Libraries from './Libraries.vue'
 import { useLayoutStore } from './useLayoutStore'
@@ -155,6 +162,7 @@ const store = useLayoutStore()
 const route = useRoute()
 const isSettings = computed(() => route.path.startsWith('/settings'))
 const qMe = usersApi.useMe()
+const qInfo = miscApi.useInfo(() => isSettings.value)
 const username = computed(() => qMe.data.value?.username ?? '')
 const isAdmin = computed(() => qMe.data.value?.permissions.includes('ADMIN'))
 const { canLogout, logout, mutation: mLogout } = useLogout()

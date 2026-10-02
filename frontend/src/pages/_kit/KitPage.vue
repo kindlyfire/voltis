@@ -902,6 +902,11 @@
                             <ANavItem :icon="IconLink" label="Badge" :badge="3" @click="() => {}" />
                             <ADivider class="mx-3.5 my-2.5" />
                             <ANavItem to="/settings/interface" :icon="IconCog" label="Settings" />
+                            <ANavItem
+                                href="https://example.com/"
+                                :icon="IconOpenInNew"
+                                label="External (href)"
+                            />
                         </nav>
                     </KitDemo>
                     <KitDemo label="prefix, indent, wrap (table of contents)" stack>
@@ -1239,6 +1244,7 @@ import {
     IconListFilled,
     IconMagnify,
     IconMinus,
+    IconOpenInNew,
     IconPencil,
     IconPlus,
     IconSelectMode,

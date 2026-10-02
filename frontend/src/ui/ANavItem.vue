@@ -20,6 +20,19 @@
             <span v-if="badge" class="a-nav-item__badge">{{ badge }}</span>
         </a>
     </RouterLink>
+    <a
+        v-else-if="href != null && !disabled"
+        v-bind="$attrs"
+        :href="href"
+        target="_blank"
+        rel="noopener"
+        class="a-nav-item a-state a-focus"
+    >
+        <AIcon v-if="icon" :icon="icon" class="a-nav-item__icon" />
+        <span class="a-nav-item__label"
+            ><slot>{{ label }}</slot></span
+        >
+    </a>
     <button
         v-else
         v-bind="$attrs"
@@ -43,12 +56,16 @@ import type { Component } from 'vue'
 import { RouterLink, type RouteLocationRaw } from 'vue-router'
 import AIcon from './AIcon.vue'
 
-/** A sidebar or drawer entry: a link with `to`, else a button (`@click`, or a menu trigger). */
+/**
+ * A sidebar or drawer entry: a link with `to`, an external link in a new tab with `href`, else a
+ * button (`@click`, or a menu trigger).
+ */
 defineOptions({ inheritAttrs: false })
 
 const props = withDefaults(
     defineProps<{
         to?: RouteLocationRaw
+        href?: string
         label?: string
         icon?: Component
         activeIcon?: Component
