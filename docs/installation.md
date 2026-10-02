@@ -8,14 +8,15 @@ Here's an example Docker Compose file to get started:
 ```yml
 services:
     app:
-        image: ghcr.io/kindlyfire/voltis:1.0.0-alpha.4
+        image: ghcr.io/kindlyfire/voltis:1.0.0-beta.1
         ports:
             - '127.0.0.1:8080:8080'
         environment:
             APP_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/voltis
             APP_CACHE_DIR: /app/cache
         depends_on:
-            - postgres
+            postgres:
+                condition: service_healthy
         volumes:
             - ./data_cache:/app/cache
             - /my/library/1:/app/library/1

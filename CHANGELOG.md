@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0-beta.1] - 2026-10-02
+
 - OPDS 1.2 and 2.0 catalogs, with page streaming and progress sync for OPDS-PSE
   apps
 - A scan removes nothing when a source folder lists empty or would lose most of
@@ -23,6 +25,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   chapters such as "0074 - Extra #1" no longer get one from the file name, and a
   series name such as "C3" no longer reads as a chapter or volume. A forced
   rescan fixes existing libraries
+- The example Compose file starts Voltis once Postgres is healthy
 
 ### Upgrade notes
 

@@ -1,13 +1,14 @@
 services:
     app:
-        image: ghcr.io/kindlyfire/voltis:dev
+        image: ghcr.io/kindlyfire/voltis:1.0.0-beta.1
         ports:
             - '127.0.0.1:8080:8080'
         environment:
             APP_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/voltis
             APP_CACHE_DIR: /app/cache
         depends_on:
-            - postgres
+            postgres:
+                condition: service_healthy
         volumes:
             - ./data_cache:/app/cache
             - /my/library/1:/app/library/1
@@ -21,3 +22,8 @@ services:
             POSTGRES_PASSWORD: postgres
         volumes:
             - ./data_postgres:/var/lib/postgresql
+        healthcheck:
+            test: ['CMD-SHELL', 'pg_isready -U postgres']
+            interval: 3s
+            timeout: 3s
+            retries: 10
