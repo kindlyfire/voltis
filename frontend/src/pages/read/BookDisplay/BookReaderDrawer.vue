@@ -8,8 +8,22 @@
                     :to="exit.to"
                     @click="onLeave"
                 />
-                <h2 :id="titleId" class="font-display min-w-0 grow truncate text-xl font-semibold">
-                    {{ session?.content?.title || 'Book' }}
+                <h2 :id="titleId" class="font-display flex min-w-0 grow text-xl font-semibold">
+                    <template v-if="heading">
+                        <!-- The series gives way before the item. -->
+                        <span class="min-w-0 shrink-[999] truncate">{{ heading.series }}</span>
+                        <span class="shrink-0">&nbsp;·&nbsp;</span>
+                        <template v-if="heading.label && heading.stripped">
+                            <span class="shrink-0">{{ heading.label }}</span>
+                            <span class="min-w-0 truncate">: {{ heading.stripped }}</span>
+                        </template>
+                        <span v-else class="min-w-0 truncate">
+                            {{ heading.label ?? heading.stripped }}
+                        </span>
+                    </template>
+                    <span v-else class="min-w-0 truncate">
+                        {{ session?.content?.title || 'Book' }}
+                    </span>
                 </h2>
                 <AIconButton :icon="IconClose" label="Close" @click="store.sidebarOpen = false" />
             </div>
@@ -110,6 +124,8 @@ import ASkeleton from '@/ui/ASkeleton.vue'
 import ASlider from '@/ui/ASlider.vue'
 import ATabs from '@/ui/ATabs.vue'
 import { IconArrowLeft, IconChevronLeft, IconChevronRight, IconClose } from '@/ui/icons'
+import { contentApi } from '@/utils/api/content'
+import { readerParts } from '@/utils/seriesItem'
 import type { ReaderExit } from '../readerExit'
 import ReaderHeading from '../ReaderHeading.vue'
 import ReaderStatusRow from '../ReaderStatusRow.vue'
@@ -128,6 +144,13 @@ const TABS: { value: DrawerTab; label: string }[] = [
 const store = useBookDisplayStore()
 const layout = useLayoutStore()
 const session = computed(() => store.session)
+
+const qParent = contentApi.useGet(() => store.session?.content?.parent_id || undefined)
+/** The parts of `readerTitle`, so each can truncate on its own. */
+const heading = computed(() => {
+    const c = session.value?.content
+    return c ? readerParts(c, qParent.data.value) : null
+})
 const tabs = useTemplateRef('tabs')
 
 const kbShortcuts = computed<Shortcut[]>(() => [

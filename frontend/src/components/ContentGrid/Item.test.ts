@@ -18,11 +18,14 @@ const series = {
     user_data: null,
 } as unknown as Content
 
-function item(status?: ReadingStatus, title = 'Vol. 4') {
+const TooltipStub = { props: ['disabled'], template: '<div><slot /><slot name="content" /></div>' }
+
+function item(status?: ReadingStatus, title = 'Vol. 4', order_parts = [4]) {
     return {
         id: 'c_item',
         type: 'comic',
         title,
+        order_parts,
         file_data: {},
         user_data: status ? { status, progress: { current_page: 12, progress_percent: 40 } } : null,
     } as unknown as Content
@@ -31,17 +34,22 @@ function item(status?: ReadingStatus, title = 'Vol. 4') {
 function mountItem(
     content: Content,
     withSeries = true,
-    extra: { highlightReading?: boolean } = {}
+    extra: { highlightReading?: boolean; parent?: Content } = {}
 ) {
     return mount(Item, {
         props: { content, series: withSeries ? series : null, toReadRoute: true, ...extra },
-        global: { stubs: { RouterLink: RouterLinkStub, ATooltip: { template: '<slot />' } } },
+        global: { stubs: { RouterLink: RouterLinkStub, ATooltip: TooltipStub } },
     })
 }
 
 function links(w: ReturnType<typeof mountItem>) {
     const [card, details] = w.findAllComponents(RouterLinkStub)
     return { card: card!, details: details! }
+}
+
+// The details button has its own tooltip.
+function titleTooltip(w: ReturnType<typeof mountItem>) {
+    return w.findAllComponents(TooltipStub).find(t => t.find('.content-card__text').exists())!
 }
 
 beforeEach(() => {
@@ -59,7 +67,8 @@ describe('ContentGrid Item', () => {
         )
         expect(details.props('to')).toBe('/c_series')
         expect(w.find('.content-card__title').text()).toBe('Harbor Lights')
-        expect(w.find('.content-card__subtitle').text()).toBe('Vol. 4 · 2/10 read · 1 dropped')
+        expect(w.find('.content-card__subtitle').text()).toBe('Volume 4 · 2/10 read · 1 dropped')
+        expect(titleTooltip(w).props('disabled')).toBe(false)
         expect(w.findComponent(ACover).props('progress')).toBeUndefined()
         expect(w.findComponent(ABadge).exists()).toBe(false)
         expect(w.classes()).not.toContain('reading')
@@ -93,6 +102,18 @@ describe('ContentGrid Item', () => {
         expect(details.props('to')).toBe('/c_item')
         expect(w.find('.content-card__subtitle').exists()).toBe(false)
         expect(w.classes()).not.toContain('reading')
+    })
+
+    it('shows a series item by its number', () => {
+        const parent = { type: 'book_series', title: 'Ember Saga', meta: {} } as unknown as Content
+        const full = 'Ember Saga, Vol. 3: The Long Road'
+        const w = mountItem(item(undefined, full, [3]), false, { parent })
+        expect(w.find('.content-card__title').text()).toBe('Volume 3')
+        expect(w.find('.content-card__subtitle').text()).toBe('The Long Road')
+        const tooltip = titleTooltip(w)
+        expect(tooltip.props('disabled')).toBe(false)
+        expect(tooltip.text()).toContain(full)
+        expect(links(w).card.attributes('aria-label')).toBe(`Read ${full}`)
     })
 
     it('badges new volumes', () => {

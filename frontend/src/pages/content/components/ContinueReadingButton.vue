@@ -27,13 +27,16 @@ import AButton from '@/ui/AButton.vue'
 import { IconBookOpen, IconRefresh } from '@/ui/icons'
 import { contentApi } from '@/utils/api/content'
 import { readingApi } from '@/utils/api/reading'
-import type { ContentType } from '@/utils/api/types'
+import type { Content, ContentType } from '@/utils/api/types'
 import { childNoun } from '@/utils/contentProgress'
+import { itemName } from '@/utils/seriesItem'
 import { showClearReadingModal } from './ClearReadingModal.vue'
 
 const props = defineProps<{
     contentId: string
     type: ContentType
+    /** Names the held item by its number in this series. */
+    series?: Content | null
 }>()
 
 const router = useRouter()
@@ -62,7 +65,7 @@ const ACTION_LABELS = { start: 'Start reading', resume: 'Continue reading', next
 const label = computed(() => {
     const c = qContinue.data.value
     if (!c) return 'Continue reading'
-    if (c.reason === 'held' && c.target) return `Resume ${c.target.title}`
+    if (c.reason === 'held' && c.target) return `Resume ${itemName(c.target, props.series)}`
     if (c.reason === 'earlier_unread') return 'Read earlier volume'
     if (c.reason === 'completed' || c.reason === 'caught_up') return 'Read again'
     if (!c.action) return 'Start reading'

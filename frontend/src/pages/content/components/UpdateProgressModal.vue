@@ -59,6 +59,7 @@ import { useToast } from '@/ui/useToast'
 import { contentApi } from '@/utils/api/content'
 import { readingApi } from '@/utils/api/reading'
 import { childNoun } from '@/utils/contentProgress'
+import { itemName } from '@/utils/seriesItem'
 import { showClearReadingModal } from './ClearReadingModal.vue'
 
 const props = defineProps<{
@@ -91,7 +92,10 @@ const qChildren = contentApi.useList(
 )
 
 const childOptions = computed(() =>
-    (qChildren.data.value?.data ?? []).map(c => ({ value: c.id, label: c.title }))
+    (qChildren.data.value?.data ?? []).map(c => ({
+        value: c.id,
+        label: itemName(c, qSeries.data.value),
+    }))
 )
 
 const mUpdate = useMutation({

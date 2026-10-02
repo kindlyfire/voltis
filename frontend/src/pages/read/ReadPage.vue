@@ -19,6 +19,7 @@ import QueryError from '@/components/QueryError.vue'
 import ASpinner from '@/ui/ASpinner.vue'
 import { contentApi } from '@/utils/api/content'
 import type { ContentType } from '@/utils/api/types'
+import { readerTitle } from '@/utils/seriesItem'
 import BookDisplay from '../read/BookDisplay/BookDisplay.vue'
 import ComicDisplay from '../read/ComicDisplay/ComicDisplay.vue'
 
@@ -26,6 +27,7 @@ const route = useRoute()
 const router = useRouter()
 const contentId = computed(() => route.params.id as string)
 const qContent = contentApi.useGet(contentId)
+const qParent = contentApi.useGet(() => qContent.data.value?.parent_id || undefined)
 
 // We cache the content type to avoid flickering when navigating between
 // contents.
@@ -53,7 +55,8 @@ watch(
 
 useHead({
     title() {
-        return qContent.data.value?.title ?? null
+        const c = qContent.data.value
+        return c ? readerTitle(c, qParent.data.value) : null
     },
 })
 </script>

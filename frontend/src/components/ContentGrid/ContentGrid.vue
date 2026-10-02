@@ -160,6 +160,7 @@
                             :data-index="i"
                             :content="itemAt(i)!"
                             :series="itemAt(i)!.continue?.series"
+                            :parent="parent"
                             :is-new="itemAt(i)!.continue?.is_new"
                             :to-read-route="toReadRoute || !!itemAt(i)!.continue"
                             :store-key="storeKey"
@@ -268,6 +269,8 @@ const props = withDefaults(
         title?: string
         toReadRoute?: boolean
         storeKey?: string
+        /** Items shown inside this series. */
+        parent?: Content
         /** Sorts offered before the library ones, descending by default. */
         extraSorts?: { label: string; value: NonNullable<ContentListParams['sort']> }[]
     }>(),

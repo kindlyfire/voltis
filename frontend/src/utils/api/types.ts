@@ -372,7 +372,7 @@ export interface Content {
     cover_version: string | null
     type: ContentType
     order: number | null
-    order_parts: number[]
+    order_parts: (number | null)[]
     meta: DisplayMetadata
     file_data: ContentFileData
     parent_id: string | null

@@ -41,7 +41,7 @@
         </ACover>
 
         <!-- Above the card link so it can show the full text; the card link names it. -->
-        <ATooltip v-if="!settings.hideTitle" :disabled="selecting || !truncated">
+        <ATooltip v-if="!settings.hideTitle" :disabled="selecting || (!truncated && !replaced)">
             <RouterLink
                 :to="to"
                 tabindex="-1"
@@ -49,12 +49,19 @@
                 class="content-card__text"
                 @pointerenter="checkTruncated"
             >
-                <div class="content-card__title">{{ title }}</div>
+                <div
+                    class="content-card__title"
+                    :class="{ 'content-card__title--single': !series && subtitle }"
+                >
+                    {{ shownTitle }}
+                </div>
                 <div v-if="subtitle" class="content-card__subtitle">{{ subtitle }}</div>
             </RouterLink>
             <template #content>
                 <div>{{ title }}</div>
-                <div v-if="subtitle" class="content-card__tooltip-subtitle">{{ subtitle }}</div>
+                <div v-if="fullSubtitle" class="content-card__tooltip-subtitle">
+                    {{ fullSubtitle }}
+                </div>
             </template>
         </ATooltip>
 
@@ -89,6 +96,7 @@ import { coverUrl } from '@/utils/api/content'
 import { READING_STATUS_LABELS } from '@/utils/api/types'
 import type { Content, ReadingStatus } from '@/utils/api/types'
 import { contentProgress, seriesReadLabel } from '@/utils/contentProgress'
+import { splitItemTitle } from '@/utils/seriesItem'
 import { useContentGridStore } from './store'
 
 const props = withDefaults(
@@ -96,6 +104,8 @@ const props = withDefaults(
         content: Content
         /** Shows `content` as the item to read next in this series. */
         series?: Content | null
+        /** Shows `content` as an item of this series, by its number and shortened title. */
+        parent?: Content | null
         toReadRoute?: boolean
         storeKey?: string
         selecting?: boolean
@@ -129,10 +139,20 @@ const to = computed(() =>
 
 const title = computed(() => (props.series ?? props.content).title)
 const readLabel = computed(() => (props.series ? seriesReadLabel(props.series) : null))
-const subtitle = computed(() => {
-    if (!props.series) return undefined
-    return readLabel.value ? `${props.content.title} · ${readLabel.value}` : props.content.title
+const withRead = (s: string) => (readLabel.value ? `${s} · ${readLabel.value}` : s)
+
+const split = computed(() => {
+    const s = props.series ?? props.parent
+    return s ? splitItemTitle(props.content, s) : null
 })
+// The label over the stripped title, or the stripped title alone.
+const line1 = computed(() => split.value?.label ?? split.value?.stripped ?? props.content.title)
+const line2 = computed(() => (split.value?.label ? split.value.stripped : null))
+const shownTitle = computed(() => (props.series ? title.value : line1.value))
+const subtitle = computed(() => (props.series ? withRead(line1.value) : line2.value))
+/** The tooltip's subtitle, with the full item title. */
+const fullSubtitle = computed(() => (props.series ? withRead(props.content.title) : undefined))
+const replaced = computed(() => line1.value !== props.content.title)
 
 // A completed series counts what was added since; an item is new to its series.
 const newLabel = computed(() => {
@@ -187,9 +207,14 @@ const statusLabel = computed(() => {
 
 // Deliberate, so the progress bar and badges don't end up in the name.
 const linkLabel = computed(() => {
-    const parts = [props.toReadRoute ? `Read ${title.value}` : title.value]
+    // The label only adds something when the title doesn't already hold the number.
+    const s = split.value
+    const itemTitle =
+        s?.label && !s.removedNumber ? `${s.label}, ${props.content.title}` : props.content.title
+    const name = props.series ? title.value : itemTitle
+    const parts = [props.toReadRoute ? `Read ${name}` : name]
     if (props.series) {
-        parts.push(props.content.title)
+        parts.push(itemTitle)
         if (readLabel.value) parts.push(readLabel.value)
     }
     if (newLabel.value) parts.push(newLabel.value)
@@ -257,6 +282,11 @@ const linkLabel = computed(() => {
         overflow-wrap: anywhere;
         -webkit-box-orient: vertical;
         -webkit-line-clamp: 2;
+    }
+
+    /* Keeps the two lines within the grid's caption height. */
+    .content-card__title--single {
+        -webkit-line-clamp: 1;
     }
 
     .content-card__subtitle {

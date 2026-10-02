@@ -34,6 +34,7 @@
                         <AIcon :icon="IconChevronLeft" class="-ml-1 text-xl" />
                         {{ parent.title }}
                     </RouterLink>
+                    <p v-if="eyebrow" class="text-fg-muted text-sm font-semibold">{{ eyebrow }}</p>
                     <h1
                         id="content-title"
                         class="font-display text-[32px] leading-tight font-semibold [overflow-wrap:anywhere] sm:text-[40px]"
@@ -82,6 +83,7 @@
                     <ContinueReadingButton
                         :content-id="content.id"
                         :type="content.type"
+                        :series="content"
                         class="grow basis-full sm:grow-0 sm:basis-auto"
                     />
                     <ReadingStatusButton
@@ -185,6 +187,7 @@ import type { Content } from '@/utils/api/types'
 import { usersApi } from '@/utils/api/users'
 import { displayContentType, plural } from '@/utils/misc'
 import { lengthSummary, readingSpeed } from '@/utils/readingTime'
+import { splitItemTitle } from '@/utils/seriesItem'
 import ContinueReadingButton from './components/ContinueReadingButton.vue'
 import CoverProgress from './components/CoverProgress.vue'
 import OptionsButton from './components/OptionsButton.vue'
@@ -198,6 +201,11 @@ const props = defineProps<{
 
 const qParent = contentApi.useGet(() => props.content.parent_id || undefined)
 const parent = qParent.data
+/** The item's number, unless the title is nothing but series name and numbering. */
+const eyebrow = computed(() => {
+    const { label, stripped, removedNumber } = splitItemTitle(props.content, parent.value)
+    return removedNumber && !stripped ? null : label
+})
 
 const mUpdateUserData = contentApi.useUpdateUserData()
 const isStarred = computed(() => props.content.user_data?.starred ?? false)

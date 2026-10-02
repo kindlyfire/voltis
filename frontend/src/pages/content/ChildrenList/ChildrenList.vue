@@ -3,6 +3,7 @@
         <h2 id="children-heading" class="font-display text-[30px] font-semibold">Contents</h2>
         <ContentGrid
             :params="{ parent_id: content.id, sort: 'order', sort_order: 'asc' }"
+            :parent="content"
             to-read-route
         />
     </section>

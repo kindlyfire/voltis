@@ -116,6 +116,7 @@ import ASlider from '@/ui/ASlider.vue'
 import { IconArrowLeft, IconChevronLeft, IconChevronRight, IconClose } from '@/ui/icons'
 import type { Option } from '@/ui/options'
 import { contentApi } from '@/utils/api/content'
+import { itemName } from '@/utils/seriesItem'
 import { readerExit } from '../readerExit'
 import ReaderHeading from '../ReaderHeading.vue'
 import ReaderStatusRow from '../ReaderStatusRow.vue'
@@ -135,7 +136,10 @@ const MODE_OPTIONS = [
 ] as const satisfies readonly Option<ReaderMode | 'auto'>[]
 
 const chapterOptions = computed(() =>
-    reader.siblings.items.map(item => ({ value: item.id, label: item.title }))
+    reader.siblings.items.map(item => ({
+        value: item.id,
+        label: itemName(item, qParent.data.value),
+    }))
 )
 
 const navbarHidden = layout.navbarHidden.useLayer('comicReaderSidebar')

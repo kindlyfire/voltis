@@ -1,13 +1,17 @@
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { nextTick, reactive } from 'vue'
+import { nextTick, reactive, ref } from 'vue'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import type { BookStructure } from '@/utils/api/types'
 import { addOverlays } from '@/utils/modalTesting'
 import BookReaderDrawer from './BookReaderDrawer.vue'
 import type { BookSession } from './createBookSession'
 import { useBookDisplayStore } from './useBookDisplayStore'
+
+vi.mock('@/utils/api/content', () => ({
+    contentApi: { useGet: () => ({ data: ref(undefined) }) },
+}))
 
 const STRUCTURE: BookStructure = {
     spine: Array.from({ length: 20 }, (_, i) => ({

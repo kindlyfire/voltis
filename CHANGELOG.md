@@ -17,6 +17,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   typo. Exact titles rank first, then titles that start with the search
 - Metadata, overrides and provider links are now deleted with their content,
   and the "Orphaned metadata" repair section is gone
+- Items in a series show their number ("Volume 3", "Vol. 2 · Ch. 5") above a
+  shortened title
 
 ### Upgrade notes
 
