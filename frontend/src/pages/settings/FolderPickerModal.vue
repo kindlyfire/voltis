@@ -357,7 +357,8 @@ watch(
     { immediate: true }
 )
 
-// Not against the selection: each ticked child would add a sentence to a live region.
+// The selection is left out: its only warning would be `equal`, the browsed folder itself.
+// Other libraries' overlaps of any kind show, since the footer's pick acts on the browsed folder.
 const currentWarning = computed(() =>
     displayed.value && !loading.value
         ? overlaps.warning(displayed.value.path, formSources.value)

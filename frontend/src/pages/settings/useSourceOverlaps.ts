@@ -3,9 +3,12 @@ import { fsApi } from '@/utils/api/fs'
 import { librariesApi } from '@/utils/api/libraries'
 import type { ResolvedPath } from '@/utils/api/types'
 import { RequestError } from '@/utils/fetch'
-import { describeOverlap, findOverlaps, type LabeledPath } from '@/utils/sourceOverlap'
-
-type OverlapWarning = ReturnType<typeof describeOverlap>
+import {
+    describeOverlaps,
+    findOverlaps,
+    type LabeledPath,
+    type OverlapWarning,
+} from '@/utils/sourceOverlap'
 
 /**
  * Compares source paths with each other and with the other libraries' sources. The server
@@ -53,18 +56,19 @@ export function useSourceOverlaps(excludeLibraryId: string | undefined) {
     )
     watch(otherLibraries, sources => resolve(sources.map(s => s.path)), { immediate: true })
 
-    /** Overlaps of the resolved `path`. `others` are raw paths, compared once `resolve`d. */
+    /**
+     * Overlaps of the resolved `path` with other libraries and with `others`, this library's own
+     * sources as raw paths, compared once `resolve`d.
+     */
     function warning(path: string, others: LabeledPath[]): OverlapWarning | undefined {
-        const known = [...otherLibraries.value, ...others].flatMap(o => {
+        const known = [
+            ...otherLibraries.value,
+            ...others.map(o => ({ ...o, sameLibrary: true })),
+        ].flatMap(o => {
             const real = cache.get(o.path)?.path
-            return real ? [{ path: real, label: o.label }] : []
+            return real ? [{ ...o, path: real }] : []
         })
-        const overlaps = findOverlaps(path, known).map(describeOverlap)
-        if (!overlaps.length) return undefined
-        return {
-            short: overlaps.map(o => o.short).join(', '),
-            long: overlaps.map(o => o.long).join('. '),
-        }
+        return describeOverlaps(findOverlaps(path, known))
     }
 
     /** Like `warning`, for a raw path; nothing until it's `resolve`d. */

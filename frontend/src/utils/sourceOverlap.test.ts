@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { describeOverlap, findOverlaps, overlapRelation } from './sourceOverlap'
+import { describeOverlaps, findOverlaps, overlapRelation } from './sourceOverlap'
 
 describe('overlapRelation', () => {
     it('compares whole segments', () => {
@@ -19,18 +19,26 @@ describe('overlapRelation', () => {
     })
 })
 
-describe('findOverlaps', () => {
-    it('describes each overlapping source', () => {
+describe('describeOverlaps', () => {
+    it('groups overlaps by relation', () => {
         const overlaps = findOverlaps('/media/books', [
-            { path: '/media/books', label: 'Comics' },
-            { path: '/media', label: 'Everything' },
-            { path: '/media/books/manga', label: 'Manga' },
-            { path: '/media/bookshelf', label: 'Shelf' },
+            { path: '/media/books', label: 'Comics', libraryId: '1' },
+            { path: '/media/books', label: 'this library', sameLibrary: true },
+            { path: '/media', label: 'Everything', libraryId: '2' },
+            { path: '/media', label: 'this library', sameLibrary: true },
+            { path: '/media/books/manga/a', label: 'Manga', libraryId: '3' },
+            { path: '/media/books/manga/b', label: 'Manga', libraryId: '3' },
+            { path: '/media/books/shelf', label: 'Shelf', libraryId: '4' },
+            { path: '/media/books/new', label: 'this library', sameLibrary: true },
+            { path: '/media/bookshelf', label: 'Shelf', libraryId: '4' },
         ])
-        expect(overlaps.map(describeOverlap)).toEqual([
-            { short: 'In use by Comics', long: 'Already used by Comics' },
-            { short: 'Inside Everything', long: 'Inside /media, used by Everything' },
-            { short: 'Contains Manga', long: 'Contains /media/books/manga, used by Manga' },
-        ])
+        expect(describeOverlaps(overlaps)).toEqual({
+            short: 'In use by Comics and this library · Inside Everything · Contains Manga and Shelf',
+            long: 'Already used by Comics and this library. Inside a folder used by Everything. Contains folders used by Manga and Shelf.',
+        })
+        expect(describeOverlaps([])).toBeUndefined()
+        expect(
+            describeOverlaps(findOverlaps('/media', [{ path: '/media/books', label: 'Manga' }]))
+        ).toMatchObject({ long: 'Contains a folder used by Manga.' })
     })
 })
