@@ -123,7 +123,7 @@ export function createComicState(contentId: string, initialPage: number | 'last'
     function setPage(page: number, { restore = false } = {}) {
         state.page = clamp(page)
         cleanupDistantLoaders()
-        preloadPages()
+        preloadPages(true)
         if (restore) sync.placed(position(state.page))
         else sync.moved(position(state.page))
     }
@@ -141,16 +141,22 @@ export function createComicState(contentId: string, initialPage: number | 'last'
         }
     }
 
-    function preloadPages() {
+    /** Fills the window around the page, a few at a time; each load that settles starts the next.
+     * Failed pages are tried again only on a move (`retry`), or settling would loop on them. */
+    function preloadPages(retry = false) {
         const order = getPagesInPreloadOrder(state.pageDimensions.length, state.page)
-        let loading = 0
-        for (const index of order.slice(0, PRELOAD_COUNT)) {
-            const loader = state.loaders[index]
-            if (!loader) continue
-            if (loader.blobUrl) continue
-            if (loading >= PRELOAD_CONCURRENCY) break
-            loader.load()
-            loading++
+        const queue = order
+            .slice(0, PRELOAD_COUNT)
+            .flatMap(i => state.loaders[i] ?? [])
+            .filter(l => !l.blobUrl)
+        let free = PRELOAD_CONCURRENCY - queue.filter(l => l.loading).length
+        for (const loader of queue) {
+            if (free <= 0) break
+            if (loader.loading || (loader.error && !retry)) continue
+            free--
+            void loader.load().then(() => {
+                if (!disposed) preloadPages()
+            })
         }
     }
 

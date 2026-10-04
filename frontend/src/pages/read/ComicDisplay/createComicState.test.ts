@@ -22,14 +22,21 @@ vi.mock('@/utils/api/reading', async original => {
 
 vi.mock('@/utils/modals', () => ({ Modals: { show: vi.fn(async () => 'start') } }))
 
-vi.mock('./usePageLoader', () => ({
-    createPageLoader: (index: number) => ({
-        index,
-        blobUrl: null,
-        load: vi.fn(),
-        dispose: vi.fn(),
-    }),
-    getPagesInPreloadOrder: () => [],
+vi.mock('./usePageLoader', async original => ({
+    ...(await original<typeof import('./usePageLoader')>()),
+    createPageLoader: (index: number) => {
+        const loader = {
+            index,
+            blobUrl: null as string | null,
+            loading: false,
+            error: null,
+            load: vi.fn(async () => {
+                loader.blobUrl = `blob:${index}`
+            }),
+            dispose: vi.fn(),
+        }
+        return loader
+    },
 }))
 
 afterEach(() => {
@@ -167,7 +174,7 @@ it('finishes again after accepting a clear made elsewhere', async () => {
     comic.dispose()
 })
 
-it('keeps the last of many pages below 100% until a finish', async () => {
+it('preloads ahead, and keeps the last of many pages below 100% until a finish', async () => {
     vi.useFakeTimers()
     vi.mocked(contentApi.get).mockResolvedValue({
         id: 'c_1',
@@ -182,6 +189,9 @@ it('keeps the last of many pages below 100% until a finish', async () => {
     const comic = createComicState('c_1', 'resume')
     comic.setHandlers({ onReady: vi.fn(), onPlace: vi.fn() })
     await vi.advanceTimersByTimeAsync(0)
+    // Each load that settles starts the next, past the first three.
+    const requested = comic.loaders.filter(l => vi.mocked(l.load).mock.calls.length)
+    expect(requested.map(l => l.index)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
     comic.setPage(1999)
     await vi.advanceTimersByTimeAsync(1000)
     expect(writes().at(-1)).toMatchObject({ op: 'position', progress: { progress_percent: 99.9 } })

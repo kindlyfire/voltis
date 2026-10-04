@@ -9,10 +9,18 @@
             @wheel.passive="pending = null"
             @touchmove.passive="pending = null"
         >
+            <!-- The neighbours stay mounted and decoded, so a turn has something to paint. -->
             <div
+                v-for="{ slots, boxes, current } in spreads"
+                :key="slots[0]!.page"
                 class="reader-paged__spread transition-none"
-                :class="{ 'flex-row-reverse': reader.direction === 'rtl', 'size-full': !boxes }"
-                :style="boxes ? px(boxes.width, boxes.height) : undefined"
+                :class="[
+                    { 'flex-row-reverse': reader.direction === 'rtl' },
+                    current
+                        ? { 'size-full': !boxes }
+                        : 'invisible absolute top-0 left-0 size-0 overflow-hidden',
+                ]"
+                :style="current && boxes ? px(boxes.width, boxes.height) : undefined"
                 :role="slots.length === 2 ? 'figure' : undefined"
                 :aria-label="
                     slots.length === 2
@@ -34,6 +42,7 @@
                     <ASpinner v-else-if="!loader?.blobUrl || loader.loading" size="lg" />
                     <img
                         v-else
+                        v-decode
                         :src="loader.blobUrl"
                         :alt="`Page ${page + 1}`"
                         class="size-full object-contain"
@@ -51,7 +60,7 @@
 
 <script setup lang="ts">
 import { useElementSize, useMediaQuery } from '@vueuse/core'
-import { computed, onMounted, onUnmounted, useTemplateRef, watch } from 'vue'
+import { computed, onMounted, onUnmounted, useTemplateRef, watch, type Directive } from 'vue'
 import { useLayoutStore } from '@/pages/_layout/useLayoutStore'
 import AButton from '@/ui/AButton.vue'
 import ASpinner from '@/ui/ASpinner.vue'
@@ -68,16 +77,12 @@ const viewport = useTemplateRef('viewport')
 const size = useElementSize(viewport, { width: window.innerWidth, height: window.innerHeight })
 const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
 
-const spread = computed(() => reader.currentSpread ?? [])
-const slots = computed(() =>
-    spread.value.map(page => ({ page, loader: reader.state?.loaders[page] }))
-)
 /** Whole px, so rounding never makes a fitting spread overflow. Null when a size is unknown. */
-const boxes = computed(() => {
+function boxesOf(spread: number[]) {
     const dims = reader.state?.pageDimensions
-    if (!dims || !spread.value.length) return null
+    if (!dims) return null
     const l = layoutSpread(
-        spread.value.map(p => dims[p]!),
+        spread.map(p => dims[p]!),
         { width: size.width.value, height: size.height.value },
         { fit: reader.settings.fit, zoomWide: reader.settings.zoomWide }
     )
@@ -85,7 +90,24 @@ const boxes = computed(() => {
     const height = Math.floor(l.height)
     const pages = l.pages.map(p => ({ width: Math.floor(p.width), height }))
     return { pages, width: pages.reduce((sum, p) => sum + p.width, 0), height }
+}
+/** The current spread and its neighbours. */
+const spreads = computed(() => {
+    const index = reader.spreadIndex
+    if (index === undefined) return []
+    return [index - 1, index, index + 1].flatMap(i => {
+        const spread = reader.spreads[i]
+        if (!spread) return []
+        return {
+            slots: spread.map(page => ({ page, loader: reader.state?.loaders[page] })),
+            boxes: boxesOf(spread),
+            current: i === index,
+        }
+    })
 })
+const boxes = computed(() => spreads.value.find(s => s.current)?.boxes)
+// Hidden images are otherwise not decoded until painted.
+const vDecode: Directive<HTMLImageElement> = { mounted: el => void el.decode().catch(() => {}) }
 const px = (width: number, height: number) => ({ width: `${width}px`, height: `${height}px` })
 // Unsized pages meet at the spine.
 const meetSide = (i: number) => ((i === 0) !== (reader.direction === 'rtl') ? 'right' : 'left')
@@ -175,7 +197,7 @@ function recordScroll() {
 watch(
     [
         () => viewport.value,
-        () => spread.value.join(','),
+        () => reader.currentSpread?.join(','),
         () => reader.direction,
         () => boxes.value?.width,
         () => boxes.value?.height,
