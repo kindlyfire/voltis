@@ -11,7 +11,8 @@ const FLAG = { comic: 'comicReader', book: 'bookReader' } as const
 export function useReaderTutorial(
     kind: ReaderKind,
     ready: Ref<boolean>,
-    bookMode?: MaybeRefOrGetter<LayoutKind | undefined>
+    bookMode?: MaybeRefOrGetter<LayoutKind | undefined>,
+    flipped?: MaybeRefOrGetter<boolean>
 ) {
     const qMe = usersApi.useMe()
     const patch = usersApi.usePatchPreferences()
@@ -25,7 +26,7 @@ export function useReaderTutorial(
             // Set before the await: the reader stays mounted across
             // sibling-entry navigation, which flips `ready` false→true again.
             shown = true
-            void showReaderTutorial(kind, toValue(bookMode)).then(() => {
+            void showReaderTutorial(kind, toValue(bookMode), toValue(flipped)).then(() => {
                 patch.mutate({ tutorials: { [key]: true } })
             })
         },

@@ -22,8 +22,8 @@ export interface ComicStateValues {
     pageDimensions: PageDimensions[]
 }
 
-const PAGE_CACHE_WINDOW = 8
-const PRELOAD_COUNT = 8
+const PAGE_CACHE_WINDOW = 10
+const PRELOAD_COUNT = 10
 const PRELOAD_CONCURRENCY = 3
 
 export function createComicState(contentId: string, initialPage: number | 'last' | 'resume') {

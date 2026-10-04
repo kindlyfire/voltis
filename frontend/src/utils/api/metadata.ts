@@ -40,6 +40,8 @@ export interface DisplayMetadata {
     content_rating?: string
     status?: string
     kind?: string
+    /** ComicInfo `Manga`: `Yes`, `No`, `YesAndRightToLeft` or `Unknown`. */
+    manga?: string
     /** 0-100. */
     rating?: number
     links?: MetadataLinkRef[]

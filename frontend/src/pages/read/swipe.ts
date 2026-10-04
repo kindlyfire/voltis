@@ -4,6 +4,11 @@ interface TouchPoint {
     time: number
 }
 
+/** Pinch-zoomed: a drag pans the zoomed view. */
+export function isZoomed() {
+    return (window.visualViewport?.scale ?? 1) > 1
+}
+
 const MIN_DISTANCE = 40
 const MIN_FRACTION = 0.06
 const MAX_DURATION = 800

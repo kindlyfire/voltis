@@ -75,7 +75,7 @@ import {
 } from '@/ui/icons'
 import type { LayoutKind } from './BookDisplay/readingLayout'
 import ReaderHeading from './ReaderHeading.vue'
-import { bookShortcuts, COMIC_SHORTCUTS, type ReaderKind } from './shortcuts'
+import { bookShortcuts, comicShortcuts, type ReaderKind } from './shortcuts'
 import { HEIGHT_ZONE } from './useClickZones'
 
 const props = defineProps<{
@@ -83,6 +83,8 @@ const props = defineProps<{
     close: () => void
     kind: ReaderKind
     bookMode?: LayoutKind
+    /** Comic controls mirrored for right-to-left reading. */
+    flipped?: boolean
 }>()
 
 const coarse = useMediaQuery('(pointer: coarse)')
@@ -96,27 +98,35 @@ const mid = pct(100 - HEIGHT_ZONE * 100)
 const firstCol = pct(100 / 3)
 const secondCol = pct(200 / 3)
 
-const zones = [
-    { icon: IconChevronUp, tint: 'prev', inset: `0 0 ${mid} 0` },
-    { icon: IconChevronLeft, tint: 'prev', inset: `${band} ${secondCol} ${band} 0` },
-    { icon: IconMenu, tint: 'menu', inset: `${band} ${firstCol} ${band} ${firstCol}` },
-    { icon: IconChevronRight, tint: 'next', inset: `${band} 0 ${band} ${secondCol}` },
-    { icon: IconChevronDown, tint: 'next', inset: `${mid} 0 0 0` },
-]
+// Flipped swaps only the side tints: the chevrons still point at the screen edges.
+const zones = computed(() => {
+    const [left, right] = props.flipped ? ['next', 'prev'] : ['prev', 'next']
+    return [
+        { icon: IconChevronUp, tint: 'prev', inset: `0 0 ${mid} 0` },
+        { icon: IconChevronLeft, tint: left, inset: `${band} ${secondCol} ${band} 0` },
+        { icon: IconMenu, tint: 'menu', inset: `${band} ${firstCol} ${band} ${firstCol}` },
+        { icon: IconChevronRight, tint: right, inset: `${band} 0 ${band} ${secondCol}` },
+        { icon: IconChevronDown, tint: 'next', inset: `${mid} 0 0 0` },
+    ]
+})
 
 const title = computed(() =>
     props.kind === 'comic' ? 'Comic reader tutorial' : 'Book reader tutorial'
 )
 const shortcuts = computed(() =>
-    props.kind === 'comic' ? COMIC_SHORTCUTS : bookShortcuts(props.bookMode ?? 'paged')
+    props.kind === 'comic'
+        ? comicShortcuts({ flipped: props.flipped ?? false, paged: true })
+        : bookShortcuts(props.bookMode ?? 'paged')
 )
 
 const lines = computed(() => {
     const [action, gerund] = coarse.value ? ['Tap', 'tapping'] : ['Click', 'clicking']
     const menu = `The menu can be opened by ${gerund} the center of the screen.`
+    const swipe = 'You can also swipe left or right.'
     if (props.kind === 'comic') {
         return [
-            `${action} the previous and next zones to turn pages. In longstrip mode they scroll the screen instead.`,
+            `${action} the previous and next zones to turn pages or scroll a page that doesn't fit. In longstrip mode they scroll the screen.`,
+            ...(coarse.value ? [swipe] : []),
             menu,
         ]
     }
@@ -128,7 +138,7 @@ const lines = computed(() => {
     }
     return [
         `${action} the previous and next zones to turn pages. Turning past the last page continues into the next chapter.`,
-        coarse.value ? 'You can also swipe left or right.' : 'The mouse wheel also turns pages.',
+        coarse.value ? swipe : 'The mouse wheel also turns pages.',
         menu,
     ]
 })
@@ -138,8 +148,12 @@ const lines = computed(() => {
 import { Modals } from '@/utils/modals'
 import Self from './ReaderTutorialModal.vue'
 
-export function showReaderTutorial(kind: ReaderKind, bookMode?: LayoutKind): Promise<void> {
-    return Modals.show(Self, { kind, bookMode })
+export function showReaderTutorial(
+    kind: ReaderKind,
+    bookMode?: LayoutKind,
+    flipped?: boolean
+): Promise<void> {
+    return Modals.show(Self, { kind, bookMode, flipped })
 }
 </script>
 

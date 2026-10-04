@@ -35,8 +35,18 @@ function render(parentId: string | null, siblings: Partial<Siblings>) {
             ...siblings,
         },
         seriesSettings: {},
-        settings: { longstripWidth: 100 },
+        settings: {
+            longstripWidth: 100,
+            fit: 'screen',
+            spread: 'auto',
+            zoomWide: true,
+            invertRtlControls: true,
+        },
         mode: 'paged',
+        direction: 'ltr',
+        autoDirection: 'ltr',
+        controlsFlipped: false,
+        shifted: false,
     })
     const wrapper = mount(ReaderSidebar, {
         global: {
@@ -47,6 +57,7 @@ function render(parentId: string | null, siblings: Partial<Siblings>) {
                 ACombobox: { props: ['label'], template: '<div>{{ label }}</div>' },
                 ASlider: true,
                 ASegmented: true,
+                ASwitch: true,
             },
         },
     })

@@ -5,7 +5,13 @@
             Retry
         </AButton>
     </AAlert>
-    <div v-else class="reader-main select-none" @click="controls.handleClick">
+    <div
+        v-else
+        class="reader-main select-none"
+        @click="controls.handleClick"
+        @touchstart.passive="controls.handleTouchStart"
+        @touchend.passive="controls.handleTouchEnd"
+    >
         <ReaderModePaged v-if="reader.mode === 'paged'" />
         <ReaderModeLongstrip v-else />
     </div>
@@ -17,7 +23,10 @@
         :value="progressValue / 100"
         label="Reading progress"
         class="reader-progress"
-        :class="`mode-${reader.mode}`"
+        :class="[
+            `mode-${reader.mode}`,
+            { rtl: reader.mode === 'paged' && reader.direction === 'rtl' },
+        ]"
     />
 </template>
 
@@ -79,7 +88,9 @@ const controls = useReaderControls()
 // `setHandlers({ onReady })` either: that single slot belongs to the store.
 useReaderTutorial(
     'comic',
-    computed(() => !!reader.state && !reader.state.loading && !reader.state.error)
+    computed(() => !!reader.state && !reader.state.loading && !reader.state.error),
+    undefined,
+    () => reader.controlsFlipped
 )
 
 const { y: scrollY } = useScroll(window)
@@ -108,6 +119,10 @@ const progressValue = computed(() => {
     z-index: var(--z-reader-progress);
     border-radius: 0;
     pointer-events: none;
+}
+
+.reader-progress.rtl :deep(.a-progress__fill) {
+    transform-origin: right;
 }
 
 /* Scrolling drives it continuously; easing would only make it lag. */

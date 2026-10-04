@@ -2,7 +2,8 @@ type ClickZone = 'prev' | 'next' | 'menu'
 
 export const HEIGHT_ZONE = 0.2
 
-export function getClickZone(e: MouseEvent): ClickZone {
+/** `flipped` swaps the left and right thirds; the top and bottom bands stay. */
+export function getClickZone(e: MouseEvent, o: { flipped?: boolean } = {}): ClickZone {
     const target = e.currentTarget as HTMLElement
     const rect = target.getBoundingClientRect()
 
@@ -26,10 +27,10 @@ export function getClickZone(e: MouseEvent): ClickZone {
         return 'next'
     }
     if (relativeX < widthZone1) {
-        return 'prev'
+        return o.flipped ? 'next' : 'prev'
     }
     if (relativeX > widthZone2) {
-        return 'next'
+        return o.flipped ? 'prev' : 'next'
     }
     return 'menu'
 }

@@ -4,13 +4,25 @@ export type ReaderKind = 'comic' | 'book'
 
 export type Shortcut = [keys: string, action: string]
 
-export const COMIC_SHORTCUTS: Shortcut[] = [
-    ['Left arrow', 'Previous'],
-    ['Right arrow', 'Next'],
-    ['Comma', 'Previous Entry'],
-    ['Period', 'Next Entry'],
-    ['M', 'Show or hide the panel'],
-]
+/** `flipped` swaps the left and right arrows, as in right-to-left reading. */
+export function comicShortcuts(o: { flipped: boolean; paged: boolean }): Shortcut[] {
+    const [left, right] = o.flipped ? ['Next', 'Previous'] : ['Previous', 'Next']
+    return [
+        ['Left arrow', left],
+        ['Right arrow', right],
+        ...(o.paged
+            ? ([
+                  ['Space, PgDn', 'Next'],
+                  ['Shift+Space, PgUp', 'Previous'],
+                  ['↑, ↓', 'Scroll'],
+                  ['S', 'Shift spreads'],
+              ] satisfies Shortcut[])
+            : []),
+        ['Comma', 'Previous Entry'],
+        ['Period', 'Next Entry'],
+        ['M', 'Show or hide the panel'],
+    ]
+}
 
 export function bookShortcuts(mode: LayoutKind): Shortcut[] {
     const [forward, back] = mode === 'paged' ? ['Next page', 'Previous page'] : ['Forward', 'Back']

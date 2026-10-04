@@ -23,6 +23,7 @@ vi.mock('@/utils/api/content', () => ({
             siblings.isFetching = ref(false)
             return { ...siblings, refetch: vi.fn() }
         },
+        useGet: () => ({ data: ref(undefined) }),
     },
 }))
 vi.mock('./createComicState', () => ({
@@ -207,6 +208,47 @@ it.each([
     expect(flush).toHaveBeenCalledOnce()
     expect(reader.armed).toBe(false)
     expect(reader.seriesSettings?.mode ?? null).toBe(mode)
+})
+
+it('parses stored settings field by field and keeps a direction across Auto mode', () => {
+    localStorage.removeItem('reader:comics')
+    expect(useReaderStore().settings).toEqual({
+        longstripWidth: 100,
+        fit: 'screen',
+        spread: 'auto',
+        zoomWide: true,
+        invertRtlControls: true,
+        seriesSettings: {},
+        shiftedBooks: {},
+    })
+
+    setActivePinia(createPinia())
+    localStorage.setItem(
+        'reader:comics',
+        JSON.stringify({
+            longstripWidth: 50,
+            fit: 'sideways',
+            seriesSettings: { s_1: { mode: 'paged' } },
+        })
+    )
+    const reader = useReaderStore()
+    localStorage.removeItem('reader:comics')
+    expect(reader.settings).toMatchObject({
+        longstripWidth: 50,
+        fit: 'screen',
+        spread: 'auto',
+        invertRtlControls: true,
+        seriesSettings: { s_1: { mode: 'paged', direction: null } },
+        shiftedBooks: {},
+    })
+
+    reader.setContent({ contentId: 'c_1', initialPage: 'resume' })
+    reader.setDirection('rtl')
+    reader.setMode(null)
+    expect(reader.settings.seriesSettings).toEqual({ s_1: { mode: null, direction: 'rtl' } })
+    expect(reader.direction).toBe('rtl')
+    reader.setDirection(null)
+    expect(reader.settings.seriesSettings).toEqual({})
 })
 
 describe('pageStyle', () => {

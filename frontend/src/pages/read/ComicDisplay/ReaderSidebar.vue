@@ -86,12 +86,102 @@
                     :step="5"
                     @update:model-value="setLongstripWidth"
                 />
+                <template v-if="reader.mode === 'paged'">
+                    <div class="text-fg-muted mt-4 mb-2 text-sm" aria-hidden="true">Direction</div>
+                    <ASegmented
+                        :model-value="reader.seriesSettings.direction ?? 'auto'"
+                        :options="DIRECTION_OPTIONS"
+                        label="Direction"
+                        block
+                        @update:model-value="
+                            v => {
+                                reader.placement()
+                                reader.setDirection(v === 'auto' ? null : v)
+                            }
+                        "
+                    />
+                    <div
+                        v-if="reader.seriesSettings.direction == null"
+                        class="text-fg-muted mt-1 text-xs"
+                    >
+                        Auto:
+                        {{ reader.autoDirection === 'rtl' ? 'Right to left' : 'Left to right' }}
+                    </div>
+                    <ASwitch
+                        v-if="reader.direction === 'rtl'"
+                        class="mt-4"
+                        :model-value="reader.settings.invertRtlControls"
+                        label="Invert controls"
+                        @update:model-value="
+                            v => {
+                                reader.placement()
+                                reader.settings.invertRtlControls = v
+                            }
+                        "
+                    />
+                    <div class="text-fg-muted mt-4 mb-2 text-sm" aria-hidden="true">Fit</div>
+                    <ASegmented
+                        :model-value="reader.settings.fit"
+                        :options="FIT_OPTIONS"
+                        label="Fit"
+                        block
+                        @update:model-value="
+                            v => {
+                                reader.placement()
+                                reader.settings.fit = v
+                            }
+                        "
+                    />
+                    <div class="text-fg-muted mt-4 mb-2 text-sm" aria-hidden="true">Spread</div>
+                    <ASegmented
+                        :model-value="reader.settings.spread"
+                        :options="SPREAD_OPTIONS"
+                        label="Spread"
+                        block
+                        @update:model-value="
+                            v => {
+                                reader.placement()
+                                reader.settings.spread = v
+                            }
+                        "
+                    />
+                    <div
+                        v-if="reader.settings.spread === 'auto'"
+                        class="text-fg-muted mt-1 text-xs"
+                    >
+                        Auto: {{ reader.spreadDouble ? 'Double' : 'Single' }}
+                    </div>
+                    <ASwitch
+                        v-if="reader.settings.spread !== 'single'"
+                        class="mt-4"
+                        :model-value="reader.shifted"
+                        label="Shift spreads"
+                        @update:model-value="
+                            () => {
+                                reader.placement()
+                                reader.toggleShift()
+                            }
+                        "
+                    />
+                    <ASwitch
+                        v-if="reader.settings.fit === 'screen'"
+                        class="mt-4"
+                        :model-value="reader.settings.zoomWide"
+                        label="Zoom wide pages"
+                        @update:model-value="
+                            v => {
+                                reader.placement()
+                                reader.settings.zoomWide = v
+                            }
+                        "
+                    />
+                </template>
             </section>
 
             <section class="text-sm">
                 <ReaderHeading>Keyboard shortcuts</ReaderHeading>
                 <div
-                    v-for="[keys, action] in kbShortcuts"
+                    v-for="[keys, action] in shortcuts"
                     :key="keys"
                     class="flex justify-between py-0.5 text-xs"
                 >
@@ -113,6 +203,7 @@ import ADrawer from '@/ui/ADrawer.vue'
 import AIconButton from '@/ui/AIconButton.vue'
 import ASegmented from '@/ui/ASegmented.vue'
 import ASlider from '@/ui/ASlider.vue'
+import ASwitch from '@/ui/ASwitch.vue'
 import { IconArrowLeft, IconChevronLeft, IconChevronRight, IconClose } from '@/ui/icons'
 import type { Option } from '@/ui/options'
 import { contentApi } from '@/utils/api/content'
@@ -120,9 +211,9 @@ import { itemName } from '@/utils/seriesItem'
 import { readerExit } from '../readerExit'
 import ReaderHeading from '../ReaderHeading.vue'
 import ReaderStatusRow from '../ReaderStatusRow.vue'
-import { COMIC_SHORTCUTS as kbShortcuts } from '../shortcuts'
+import { comicShortcuts } from '../shortcuts'
 import SiblingsRetry from '../SiblingsRetry.vue'
-import type { ReaderMode } from './types'
+import type { FitMode, ReaderMode, ReadingDirection, SpreadSetting } from './types'
 import { useReaderStore } from './useComicDisplayStore'
 
 const reader = useReaderStore()
@@ -134,6 +225,25 @@ const MODE_OPTIONS = [
     { value: 'longstrip', label: 'Longstrip' },
     { value: 'auto', label: 'Auto' },
 ] as const satisfies readonly Option<ReaderMode | 'auto'>[]
+const DIRECTION_OPTIONS = [
+    { value: 'ltr', label: 'LTR' },
+    { value: 'rtl', label: 'RTL' },
+    { value: 'auto', label: 'Auto' },
+] as const satisfies readonly Option<ReadingDirection | 'auto'>[]
+const FIT_OPTIONS = [
+    { value: 'screen', label: 'Screen' },
+    { value: 'width', label: 'Width' },
+    { value: 'height', label: 'Height' },
+] as const satisfies readonly Option<FitMode>[]
+const SPREAD_OPTIONS = [
+    { value: 'single', label: 'Single' },
+    { value: 'double', label: 'Double' },
+    { value: 'auto', label: 'Auto' },
+] as const satisfies readonly Option<SpreadSetting>[]
+
+const shortcuts = computed(() =>
+    comicShortcuts({ flipped: reader.controlsFlipped, paged: reader.mode === 'paged' })
+)
 
 const chapterOptions = computed(() =>
     reader.siblings.items.map(item => ({

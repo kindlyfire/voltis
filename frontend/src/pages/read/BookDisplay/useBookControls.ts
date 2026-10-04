@@ -3,9 +3,9 @@ import { keysOwnedElsewhere, navDrawerOpen } from '@/ui/overlay'
 import { getLayoutTop } from '@/utils/misc'
 import { hasOpenModal } from '@/utils/modals'
 import { isDrawerToggle } from '../shortcuts'
+import { createSwipe, isZoomed } from '../swipe'
 import { getClickZone } from '../useClickZones'
 import { hasAttr, shadowSelection } from './domSafe'
-import { createSwipe } from './swipe'
 import { useBookDisplayStore } from './useBookDisplayStore'
 import { createWheelTurns } from './wheelTurns'
 
@@ -19,10 +19,6 @@ function selectedText(event: Event): string {
     if (text) return text
     const root = event.composedPath().find(node => node instanceof ShadowRoot)
     return root ? (shadowSelection(root as ShadowRoot)?.toString() ?? '') : ''
-}
-
-export function isZoomed() {
-    return (window.visualViewport?.scale ?? 1) > 1
 }
 
 /** A tap is only a tap when the click means nothing else. */

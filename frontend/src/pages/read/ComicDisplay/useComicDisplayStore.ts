@@ -1,32 +1,44 @@
+import { keepPreviousData } from '@tanstack/vue-query'
+import { useWindowSize } from '@vueuse/core'
 import { acceptHMRUpdate, defineStore } from 'pinia'
-import { ref, computed, type Ref } from 'vue'
+import { ref, computed, shallowRef, type Ref } from 'vue'
 import { useRouter } from 'vue-router'
 import z from 'zod'
+import { contentApi } from '@/utils/api/content'
 import { useLocalStorage } from '@/utils/localStorage'
 import { getLayoutTop } from '@/utils/misc'
 import { useSiblings } from '../useSiblings'
 import { createComicState, type ComicState } from './createComicState'
-import type { PageDimensions, ReaderMode } from './types'
+import { detectDirection } from './direction'
+import { buildSpreads, sized, spreadOfPages } from './pagedLayout'
+import type { PageDimensions, PagedScroller, ReaderMode, ReadingDirection } from './types'
 
+const zSeriesSettings = z.object({
+    mode: z.enum(['paged', 'longstrip']).nullable().catch(null),
+    /** null = Auto */
+    direction: z.enum(['ltr', 'rtl']).nullable().catch(null),
+})
+type SeriesSettings = z.infer<typeof zSeriesSettings>
+const DEFAULT_SERIES_SETTINGS: SeriesSettings = { mode: null, direction: null }
+
+/** Per field, so one stale or out-of-range value can't discard the rest. Object fallbacks are
+ * functions: a `.catch({})` value would be one object shared by every parse. */
 const zComicSettings = z.object({
-    longstripWidth: z.number().min(10).max(100).default(100),
-    seriesSettings: z
-        .record(
-            z.string(),
-            z.object({
-                mode: z.enum(['paged', 'longstrip']).nullable().default(null),
-            })
-        )
-        .default({}),
+    longstripWidth: z.number().min(10).max(100).catch(100),
+    fit: z.enum(['screen', 'width', 'height']).catch('screen'),
+    spread: z.enum(['single', 'double', 'auto']).catch('auto'),
+    zoomWide: z.boolean().catch(true),
+    /** RTL also mirrors arrow keys, click zones and swipes. */
+    invertRtlControls: z.boolean().catch(true),
+    seriesSettings: z.record(z.string(), zSeriesSettings).catch(() => ({})),
+    /** Content ids of books whose spreads are shifted by one page. */
+    shiftedBooks: z.record(z.string(), z.literal(true)).catch(() => ({})),
 })
 
 export interface ReaderContentOptions {
     contentId: string
     initialPage: number | 'last' | 'resume'
 }
-
-// A width or height of 0 means the size is unknown.
-const sized = (p: PageDimensions) => p.width > 0 && p.height > 0
 
 /** Detects longstrips by the average aspect ratio of the pages with a known size. */
 export function detectMode(pages: readonly PageDimensions[]): ReaderMode {
@@ -49,38 +61,95 @@ export const useReaderStore = defineStore('reader', () => {
 
     const sidebarOpen = ref(false)
     const { value: settings } = useLocalStorage('reader:comics', v => {
-        try {
-            return zComicSettings.parse(v)
-        } catch {
-            return zComicSettings.parse({})
-        }
-    })
-    const seriesSettings = computed(() => {
-        const c = state.value?.content
-        if (!c)
-            return {
-                mode: null,
-            }
-        const s = settings.value.seriesSettings[c.parent_id || ''] || {
-            mode: null,
-        }
-        return s
-    })
-    const mode = computed<ReaderMode>(() => {
-        const s = seriesSettings.value
-        if (!s) return 'paged'
-        if (s.mode) return s.mode
-        return detectMode(state.value?.pageDimensions || [])
+        const found = zComicSettings.safeParse(v)
+        return found.success ? found.data : zComicSettings.parse({})
     })
 
     const state: Ref<ComicState | null> = ref(null)
+    const content = computed(() => state.value?.content || null)
+
+    // Mode keeps its `parent_id || ''` key for stored data; direction gives a parentless comic
+    // its own entry.
+    const modeKey = computed(() => content.value && (content.value.parent_id || ''))
+    const directionKey = computed(
+        () => content.value && (content.value.parent_id || content.value.id)
+    )
+    const entry = (key: string | null) =>
+        (key !== null && settings.value.seriesSettings[key]) || DEFAULT_SERIES_SETTINGS
+    const seriesSettings = computed<SeriesSettings>(() => ({
+        mode: entry(modeKey.value).mode,
+        direction: entry(directionKey.value).direction,
+    }))
+    /** Merges into a series entry, dropping it once every field is back at its default. */
+    function updateSeriesSettings(key: string, patch: Partial<SeriesSettings>) {
+        const next = { ...entry(key), ...patch }
+        if (Object.values(next).every(v => v === null)) delete settings.value.seriesSettings[key]
+        else settings.value.seriesSettings[key] = next
+    }
+    const mode = computed<ReaderMode>(
+        () => seriesSettings.value.mode ?? detectMode(state.value?.pageDimensions || [])
+    )
+
+    // Placeholder data can be the previous series.
+    const qParent = contentApi.useGet(() => content.value?.parent_id, {
+        placeholderData: keepPreviousData,
+    })
+    const parent = computed(() => {
+        const data = qParent.data.value
+        return data && data.id === content.value?.parent_id ? data : null
+    })
+    const autoDirection = computed(() => detectDirection(content.value?.meta, parent.value?.meta))
+    const direction = computed<ReadingDirection>(
+        () => seriesSettings.value.direction ?? autoDirection.value
+    )
+    /** Arrow keys, click zones and swipes are mirrored. */
+    const controlsFlipped = computed(
+        () =>
+            mode.value === 'paged' && direction.value === 'rtl' && settings.value.invertRtlControls
+    )
+
+    const shifted = computed(
+        () => !!content.value && !!settings.value.shiftedBooks[content.value.id]
+    )
+    function toggleShift() {
+        const id = content.value?.id
+        if (!id) return
+        if (settings.value.shiftedBooks[id]) delete settings.value.shiftedBooks[id]
+        else settings.value.shiftedBooks[id] = true
+    }
+
+    const windowSize = useWindowSize()
+    const spreadDouble = computed(
+        () =>
+            settings.value.spread === 'double' ||
+            (settings.value.spread === 'auto' && windowSize.width.value > windowSize.height.value)
+    )
+    // Dimensions arrive before the loaders, so nothing is laid out until loading ends.
+    const spreads = computed(() => {
+        const s = state.value
+        if (!s || s.loading) return []
+        return buildSpreads(s.pageDimensions, { double: spreadDouble.value, shift: shifted.value })
+    })
+    const spreadOfPage = computed(() =>
+        spreadOfPages(spreads.value, state.value?.pageDimensions.length ?? 0)
+    )
+    /** Undefined while loading or without pages. */
+    const spreadIndex = computed<number | undefined>(() =>
+        state.value ? spreadOfPage.value[state.value.page] : undefined
+    )
+    const currentSpread = computed(() =>
+        spreadIndex.value === undefined ? undefined : spreads.value[spreadIndex.value]
+    )
+
+    /** Registered by the paged view while mounted. */
+    const pagedScroller = shallowRef<PagedScroller | null>(null)
+
     // A longstrip scroll of our own (a placement) is under way.
     const restoring = ref(false)
     // On-page input since the last placement: only then is a longstrip scroll reading.
     const armed = ref(false)
     // Paged: past the last page with no next sibling, on the end card.
     const atEnd = ref(false)
-    const content = computed(() => state.value?.content || null)
     const sync = computed(() => state.value?.sync ?? null)
 
     const siblings = useSiblings(content)
@@ -117,22 +186,14 @@ export const useReaderStore = defineStore('reader', () => {
     }
 
     function setMode(mode: ReaderMode | null) {
-        const c = state.value?.content
-        if (!c) return
+        if (modeKey.value === null) return
         placement()
+        updateSeriesSettings(modeKey.value, { mode })
+    }
 
-        if (mode == null) {
-            if (settings.value.seriesSettings[c.parent_id || '']) {
-                delete settings.value.seriesSettings[c.parent_id || '']
-            }
-            return
-        }
-
-        const s = settings.value.seriesSettings[c.parent_id || ''] || {
-            mode: null,
-        }
-        s.mode = mode
-        settings.value.seriesSettings[c.parent_id || ''] = s
+    function setDirection(direction: ReadingDirection | null) {
+        if (directionKey.value === null) return
+        updateSeriesSettings(directionKey.value, { direction })
     }
 
     function setContent(options: ReaderContentOptions) {
@@ -243,6 +304,19 @@ export const useReaderStore = defineStore('reader', () => {
         seriesSettings,
         mode,
         setMode,
+        setDirection,
+        shifted,
+        toggleShift,
+
+        // Paged layout
+        autoDirection,
+        direction,
+        controlsFlipped,
+        spreadDouble,
+        spreads,
+        spreadIndex,
+        currentSpread,
+        pagedScroller,
 
         // Content state (readonly)
         state,

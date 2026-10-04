@@ -7,21 +7,17 @@ function touches(...points: Array<[number, number]>) {
     return points.map(([clientX, clientY]) => ({ clientX, clientY })) as unknown as TouchList
 }
 
-describe('classify swipe', () => {
-    it('turns forward on a leftward flick and back on a rightward one', () => {
-        expect(classifySwipe(at(300), at(200, 10, 200), 390)).toBe('next')
-        expect(classifySwipe(at(100), at(200, -10, 200), 390)).toBe('prev')
-    })
-
-    it('needs 40px or 6% of the width, whichever is more', () => {
-        expect(classifySwipe(at(300), at(265, 0, 100), 390)).toBeNull()
-        expect(classifySwipe(at(1000), at(930, 0, 100), 1920)).toBeNull()
-        expect(classifySwipe(at(1000), at(880, 0, 100), 1920)).toBe('next')
-    })
-
-    it('rejects mostly vertical movement and long presses', () => {
-        expect(classifySwipe(at(300), at(200, 60, 200), 390)).toBeNull()
-        expect(classifySwipe(at(300), at(200, 0, 900), 390)).toBeNull()
+describe('classifySwipe', () => {
+    it.each([
+        ['leftward flick turns forward', at(300), at(200, 10, 200), 390, 'next'],
+        ['rightward flick turns back', at(100), at(200, -10, 200), 390, 'prev'],
+        ['under 40px', at(300), at(265, 0, 100), 390, null],
+        ['under 6% of a wide screen', at(1000), at(930, 0, 100), 1920, null],
+        ['over 6% of a wide screen', at(1000), at(880, 0, 100), 1920, 'next'],
+        ['mostly vertical', at(300), at(200, 60, 200), 390, null],
+        ['long press', at(300), at(200, 0, 900), 390, null],
+    ])('%s', (_name, start, end, width, expected) => {
+        expect(classifySwipe(start, end, width)).toBe(expected)
     })
 })
 
@@ -37,16 +33,13 @@ describe('swipe gestures', () => {
         timeStamp: 150,
     })
 
-    it('turns on a one-finger flick', () => {
-        const swipe = createSwipe({ hasSelection: () => false, isZoomed: () => false })
-        swipe.start(start(300))
-        expect(swipe.end(end(100), 390)).toBe('next')
-    })
-
-    it('ignores a second finger, a selection and zoom', () => {
+    it('turns on a one-finger flick, ignoring a second finger, a selection and zoom', () => {
         let selected = false
         let zoomed = false
         const swipe = createSwipe({ hasSelection: () => selected, isZoomed: () => zoomed })
+        swipe.start(start(300))
+        expect(swipe.end(end(100), 390)).toBe('next')
+
         swipe.start(start(300, [100, 0]))
         expect(swipe.end(end(100, [[100, 0]]), 390)).toBeNull()
         expect(swipe.end(end(100), 390)).toBeNull()
