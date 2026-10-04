@@ -409,12 +409,12 @@ func loadChildren(ctx context.Context, tx pgx.Tx, libraryID string, seriesIDs []
 	var kid Child
 	var parentID string
 	err := query(ctx, tx, `
-		SELECT c.id, c.uri_part, c.order_parts, c.cover_uri, c.file_mtime, c.parent_id,
+		SELECT c.id, c.uri_part, c.order_parts, c.cover_uri, c.file_mtime, NOT c.valid, c.parent_id,
 		       COALESCE(c.data_raw->'file', '{}')
 		FROM content c
 		WHERE c.library_id = $1 AND c.parent_id = ANY($2::text[])
 	`, []any{libraryID, seriesIDs},
-		[]any{&kid.ID, &kid.URIPart, &kid.OrderParts, &kid.CoverURI, &kid.FileMtime, &parentID, &kid.Meta}, func() error {
+		[]any{&kid.ID, &kid.URIPart, &kid.OrderParts, &kid.CoverURI, &kid.FileMtime, &kid.Invalid, &parentID, &kid.Meta}, func() error {
 			if !dropped[kid.ID] {
 				children[parentID] = append(children[parentID], kid)
 			}

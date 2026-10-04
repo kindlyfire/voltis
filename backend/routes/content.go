@@ -100,6 +100,9 @@ type ContentDTO struct {
 	UserData *UserToContentDTO `json:"user_data"`
 	Length   *ContentLength    `json:"length,omitempty"`
 	Continue *ContinueDTO      `json:"continue"`
+	// FacetKeys holds the value-page keys of meta's staff, genres, tags and publishers, index for
+	// index, or null where a value has no page. Only get sets it, for valid roots.
+	FacetKeys json.RawMessage `json:"facet_keys,omitempty"`
 }
 
 // childCounts counts a series' valid children. new_children_count is the unfinished volumes
@@ -293,6 +296,12 @@ func (cr *ContentRoutes) get(c echo.Context) error {
 
 	dto := r.dto(true, true)
 	dto.Length = length
+	if r.ParentID == nil && r.Valid {
+		dto.FacetKeys, err = db.SelectScalar[json.RawMessage](ctx, cr.pool, "SELECT public.facet_links($1::jsonb)", r.MetaData)
+		if err != nil {
+			return err
+		}
+	}
 	return c.JSON(http.StatusOK, dto)
 }
 
@@ -471,7 +480,11 @@ type contentListQuery struct {
 	SortOrder     string   `query:"sort_order"      validate:"omitempty,oneof=asc desc" default:"desc"`
 	Count         string   `query:"count"           validate:"omitempty,oneof=true false"`
 	Include       string   `query:"include"`
-	ListID        string   // set by code only
+	// omitempty stops validation of an empty field, so required_with goes first.
+	FacetKind string `query:"facet_kind" validate:"required_with=Facet,omitempty,oneof=genres tags people publishers"`
+	Facet     string `query:"facet"      validate:"required_with=FacetKind,omitempty,max=1000"`
+	FacetRole string `query:"facet_role" validate:"omitempty,max=200,excluded_without=Facet"`
+	ListID    string // set by code only
 	// IgnoreSeriesStatus is the user's home preference, set by code for the continue sorts.
 	IgnoreSeriesStatus bool
 }
@@ -491,6 +504,9 @@ func (q contentListQuery) filter() contentFilter {
 		Search:             strings.TrimSpace(q.Search),
 		ListID:             q.ListID,
 		IgnoreSeriesStatus: q.IgnoreSeriesStatus,
+		FacetKind:          facetKinds[q.FacetKind],
+		Facet:              q.Facet,
+		FacetRole:          q.FacetRole,
 	}
 	switch q.Sort {
 	case "history":
@@ -545,6 +561,9 @@ type contentFilter struct {
 	// Continue keeps only continue targets, joined as ct; RecentlyUpdated only the new ones.
 	Continue, RecentlyUpdated bool
 	IgnoreSeriesStatus        bool
+	// FacetKind is content_facets' singular kind; Facet any spelling of the value; FacetRole a
+	// role the value must carry.
+	FacetKind, Facet, FacetRole string
 }
 
 // joins are the optional joins of a grid query.
@@ -574,13 +593,15 @@ const (
 		) uc ON uc.parent_id = c.id`
 	// lastReadSQL is when the user last read each item, or for a series its children's latest
 	// (else its own), as lr. It starts from the user's rows, not the catalog, so the history,
-	// which joins it, reads only what the user has read.
+	// which joins it, reads only what the user has read. The group key is an expression over
+	// content's columns: grouping by a VALUES column is estimated at 2 rows.
 	lastReadSQL = `
-		SELECT r.id, COALESCE(MAX(cu.last_read_at) FILTER (WHERE r.child),
-			MAX(cu.last_read_at) FILTER (WHERE NOT r.child)) AS last_read_at
+		SELECT r.id, COALESCE(MAX(cu.last_read_at) FILTER (WHERE v.child),
+			MAX(cu.last_read_at) FILTER (WHERE NOT v.child)) AS last_read_at
 		FROM user_to_content cu
 		JOIN content k ON k.library_id = cu.library_id AND k.uri = cu.uri
-		CROSS JOIN LATERAL (VALUES (k.id, false), (k.parent_id, true)) r(id, child)
+		CROSS JOIN (VALUES (false), (true)) v(child)
+		CROSS JOIN LATERAL (SELECT CASE WHEN v.child THEN k.parent_id ELSE k.id END AS id) r
 		WHERE cu.user_id = @user_id AND cu.last_read_at IS NOT NULL AND r.id IS NOT NULL
 		GROUP BY r.id`
 	lastReadJoin = " LEFT JOIN (" + lastReadSQL + ") lr ON lr.id = c.id"
@@ -635,8 +656,26 @@ func (f contentFilter) where(args pgx.NamedArgs) (cond string, j joins) {
 	if f.RecentlyUpdated {
 		where = append(where, "ct.is_new AND ct.series_status = 'reading'")
 	}
+	if f.Facet != "" {
+		args["facet_kind"], args["facet"] = f.FacetKind, f.Facet
+		sub := "SELECT cf.content_id FROM content_facets cf WHERE cf.kind = @facet_kind AND cf.key = public.facet_key(@facet)"
+		if f.FacetRole != "" {
+			args["facet_role"] = f.FacetRole
+			sub += " AND @facet_role = ANY(cf.roles)"
+		}
+		where = append(where, "c.parent_id IS NULL AND c.id IN ("+sub+")")
+	}
 	j.utc = needsUTC
 	return strings.Join(where, " AND "), j
+}
+
+// queryArgs are the arguments of a query built on f.from. A facet filter skips the statement cache
+// so each run is planned for its key; a generic plan sizes every key at the kind's average.
+func (f contentFilter) queryArgs(args pgx.NamedArgs) []any {
+	if f.Facet == "" {
+		return []any{args}
+	}
+	return []any{pgx.QueryExecModeDescribeExec, args}
 }
 
 // from returns the FROM and WHERE clauses of a grid query, with the joins that the filter or the
@@ -723,7 +762,7 @@ func listContentIDs(ctx context.Context, q db.Querier, userID string, f contentF
 	sort, dir string, limit *int, offset int,
 ) ([]string, error) {
 	args := pgx.NamedArgs{"user_id": userID}
-	return db.SelectScalars[string](ctx, q, contentIDsSQL("c.id", f, sort, dir, limit, offset, args), args)
+	return db.SelectScalars[string](ctx, q, contentIDsSQL("c.id", f, sort, dir, limit, offset, args), f.queryArgs(args)...)
 }
 
 // continueID is a row of the continue sorts, with its target info.
@@ -739,7 +778,7 @@ func listContinueIDs(ctx context.Context, q db.Querier, userID string, f content
 ) ([]continueID, error) {
 	args := pgx.NamedArgs{"user_id": userID}
 	return db.Select[continueID](ctx, q,
-		contentIDsSQL("c.id, ct.action, ct.is_new, ct.series_id", f, sort, dir, limit, offset, args), args)
+		contentIDsSQL("c.id, ct.action, ct.is_new, ct.series_id", f, sort, dir, limit, offset, args), f.queryArgs(args)...)
 }
 
 func contentIDsSQL(cols string, f contentFilter, sort, dir string, limit *int, offset int, args pgx.NamedArgs) string {
@@ -761,7 +800,7 @@ func contentIDsSQL(cols string, f contentFilter, sort, dir string, limit *int, o
 
 func countContent(ctx context.Context, q db.Querier, userID string, f contentFilter) (int, error) {
 	args := pgx.NamedArgs{"user_id": userID}
-	return db.SelectScalar[int](ctx, q, "SELECT COUNT(*) "+f.from(args, joins{}), args)
+	return db.SelectScalar[int](ctx, q, "SELECT COUNT(*) "+f.from(args, joins{}), f.queryArgs(args)...)
 }
 
 // SearchEvalResult is one root-level search's first page of ids, its total and the time each took.
@@ -925,7 +964,7 @@ func (cr *ContentRoutes) buckets(c echo.Context) error {
 	args := pgx.NamedArgs{"user_id": user.ID}
 	res.Buckets, err = db.Select[contentBucket](ctx, cr.pool, fmt.Sprintf(
 		"SELECT %s AS key, COUNT(*) AS count %s GROUP BY 1 ORDER BY 1 %s %s",
-		key, f.from(args, j), dir, nullsOrder(dir)), args)
+		key, f.from(args, j), dir, nullsOrder(dir)), f.queryArgs(args)...)
 	if err != nil {
 		return err
 	}
@@ -952,7 +991,7 @@ func countContentKinds(ctx context.Context, pool *pgxpool.Pool, userID string, f
 		if _, err := tx.Exec(ctx, "SET LOCAL paradedb.enable_aggregate_custom_scan = off"); err != nil {
 			return err
 		}
-		k, err = db.SelectOne[kindCounts](ctx, tx, sql, args)
+		k, err = db.SelectOne[kindCounts](ctx, tx, sql, f.queryArgs(args)...)
 		return err
 	})
 	return k, err

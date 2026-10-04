@@ -66,6 +66,9 @@ export function listSearchParams(p: ContentListParams): URLSearchParams {
     if (p.sort) searchParams.append('sort', p.sort)
     if (p.sort_order) searchParams.append('sort_order', p.sort_order)
     if (p.count !== undefined) searchParams.append('count', String(p.count))
+    if (p.facet_kind) searchParams.append('facet_kind', p.facet_kind)
+    if (p.facet) searchParams.append('facet', p.facet)
+    if (p.facet_role) searchParams.append('facet_role', p.facet_role)
     return searchParams
 }
 

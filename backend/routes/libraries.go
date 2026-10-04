@@ -30,6 +30,7 @@ type LibraryRoutes struct {
 	scanQueue *scanner.Queue
 	links     *linking.Service
 	reg       *providers.Registry
+	hub       *WebSocketHub
 	ctx       context.Context // the server's
 }
 
@@ -331,6 +332,7 @@ func (lr *LibraryRoutes) delete(c echo.Context) error {
 	if result.RowsAffected() == 0 {
 		return echo.NewHTTPError(http.StatusNotFound, "Library not found")
 	}
+	lr.hub.LibraryChanged(id)
 	return okResponse(c)
 }
 

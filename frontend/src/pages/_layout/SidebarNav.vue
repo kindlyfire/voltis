@@ -65,6 +65,12 @@
                 :active-icon="IconListFilled"
                 label="Lists"
             />
+            <ANavItem
+                to="/discover"
+                :icon="IconExplore"
+                :active-icon="IconExploreFilled"
+                label="Discover"
+            />
             <Libraries />
             <ADivider class="mx-3.5 my-2.5" />
             <ANavItem
@@ -134,6 +140,8 @@ import {
     IconClipboardListFilled,
     IconCog,
     IconCogFilled,
+    IconExplore,
+    IconExploreFilled,
     IconHome,
     IconHomeFilled,
     IconLink,

@@ -151,6 +151,20 @@
                                     <span class="sr-only">(opens in a new tab)</span>
                                 </a>
                             </template>
+                            <template v-else-if="row.items">
+                                <template v-for="(item, i) in row.items" :key="i">
+                                    <template v-if="i">, </template>
+                                    <RouterLink
+                                        v-if="item.to"
+                                        :to="item.to"
+                                        class="a-focus text-primary rounded-sm font-medium hover:underline"
+                                    >
+                                        {{ item.text }}
+                                    </RouterLink>
+                                    <template v-else>{{ item.text }}</template>
+                                    <template v-if="item.suffix">{{ item.suffix }}</template>
+                                </template>
+                            </template>
                             <template v-else>{{ row.value }}</template>
                         </dd>
                     </div>
@@ -171,8 +185,8 @@
 
 <script setup lang="ts">
 import { useResizeObserver } from '@vueuse/core'
-import { computed, ref, useId, useTemplateRef, watch } from 'vue'
-import { RouterLink } from 'vue-router'
+import { capitalize, computed, ref, useId, useTemplateRef, watch } from 'vue'
+import { RouterLink, type RouteLocationRaw } from 'vue-router'
 import AButton from '@/ui/AButton.vue'
 import AChip from '@/ui/AChip.vue'
 import ACover from '@/ui/ACover.vue'
@@ -183,8 +197,9 @@ import { IconChevronLeft, IconOpenInNew, IconStar, IconStarFilled } from '@/ui/i
 import { useToast } from '@/ui/useToast'
 import { contentApi, coverUrl } from '@/utils/api/content'
 import { metadataApi, ownTitle, type MetadataLinkRef } from '@/utils/api/metadata'
-import type { Content } from '@/utils/api/types'
+import type { Content, FacetKind } from '@/utils/api/types'
 import { usersApi } from '@/utils/api/users'
+import { facetRoute, slugLabel } from '@/utils/facets'
 import { displayContentType, plural } from '@/utils/misc'
 import { lengthSummary, readingSpeed } from '@/utils/readingTime'
 import { splitItemTitle } from '@/utils/seriesItem'
@@ -198,6 +213,14 @@ import ReadingStatusButton from './components/ReadingStatusButton.vue'
 const props = defineProps<{
     content: Content
 }>()
+
+type Item = { text: string; to?: RouteLocationRaw; suffix?: string }
+const FIELD_KINDS = {
+    staff: 'people',
+    genres: 'genres',
+    tags: 'tags',
+    publishers: 'publishers',
+} as const satisfies Record<keyof NonNullable<Content['facet_keys']>, FacetKind>
 
 const qParent = contentApi.useGet(() => props.content.parent_id || undefined)
 const parent = qParent.data
@@ -245,14 +268,27 @@ watch(() => meta.value.description, measure, { flush: 'post' })
 
 const details = computed(() => {
     const m = meta.value
-    const rows: { label: string; value?: string; links?: MetadataLinkRef[] }[] = []
+    const keys = props.content.facet_keys
+    // Links only where the server gave a key: valid top-level entries.
+    const items = (field: keyof typeof FIELD_KINDS, texts: string[]): Item[] =>
+        texts.map((text, i) => {
+            const key = keys?.[field][i]
+            return { text, to: key ? facetRoute(FIELD_KINDS[field], key) : undefined }
+        })
+    const rows: { label: string; value?: string; items?: Item[]; links?: MetadataLinkRef[] }[] = []
     if (m.staff?.length) {
+        const staff = m.staff
         rows.push({
             label: 'Staff',
-            value: m.staff.map(s => `${s.name} (${s.role})`).join(', '),
+            items: items(
+                'staff',
+                staff.map(s => s.name)
+            ).map((item, i) => ({ ...item, suffix: ` (${staff[i]!.role})` })),
         })
     }
-    if (m.publishers?.length) rows.push({ label: 'Publishers', value: m.publishers.join(', ') })
+    if (m.publishers?.length) {
+        rows.push({ label: 'Publishers', items: items('publishers', m.publishers) })
+    }
     if (m.publication_date) {
         rows.push({ label: 'Published', value: formatDate(m.publication_date) })
     }
@@ -263,11 +299,9 @@ const details = computed(() => {
         })
     }
     if (m.genres?.length) {
-        rows.push({
-            label: 'Genres',
-            value: m.genres.map(g => capitalize(g.replaceAll('_', ' '))).join(', '),
-        })
+        rows.push({ label: 'Genres', items: items('genres', m.genres.map(slugLabel)) })
     }
+    if (m.tags?.length) rows.push({ label: 'Tags', items: items('tags', m.tags) })
     if (m.links?.length) rows.push({ label: 'Links', links: m.links })
     return rows
 })
@@ -281,10 +315,6 @@ const language = computed(() => {
         return code
     }
 })
-
-function capitalize(s: string) {
-    return s.charAt(0).toUpperCase() + s.slice(1)
-}
 
 /** A full date in words; a year or year-month stays as is (a day would be made up). */
 function formatDate(value: string) {

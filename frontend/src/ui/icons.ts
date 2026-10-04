@@ -36,6 +36,8 @@ export { default as IconDelete } from '~icons/material-symbols-light/delete-outl
 export { default as IconDotsHorizontal } from '~icons/material-symbols-light/more-horiz'
 export { default as IconDotsVertical } from '~icons/material-symbols-light/more-vert'
 export { default as IconDownload } from '~icons/material-symbols-light/download'
+export { default as IconExplore } from '~icons/material-symbols-light/explore-outline'
+export { default as IconExploreFilled } from '~icons/material-symbols-light/explore'
 export { default as IconEye } from '~icons/material-symbols-light/visibility-outline'
 export { default as IconFilter } from '~icons/material-symbols-light/filter-list'
 export { default as IconFolder } from '~icons/material-symbols-light/folder-outline'

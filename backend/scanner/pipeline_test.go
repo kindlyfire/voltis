@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"voltis/db"
+	"voltis/db/dbtest"
 	"voltis/lib/tasks"
 	"voltis/metadata"
 	"voltis/models"
@@ -56,6 +57,7 @@ func newPipeline(t *testing.T, libType string) *pipeline {
 	fastFlushes(t)
 
 	pool := newTestPool(t)
+	t.Cleanup(func() { dbtest.AssertFacetsConsistent(t, pool) })
 	root := t.TempDir()
 	lib := newTestLibrary(t, pool, libType)
 
@@ -214,7 +216,24 @@ func TestScanPipelineFailedParsesInvalidateAndRetry(t *testing.T) {
 	series := filepath.Join(p.root, "Foo (2019)")
 	path := filepath.Join(series, "Foo ch1.cbz")
 	writeCBZFixture(t, path, "Foo", "1")
+	ch2 := writeCBZ(t, filepath.Join(series, "Foo ch2.cbz"),
+		`<?xml version="1.0"?><ComicInfo><Series>Foo</Series><Number>2</Number><Writer>Bea Quill</Writer></ComicInfo>`)
 	p.mustScan(ScanInput{})
+
+	// A valid child's writer reaches the series; once it is invalid, it no longer does.
+	seriesID := contentIDByURI(t, p.pool, p.lib, "comic/Foo_2019")
+	assertWriter := func(want bool) {
+		t.Helper()
+		staff := readData(t, p.pool, p.lib, "comic/Foo_2019").Staff.V
+		inData := slices.Contains(staff, metadata.Staff{Name: "Bea Quill", Role: "writer"})
+		inFacets, err := db.SelectScalar[bool](context.Background(), p.pool, `SELECT EXISTS (
+			SELECT 1 FROM content_facets WHERE content_id = $1 AND kind = 'person' AND key = facet_key('Bea Quill'))`, seriesID)
+		must(t, err)
+		if inData != want || inFacets != want {
+			t.Fatalf("writer in data.staff %v (%+v), in content_facets %v; want %v", inData, staff, inFacets, want)
+		}
+	}
+	assertWriter(true)
 
 	id, err := db.SelectScalar[string](context.Background(), p.pool,
 		"SELECT id FROM content WHERE library_id = $1 AND file_uri = $2", p.lib, path)
@@ -236,7 +255,7 @@ func TestScanPipelineFailedParsesInvalidateAndRetry(t *testing.T) {
 	if string(row.FileData) != manifest {
 		t.Fatalf("file_data = %s, want the manifest kept through invalidation", row.FileData)
 	}
-	assertCatalog(t, p.pool, p.lib, []string{"comic/Foo_2019", "comic/Foo_2019/ch1"})
+	assertCatalog(t, p.pool, p.lib, []string{"comic/Foo_2019", "comic/Foo_2019/ch1", "comic/Foo_2019/ch2"})
 	assertAnnotations(t, p.pool, p.lib, []string{"comic/Foo_2019/ch1"})
 
 	writeCBZFixture(t, path, "Foo", "1")
@@ -247,6 +266,12 @@ func TestScanPipelineFailedParsesInvalidateAndRetry(t *testing.T) {
 		t.Fatal("repaired row must be valid again")
 	}
 	assertAnnotations(t, p.pool, p.lib, []string{"comic/Foo_2019/ch1"})
+
+	writeFile(t, ch2, "corrupt")
+	if result := p.mustScan(ScanInput{}); result.Failed != 1 {
+		t.Fatalf("corrupt ch2 scan = %+v", result)
+	}
+	assertWriter(false)
 }
 
 func comicInfoXML(series, number, publisher, language string) string {

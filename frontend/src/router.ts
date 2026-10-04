@@ -6,6 +6,8 @@ import PageOidcComplete from './pages/auth/PageOidcComplete.vue'
 import PageRegister from './pages/auth/PageRegister.vue'
 import BrowsePage from './pages/BrowsePage.vue'
 import ContentPage from './pages/content/ContentPage.vue'
+import DiscoverPage from './pages/discover/DiscoverPage.vue'
+import FacetPage from './pages/discover/FacetPage.vue'
 import HomePage from './pages/HomePage.vue'
 import LibraryPage from './pages/LibraryPage.vue'
 import ListPage from './pages/lists/ListPage.vue'
@@ -88,6 +90,18 @@ const router = createRouter({
                     path: '/:id(cl_[^/]+)',
                     name: 'list',
                     component: ListPage,
+                },
+                {
+                    path: '/discover',
+                    name: 'discover',
+                    component: DiscoverPage,
+                },
+                {
+                    path: '/:kind(genres|tags|people|publishers)/:key',
+                    name: 'facet',
+                    component: FacetPage,
+                    // Not `props: true`: a `key` prop would remount the page per value.
+                    props: route => ({ kind: route.params.kind }),
                 },
                 {
                     path: '/settings/interface',

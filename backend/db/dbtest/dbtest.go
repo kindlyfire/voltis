@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 
 	"voltis/db"
@@ -25,6 +26,30 @@ func GenericPlans(t *testing.T, pool *pgxpool.Pool) *pgxpool.Pool {
 	}
 	t.Cleanup(p.Close)
 	return p
+}
+
+// AssertFacetsConsistent fails t unless content_facets holds exactly facet_rows of every valid
+// root. EXCEPT ALL both ways, so a duplicated row also fails.
+func AssertFacetsConsistent(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	diff, err := db.SelectScalars[string](context.Background(), pool, `
+		WITH want AS (
+			SELECT c.id, c.library_id, r.kind, r.key, r.roles, r.labels
+			FROM content c, public.facet_rows(c.data) r
+			WHERE c.parent_id IS NULL AND c.valid
+		), got AS (
+			SELECT content_id, library_id, kind, key, roles, labels FROM content_facets
+		)
+		SELECT format('missing %s', x) FROM (TABLE want EXCEPT ALL TABLE got) x
+		UNION ALL
+		SELECT format('extra %s', x) FROM (TABLE got EXCEPT ALL TABLE want) x
+		LIMIT 20`)
+	if err != nil {
+		t.Fatalf("facets consistency: %v", err)
+	}
+	if len(diff) > 0 {
+		t.Errorf("content_facets out of sync:\n%s", strings.Join(diff, "\n"))
+	}
 }
 
 func Pool(t *testing.T) *pgxpool.Pool {

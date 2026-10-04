@@ -389,6 +389,11 @@ export interface Content {
     length?: ContentLength
     /** Only in the continue and recently_updated sorts. */
     continue: { action: ContinueAction; is_new: boolean; series: Content | null } | null
+    /**
+     * Value-page keys of meta's staff, genres, tags and publishers, index for index; null where a
+     * value has no page. Only on a single-item fetch of a valid top-level entry.
+     */
+    facet_keys?: Record<'staff' | 'genres' | 'tags' | 'publishers', (string | null)[]>
 }
 
 /** Words for books, pages for comics; `remaining` is what the user has left. */
@@ -447,6 +452,34 @@ export interface ContentListParams {
     sort_order?: 'asc' | 'desc'
     /** false leaves out the total, which is then null (see useListUncounted). */
     count?: boolean
+    /** Top-level entries carrying this value (any spelling); `facet_role` needs `facet`. */
+    facet_kind?: FacetKind
+    facet?: string
+    facet_role?: string
+}
+
+export type FacetKind = 'genres' | 'tags' | 'people' | 'publishers'
+
+export interface Facet {
+    /** Folded; the URL segment replaces its spaces with '-'. */
+    key: string
+    /** The most common spelling; a genre's slug. */
+    name: string
+    count: number
+}
+
+export interface FacetEntry extends Facet {
+    /** People only; may sum to more than `count`. */
+    roles: { role: string; count: number }[]
+}
+
+export interface FacetListParams {
+    q?: string
+    sort?: 'count' | 'name'
+    order?: 'asc' | 'desc'
+    library_id?: string
+    limit: number
+    offset: number
 }
 
 export interface SpineItem {

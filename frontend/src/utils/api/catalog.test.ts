@@ -31,6 +31,7 @@ const keys = [
     ['metadata', 'review', libraryScope('l2'), { libraryId: 'l2' }],
     ['metadata', 'summary'],
     ['metadata-config'],
+    ['content', 'facets', libraryScope(null), 'tags', 'list', { library_id: 'l1' }],
 ]
 
 function seed(): QueryClient {
@@ -51,16 +52,16 @@ describe('syncCatalog', () => {
         const invalidated = () => keys.filter(key => client.getQueryState(key)?.isInvalidated)
 
         emit('catalog_changed', { library_id: 'l1' })
-        expect(invalidated()).toEqual([keys[0], keys[1], keys[2], keys[6]])
+        expect(invalidated()).toEqual([keys[0], keys[1], keys[2], keys[6], keys[8]])
 
         emit('catalog_changed', { library_id: 'l2' })
-        expect(invalidated()).toHaveLength(4)
+        expect(invalidated()).toHaveLength(5)
         await vi.advanceTimersByTimeAsync(500)
-        expect(invalidated()).toHaveLength(7)
+        expect(invalidated()).toHaveLength(8)
 
         emit('$open', {})
         await vi.advanceTimersByTimeAsync(2000)
-        expect(invalidated()).toHaveLength(7)
+        expect(invalidated()).toHaveLength(8)
     })
 })
 
@@ -68,8 +69,9 @@ describe('refetchCatalog', () => {
     it('refetches every catalog query but the one set', async () => {
         const client = seed()
         await refetchCatalog(client, keys[1])
-        expect(keys.filter(key => client.getQueryState(key)?.isInvalidated)).toEqual(
-            keys.slice(2, 7)
-        )
+        expect(keys.filter(key => client.getQueryState(key)?.isInvalidated)).toEqual([
+            ...keys.slice(2, 7),
+            keys[8],
+        ])
     })
 })

@@ -140,6 +140,9 @@ func TestSeriesLayerConverges(t *testing.T) {
 		ContentRating: metadata.Val(metadata.Suggestive), Manga: metadata.Val("Yes"), Imprint: metadata.Val("Imp"),
 		PublicationDate: metadata.Val("2019"), Staff: metadata.Val([]metadata.Staff{{Name: "Ann", Role: "author"}}),
 	})
+	c := childOf("c", []*float32{f32(3)}, metadata.Fields{
+		Staff: metadata.Val([]metadata.Staff{{Name: "Cy", Role: "writer"}}),
+	})
 
 	partial := seriesLayer(SeriesRef{URIPart: "s"}, order([]Child{a}))
 	if partial.Title.V != "The Series" || partial.Genres.P != metadata.Absent {
@@ -147,19 +150,74 @@ func TestSeriesLayerConverges(t *testing.T) {
 	}
 
 	// Descriptions and imprints describe a volume, not the series.
-	full := seriesLayer(SeriesRef{URIPart: "s"}, order([]Child{a, b}))
+	full := seriesLayer(SeriesRef{URIPart: "s"}, order([]Child{a, b, c}))
 	want := metadata.Fields{
 		Title: metadata.Val("The Series"), Publishers: metadata.Val([]string{"Press"}),
 		Genres: metadata.Val([]string{"action"}), Language: metadata.Val("en"),
-		ContentRating: metadata.Val(metadata.Suggestive), Manga: metadata.Val("Yes"),
-		PublicationDate: metadata.Val("2019"), Staff: metadata.Val([]metadata.Staff{{Name: "Ann", Role: "author"}}),
+		ContentRating: metadata.Val(metadata.Suggestive), Manga: metadata.Val("Yes"), PublicationDate: metadata.Val("2019"),
+		Staff: metadata.Val([]metadata.Staff{{Name: "Ann", Role: "author"}, {Name: "Cy", Role: "writer"}}),
 	}
 	if !reflect.DeepEqual(full, want) {
 		t.Fatalf("full = %+v, want %+v", full, want)
 	}
 
-	if reversed := seriesLayer(SeriesRef{URIPart: "s"}, order([]Child{b, a})); !reflect.DeepEqual(reversed, full) {
+	if reversed := seriesLayer(SeriesRef{URIPart: "s"}, order([]Child{c, b, a})); !reflect.DeepEqual(reversed, full) {
 		t.Fatalf("arrival order matters: %+v != %+v", reversed, full)
+	}
+}
+
+func TestSeriesLayerStaffUnion(t *testing.T) {
+	staff := func(pairs ...string) metadata.Opt[[]metadata.Staff] {
+		var out []metadata.Staff
+		for i := 0; i < len(pairs); i += 2 {
+			out = append(out, metadata.Staff{Name: pairs[i], Role: pairs[i+1]})
+		}
+		return metadata.Val(out)
+	}
+	kid := func(id string, n float32, invalid bool, s metadata.Opt[[]metadata.Staff]) Child {
+		c := childOf(id, []*float32{f32(n)}, metadata.Fields{Series: metadata.Val("Series " + id), Staff: s})
+		c.Invalid = invalid
+		return c
+	}
+	for _, tc := range []struct {
+		name     string
+		children []Child
+		want     metadata.Opt[[]metadata.Staff]
+	}{
+		{
+			"base then creative roles in child order",
+			[]Child{
+				kid("a", 1, false, staff("Ann", "writer", "Ed", "editor")),
+				kid("b", 2, false, staff("Bo", "penciller", "Ink", "inker", "Al", "artist")),
+				kid("c", 3, false, staff("Cy", "author")),
+			},
+			staff("Ann", "writer", "Ed", "editor", "Bo", "penciller", "Al", "artist", "Cy", "author"),
+		},
+		{
+			"case-insensitive dedupe keeps the first spelling",
+			[]Child{kid("a", 1, false, staff("Ann", "writer")), kid("b", 2, false, staff("ANN", "writer", "ann", "artist"))},
+			staff("Ann", "writer", "ann", "artist"),
+		},
+		{
+			"invalid first child supplies fields but no staff",
+			[]Child{
+				kid("a", 1, true, staff("Gone", "writer")),
+				kid("b", 2, false, staff("Bo", "colorist", "Al", "artist")),
+			},
+			staff("Bo", "colorist", "Al", "artist"),
+		},
+		{
+			"no valid staff",
+			[]Child{kid("a", 1, true, staff("Gone", "writer")), kid("b", 2, false, metadata.Opt[[]metadata.Staff]{})},
+			metadata.Opt[[]metadata.Staff]{},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := seriesLayer(SeriesRef{URIPart: "s"}, order(tc.children))
+			if got.Title.V != "Series a" || !reflect.DeepEqual(got.Staff, tc.want) {
+				t.Fatalf("title %q, staff %+v; want %+v", got.Title.V, got.Staff, tc.want)
+			}
+		})
 	}
 }
 

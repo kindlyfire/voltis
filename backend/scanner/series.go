@@ -30,8 +30,12 @@ type Child struct {
 	OrderParts []*float32
 	CoverURI   *string
 	FileMtime  *time.Time
+	Invalid    bool
 	Meta       metadata.Fields // the file layer
 }
+
+// creativeRoles are the staff roles every valid child adds to its series' staff.
+var creativeRoles = []string{"author", "writer", "artist", "penciller"}
 
 type dirPick struct {
 	stored *string
@@ -116,10 +120,18 @@ func seriesLayer(ref SeriesRef, ordered []Child) metadata.Fields {
 		f.AltTitles = metadata.Val([]string{folder})
 	}
 	var earliest string
+	var staff []metadata.Staff
 	for _, child := range ordered {
 		m := child.Meta.Normalize()
 		f.Title = first(f.Title, m.Series)
-		f.Staff = first(f.Staff, m.Staff)
+		if s, _ := m.Staff.Get(); len(s) > 0 && !child.Invalid {
+			base := staff == nil
+			for _, e := range s {
+				if base || slices.Contains(creativeRoles, e.Role) {
+					staff = append(staff, e)
+				}
+			}
+		}
 		f.Publishers = first(f.Publishers, m.Publishers)
 		f.Language = first(f.Language, m.Language)
 		f.Genres = first(f.Genres, m.Genres)
@@ -128,6 +140,9 @@ func seriesLayer(ref SeriesRef, ordered []Child) metadata.Fields {
 		if d, ok := m.PublicationDate.Get(); ok && (earliest == "" || d < earliest) {
 			earliest = d
 		}
+	}
+	if staff != nil {
+		f.Staff = metadata.Fields{Staff: metadata.Val(staff)}.Normalize().Staff
 	}
 	f.Title = first(f.Title, metadata.Set(folder), metadata.Val(ref.URIPart))
 	switch {
