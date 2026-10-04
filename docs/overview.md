@@ -9,6 +9,7 @@ It has:
   _dropped_ or _plan to read_. Track your reading position and resume where you
   left off
 - **Search:** Search through your libraries, based on the series title
+- **Discover:** Browse your libraries by genre, tag, person or publisher
 - **Custom lists:** Create public, private, or unlisted lists to organize your
   content. Reorder entries and add notes
 - **Downloads:** Download individual chapters or books, or bundle an entire series as

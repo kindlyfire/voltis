@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0-beta.2] - 2026-10-04
+
+- Discover pages list the genres, tags, people and publishers of your
+  libraries, and the series under each. Those names on a series page link to
+  them
+- The paged comic reader has reading direction (per series, with RTL detected
+  for manga), fit to screen, width or height, single or double page spreads, and
+  zoom for wide pages
+- Pages next to the current one stay decoded, so turning a page no longer shows
+  it popping in
 - Apps can sign in with a password or through the browser with any web login,
   and then send their session token as `Authorization: Bearer`. Device sessions
   end after 30 days without use. See
