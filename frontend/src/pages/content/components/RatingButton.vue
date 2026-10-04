@@ -1,6 +1,6 @@
 <template>
     <div class="flex items-center gap-1">
-        <fieldset class="rating" @pointerleave="hover = null" @keydown="onKeydown" @keyup="onKeyup">
+        <fieldset ref="fieldset" class="rating"@pointerleave="hover = null" @keydown="onKeydown" @keyup="onKeyup">
             <legend class="sr-only">Your rating</legend>
             <label
                 v-for="star in 5"
@@ -24,16 +24,15 @@
             :icon="IconClose"
             label="Clear rating"
             size="sm"
-            :disabled="selected == null"
-            focusable-when-disabled
+            :class="{ invisible: selected == null }"
             :loading="mUpdateUserData.isPending.value"
-            @click="select(null)"
+            @click="clear"
         />
     </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, useId, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, useId, useTemplateRef, watch } from 'vue'
 import AIcon from '@/ui/AIcon.vue'
 import AIconButton from '@/ui/AIconButton.vue'
 import { IconClose, IconStar, IconStarFilled } from '@/ui/icons'
@@ -46,6 +45,7 @@ const props = defineProps<{
 }>()
 
 const name = useId()
+const fieldset = useTemplateRef('fieldset')
 const qContent = contentApi.useGet(() => props.contentId)
 const content = qContent.data
 const mUpdateUserData = contentApi.useUpdateUserData()
@@ -83,6 +83,12 @@ function select(rating: number | null, debounce = false) {
     timer = undefined
     if (debounce) timer = setTimeout(save, 400)
     else save()
+}
+
+// The button hides once cleared, so keep focus in the widget.
+function clear() {
+    select(null)
+    fieldset.value?.querySelector('input')?.focus()
 }
 
 // Leaving the page or switching content must not drop a rating that is still waiting.

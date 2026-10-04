@@ -136,19 +136,20 @@ describe('BookReaderDrawer tabs', () => {
         expect(selectedTab()).toBe('Settings')
     })
 
-    it("restores each tab's scroll across tab switches and reopening", async () => {
+    it('keeps Settings scroll across tab switches and reopening, but recenters Contents', async () => {
+        mockLayout()
         const { store } = render()
         await setOpen(true)
         panel('Contents').scrollTop = 120
         await pick('Settings')
         panel('Settings').scrollTop = 40
         await setOpen(false)
-        expect(store.drawerScroll).toEqual({ contents: 120, settings: 40 })
+        expect(store.settingsScroll).toBe(40)
 
         await setOpen(true)
         expect(panel('Settings').scrollTop).toBe(40)
         await pick('Contents')
-        expect(panel('Contents').scrollTop).toBe(120)
+        expect(panel('Contents').scrollTop).toBe(310)
     })
 
     it('resets on dispose', async () => {
@@ -158,12 +159,12 @@ describe('BookReaderDrawer tabs', () => {
         await setOpen(false)
         void store.dispose()
         expect(store.drawerTab).toBe('contents')
-        expect(store.drawerScroll).toEqual({})
+        expect(store.settingsScroll).toBeNull()
     })
 
-    it('first shows Contents centered on the current chapter, once it has loaded', async () => {
+    it('centers Contents on the current chapter whenever shown, once loaded', async () => {
         mockLayout()
-        const { session, store } = render(fakeSession(null))
+        const { session } = render(fakeSession(null))
         await setOpen(true)
         expect(panel('Contents').scrollTop).toBe(0)
 
@@ -172,21 +173,19 @@ describe('BookReaderDrawer tabs', () => {
         // 400 below the panel's top, less half the leftover height.
         expect(panel('Contents').scrollTop).toBe(310)
 
-        // Remembered from then on, rather than centered again.
+        // Centered again on reopening, rather than restored.
         panel('Contents').scrollTop = 30
         await setOpen(false)
         session.chapterIndex = 3
         await setOpen(true)
-        expect(panel('Contents').scrollTop).toBe(30)
-        expect(store.drawerScroll.contents).toBe(30)
+        expect(panel('Contents').scrollTop).toBe(310)
     })
 
     it('still centers Contents when it was hidden before the structure loaded', async () => {
         mockLayout()
-        const { session, store } = render(fakeSession(null))
+        const { session } = render(fakeSession(null))
         await setOpen(true)
         await pick('Settings')
-        expect(store.drawerScroll.contents).toBeUndefined()
         session.structure = STRUCTURE
         await nextTick()
         await pick('Contents')

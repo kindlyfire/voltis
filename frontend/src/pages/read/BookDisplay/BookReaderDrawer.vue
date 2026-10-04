@@ -203,15 +203,15 @@ watch(
 )
 
 /*
- * Tab scroll is kept in the store: the drawer's content unmounts on close. It's saved when a
- * panel is hidden (tab switch, close), while its element is still shown: `pre` runs before the
- * DOM update.
+ * Contents is centered on the current chapter whenever it's shown. Settings keeps its scroll in
+ * the store (the drawer's content unmounts on close), saved when the panel is hidden (tab switch,
+ * close), while its element is still shown: `pre` runs before the DOM update.
  */
 let restorePending = false
 
 function saveScroll(tab: DrawerTab) {
     const el = tabs.value?.panel(tab)
-    if (el) store.drawerScroll[tab] = el.scrollTop
+    if (el && tab === 'settings') store.settingsScroll = el.scrollTop
 }
 
 watch(
@@ -253,14 +253,12 @@ watch(
 function restoreScroll(tab: DrawerTab) {
     const el = tabs.value?.panel(tab)
     if (!el || (tab === 'contents' && !session.value?.structure)) return false
-    const saved = store.drawerScroll[tab]
-    if (saved != null) el.scrollTop = saved
-    else if (tab === 'contents') centerActiveEntry(el)
+    if (tab === 'contents') centerActiveEntry(el)
+    else if (store.settingsScroll != null) el.scrollTop = store.settingsScroll
     return true
 }
 
-/** First time in this book: show the current chapter rather than the top. Not `scrollIntoView`,
- * which would also scroll the (locked) page. */
+/** Not `scrollIntoView`, which would also scroll the (locked) page. */
 function centerActiveEntry(panel: HTMLElement) {
     const entry = panel.querySelector('[aria-current="page"]')
     if (!entry) return

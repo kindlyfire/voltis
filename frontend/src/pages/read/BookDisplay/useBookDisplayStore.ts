@@ -56,9 +56,9 @@ export const useBookDisplayStore = defineStore('book-display', () => {
     const sidebarOpen = ref(false)
     const session: Ref<BookSession | null> = ref(null)
     const settings = useBookSettings()
-    /** The drawer's open tab and each tab's scroll, kept while reading. */
+    /** The drawer's open tab and the settings tab's scroll, kept while reading. */
     const drawerTab = ref<DrawerTab>('contents')
-    const drawerScroll = ref<Partial<Record<DrawerTab, number>>>({})
+    const settingsScroll = ref<number | null>(null)
 
     function setContent(contentId: string, entry: BookEntry) {
         if (session.value?.contentId === contentId) {
@@ -67,7 +67,6 @@ export const useBookDisplayStore = defineStore('book-display', () => {
         }
         // The next session's load queues behind this one's exit write.
         session.value?.dispose()
-        drawerScroll.value = {}
         session.value = createBookSession(
             contentId,
             entry,
@@ -79,12 +78,20 @@ export const useBookDisplayStore = defineStore('book-display', () => {
     function dispose() {
         sidebarOpen.value = false
         drawerTab.value = 'contents'
-        drawerScroll.value = {}
+        settingsScroll.value = null
         session.value?.dispose()
         session.value = null
     }
 
-    return { session, sidebarOpen, drawerTab, drawerScroll, settings, setContent, dispose }
+    return {
+        session,
+        sidebarOpen,
+        drawerTab,
+        settingsScroll,
+        settings,
+        setContent,
+        dispose,
+    }
 })
 
 if (import.meta.hot) {
