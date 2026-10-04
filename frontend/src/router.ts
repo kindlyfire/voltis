@@ -1,6 +1,7 @@
 import { useDebounceFn } from '@vueuse/core'
 import { createRouter, createWebHistory } from 'vue-router'
 import AppLayout from './pages/_layout/Layout.vue'
+import PageAuthorizeApp from './pages/auth/PageAuthorizeApp.vue'
 import PageLogin from './pages/auth/PageLogin.vue'
 import PageOidcComplete from './pages/auth/PageOidcComplete.vue'
 import PageRegister from './pages/auth/PageRegister.vue'
@@ -171,6 +172,12 @@ const router = createRouter({
             path: '/auth/oidc/complete',
             name: 'oidc-complete',
             component: PageOidcComplete,
+        },
+        // Outside /auth, which a post-login redirect can't target.
+        {
+            path: '/authorize-app',
+            name: 'authorize-app',
+            component: PageAuthorizeApp,
         },
         // The kit gallery, the living spec of `src/ui` (dev only, no login needed).
         ...(import.meta.env.DEV

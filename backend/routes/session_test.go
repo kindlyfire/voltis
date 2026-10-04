@@ -5,6 +5,8 @@ import (
 	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +19,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
+	"golang.org/x/oauth2"
 )
 
 func setSetting(t *testing.T, st *settings.Store, key string, value any) {
@@ -34,13 +37,10 @@ func meID(t *testing.T, c *testClient) string {
 func insertSession(t *testing.T, pool *pgxpool.Pool, userID, method string, expires time.Time, absolute *time.Time) string {
 	t.Helper()
 	token := randomToken()
-	_, err := pool.Exec(context.Background(), `
+	mustExec(t, pool, `
 		INSERT INTO sessions (token, user_id, expires_at, method, absolute_expires_at)
 		VALUES ($1, $2, $3, $4, $5)
 	`, token, userID, expires, method, absolute)
-	if err != nil {
-		t.Fatalf("insert session: %v", err)
-	}
 	return token
 }
 
@@ -58,10 +58,7 @@ func TestLoginRejectsUsersWithoutAPassword(t *testing.T) {
 	pool := newTestPool(t)
 	c := newAdminClient(t, pool)
 
-	if _, err := pool.Exec(context.Background(),
-		"UPDATE users SET password_hash = NULL WHERE username = 'admin'"); err != nil {
-		t.Fatalf("clear hash: %v", err)
-	}
+	mustExec(t, pool, "UPDATE users SET password_hash = NULL WHERE username = 'admin'")
 
 	c.newSession(t).Post("/api/auth/login", map[string]any{
 		"username": "admin", "password": "adminpass123",
@@ -396,4 +393,133 @@ func TestCLIRenameKeepsACommittedDemotion(t *testing.T) {
 		t.Fatalf("read permissions: %v", err)
 	}
 	assertEq(t, len(perms), 0)
+}
+
+func TestBearerAuth(t *testing.T) {
+	pool := newTestPool(t)
+	admin := newAdminClient(t, pool)
+	member, memberID := newMemberClient(t, admin)
+
+	tokenReq := map[string]any{"username": "member", "password": "memberpass123", "client_name": " Test Phone "}
+	device := s(admin.newSession(t).Post("/api/auth/token", tokenReq).Assert(t, 200).JSON()["token"])
+	assertEq(t, countRows(t, admin, `SELECT count(*) FROM sessions WHERE token = '`+device+`'
+		AND method = 'password' AND client_name = 'Test Phone' AND absolute_expires_at IS NULL`), 1)
+	admin.newSession(t).Post("/api/auth/token", map[string]any{
+		"username": "member", "password": "wrong", "client_name": "Test Phone",
+	}).Assert(t, 401)
+
+	adminBearer := insertSession(t, pool, meID(t, admin), models.SessionPassword, time.Now().Add(time.Hour), nil)
+	browserProxy := insertSession(t, pool, memberID, models.SessionProxy, time.Now().Add(time.Hour), nil)
+	deviceProxy := insertSession(t, pool, memberID, models.SessionProxy, time.Now().Add(time.Hour), nil)
+	stale := insertSession(t, pool, memberID, models.SessionPassword, time.Now().Add(24*time.Hour), nil)
+	mustExec(t, pool, `UPDATE sessions SET client_name = 'Test Phone',
+		last_used_at = NOW() - interval '2 hours' WHERE token IN ($1, $2)`, deviceProxy, stale)
+
+	for _, tc := range []struct {
+		auth []string
+		want string // username, or "" for anonymous
+	}{
+		{[]string{"Bearer " + device}, "member"},
+		{[]string{"bearer " + adminBearer}, "admin"},
+		{[]string{"Bearer " + randomToken()}, ""},
+		{[]string{"Bearer a.b.c"}, "member"},
+		{[]string{"Basic dXNlcjpwYXNz"}, "member"},
+		{[]string{"Basic dXNlcjpwYXNz", "Bearer " + adminBearer}, "admin"},
+		{[]string{"Bearer " + browserProxy}, ""},
+		// Forwarded auth is off on this server.
+		{[]string{"Bearer " + deviceProxy}, ""},
+	} {
+		resp := member.WithRawHeader("Authorization", tc.auth...).Get("/api/users/me")
+		if tc.want == "" {
+			resp.Assert(t, 401)
+		} else {
+			assertEq(t, s(resp.Assert(t, 200).JSON()["username"]), tc.want)
+		}
+	}
+
+	// A device session slides to the full window and never gets a cookie.
+	bearer := admin.newSession(t).WithHeader("Authorization", "Bearer "+stale)
+	resp := bearer.Get("/api/users/me").Assert(t, 200)
+	assertEq(t, len(resp.Cookies), 0)
+	assertEq(t, countRows(t, admin, `SELECT count(*) FROM sessions WHERE token = '`+stale+`'
+		AND abs(extract(epoch FROM expires_at - (NOW() + interval '30 days'))) < 60
+		AND absolute_expires_at IS NULL AND last_used_at > NOW() - interval '1 minute'`), 1)
+
+	// A browser session due for a refresh, sent as a bearer over the socket.
+	due := insertSession(t, pool, memberID, models.SessionPassword, time.Now().Add(24*time.Hour), nil)
+	conn, wsResp, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(admin.server.URL, "http")+"/api/ws",
+		http.Header{"Authorization": []string{"Bearer " + due}})
+	if err != nil {
+		t.Fatalf("dial ws: %v", err)
+	}
+	_ = conn.Close()
+	assertEq(t, len(wsResp.Header.Values("Set-Cookie")), 0)
+
+	// Session list and revoke.
+	sessionID := func(token string) string {
+		t.Helper()
+		id, err := db.SelectScalar[string](context.Background(), pool, "SELECT id FROM sessions WHERE token = $1", token)
+		if err != nil {
+			t.Fatalf("read session id: %v", err)
+		}
+		return id
+	}
+	listResp := member.Get("/api/users/me/sessions").Assert(t, 200)
+	if body := string(listResp.Body); strings.Contains(body, device) || strings.Contains(body, `"token"`) {
+		t.Fatalf("session list leaks a token: %s", listResp.Body)
+	}
+	list := listResp.JSONArray()
+	assertEq(t, s(list[0]["id"]), sessionID(member.cookie("voltis_session")))
+	assertEq[any](t, list[0]["current"], true)
+	i := slices.IndexFunc(list, func(row map[string]any) bool { return s(row["id"]) == sessionID(device) })
+	if i < 1 || s(list[i]["client_name"]) != "Test Phone" || list[i]["current"] != false {
+		t.Fatalf("device session not listed: %v", list)
+	}
+	member.Delete("/api/users/me/sessions/"+sessionID(device)).Assert(t, 200)
+	admin.newSession(t).WithHeader("Authorization", "Bearer "+device).Get("/api/users/me").Assert(t, 401)
+	member.Delete("/api/users/me/sessions/"+s(list[0]["id"])).Assert(t, 404)
+	member.Delete("/api/users/me/sessions/"+sessionID(adminBearer)).Assert(t, 404)
+	member.Get("/api/users/me").Assert(t, 200)
+
+	bearer.Post("/api/auth/logout", nil).Assert(t, 200)
+	bearer.Get("/api/users/me").Assert(t, 401)
+
+	// Web-session handoff.
+	verifier := oauth2.GenerateVerifier()
+	codeReq := map[string]any{"code_challenge": oauth2.S256ChallengeFromVerifier(verifier), "client_name": "Test Tablet"}
+	mint := func() string {
+		t.Helper()
+		redirect := s(member.Post("/api/auth/app-code", codeReq).Assert(t, 200).JSON()["redirect_url"])
+		if !strings.HasPrefix(redirect, "voltis://auth/callback?code=") {
+			t.Fatalf("redirect_url = %q", redirect)
+		}
+		u, _ := url.Parse(redirect)
+		return u.Query().Get("code")
+	}
+	anon := admin.newSession(t)
+	exchange := func(code, v string) *response {
+		return anon.Post("/api/auth/token/exchange", map[string]any{"code": code, "code_verifier": v})
+	}
+	member.WithHeader("Content-Type", "text/plain").Post("/api/auth/app-code", codeReq).Assert(t, 415)
+	member.Post("/api/auth/app-code", map[string]any{"code_challenge": "short", "client_name": "Test Tablet"}).
+		Assert(t, 400)
+
+	code := mint()
+	handed := s(exchange(code, verifier).Assert(t, 200).JSON()["token"])
+	assertEq(t, s(anon.WithHeader("Authorization", "Bearer "+handed).Get("/api/users/me").Assert(t, 200).
+		JSON()["username"]), "member")
+	assertEq(t, countRows(t, admin, `SELECT count(*) FROM sessions WHERE token = '`+handed+`'
+		AND method = 'password' AND client_name = 'Test Tablet' AND absolute_expires_at IS NULL`), 1)
+	exchange(code, verifier).Assert(t, 400)
+
+	// A wrong verifier spends the code.
+	code = mint()
+	exchange(code, oauth2.GenerateVerifier()).Assert(t, 400)
+	exchange(code, verifier).Assert(t, 400)
+
+	// Last: this deletes every password session, so a code dies with the one that minted it.
+	code = mint()
+	setSetting(t, admin.st, settings.AuthPasswordLoginEnabled, false)
+	exchange(code, verifier).Assert(t, 400)
+	admin.newSession(t).Post("/api/auth/token", tokenReq).Assert(t, 403)
 }

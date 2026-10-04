@@ -47,3 +47,6 @@ docker-push-dev:
     echo "Image: $image"
     docker build --build-arg APP_VERSION=dev -t "$image" .
     docker push "$image"
+
+android *args='assembleDebug':
+    cd android && ./gradlew {{ args }}

@@ -4,14 +4,18 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/binary"
+	"encoding/json"
 	"image"
 	"image/color"
 	"image/jpeg"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"voltis/metadata"
@@ -287,7 +291,7 @@ func TestBookFilesCacheOnlyWhenVersioned(t *testing.T) {
 	}
 }
 
-func TestGetComicPageUnsized(t *testing.T) {
+func TestComicPages(t *testing.T) {
 	pool := newTestPool(t)
 	c := newAdminClient(t, pool)
 
@@ -300,4 +304,63 @@ func TestGetComicPageUnsized(t *testing.T) {
 		t.Errorf("page 1 returned %d bytes, want the second entry", len(body))
 	}
 	c.Get("/api/files/comic-page/"+id+"/2").Assert(t, 404)
+
+	offline := "/api/files/offline/" + id
+	assertFrames := func(got []offlineFrame, want ...offlineFrame) {
+		t.Helper()
+		if !slices.EqualFunc(got, want, func(a, b offlineFrame) bool { return a.index == b.index && bytes.Equal(a.data, b.data) }) {
+			t.Fatalf("frames = %v, want %v", got, want)
+		}
+	}
+	end := offlineFrame{offlineEndIndex, []byte{}}
+
+	manifest, frames := readFrames(t, c.Get(offline).Assert(t, 200).Body)
+	assertEq(t, manifest["page_count"], any(2.0))
+	assertEq(t, manifest["pages"].([]any)[0].(map[string]any)["width"], nil)
+	assertFrames(frames, offlineFrame{0, []byte("other")}, offlineFrame{1, img}, end)
+
+	_, frames = readFrames(t, c.Get(offline+"?from=1").Assert(t, 200).Body)
+	assertFrames(frames, offlineFrame{1, img}, end)
+	c.Get(offline+"?from=3").Assert(t, 400)
+
+	// A page missing from the archive ends the stream with an error frame after the pages before it.
+	mustExec(t, pool, `UPDATE content SET file_data = '{"pages": [["01.jpg"], ["02.jpg"], ["03.jpg"]]}' WHERE id = $1`, id)
+	_, frames = readFrames(t, c.Get(offline).Assert(t, 200).Body)
+	assertFrames(frames, offlineFrame{0, []byte("other")}, offlineFrame{1, img},
+		offlineFrame{offlineErrorIndex, []byte("page 2: file not found in archive")})
+}
+
+type offlineFrame struct {
+	index uint32
+	data  []byte
+}
+
+// readFrames parses an offline stream into its manifest and the frames after it.
+func readFrames(t *testing.T, body []byte) (map[string]any, []offlineFrame) {
+	t.Helper()
+	r := bytes.NewReader(body)
+	u32 := func() uint32 {
+		var v uint32
+		if err := binary.Read(r, binary.BigEndian, &v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	bytesOf := func(n uint32) []byte {
+		b := make([]byte, n)
+		if _, err := io.ReadFull(r, b); err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal(bytesOf(u32()), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	var frames []offlineFrame
+	for r.Len() > 0 {
+		index := u32()
+		frames = append(frames, offlineFrame{index, bytesOf(u32())})
+	}
+	return manifest, frames
 }

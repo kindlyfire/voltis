@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- Apps can sign in with a password or through the browser with any web login,
+  and then send their session token as `Authorization: Bearer`. Device sessions
+  end after 30 days without use. See
+  [Apps](https://voltis.tijlvdb.me/authentication#apps) for what this means
+  behind OIDC or a login proxy
+- Settings → Account lists your sessions and can sign out any other one
+- `GET /api/files/offline/:content_id` streams all pages of a comic in one
+  resumable response, for apps that download for offline reading
+
 ## [1.0.0-beta.1] - 2026-10-02
 
 - OPDS 1.2 and 2.0 catalogs, with page streaming and progress sync for OPDS-PSE

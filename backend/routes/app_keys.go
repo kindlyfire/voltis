@@ -88,7 +88,7 @@ func (r *AppKeyRoutes) create(c echo.Context) error {
 	if err := requireJSON(c); err != nil {
 		return err
 	}
-	user, err := requireUser(c)
+	user, sess, err := requireSession(c)
 	if err != nil {
 		return err
 	}
@@ -100,10 +100,6 @@ func (r *AppKeyRoutes) create(c echo.Context) error {
 	}
 	if err := ValidateStruct(req); err != nil {
 		return err
-	}
-	sess := requestSession(c)
-	if sess == nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
 	}
 
 	ctx := reqCtx(c)

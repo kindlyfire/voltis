@@ -48,6 +48,8 @@
             </div>
         </IdentitiesCard>
 
+        <SessionsCard v-if="me.data.value" />
+
         <ACard
             v-if="info.data.value?.password_login_enabled"
             :title="me.data.value?.has_password ? 'Change password' : 'Set password'"
@@ -93,6 +95,7 @@ import { oidcApi } from '@/utils/api/oidc'
 import { usersApi } from '@/utils/api/users'
 import { useForm } from '@/utils/forms'
 import IdentitiesCard from './IdentitiesCard.vue'
+import SessionsCard from './SessionsCard.vue'
 
 useHead({
     title: 'Account',

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -37,6 +38,7 @@ const (
 	sessionDurationDays         = 30
 	sessionRefreshThresholdDays = 14
 	sessionMaxAge               = sessionDurationDays * 24 * 60 * 60
+	sessionTouchInterval        = time.Hour
 	contextKeyUser              = "user"
 	contextKeySession           = "session"
 )
@@ -118,21 +120,40 @@ func authMiddleware(r *resolver) echo.MiddlewareFunc {
 
 type userWithSession struct {
 	models.User
-	SessionToken     string     `db:"session_token"`
-	SessionExpiresAt time.Time  `db:"session_expires_at"`
-	SessionMethod    string     `db:"session_method"`
-	SessionAbsolute  *time.Time `db:"session_absolute_expires_at"`
+	SessionToken      string     `db:"session_token"`
+	SessionExpiresAt  time.Time  `db:"session_expires_at"`
+	SessionMethod     string     `db:"session_method"`
+	SessionAbsolute   *time.Time `db:"session_absolute_expires_at"`
+	SessionClientName *string    `db:"session_client_name"`
+	SessionLastUsed   *time.Time `db:"session_last_used_at"`
 }
 
 func (r *resolver) resolve(c echo.Context) (*models.User, error) {
+	// A well-formed bearer wins over the cookie and never falls back to it.
+	if token, ok := bearerToken(c); ok {
+		row, err := sessionByToken(reqCtx(c), r.pool, token)
+		if err != nil || row == nil {
+			return nil, err
+		}
+		// A browser proxy session needs its header; a proxy device session needs proxy auth enabled.
+		if row.SessionMethod == models.SessionProxy && (row.SessionClientName == nil || !r.proxy.Enabled()) {
+			return nil, nil
+		}
+		r.refresh(c, row, false)
+		c.Set(contextKeySession, &sessionInfo{Token: row.SessionToken, Method: row.SessionMethod})
+		return &row.User, nil
+	}
+
 	id, forwarded, err := r.proxyIdentity(c)
 	if err != nil {
 		return nil, err
 	}
 
-	row, err := sessionUser(c, r.pool)
-	if err != nil {
-		return nil, err
+	var row *userWithSession
+	if token := cookieToken(c); token != "" {
+		if row, err = sessionByToken(reqCtx(c), r.pool, token); err != nil {
+			return nil, err
+		}
 	}
 	if forwarded {
 		return r.resolveForwarded(c, id, row)
@@ -141,7 +162,7 @@ func (r *resolver) resolve(c echo.Context) (*models.User, error) {
 	if row == nil || row.SessionMethod == models.SessionProxy {
 		return nil, nil
 	}
-	r.refresh(c, row)
+	r.refresh(c, row, true)
 	c.Set(contextKeySession, &sessionInfo{Token: row.SessionToken, Method: row.SessionMethod})
 	return &row.User, nil
 }
@@ -166,7 +187,7 @@ func (r *resolver) resolveForwarded(c echo.Context, id ExternalIdentity, row *us
 
 	var token string
 	if row != nil && row.SessionMethod == models.SessionProxy && row.ID == user.ID {
-		r.refresh(c, row)
+		r.refresh(c, row, true)
 		token = row.SessionToken
 	} else {
 		err := db.WithTx(ctx, r.pool, func(tx pgx.Tx) error {
@@ -184,10 +205,11 @@ func (r *resolver) resolveForwarded(c echo.Context, id ExternalIdentity, row *us
 				}
 			}
 
-			// Per-request proxy authorization makes session reuse safe.
+			// Per-request proxy authorization makes session reuse safe. A device
+			// session's token must never become a browser cookie.
 			live, err := db.SelectScalar[string](ctx, tx, `
 				SELECT token FROM sessions
-				WHERE user_id = $1 AND method = $2 AND `+liveSession+`
+				WHERE user_id = $1 AND method = $2 AND client_name IS NULL AND `+liveSession+`
 				ORDER BY expires_at DESC LIMIT 1
 			`, user.ID, models.SessionProxy)
 			if err == nil {
@@ -218,35 +240,69 @@ func (r *resolver) resolveForwarded(c echo.Context, id ExternalIdentity, row *us
 	return user, nil
 }
 
-func (r *resolver) refresh(c echo.Context, row *userWithSession) {
-	if time.Until(row.SessionExpiresAt) >= sessionRefreshThresholdDays*24*time.Hour {
+// refresh slides the expiry and bumps last_used_at, writing at most once per
+// touch interval unless a browser session needs extending.
+func (r *resolver) refresh(c echo.Context, row *userWithSession, setCookie bool) {
+	now := time.Now()
+	touch := row.SessionLastUsed == nil || now.Sub(*row.SessionLastUsed) >= sessionTouchInterval
+	expiry := row.SessionExpiresAt
+	if row.SessionClientName != nil {
+		// Device sessions have no absolute cap: 30 days of inactivity ends them.
+		if touch {
+			expiry = now.Add(sessionDurationDays * 24 * time.Hour)
+		}
+	} else if expiry.Sub(now) < sessionRefreshThresholdDays*24*time.Hour {
+		expiry = now.Add(sessionDurationDays * 24 * time.Hour)
+		if row.SessionAbsolute != nil && expiry.After(*row.SessionAbsolute) {
+			expiry = *row.SessionAbsolute
+		}
+	}
+	extend := expiry.After(row.SessionExpiresAt)
+	if !touch && !extend {
 		return
 	}
-	newExpiry := time.Now().Add(sessionDurationDays * 24 * time.Hour)
-	if row.SessionAbsolute != nil && newExpiry.After(*row.SessionAbsolute) {
-		newExpiry = *row.SessionAbsolute
+	_, _ = r.pool.Exec(reqCtx(c),
+		"UPDATE sessions SET expires_at = GREATEST(expires_at, $1), last_used_at = $2 WHERE token = $3",
+		expiry, now, row.SessionToken)
+	if extend && setCookie {
+		setSessionCookie(c, r.st, row.SessionToken)
 	}
-	if !newExpiry.After(row.SessionExpiresAt) {
-		return
-	}
-	_, _ = r.pool.Exec(reqCtx(c), "UPDATE sessions SET expires_at = $1 WHERE token = $2", newExpiry, row.SessionToken)
-	setSessionCookie(c, r.st, row.SessionToken)
 }
 
-func sessionUser(c echo.Context, q db.Querier) (*userWithSession, error) {
-	cookie, err := c.Cookie("voltis_session")
-	if err != nil || cookie.Value == "" {
-		return nil, nil
-	}
+var bearerPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
-	row, err := db.SelectOne[userWithSession](reqCtx(c), q, `
+// bearerToken accepts only the shape randomToken produces, so a proxy's own
+// Authorization header (Basic, a JWT) leaves the cookie in charge. It checks
+// every Authorization header, as a proxy's bypass matcher does: reading only
+// the first would put a request that bypassed the proxy on the cookie path.
+func bearerToken(c echo.Context) (string, bool) {
+	for _, value := range c.Request().Header.Values(echo.HeaderAuthorization) {
+		scheme, token, ok := strings.Cut(value, " ")
+		if ok && strings.EqualFold(scheme, "Bearer") && bearerPattern.MatchString(token) {
+			return token, true
+		}
+	}
+	return "", false
+}
+
+func cookieToken(c echo.Context) string {
+	cookie, err := c.Cookie("voltis_session")
+	if err != nil {
+		return ""
+	}
+	return cookie.Value
+}
+
+func sessionByToken(ctx context.Context, q db.Querier, token string) (*userWithSession, error) {
+	row, err := db.SelectOne[userWithSession](ctx, q, `
 		SELECT u.*, s.token AS session_token, s.expires_at AS session_expires_at,
-		       s.method AS session_method, s.absolute_expires_at AS session_absolute_expires_at
+		       s.method AS session_method, s.absolute_expires_at AS session_absolute_expires_at,
+		       s.client_name AS session_client_name, s.last_used_at AS session_last_used_at
 		FROM users u
 		JOIN sessions s ON s.user_id = u.id
 		WHERE s.token = $1 AND s.expires_at > NOW()
 		  AND (s.absolute_expires_at IS NULL OR s.absolute_expires_at > NOW())
-	`, cookie.Value)
+	`, token)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -262,6 +318,18 @@ func requireUser(c echo.Context) (*models.User, error) {
 		return nil, echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
 	}
 	return user, nil
+}
+
+func requireSession(c echo.Context) (*models.User, *sessionInfo, error) {
+	user, err := requireUser(c)
+	if err != nil {
+		return nil, nil, err
+	}
+	session := requestSession(c)
+	if session == nil {
+		return nil, nil, echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
+	}
+	return user, session, nil
 }
 
 func requireAdmin(c echo.Context) (*models.User, error) {

@@ -5,3 +5,14 @@ backend/voltis
 .plans
 CLAUDE.md
 .claude
+android/.gradle
+android/.kotlin
+android/build
+android/app/build
+android/local.properties
+android/.idea
+android/captures
+android/app/release
+*.iml
+*.jks
+*.keystore

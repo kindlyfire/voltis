@@ -67,7 +67,7 @@ var defs = []Def{
 	{Key: AuthExternalAutoCreate, Type: TypeBool, Default: true, Help: "Create an account on first OIDC or proxy login."},
 	{
 		Key: AuthExternalSessionMaxDays, Type: TypeInt, Default: 30,
-		Help:     "Maximum lifetime in days of a session created by OIDC or a proxy.",
+		Help:     "Maximum lifetime in days of a browser session created by OIDC or a proxy.",
 		validate: intRange(1, 3650),
 	},
 	{Key: OIDCEnabled, Type: TypeBool, Default: false, Help: "Enable single sign-on through an OIDC provider."},

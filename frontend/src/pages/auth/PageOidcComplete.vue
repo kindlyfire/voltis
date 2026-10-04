@@ -31,7 +31,12 @@
                         >
                             Not my account
                         </AButton>
-                        <AButton v-else variant="text" tone="neutral" to="/auth/login?local=1">
+                        <AButton
+                            v-else
+                            variant="text"
+                            tone="neutral"
+                            :to="loginLink(active.redirect)"
+                        >
                             Back to login
                         </AButton>
                         <AButton type="submit" :loading="confirmForm.mutation.isPending.value">
@@ -80,7 +85,7 @@
             <AButton
                 :variant="state === 'failed' ? 'text' : undefined"
                 :tone="state === 'failed' ? 'neutral' : undefined"
-                to="/auth/login?local=1"
+                :to="loginLink(qPending.data.value?.redirect)"
             >
                 Back to login
             </AButton>
@@ -107,7 +112,7 @@ import ATextField from '@/ui/ATextField.vue'
 import { oidcApi } from '@/utils/api/oidc'
 import { RequestError } from '@/utils/fetch'
 import { useForm } from '@/utils/forms'
-import { safeRedirect } from '@/utils/redirect'
+import { redirectQuery, safeRedirect } from '@/utils/redirect'
 import AuthCard from './AuthCard.vue'
 
 useHead({ title: 'Finish signing in' })
@@ -143,6 +148,11 @@ const declined = ref(false)
 const showConfirm = computed(
     () => active.value?.needs === 'confirm' && !(declined.value && active.value.can_create)
 )
+
+const loginLink = (redirect: string | undefined) => ({
+    path: '/auth/login',
+    query: { local: '1', ...redirectQuery(redirect) },
+})
 
 // The mutations consume the pending row, so callers read the target before awaiting them.
 const redirectTarget = () => safeRedirect(active.value?.redirect) ?? '/'

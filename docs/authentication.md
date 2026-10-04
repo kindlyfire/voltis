@@ -12,7 +12,8 @@ Voltis supports three ways of signing in, and they can be used together:
 Everything except the forwarded-auth header names is configured under **Settings
 → General** in the web interface, or with [`voltis settings`](/cli#settings).
 
-[OPDS apps](/opds) use per-user keys instead of these methods.
+[OPDS apps](/opds) use per-user keys instead of these methods. Other apps sign
+in with them and then keep their own session; see [Apps](#apps).
 
 ## Settings
 
@@ -22,7 +23,7 @@ Everything except the forwarded-auth header names is configured under **Settings
 | `auth.registration_enabled`      | bool   | `false`                | Allow anyone to create an account                                  |
 | `auth.password_login_enabled`    | bool   | `true`                 | Allow username and password login                                  |
 | `auth.external_auto_create`      | bool   | `true`                 | Create an account on first OIDC or proxy login                     |
-| `auth.external_session_max_days` | int    | `30`                   | Hard lifetime of a session created by OIDC or a proxy              |
+| `auth.external_session_max_days` | int    | `30`                   | Hard lifetime of a browser session created by OIDC or a proxy      |
 | `auth.oidc.enabled`              | bool   | `false`                | Enable single sign-on                                              |
 | `auth.oidc.issuer`               | string | _(empty)_              | Issuer URL, used for discovery                                     |
 | `auth.oidc.client_id`            | string | _(empty)_              | Client ID                                                          |
@@ -184,6 +185,90 @@ Local addresses are never verified by Voltis. Anyone who can register a matching
 verified address at the provider can claim a pre-created account that uses it,
 or be asked for the password of an account that has one.
 :::
+
+## Apps
+
+An app signs in one of two ways:
+
+- **Password**, entered in the app. This needs `auth.password_login_enabled`.
+- **Sign in with browser.** The app opens `/authorize-app` on the server in a
+  browser. You sign in there with any method above, confirm, and the browser
+  hands the app a one-time code.
+
+Either way the app gets a **device session**. It is sent as
+`Authorization: Bearer <token>` instead of a cookie, and it ends after 30 days
+without use. `auth.external_session_max_days` does not apply to it, so an app
+in regular use stays signed in.
+
+**Settings → Account** lists your sessions and can sign out any but the current
+one.
+
+::: warning Device sessions outlive changes at the provider
+A device session minted through an OIDC or proxy login is not checked against
+the provider or the proxy again. A user who is disabled or removed there keeps
+access from the app for as long as it is used at least every 30 days, and their
+current admin status, which is no longer synced from the provider's groups.
+
+To take admin rights away, edit the user's permissions under **Settings →
+Users**. That applies immediately.
+
+To end the access, an admin can:
+
+- delete the account;
+- with password login enabled, set a password for the user and then unlink
+  their external identity, which ends all their sessions;
+- disable single sign-on or change its issuer or client ID, which ends every
+  OIDC session on the server. Proxy device sessions stop working while
+  forwarded auth is disabled.
+
+Users can sign out their own sessions, but an admin cannot list or end
+another user's.
+:::
+
+### Behind a login proxy
+
+Signing in with the browser goes through the proxy like any other page. The
+app's later requests carry only its token, so the proxy has to let them through
+without a login. Bypass the proxy's authentication for these requests only:
+
+- any request whose `Authorization` header matches `^Bearer [0-9a-f]{64}$`.
+  Don't match `Bearer *`: Voltis ignores any other value and uses the cookie,
+  so those requests would skip the proxy;
+- `GET /api/info`, which the app uses to check the server address;
+- `POST /api/auth/token/exchange`, which completes a browser sign-in;
+- `POST /api/auth/token`, only if users sign in with a password in the app.
+
+The bypass must still [strip the identity
+headers](#your-proxy-must-strip-the-identity-headers). In Caddy:
+
+```caddyfile
+@app header_regexp Authorization "^Bearer [0-9a-f]{64}$"
+@app_info {
+	method GET
+	path /api/info
+}
+@app_signin {
+	method POST
+	path /api/auth/token /api/auth/token/exchange
+}
+
+route {
+	request_header -Remote-User
+	request_header -Remote-Email
+	request_header -Remote-Groups
+
+	reverse_proxy @app voltis:8080
+	reverse_proxy @app_info voltis:8080
+	reverse_proxy @app_signin voltis:8080
+
+	forward_auth authelia:9091 {
+		uri /api/verify?rd=https://auth.example.com/
+		copy_headers Remote-User Remote-Groups Remote-Email
+	}
+
+	reverse_proxy voltis:8080
+}
+```
 
 ## Losing access
 

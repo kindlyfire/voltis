@@ -37,6 +37,17 @@ export interface Me extends User {
     can_logout: boolean
 }
 
+export interface Session {
+    id: string
+    method: SessionMethod
+    /** Set for app sessions; null for a browser. */
+    client_name: string | null
+    created_at: string
+    last_used_at: string | null
+    expires_at: string
+    current: boolean
+}
+
 export interface UserUpsert {
     id?: string
     username: string

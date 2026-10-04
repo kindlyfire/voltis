@@ -91,11 +91,25 @@ func TestProxyTrustedPeerCreatesTheUserAndASession(t *testing.T) {
 
 func TestProxyReusesItsOwnSession(t *testing.T) {
 	pool := newTestPool(t)
-	c := newProxiedClient(t, pool).asProxy("alice")
+	base := newProxiedClient(t, pool)
+	c := base.asProxy("alice")
 
 	c.Get("/api/users/me").Assert(t, 200)
 	c.Get("/api/users/me").Assert(t, 200)
 	assertEq(t, len(sessionMethods(t, pool, "alice")), 1)
+
+	// A device session that outlives the browser one is never handed out as a cookie.
+	device := insertSession(t, pool, meID(t, c), models.SessionProxy, time.Now().Add(31*24*time.Hour), nil)
+	mustExec(t, pool, "UPDATE sessions SET client_name = 'Test Phone' WHERE token = $1", device)
+	fresh := c.newSession(t)
+	fresh.Get("/api/users/me").Assert(t, 200)
+	if cookie := fresh.cookie("voltis_session"); cookie == "" || cookie == device {
+		t.Fatalf("voltis_session = %q", cookie)
+	}
+	assertEq(t, len(sessionMethods(t, pool, "alice")), 2)
+
+	resp := base.newSession(t).WithHeader("Authorization", "Bearer "+device).Get("/api/users/me").Assert(t, 200)
+	assertEq(t, len(resp.Cookies), 0)
 }
 
 func TestProxyHeaderChangeReplacesTheSession(t *testing.T) {

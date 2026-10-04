@@ -36,6 +36,8 @@ func (ur *UserRoutes) Register(g *echo.Group) {
 	g.PATCH("/me/preferences", ur.patchPreferences)
 	g.GET("/me/identities", ur.myIdentities)
 	g.DELETE("/me/identities/:identity_id", ur.unlinkMine)
+	g.GET("/me/sessions", ur.sessions)
+	g.DELETE("/me/sessions/:session_id", ur.revokeSession)
 	g.GET("/:user_id/identities", adminOnly(ur.identities))
 	g.POST("/:user_id/identities", adminOnly(ur.linkIdentity))
 	g.DELETE("/:user_id/identities/:identity_id", adminOnly(ur.unlinkIdentity))
@@ -107,6 +109,54 @@ func (ur *UserRoutes) me(c echo.Context) error {
 	// nothing a logout button could do.
 	canLogout := method != models.SessionProxy || ur.st.String(settings.AuthProxyLogoutURL) != ""
 	return c.JSON(http.StatusOK, MeDTO{UserDTO: userToDTO(*user), SessionMethod: method, CanLogout: canLogout})
+}
+
+type SessionDTO struct {
+	ID         string     `json:"id" db:"id"`
+	Method     string     `json:"method" db:"method"`
+	ClientName *string    `json:"client_name" db:"client_name"`
+	CreatedAt  time.Time  `json:"created_at" db:"created_at"`
+	LastUsedAt *time.Time `json:"last_used_at" db:"last_used_at"`
+	ExpiresAt  time.Time  `json:"expires_at" db:"expires_at"`
+	Current    bool       `json:"current" db:"current"`
+}
+
+func (ur *UserRoutes) sessions(c echo.Context) error {
+	user, session, err := requireSession(c)
+	if err != nil {
+		return err
+	}
+	rows, err := db.Select[SessionDTO](reqCtx(c), ur.pool, `
+		SELECT id, method, client_name, created_at, last_used_at, expires_at, token = $2 AS current
+		FROM sessions WHERE user_id = $1 AND `+liveSession+`
+		ORDER BY current DESC, last_used_at DESC NULLS LAST, created_at DESC
+	`, user.ID, session.Token)
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, rows)
+}
+
+func (ur *UserRoutes) revokeSession(c echo.Context) error {
+	if err := requireJSON(c); err != nil {
+		return err
+	}
+	user, session, err := requireSession(c)
+	if err != nil {
+		return err
+	}
+	// The current session ends through logout, which also clears its cookie.
+	tag, err := ur.pool.Exec(reqCtx(c),
+		"DELETE FROM sessions WHERE id = $1 AND user_id = $2 AND token <> $3",
+		c.Param("session_id"), user.ID, session.Token)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return echo.NewHTTPError(http.StatusNotFound, "Session not found")
+	}
+	ur.hub.Drop(user.ID)
+	return okResponse(c)
 }
 
 type updateMeRequest struct {

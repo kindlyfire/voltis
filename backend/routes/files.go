@@ -2,12 +2,17 @@ package routes
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"mime"
 	"net/http"
 	"net/url"
@@ -15,12 +20,16 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"voltis/covers"
 	"voltis/db"
 	"voltis/lib/archive"
+	"voltis/lib/comic"
 	"voltis/lib/epub"
+	"voltis/lib/fp"
 	"voltis/metadata"
 	"voltis/models"
 
@@ -42,6 +51,7 @@ func (fr *FileRoutes) Register(g *echo.Group) {
 	g.GET("/book-resource/:content_id", fr.getBookResource)
 	g.GET("/download-info/:content_id", fr.getDownloadInfo)
 	g.GET("/download/:content_id", fr.download)
+	g.GET("/offline/:content_id", fr.offline)
 }
 
 func (fr *FileRoutes) getCover(c echo.Context) error {
@@ -127,45 +137,284 @@ func (fr *FileRoutes) getComicPage(c echo.Context) error {
 
 // comicPage reads page index of a comic, and returns the names of all its pages.
 func comicPage(ctx context.Context, pool *pgxpool.Pool, contentID string, index int) (
-	content models.Content, pageNames []string, data []byte, mediaType string, err error,
+	content models.Content, names []string, data []byte, mediaType string, err error,
 ) {
-	content, err = getContent(ctx, pool, contentID)
+	content, pages, err := contentPages(ctx, pool, contentID)
 	if err != nil {
 		return
 	}
-	if content.FileURI != nil {
-		pageNames, err = comicPageNames(content.FileData)
-	}
-	if content.FileURI == nil || err != nil || len(pageNames) == 0 {
-		err = echo.NewHTTPError(http.StatusNotFound, "Content has no pages")
-		return
-	}
-	if index < 0 || index >= len(pageNames) {
+	if index < 0 || index >= len(pages) {
 		err = echo.NewHTTPError(http.StatusNotFound, "Page index out of range")
 		return
 	}
-	data, mediaType, err = readArchiveEntry(*content.FileURI, pageNames[index])
+	names = pageNames(pages)
+	data, mediaType, err = readArchiveEntry(*content.FileURI, names[index])
 	return
 }
 
-// comicPageNames reads the page names from file_data's [name] or [name, width, height] tuples.
-func comicPageNames(fileData []byte) ([]string, error) {
+// contentPages loads a content row and its pages; 404 when it has none.
+func contentPages(ctx context.Context, pool *pgxpool.Pool, id string) (models.Content, []comic.PageInfo, error) {
+	content, err := getContent(ctx, pool, id)
+	if err != nil {
+		return models.Content{}, nil, err
+	}
+	var pages []comic.PageInfo
+	if content.FileURI != nil {
+		pages, err = comicPages(content.FileData)
+	}
+	if err != nil || len(pages) == 0 {
+		return models.Content{}, nil, echo.NewHTTPError(http.StatusNotFound, "Content has no pages")
+	}
+	return content, pages, nil
+}
+
+// comicPages reads file_data's [name] or [name, width, height] tuples.
+func comicPages(fileData []byte) ([]comic.PageInfo, error) {
 	var fd struct {
 		Pages [][]json.RawMessage `json:"pages"`
 	}
 	if err := json.Unmarshal(fileData, &fd); err != nil {
 		return nil, err
 	}
-	names := make([]string, len(fd.Pages))
+	pages := make([]comic.PageInfo, len(fd.Pages))
 	for i, p := range fd.Pages {
 		if len(p) == 0 {
 			return nil, errors.New("invalid page data")
 		}
-		if err := json.Unmarshal(p[0], &names[i]); err != nil {
+		if err := json.Unmarshal(p[0], &pages[i].Name); err != nil {
 			return nil, err
 		}
+		if len(p) >= 3 {
+			// An unparsable size stays 0, like an undecodable page.
+			_ = json.Unmarshal(p[1], &pages[i].Width)
+			_ = json.Unmarshal(p[2], &pages[i].Height)
+		}
 	}
-	return names, nil
+	return pages, nil
+}
+
+func comicPageNames(fileData []byte) ([]string, error) {
+	pages, err := comicPages(fileData)
+	if err != nil {
+		return nil, err
+	}
+	return pageNames(pages), nil
+}
+
+func pageNames(pages []comic.PageInfo) []string {
+	return fp.Map(pages, func(p comic.PageInfo) string { return p.Name })
+}
+
+var errPageTooLarge = errors.New("page too large")
+
+const (
+	offlineMediaType   = "application/vnd.voltis.pages"
+	maxOfflineManifest = 4 << 20
+	maxOfflinePage     = 256 << 20
+	offlineEndIndex    = math.MaxUint32
+	offlineErrorIndex  = math.MaxUint32 - 1
+)
+
+type offlinePage struct {
+	Name      string `json:"name"`
+	MediaType string `json:"media_type"`
+	Width     *int   `json:"width"`
+	Height    *int   `json:"height"`
+}
+
+type offlineManifest struct {
+	Format    int           `json:"format"`
+	ContentID string        `json:"content_id"`
+	Version   string        `json:"version"`
+	FileSize  *int          `json:"file_size"`
+	FileMtime *time.Time    `json:"file_mtime"`
+	PageCount int           `json:"page_count"`
+	From      int           `json:"from"`
+	Pages     []offlinePage `json:"pages"`
+}
+
+// offline streams a comic's pages from index from on as frames (manifest, pages, then an end or
+// error frame), so a client can download them for offline reading and resume an aborted download.
+func (fr *FileRoutes) offline(c echo.Context) error {
+	if _, err := requireUser(c); err != nil {
+		return err
+	}
+	ctx := reqCtx(c)
+
+	content, pages, err := contentPages(ctx, fr.pool, c.Param("content_id"))
+	if err != nil {
+		return err
+	}
+	if content.Type != "comic" {
+		return echo.NewHTTPError(http.StatusBadRequest, "Content is not a comic")
+	}
+	from := 0
+	if q := c.QueryParam("from"); q != "" {
+		if from, err = strconv.Atoi(q); err != nil || from < 0 || from > len(pages) {
+			return echo.NewHTTPError(http.StatusBadRequest, "Invalid from")
+		}
+	}
+	path := *content.FileURI
+	if err := checkScannedFile(path, content.FileMtime, content.FileSize); err != nil {
+		return err
+	}
+
+	names := pageNames(pages)
+	wanted := names[from:]
+	isPDF := strings.ToLower(filepath.Ext(path)) == ".pdf"
+	var a archive.Archive
+	if !isPDF {
+		if a, err = archive.Open(path); err != nil {
+			return echo.NewHTTPError(http.StatusNotFound, "File not found")
+		}
+		defer func() { _ = a.Close() }()
+	}
+
+	m := offlineManifest{
+		Format: 1, ContentID: content.ID, Version: offlineVersion(content, names),
+		FileSize: content.FileSize, PageCount: len(pages), From: from,
+		Pages: make([]offlinePage, len(pages)),
+	}
+	if content.FileMtime != nil {
+		t := content.FileMtime.UTC()
+		m.FileMtime = &t
+	}
+	for i, p := range pages {
+		m.Pages[i] = offlinePage{Name: p.Name, MediaType: "image/jpeg", Width: nonZero(p.Width), Height: nonZero(p.Height)}
+		if !isPDF {
+			m.Pages[i].MediaType = guessMediaType(p.Name)
+		}
+	}
+	manifest, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	if len(manifest) > maxOfflineManifest {
+		return echo.NewHTTPError(http.StatusUnprocessableEntity, "Too many pages")
+	}
+
+	w := c.Response()
+	w.Header().Set(echo.HeaderContentType, offlineMediaType)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	// An error returned after the header would end the chunked body cleanly, which a client could
+	// not tell from a complete stream, so transport errors abort the connection instead.
+	if err := writeFrame(w, manifest); err != nil {
+		panic(http.ErrAbortHandler)
+	}
+
+	// send writes page i of wanted, once the context and the page's size are checked.
+	send := func(i int, read func() ([]byte, error)) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		data, err := read()
+		if err == nil && len(data) > maxOfflinePage {
+			err = errPageTooLarge
+		}
+		if err != nil {
+			return &archive.EntryError{Index: i, Name: wanted[i], Err: err}
+		}
+		return writeFrame(w, data, uint32(from+i))
+	}
+	if isPDF {
+		for i, name := range wanted {
+			if err = send(i, func() ([]byte, error) { return renderPDFPage(path, name) }); err != nil {
+				break
+			}
+		}
+	} else {
+		var buf bytes.Buffer
+		err = a.Each(wanted, func(i int, r io.Reader) error {
+			return send(i, func() ([]byte, error) {
+				buf.Reset()
+				_, err := buf.ReadFrom(io.LimitReader(r, maxOfflinePage+1))
+				return buf.Bytes(), err
+			})
+		})
+	}
+	if ctx.Err() != nil {
+		return nil
+	}
+	if entryErr, ok := errors.AsType[*archive.EntryError](err); ok {
+		page := from + entryErr.Index
+		slog.Warn("offline page unavailable", "content_id", content.ID, "page", page, "name", entryErr.Name, "err", entryErr.Err)
+		// Other errors may carry server paths.
+		reason := "unreadable"
+		switch {
+		case errors.Is(entryErr.Err, archive.ErrFileNotFound):
+			reason = archive.ErrFileNotFound.Error()
+		case errors.Is(entryErr.Err, errPageTooLarge):
+			reason = errPageTooLarge.Error()
+		}
+		if writeFrame(w, fmt.Appendf(nil, "page %d: %s", page, reason), offlineErrorIndex) != nil {
+			panic(http.ErrAbortHandler)
+		}
+		return nil
+	}
+	if err != nil || writeFrame(w, nil, offlineEndIndex) != nil {
+		panic(http.ErrAbortHandler)
+	}
+	return nil
+}
+
+// checkScannedFile answers 404 when path is not a file, and 409 when it no longer matches the
+// last scan, whose page list would then not fit it. The scanner records os.Stat for a file given
+// as a source root but lstat-like info for files inside directories, so either may match.
+func checkScannedFile(path string, mtime *time.Time, size *int) error {
+	fi, err := os.Stat(path)
+	if err != nil || fi.IsDir() {
+		return echo.NewHTTPError(http.StatusNotFound, "File not found")
+	}
+	matches := func(fi os.FileInfo) bool {
+		return (size == nil || int64(*size) == fi.Size()) &&
+			(mtime == nil || fi.ModTime().Truncate(time.Millisecond).Equal(mtime.Truncate(time.Millisecond)))
+	}
+	if matches(fi) {
+		return nil
+	}
+	if li, err := os.Lstat(path); err == nil && matches(li) {
+		return nil
+	}
+	return echo.NewHTTPError(http.StatusConflict, "File changed since the last scan")
+}
+
+// offlineVersion identifies the last scan of a comic's file; a null mtime or size hashes as "".
+func offlineVersion(content models.Content, names []string) string {
+	var mtime, size string
+	if content.FileMtime != nil {
+		mtime = content.FileMtime.UTC().Format(time.RFC3339Nano)
+	}
+	if content.FileSize != nil {
+		size = strconv.Itoa(*content.FileSize)
+	}
+	parts := append([]string{*content.FileURI, mtime, size}, names...)
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	return hex.EncodeToString(sum[:])[:32]
+}
+
+// writeFrame writes the header fields and data's length as big-endian u32s, then data, and
+// flushes them.
+func writeFrame(w http.ResponseWriter, data []byte, header ...uint32) error {
+	buf := make([]byte, 0, 4*len(header)+4)
+	for _, h := range append(header, uint32(len(data))) {
+		buf = binary.BigEndian.AppendUint32(buf, h)
+	}
+	if _, err := w.Write(buf); err != nil {
+		return err
+	}
+	if _, err := w.Write(data); err != nil {
+		return err
+	}
+	return http.NewResponseController(w).Flush()
+}
+
+func nonZero(n int) *int {
+	if n == 0 {
+		return nil
+	}
+	return &n
 }
 
 func (fr *FileRoutes) getBookChapters(c echo.Context) error {
@@ -450,10 +699,24 @@ func readArchiveEntry(archivePath, innerPath string) ([]byte, string, error) {
 	return data, mediaType, nil
 }
 
+var errInvalidPDFPage = errors.New("invalid PDF page identifier")
+
 func readPDFPage(pdfPath, innerPath string) ([]byte, string, error) {
-	m := pdfPagePattern.FindStringSubmatch(innerPath)
-	if m == nil {
+	data, err := renderPDFPage(pdfPath, innerPath)
+	if errors.Is(err, errInvalidPDFPage) {
 		return nil, "", echo.NewHTTPError(http.StatusBadRequest, "Invalid PDF page identifier")
+	}
+	if err != nil {
+		return nil, "", echo.NewHTTPError(http.StatusInternalServerError, "PDF rendering failed")
+	}
+	return data, "image/jpeg", nil
+}
+
+// renderPDFPage renders page pN of a PDF as a JPEG.
+func renderPDFPage(pdfPath, name string) ([]byte, error) {
+	m := pdfPagePattern.FindStringSubmatch(name)
+	if m == nil {
+		return nil, errInvalidPDFPage
 	}
 	page := m[1]
 
@@ -466,9 +729,9 @@ func readPDFPage(pdfPath, innerPath string) ([]byte, string, error) {
 	)
 	data, err := cmd.Output()
 	if err != nil {
-		return nil, "", echo.NewHTTPError(http.StatusInternalServerError, "PDF rendering failed")
+		return nil, fmt.Errorf("PDF rendering failed: %w", err)
 	}
-	return data, "image/jpeg", nil
+	return data, nil
 }
 
 func findArchiveAndInnerPath(uri string) (string, string) {

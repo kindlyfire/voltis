@@ -5,6 +5,8 @@ import { isEnabled } from './_utils'
 
 export interface Info {
     version: string
+    api_version: number
+    server_id: string
     registration_enabled: boolean
     first_user_flow: boolean
     password_login_enabled: boolean

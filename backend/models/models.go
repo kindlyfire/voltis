@@ -29,14 +29,6 @@ const (
 	SessionProxy    = "proxy"
 )
 
-type Session struct {
-	Token             string     `db:"token"`
-	UserID            string     `db:"user_id"`
-	ExpiresAt         time.Time  `db:"expires_at"`
-	Method            string     `db:"method"`
-	AbsoluteExpiresAt *time.Time `db:"absolute_expires_at"`
-}
-
 // AppKey is a per-user credential carried in the URL path by key-authenticated protocols (OPDS).
 type AppKey struct {
 	ID         string     `db:"id"`

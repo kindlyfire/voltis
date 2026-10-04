@@ -100,9 +100,10 @@ func (o *OIDCRoutes) Register(g *echo.Group) {
 }
 
 func (o *OIDCRoutes) login(c echo.Context) error {
-	target, err := o.start(c, false, nil, nil, safeRedirect(c.QueryParam("redirect")))
+	redirect := safeRedirect(c.QueryParam("redirect"))
+	target, err := o.start(c, false, nil, nil, redirect)
 	if err != nil {
-		return o.fail(c, false, err)
+		return o.fail(c, false, redirect, err)
 	}
 	return c.Redirect(http.StatusFound, target)
 }
@@ -111,13 +112,9 @@ func (o *OIDCRoutes) link(c echo.Context) error {
 	if err := requireJSON(c); err != nil {
 		return err
 	}
-	user, err := requireUser(c)
+	user, session, err := requireSession(c)
 	if err != nil {
 		return err
-	}
-	session := requestSession(c)
-	if session == nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
 	}
 
 	target, err := o.start(c, true, &user.ID, &session.Token, "")
@@ -141,7 +138,7 @@ func (o *OIDCRoutes) start(c echo.Context, isLink bool, userID, sessionToken *st
 		Link:     isLink,
 		Redirect: redirect,
 	}
-	raw, err := insertPending(ctx, o.res.pool, pendingFlow, flow, userID, sessionToken)
+	raw, err := insertPending(ctx, o.res.pool, pendingFlow, flow, userID, sessionToken, pendingTTL)
 	if err != nil {
 		return "", err
 	}
@@ -156,30 +153,30 @@ func (o *OIDCRoutes) callback(c echo.Context) error {
 
 	row, err := consumeFlow(ctx, o.res.pool, raw, c.QueryParam("state"))
 	if err != nil {
-		return o.fail(c, false, err)
+		return o.fail(c, false, "", err)
 	}
 	if row == nil {
 		// A live flow with another state stays, cookie included.
 		waiting, err := readPending(ctx, o.res.pool, raw, pendingFlow)
 		if err != nil {
-			return o.fail(c, false, err)
+			return o.fail(c, false, "", err)
 		}
 		if waiting != nil {
 			flow, _ := pendingData[oidcFlow](waiting)
-			return o.fail(c, flow.Link, reject("the sign-in state did not match", nil))
+			return o.fail(c, flow.Link, flow.Redirect, reject("the sign-in state did not match", nil))
 		}
 		clearPendingCookie(c, o.res.st)
-		return o.fail(c, false, reject("the sign-in request expired, try again", nil))
+		return o.fail(c, false, "", reject("the sign-in request expired, try again", nil))
 	}
 	clearPendingCookie(c, o.res.st)
 	flow, err := pendingData[oidcFlow](row)
 	if err != nil {
-		return o.fail(c, false, err)
+		return o.fail(c, false, "", err)
 	}
 
 	id, clientID, err := o.verify(ctx, c, flow)
 	if err != nil {
-		return o.fail(c, flow.Link, err)
+		return o.fail(c, flow.Link, flow.Redirect, err)
 	}
 	if flow.Link {
 		return o.finishLink(c, row, id, clientID)
@@ -305,21 +302,21 @@ func (o *OIDCRoutes) identity(ctx context.Context, provider *oidc.Provider, toke
 
 func (o *OIDCRoutes) finishLink(c echo.Context, row *models.AuthPending, id ExternalIdentity, clientID string) error {
 	if row.UserID == nil || row.SessionToken == nil {
-		return o.fail(c, true, errSessionChanged)
+		return o.fail(c, true, "", errSessionChanged)
 	}
 
 	// The browser holding the callback must still be the one that asked.
 	user, _ := c.Get(contextKeyUser).(*models.User)
 	session := requestSession(c)
 	if user == nil || session == nil || user.ID != *row.UserID || session.Token != *row.SessionToken {
-		return o.fail(c, true, errSessionChanged)
+		return o.fail(c, true, "", errSessionChanged)
 	}
 
 	_, err := o.finalize(reqCtx(c), finalizeRequest{
 		Op: finalizeLink, ID: id, ClientID: clientID, UserID: *row.UserID, SessionToken: *row.SessionToken,
 	})
 	if err != nil {
-		return o.fail(c, true, err)
+		return o.fail(c, true, "", err)
 	}
 	return c.Redirect(http.StatusFound, accountPath)
 }
@@ -328,7 +325,7 @@ func (o *OIDCRoutes) finishLogin(c echo.Context, id ExternalIdentity, clientID, 
 	ctx := reqCtx(c)
 	out, err := o.finalize(ctx, finalizeRequest{Op: finalizeLogin, ID: id, ClientID: clientID, Redirect: redirect})
 	if err != nil {
-		return o.fail(c, false, err)
+		return o.fail(c, false, redirect, err)
 	}
 	if out.Completion != "" {
 		setPendingCookie(c, o.res.st, out.Completion)
@@ -479,13 +476,18 @@ func (o *OIDCRoutes) completeRow(c echo.Context) (*models.AuthPending, string, e
 	return row, raw, nil
 }
 
-func (o *OIDCRoutes) fail(c echo.Context, link bool, err error) error {
+// fail keeps a login's redirect, so a retry still returns there.
+func (o *OIDCRoutes) fail(c echo.Context, link bool, redirect string, err error) error {
 	slog.Warn("[oidc] sign-in failed", "err", err, "link", link)
 	target := "/auth/login"
 	if link {
 		target = accountPath
 	}
-	return c.Redirect(http.StatusFound, target+"?error="+url.QueryEscape(appMessage(err)))
+	target += "?error=" + url.QueryEscape(appMessage(err))
+	if redirect = safeRedirect(redirect); !link && redirect != "" {
+		target += "&redirect=" + url.QueryEscape(redirect)
+	}
+	return c.Redirect(http.StatusFound, target)
 }
 
 func claimBool(v any) bool {
@@ -637,7 +639,7 @@ func insertCompletion(ctx context.Context, tx pgx.Tx, id ExternalIdentity, login
 	if login.Match != nil {
 		complete.MatchID, complete.MatchUsername = login.Match.ID, login.Match.Username
 	}
-	return insertPending(ctx, tx, pendingComplete, complete, nil, nil)
+	return insertPending(ctx, tx, pendingComplete, complete, nil, nil, pendingTTL)
 }
 
 func readOIDCPolicy(ctx context.Context, tx pgx.Tx, req finalizeRequest) (oidcPolicy, error) {

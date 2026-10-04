@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Voltis</string>
+    <string name="loading">Loading</string>
+    <string name="retry">Retry</string>
+
+    <string name="server_title">Connect to a server</string>
+    <string name="server_url">Server address</string>
+    <string name="server_connect">Connect</string>
+    <string name="server_insecure">Not encrypted. Use https:// outside your home network.</string>
+
+    <string name="login_title">Sign in</string>
+    <string name="login_reauth">Your session ended. Sign in again.</string>
+    <string name="login_username">Username</string>
+    <string name="login_password">Password</string>
+    <string name="login_submit">Sign in</string>
+    <string name="login_browser">Sign in with browser</string>
+    <string name="login_signing_in">Signing in</string>
+    <string name="login_setup_needed">This server isn\'t set up yet.</string>
+    <string name="login_finish_setup">Finish setup in a browser</string>
+    <string name="login_change_server">Change server</string>
+
+    <string name="home_signed_in_as">Signed in as %1$s</string>
+    <string name="home_method">Sign-in method: %1$s</string>
+    <string name="home_sign_out">Sign out</string>
+    <string name="method_password">Password</string>
+    <string name="method_oidc">SSO</string>
+    <string name="method_proxy">Proxy</string>
+
+    <string name="error_bad_url">Enter an address starting with http:// or https://</string>
+    <string name="error_http">Server error (HTTP %1$d)</string>
+    <string name="error_not_json">This address returned a web page, not Voltis. Is a login proxy in front of it?</string>
+    <string name="error_unknown_host">Server not found</string>
+    <string name="error_tls">Secure connection failed</string>
+    <string name="error_local_network">Allow Nearby devices access to reach this server.</string>
+    <string name="error_unreachable">Can\'t reach the server</string>
+    <string name="error_network">Network error</string>
+    <string name="error_unexpected">Something went wrong</string>
+    <string name="error_not_voltis">No Voltis server at this address (HTTP %1$d)</string>
+    <string name="error_downgrade">This server redirects to an unencrypted address</string>
+    <string name="error_old_server">Update the Voltis server</string>
+    <string name="error_no_server">No server selected</string>
+    <string name="error_credentials">Wrong username or password</string>
+    <string name="error_sign_in_expired">Sign-in expired. Try again.</string>
+    <string name="error_no_browser">No browser found</string>
+</resources>

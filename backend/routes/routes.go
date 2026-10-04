@@ -121,7 +121,7 @@ func Register(ctx context.Context, e *echo.Echo, pool *pgxpool.Pool, st *setting
 
 	api := e.Group("/api", authMiddleware(res))
 
-	(&AuthRoutes{pool: pool, hub: hub, st: st}).Register(api.Group("/auth"))
+	(&AuthRoutes{pool: pool, hub: hub, st: st, proxyEnabled: proxy.Enabled()}).Register(api.Group("/auth"))
 	(&OIDCRoutes{res: res, oidc: newOIDCClient(st)}).Register(api.Group("/auth/oidc"))
 	(&SettingsRoutes{st: st, proxy: proxy}).Register(api.Group("/settings"))
 	(&LibraryRoutes{pool: pool, scanQueue: scanQueue, links: links, reg: deps.Providers, hub: hub, ctx: ctx}).Register(api.Group("/libraries"))

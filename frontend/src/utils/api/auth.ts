@@ -13,6 +13,11 @@ export interface RegisterRequest {
     password: string
 }
 
+export interface AppCodeRequest {
+    code_challenge: string
+    client_name: string
+}
+
 export const authApi = {
     useLogin: () => {
         const queryClient = useQueryClient()
@@ -57,8 +62,18 @@ export const authApi = {
             onSuccess: () => {
                 // Invalidating alone would keep the raw keys cached and refetch them.
                 queryClient.removeQueries({ queryKey: ['app-keys'] })
+                queryClient.removeQueries({ queryKey: ['users', 'sessions'] })
                 queryClient.invalidateQueries()
             },
         })
     },
+
+    useAppCode: () =>
+        useMutation({
+            mutationFn: async (req: AppCodeRequest) =>
+                apiFetch<{ redirect_url: string }>('/auth/app-code', {
+                    method: 'POST',
+                    body: JSON.stringify(req),
+                }),
+        }),
 }

@@ -10,8 +10,13 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// apiVersion lets native clients reject a server too old for them.
+const apiVersion = 1
+
 type infoDTO struct {
 	Version              string `json:"version"`
+	APIVersion           int    `json:"api_version"`
+	ServerID             string `json:"server_id"`
 	RegistrationEnabled  bool   `json:"registration_enabled"`
 	FirstUserFlow        bool   `json:"first_user_flow"`
 	PasswordLoginEnabled bool   `json:"password_login_enabled"`
@@ -29,6 +34,8 @@ func infoHandler(pool *pgxpool.Pool, st *settings.Store) echo.HandlerFunc {
 		oidcOn := oidcConfigOf(st).usable()
 		return c.JSON(http.StatusOK, infoDTO{
 			Version:              config.AppVersion,
+			APIVersion:           apiVersion,
+			ServerID:             st.String(settings.InstallationID),
 			RegistrationEnabled:  st.Bool(settings.AuthRegistrationEnabled),
 			FirstUserFlow:        first,
 			PasswordLoginEnabled: st.Bool(settings.AuthPasswordLoginEnabled),

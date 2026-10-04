@@ -8,7 +8,9 @@ import type {
     Identity,
     IdentityLink,
     Me,
+    OkResponse,
     PreferencesPatch,
+    Session,
     UpdateMe,
     User,
     UserUpsert,
@@ -140,6 +142,25 @@ export const usersApi = {
             onSuccess: () => {
                 queryClient.invalidateQueries({ queryKey: ['users'] })
             },
+        })
+    },
+
+    useSessions: () =>
+        useQuery({
+            queryKey: ['users', 'sessions'],
+            queryFn: async () => apiFetch<Session[]>('/users/me/sessions'),
+        }),
+
+    useRevokeSession: () => {
+        const queryClient = useQueryClient()
+        return useMutation({
+            mutationFn: async (sessionId: string) =>
+                apiFetch<OkResponse>(`/users/me/sessions/${sessionId}`, {
+                    method: 'DELETE',
+                    body: '{}',
+                }),
+            // Resolves once the list no longer has the row, so focus can move on.
+            onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users', 'sessions'] }),
         })
     },
 

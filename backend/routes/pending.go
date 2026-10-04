@@ -25,7 +25,18 @@ const (
 	pendingComplete = "oidc_complete"
 
 	maxConfirmAttempts = 5
+
+	pendingNativeCode = "native_code"
+	nativeCodeTTL     = 2 * time.Minute
+	nativeCallbackURI = "voltis://auth/callback" // fixed; never taken from a request
 )
+
+// nativeCode is a one-time code for a native client, minted by a web session.
+type nativeCode struct {
+	Challenge  string `json:"challenge"`
+	ClientName string `json:"client_name"`
+	Method     string `json:"method"` // the minting web session's method
+}
 
 type oidcFlow struct {
 	State    string `json:"state"`
@@ -74,7 +85,7 @@ func pendingKey(raw string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func insertPending(ctx context.Context, q db.Querier, kind string, data any, userID, sessionToken *string) (string, error) {
+func insertPending(ctx context.Context, q db.Querier, kind string, data any, userID, sessionToken *string, ttl time.Duration) (string, error) {
 	encoded, err := json.Marshal(data)
 	if err != nil {
 		return "", err
@@ -87,7 +98,7 @@ func insertPending(ctx context.Context, q db.Querier, kind string, data any, use
 	_, err = q.Exec(ctx, `
 		INSERT INTO auth_pending (id, kind, data, user_id, session_token, expires_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
-	`, pendingKey(raw), kind, encoded, userID, sessionToken, time.Now().Add(pendingTTL))
+	`, pendingKey(raw), kind, encoded, userID, sessionToken, time.Now().Add(ttl))
 	if err != nil {
 		return "", err
 	}
