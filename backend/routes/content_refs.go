@@ -109,17 +109,18 @@ func (cr *ContentRefRoutes) brokenRefsSummary(c echo.Context) error {
 }
 
 type brokenUserToContentDTO struct {
-	ID                string          `json:"id"`
-	URI               string          `json:"uri"`
-	LibraryID         *string         `json:"library_id"`
-	Starred           bool            `json:"starred"`
-	Status            *string         `json:"status"`
-	StatusUpdatedAt   *time.Time      `json:"status_updated_at"`
-	Notes             *string         `json:"notes"`
-	Rating            *int            `json:"rating"`
-	Progress          json.RawMessage `json:"progress"`
-	ProgressUpdatedAt *time.Time      `json:"progress_updated_at"`
-	LastReadAt        *time.Time      `json:"last_read_at"`
+	ID                string            `json:"id"`
+	URI               string            `json:"uri"`
+	LibraryID         *string           `json:"library_id"`
+	Starred           bool              `json:"starred"`
+	Status            *string           `json:"status"`
+	StatusUpdatedAt   *time.Time        `json:"status_updated_at"`
+	Notes             *string           `json:"notes"`
+	Rating            *int              `json:"rating"`
+	Progress          json.RawMessage   `json:"progress"`
+	ProgressUpdatedAt *time.Time        `json:"progress_updated_at"`
+	LastReadAt        *time.Time        `json:"last_read_at"`
+	ReadingSeq        models.ReadingSeq `json:"reading_seq"`
 }
 
 func brokenUTCToDTO(u models.UserToContent) brokenUserToContentDTO {
@@ -139,6 +140,7 @@ func brokenUTCToDTO(u models.UserToContent) brokenUserToContentDTO {
 		Progress:          progress,
 		ProgressUpdatedAt: u.ProgressUpdatedAt,
 		LastReadAt:        u.LastReadAt,
+		ReadingSeq:        u.ReadingSeq,
 	}
 }
 
@@ -269,9 +271,22 @@ func (cr *ContentRefRoutes) fixBrokenRefs(c echo.Context) error {
 
 	// Delete
 	if len(req.Delete) > 0 {
+		// Content that still exists keeps its identity: the row resets to an empty state with a
+		// new seq, so a client holding the old state can tell it's gone. Dangling rows go.
 		_, err := tx.Exec(ctx, `
-			DELETE FROM user_to_content
-			WHERE id = ANY($1) AND user_id = $2 AND library_id = $3
+			UPDATE user_to_content u SET starred = false, status = NULL, status_updated_at = NULL,
+				notes = NULL, rating = NULL, progress = '{}', progress_updated_at = NULL,
+				last_read_at = NULL, revision = $4
+			WHERE u.id = ANY($1) AND u.user_id = $2 AND u.library_id = $3
+				AND EXISTS (SELECT 1 FROM content c WHERE c.library_id = u.library_id AND c.uri = u.uri)
+		`, req.Delete, user.ID, libraryID, db.ServerRevision())
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `
+			DELETE FROM user_to_content u
+			WHERE u.id = ANY($1) AND u.user_id = $2 AND u.library_id = $3
+				AND NOT EXISTS (SELECT 1 FROM content c WHERE c.library_id = u.library_id AND c.uri = u.uri)
 		`, req.Delete, user.ID, libraryID)
 		if err != nil {
 			return err
@@ -347,6 +362,15 @@ func mergeUTC(ctx context.Context, tx pgx.Tx, userID, libraryID, srcID, dstURI, 
 		[]string{keep}, revision, userID); err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, "UPDATE user_to_content SET uri = $1, revision = $3 WHERE id = $2", dstURI, srcID, revision)
+	if _, err = tx.Exec(ctx, "UPDATE user_to_content SET uri = $1, revision = $3 WHERE id = $2", dstURI, srcID, revision); err != nil {
+		return err
+	}
+	// The row left the source URI. If content still lives there, its identity keeps a versioned
+	// empty state, so a client holding the old state sees it replaced rather than vanish.
+	_, err = tx.Exec(ctx, `
+		INSERT INTO user_to_content (id, user_id, library_id, uri, revision)
+		SELECT $1, $2, library_id, uri, $3 FROM content WHERE library_id = $4 AND uri = $5
+		ON CONFLICT (user_id, library_id, uri) DO NOTHING
+	`, models.MakeUserToContentID(), userID, revision, libraryID, srcURI)
 	return err
 }

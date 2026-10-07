@@ -54,6 +54,8 @@ type UserToContentDTO struct {
 	ProgressUpdatedAt *time.Time      `json:"progress_updated_at"`
 	Revision          *string         `json:"revision"`
 	LastReadAt        *time.Time      `json:"last_read_at"`
+	// ReadingSeq orders this state against others of the same content; see models.ReadingSeq.
+	ReadingSeq models.ReadingSeq `json:"reading_seq"`
 }
 
 func utcToDTO(u *models.UserToContent) *UserToContentDTO {
@@ -74,6 +76,7 @@ func utcToDTO(u *models.UserToContent) *UserToContentDTO {
 		ProgressUpdatedAt: u.ProgressUpdatedAt,
 		Revision:          u.Revision,
 		LastReadAt:        u.LastReadAt,
+		ReadingSeq:        u.ReadingSeq,
 	}
 }
 
@@ -231,7 +234,7 @@ var contentRowColumns = models.ContentColumns("c") + `,
 	utc.status_updated_at AS utc_status_updated_at, utc.notes AS utc_notes,
 	utc.rating AS utc_rating, utc.progress AS utc_progress,
 	utc.progress_updated_at AS utc_progress_updated_at, utc.revision AS utc_revision,
-	utc.last_read_at AS utc_last_read_at, c.data AS meta_data, c.meta_updated_at`
+	utc.last_read_at AS utc_last_read_at, utc.reading_seq AS utc_reading_seq, c.data AS meta_data, c.meta_updated_at`
 
 func selectContentRows(ctx context.Context, q db.Querier, userID string, ids []string) (map[string]contentListRow, error) {
 	if len(ids) == 0 { // ANY(NULL) fails pg_search's pushdown
@@ -1264,6 +1267,7 @@ type contentWithUTCRow struct {
 	UTCProgressUpdatedAt *time.Time `db:"utc_progress_updated_at"`
 	UTCRevision          *string    `db:"utc_revision"`
 	UTCLastReadAt        *time.Time `db:"utc_last_read_at"`
+	UTCReadingSeq        *int64     `db:"utc_reading_seq"`
 	MetaData             []byte     `db:"meta_data"`
 	MetaUpdatedAt        *time.Time `db:"meta_updated_at"`
 }
@@ -1286,6 +1290,7 @@ func (r *contentWithUTCRow) utc() *models.UserToContent {
 		ProgressUpdatedAt: r.UTCProgressUpdatedAt,
 		Revision:          r.UTCRevision,
 		LastReadAt:        r.UTCLastReadAt,
+		ReadingSeq:        models.ReadingSeq(*r.UTCReadingSeq),
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"maps"
 	"math/rand"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -197,6 +198,20 @@ func ContentColumns(alias string) string {
 	return alias + "." + strings.Join(contentColumns, ", "+alias+".")
 }
 
+// ReadingSeq orders the committed states of a user_to_content row (see migration 004). 0 is a row
+// that doesn't exist. It serializes as a decimal string, so JavaScript clients can't lose precision.
+type ReadingSeq int64
+
+func (s ReadingSeq) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + strconv.FormatInt(int64(s), 10) + `"`), nil
+}
+
+func (s *ReadingSeq) UnmarshalJSON(b []byte) error {
+	n, err := strconv.ParseInt(strings.Trim(string(b), `"`), 10, 64)
+	*s = ReadingSeq(n)
+	return err
+}
+
 type UserToContent struct {
 	ID                string     `db:"id" json:"id"`
 	UserID            string     `db:"user_id" json:"user_id"`
@@ -211,6 +226,7 @@ type UserToContent struct {
 	ProgressUpdatedAt *time.Time `db:"progress_updated_at" json:"progress_updated_at"`
 	Revision          *string    `db:"revision" json:"revision"`
 	LastReadAt        *time.Time `db:"last_read_at" json:"last_read_at"`
+	ReadingSeq        ReadingSeq `db:"reading_seq" json:"reading_seq"`
 }
 
 type CustomList struct {

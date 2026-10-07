@@ -34,6 +34,15 @@ type ReadingStateDTO struct {
 	Progress          json.RawMessage `json:"progress"            db:"progress"`
 	ProgressUpdatedAt *time.Time      `json:"progress_updated_at" db:"progress_updated_at"`
 	LastReadAt        *time.Time      `json:"last_read_at"        db:"last_read_at"`
+	// ReadingSeq orders this state against the content's other states; 0 for content the user has
+	// no row for. It serializes as a decimal string.
+	ReadingSeq models.ReadingSeq `json:"reading_seq" db:"reading_seq"`
+}
+
+// readingItem is one content's complete reading state.
+type readingItem struct {
+	ID string `json:"id" db:"id"`
+	ReadingStateDTO
 }
 
 func (s ReadingStateDTO) snapshot() readingSnapshot {
@@ -41,13 +50,13 @@ func (s ReadingStateDTO) snapshot() readingSnapshot {
 }
 
 type SeriesReadingInfo struct {
-	ID                     string  `json:"id"                       db:"id"`
-	Status                 *string `json:"status"                   db:"status"`
-	Revision               *string `json:"revision"                 db:"revision"`
-	CaughtUp               bool    `json:"caught_up"                db:"caught_up"`
-	ChildrenCount          int     `json:"children_count"           db:"children_count"`
-	CompletedChildrenCount int     `json:"completed_children_count" db:"completed_children_count"`
-	DroppedChildrenCount   int     `json:"dropped_children_count"   db:"dropped_children_count"`
+	ID string `json:"id" db:"id"`
+	// The series' complete reading state, as in ReadingStateDTO.
+	ReadingStateDTO
+	CaughtUp               bool `json:"caught_up"                db:"caught_up"`
+	ChildrenCount          int  `json:"children_count"           db:"children_count"`
+	CompletedChildrenCount int  `json:"completed_children_count" db:"completed_children_count"`
+	DroppedChildrenCount   int  `json:"dropped_children_count"   db:"dropped_children_count"`
 }
 
 // readingEnvelope is an item's state with its series', read together, and the reader that wrote the
@@ -74,7 +83,10 @@ type readingRequest struct {
 	Status       *string          `json:"status"        validate:"omitempty,oneof=reading completed on_hold dropped plan_to_read"`
 	Snapshot     *readingSnapshot `json:"snapshot"`
 	Series       *seriesPrev      `json:"series"`
-	revision     string           // set by code: the token of a request without a writer
+	// IDs are the content a series clear is expected to affect. The response's items include them,
+	// wherever they live now, besides the series' current children.
+	IDs      []string `json:"ids" validate:"max=10000"`
+	revision string   // set by code: the token of a request without a writer
 }
 
 type readingResponse struct {
@@ -83,6 +95,9 @@ type readingResponse struct {
 	Previous *readingSnapshot `json:"previous"`
 	// The series' status before this write started it, and its revision after.
 	SeriesPrevious *seriesPrev `json:"series_previous"`
+	// Items holds the current state of every child a series clear covers, also when the request was
+	// delivered before. Only set for a clear of a series.
+	Items []readingItem `json:"items,omitempty"`
 }
 
 type errReadingConflict struct{ current readingEnvelope }
@@ -181,7 +196,8 @@ type readingTarget struct {
 func (t readingTarget) isSeries() bool { return slices.Contains(metadata.SeriesTypes, t.Type) }
 
 const readingStateColumns = `utc.revision, utc.status, utc.status_updated_at,
-	COALESCE(utc.progress, '{}') AS progress, utc.progress_updated_at, utc.last_read_at`
+	COALESCE(utc.progress, '{}') AS progress, utc.progress_updated_at, utc.last_read_at,
+	COALESCE(utc.reading_seq, 0) AS reading_seq`
 
 // pagesExpr is a comic's current page count, from the scan or its page list.
 const pagesExpr = `COALESCE(c.page_count, CASE WHEN jsonb_typeof(c.file_data->'pages') = 'array'
@@ -324,7 +340,29 @@ func applyReading(ctx context.Context, tx pgx.Tx, userID, contentID string, req 
 		return res, err
 	}
 	res.readingEnvelope, err = envelope(ctx, tx, userID, t.ParentID, state)
+	if err == nil && t.isSeries() && req.Op == "clear" {
+		res.Items, err = readingItems(ctx, tx, `SELECT id FROM content WHERE parent_id = @id`,
+			pgx.NamedArgs{"user_id": userID, "id": t.ID}, req.IDs)
+	}
 	return res, err
+}
+
+// readingItems reads the current state of the content that idsSQL selects, in the caller's
+// transaction, plus the extra ids that still exist. args holds idsSQL's parameters and @user_id. Content without a row reads as the empty state at seq 0.
+func readingItems(ctx context.Context, q db.Querier, idsSQL string, args pgx.NamedArgs, extra []string,
+) ([]readingItem, error) {
+	args["extra_ids"] = extra
+	if extra == nil {
+		args["extra_ids"] = []string{}
+	}
+	items, err := db.Select[readingItem](ctx, q, `
+		SELECT c.id, `+readingStateColumns+` FROM content c`+utcJoin+`
+		WHERE c.id IN (`+idsSQL+`) OR c.id = ANY(@extra_ids) ORDER BY c.id
+	`, args)
+	if items == nil {
+		items = []readingItem{}
+	}
+	return items, err
 }
 
 // setSeriesStatus sets the status of the item's series for a reader, last writer wins: the series'
@@ -535,7 +573,7 @@ const unfinishedChildRows = `SELECT ` + completionColumns + `
 
 func seriesReadingInfo(ctx context.Context, q db.Querier, userID, seriesID string) (*SeriesReadingInfo, error) {
 	info, err := db.SelectOne[SeriesReadingInfo](ctx, q, `
-		SELECT c.id, utc.status, utc.revision, cc.children_count, cc.completed_children_count,
+		SELECT c.id, `+readingStateColumns+`, cc.children_count, cc.completed_children_count,
 			cc.dropped_children_count,
 			cc.children_count > 0 AND cc.completed_children_count + cc.dropped_children_count = cc.children_count
 				AS caught_up
@@ -609,6 +647,9 @@ type seriesReadingRequest struct {
 	// A reader's request: its writes carry the reader's revision.
 	WriterID string `json:"writer_id"`
 	Seq      int64  `json:"seq"       validate:"min=0"`
+	// IDs are the content the client expects the action to affect; the response's items include them
+	// besides the current scope, so a catalog change since doesn't hide an affected volume.
+	IDs []string `json:"ids" validate:"max=10000"`
 }
 
 // seriesReading applies a series-wide action: completing the volumes up to one, completing the
@@ -636,7 +677,7 @@ func (cr *ContentRoutes) seriesReading(c echo.Context) error {
 		rev = req.WriterID + ":" + strconv.FormatInt(req.Seq, 10)
 	}
 	args := pgx.NamedArgs{"user_id": user.ID, "ids": []string{seriesID}, "series_id": seriesID, "until_id": req.UntilID}
-	var count int
+	res := seriesReadingResponse{Items: []readingItem{}}
 	err = db.WithTx(ctx, cr.pool, func(tx pgx.Tx) error {
 		if err := lockUserData(ctx, tx, user.ID, seriesID); err != nil {
 			return err
@@ -649,8 +690,13 @@ func (cr *ContentRoutes) seriesReading(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusBadRequest, "Not a series")
 		}
 		// A reader's request delivered already, or overtaken by its later write to the series or a
-		// volume, changes nothing.
-		if req.WriterID != "" {
+		// volume, changes nothing. Its response still covers the same scope.
+		replay := false
+		if writer, seq, ok := parseRevision(t.Revision); ok && req.WriterID != "" && writer == req.WriterID &&
+			seq >= req.Seq {
+			replay = true // the series row's own revision, which survives changes to its volumes
+		}
+		if req.WriterID != "" && !replay {
 			revs, err := db.SelectScalars[*string](ctx, tx, `
 				SELECT utc.revision FROM content c`+utcJoin+`
 				WHERE c.id = @series_id OR c.parent_id = @series_id`, args)
@@ -659,57 +705,133 @@ func (cr *ContentRoutes) seriesReading(c echo.Context) error {
 			}
 			for _, rev := range revs {
 				if writer, seq, ok := parseRevision(rev); ok && writer == req.WriterID && seq >= req.Seq {
-					return nil
+					replay = true
 				}
 			}
 		}
-
-		var rows []completionRow
-		switch req.Action {
-		case "clear":
-			count, err = db.SelectScalar[int](ctx, tx,
-				"SELECT COUNT(*) FROM content WHERE id = ANY(@ids) OR parent_id = ANY(@ids)", args)
-			if err != nil {
-				return err
-			}
-			return clearContent(ctx, tx, user.ID, []string{seriesID}, rev)
-		case "mark_through":
-			rows, err = db.Select[completionRow](ctx, tx, `
-				WITH k AS (
-					SELECT c.id, row_number() OVER (ORDER BY c."order" ASC NULLS LAST, c.id) AS pos
-					FROM content c WHERE c.parent_id = @series_id AND c.valid
-				)
-				SELECT u.* FROM (`+unfinishedChildRows+`) u JOIN k ON k.id = u.id
-				WHERE k.pos <= (SELECT pos FROM k WHERE id = @until_id)
-			`, args)
-			if err != nil {
-				return err
-			}
-			if exists, err := db.SelectScalar[bool](ctx, tx,
-				"SELECT EXISTS (SELECT 1 FROM content WHERE id = @until_id AND parent_id = @series_id AND valid)", args); err != nil {
-				return err
-			} else if !exists {
-				return echo.NewHTTPError(http.StatusNotFound, "Volume not found")
-			}
-		case "mark_series_completed":
-			if req.IncludeUnread {
-				if rows, err = db.Select[completionRow](ctx, tx, unfinishedChildRows, args); err != nil {
-					return err
-				}
-			}
-			rows = append(rows, completionRow{ID: seriesID, Type: t.Type})
-		}
-		count = len(rows)
-		if err := markCompleted(ctx, tx, user.ID, rows, rev, now); err != nil {
+		scope, err := seriesScopeSQL(ctx, tx, req, args, replay)
+		if err != nil {
 			return err
 		}
-		if req.Action == "mark_through" && count > 0 {
-			_, err = startSeries(ctx, tx, user.ID, seriesID, rev, now, false)
+		if !replay {
+			if res.Count, err = applySeriesAction(ctx, tx, user.ID, t, req, args, rev, now); err != nil {
+				return err
+			}
 		}
-		return err
+		items, err := readingItems(ctx, tx, scope, args, req.IDs)
+		if err != nil {
+			return err
+		}
+		for _, it := range items {
+			if it.ID == seriesID {
+				res.Series = it
+			} else {
+				res.Items = append(res.Items, it)
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return err
 	}
-	return c.JSON(http.StatusOK, map[string]int{"count": count})
+	return c.JSON(http.StatusOK, res)
+}
+
+// seriesReadingResponse is the series' state and that of every volume the action covers, as of
+// the end of the write.
+type seriesReadingResponse struct {
+	Count  int           `json:"count"`
+	Series readingItem   `json:"series"`
+	Items  []readingItem `json:"items"`
+}
+
+// seriesScopeSQL selects (taking @series_id and @until_id) the ids of the content a series action
+// covers: the series, plus the volumes it can change. A superset of what it did, so that a
+
+func seriesScopeSQL(ctx context.Context, tx pgx.Tx, req seriesReadingRequest, args pgx.NamedArgs,
+	replay bool) (string, error) {
+	self := `SELECT @series_id::text`
+	switch req.Action {
+	case "clear":
+		return self + ` UNION SELECT id FROM content WHERE parent_id = @series_id`, nil
+	case "mark_series_completed":
+		if req.IncludeUnread {
+			return self + ` UNION SELECT id FROM content WHERE parent_id = @series_id AND valid`, nil
+		}
+		return self, nil
+	}
+	// A delivered-again request needs no valid cutoff: it reports, whatever the cutoff is now.
+	if !replay {
+		exists, err := db.SelectScalar[bool](ctx, tx,
+			"SELECT EXISTS (SELECT 1 FROM content WHERE id = @until_id AND parent_id = @series_id AND valid)", args)
+		if err != nil {
+			return "", err
+		}
+		if !exists {
+			return "", echo.NewHTTPError(http.StatusNotFound, "Volume not found")
+		}
+	}
+	return self + ` UNION SELECT k.id FROM (
+		SELECT c.id, row_number() OVER (ORDER BY c."order" ASC NULLS LAST, c.id) AS pos
+		FROM content c WHERE c.parent_id = @series_id AND c.valid
+	) k WHERE k.pos <= (SELECT pos FROM (
+		SELECT c.id, row_number() OVER (ORDER BY c."order" ASC NULLS LAST, c.id) AS pos
+		FROM content c WHERE c.parent_id = @series_id AND c.valid
+	) u WHERE u.id = @until_id)`, nil
+}
+
+// applySeriesAction writes a series action and returns how many rows it changed.
+func applySeriesAction(ctx context.Context, tx pgx.Tx, userID string, t readingTarget, req seriesReadingRequest,
+	args pgx.NamedArgs, rev string, now time.Time) (int, error) {
+	seriesID := t.ID
+	var rows []completionRow
+	var err error
+	switch req.Action {
+	case "clear":
+		count, err := db.SelectScalar[int](ctx, tx,
+			"SELECT COUNT(*) FROM content WHERE id = ANY(@ids) OR parent_id = ANY(@ids)", args)
+		if err != nil {
+			return 0, err
+		}
+		return count, clearContent(ctx, tx, userID, []string{seriesID}, rev)
+	case "mark_through":
+		rows, err = db.Select[completionRow](ctx, tx, `
+			WITH k AS (
+				SELECT c.id, row_number() OVER (ORDER BY c."order" ASC NULLS LAST, c.id) AS pos
+				FROM content c WHERE c.parent_id = @series_id AND c.valid
+			)
+			SELECT u.* FROM (`+unfinishedChildRows+`) u JOIN k ON k.id = u.id
+			WHERE k.pos <= (SELECT pos FROM k WHERE id = @until_id)
+		`, args)
+		if err != nil {
+			return 0, err
+		}
+	case "mark_series_completed":
+		if req.IncludeUnread {
+			if rows, err = db.Select[completionRow](ctx, tx, unfinishedChildRows, args); err != nil {
+				return 0, err
+			}
+		}
+		rows = append(rows, completionRow{ID: seriesID, Type: t.Type})
+	}
+	count := len(rows)
+	if err := markCompleted(ctx, tx, userID, rows, rev, now); err != nil {
+		return 0, err
+	}
+	if req.Action == "mark_through" && count > 0 {
+		if _, err = startSeries(ctx, tx, userID, seriesID, rev, now, false); err != nil {
+			return 0, err
+		}
+	}
+	if req.Action == "mark_through" && req.WriterID != "" {
+		// The series row carries the reader's revision even when its status didn't change, so a retry
+		// is recognized as delivered whatever has happened to the volumes since.
+		_, err = tx.Exec(ctx, `
+			INSERT INTO user_to_content (id, user_id, library_id, uri, revision)
+			SELECT @utc_id, @user_id, library_id, uri, @rev FROM content WHERE id = @series_id
+			ON CONFLICT (user_id, library_id, uri) DO UPDATE SET revision = EXCLUDED.revision
+		`, pgx.NamedArgs{"utc_id": models.MakeUserToContentID(), "user_id": userID, "rev": rev,
+			"series_id": seriesID})
+	}
+	return count, err
 }

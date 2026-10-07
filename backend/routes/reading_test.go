@@ -6,6 +6,8 @@ import (
 	"os"
 	"reflect"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -481,4 +483,192 @@ func TestReadingWriteLocks(t *testing.T) {
 	codes := []int{(<-writes[0]).StatusCode, (<-writes[1]).StatusCode}
 	slices.Sort(codes)
 	assertEq(t, s(codes), s([]int{200, 409}))
+}
+
+// TestReadingSeq checks that every state a row reaches gets a greater reading_seq, that the
+// endpoints report the row's current one, and that a row leaving live content keeps a versioned
+// empty state.
+func TestReadingSeq(t *testing.T) {
+	pool := newTestPool(t)
+	c := newAdminClient(t, pool)
+	f := newRecentFixture(t, pool, c)
+	ctx := context.Background()
+
+	const w = "taaaaaaaaaaaaaaaa"
+	wseq := 0
+	seqOf := func(id string) string { // "0" without a row
+		t.Helper()
+		v, err := db.SelectScalar[string](ctx, pool, `
+			SELECT COALESCE((SELECT utc.reading_seq FROM content c JOIN user_to_content utc
+				ON utc.library_id = c.library_id AND utc.uri = c.uri AND utc.user_id = $2 WHERE c.id = $1), 0)::text`,
+			id, f.userID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	rowID := func(id string) string {
+		t.Helper()
+		v, err := db.SelectScalar[string](ctx, pool, `SELECT utc.id FROM content c JOIN user_to_content utc
+			ON utc.library_id = c.library_id AND utc.uri = c.uri AND utc.user_id = $2 WHERE c.id = $1`, id, f.userID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	post := func(id string, body map[string]any) map[string]any {
+		t.Helper()
+		return c.Post("/api/content/"+id+"/reading", body).Assert(t, 200).JSON()
+	}
+	position := func(id string) {
+		wseq++
+		cur := c.Get("/api/content/"+id+"/reading").Assert(t, 200).JSON()["state"].(map[string]any)["revision"]
+		post(id, map[string]any{"op": "position", "writer_id": w, "seq": wseq, "base_revision": cur,
+			"progress": map[string]any{"current_page": 1}})
+	}
+	seriesReading := func(id string, body map[string]any) map[string]any {
+		t.Helper()
+		return c.Post("/api/content/"+id+"/series-reading", body).Assert(t, 200).JSON()
+	}
+
+	x := f.content("comic", nil, 0)
+	f.exec("UPDATE content SET page_count = 10 WHERE id = $1", x)
+	series, kids := f.series(3)
+	moved, target, dropped := f.content("comic", nil, 0), f.content("comic", nil, 0), f.content("comic", nil, 0)
+	f.set(moved, "reading", f.at(1), f.at(1))
+	f.set(target, "completed", f.at(2), f.at(2))
+	f.set(dropped, "reading", f.at(1), f.at(1))
+	all := append([]string{series}, kids...)
+
+	steps := []struct {
+		name    string
+		touched []string
+		do      func()
+	}{
+		{"position", []string{x}, func() { position(x) }},
+		{"position again", []string{x}, func() { position(x) }},
+		{"status cleared", []string{x}, func() { setStatus(t, c, x, nil) }},
+		{"restore", []string{x}, func() {
+			wseq++
+			post(x, map[string]any{"op": "restore", "writer_id": w, "seq": wseq, "base_revision": readingOf(t, c, x)["revision"],
+				"snapshot": map[string]any{"status": "on_hold", "progress": map[string]any{}}})
+		}},
+		{"clear", []string{x}, func() { post(x, map[string]any{"op": "clear"}) }},
+		{"start series", []string{kids[0], series}, func() { position(kids[0]) }},
+		{"bulk completion", all, func() {
+			seriesReading(series, map[string]any{"action": "mark_series_completed", "include_unread": true})
+		}},
+		{"series clear", all, func() {
+			res := post(series, map[string]any{"op": "clear"})
+			items := res["items"].([]any)
+			assertEq(t, len(items), 3)
+			for _, it := range items {
+				m := it.(map[string]any)
+				assertEq(t, s(m["reading_seq"]), seqOf(s(m["id"])))
+			}
+		}},
+		{"move onto a live row", []string{moved, target}, func() {
+			c.Post("/api/content/broken-refs/"+f.libID, map[string]any{
+				"update": map[string]string{rowID(moved): "file:///lib/" + target},
+				"keep":   map[string]string{rowID(moved): "source"},
+			}).Assert(t, 200)
+			// The source identity stays, empty.
+			assertEq(t, f.userData(moved), "- {}")
+		}},
+		{"delete", []string{dropped}, func() {
+			c.Post("/api/content/broken-refs/"+f.libID, map[string]any{"delete": []string{rowID(dropped)}}).
+				Assert(t, 200)
+			assertEq(t, f.userData(dropped), "- {}")
+		}},
+	}
+	for _, st := range steps {
+		before := map[string]int64{}
+		for _, id := range st.touched {
+			before[id], _ = strconv.ParseInt(seqOf(id), 10, 64)
+		}
+		st.do()
+		for _, id := range st.touched {
+			now := seqOf(id)
+			if n, _ := strconv.ParseInt(now, 10, 64); n <= before[id] {
+				t.Errorf("%s: seq %d, was %d", st.name, n, before[id])
+			}
+			res := c.Get("/api/content/"+id+"/reading").Assert(t, 200).JSON()
+			assertEq(t, s(res["state"].(map[string]any)["reading_seq"]), now)
+			detail := c.Get("/api/content/"+id).Assert(t, 200).JSON()["user_data"].(map[string]any)
+			assertEq(t, s(detail["reading_seq"]), now)
+		}
+	}
+
+	t.Run("nested series info and conflicts", func(t *testing.T) {
+		got := c.Get("/api/content/"+kids[1]+"/reading").Assert(t, 200).JSON()["series"].(map[string]any)
+		assertEq(t, s(got["reading_seq"]), seqOf(series))
+		wseq++
+		res := c.Post("/api/content/"+x+"/reading", map[string]any{"op": "position", "writer_id": w, "seq": wseq,
+			"base_revision": "stale", "progress": map[string]any{"current_page": 1}}).Assert(t, 409).JSON()
+		assertEq(t, s(res["state"].(map[string]any)["reading_seq"]), seqOf(x))
+		assertEq(t, c.Get("/api/content/"+f.content("comic", nil, 0)+"/reading").Assert(t, 200).
+			JSON()["state"].(map[string]any)["reading_seq"], any("0"))
+	})
+
+	t.Run("a series response covers its scope on replay", func(t *testing.T) {
+		wseq++
+		body := map[string]any{"action": "mark_through", "until_id": kids[1], "writer_id": w, "seq": wseq}
+		first := seriesReading(series, body)
+		assertEq(t, s(first["count"]), "2")
+		before := seqOf(kids[1])
+		again := seriesReading(series, body)
+		assertEq(t, s(again["count"]), "0")
+		assertEq(t, seqOf(kids[1]), before)
+		assertEq(t, s(again["series"].(map[string]any)["reading_seq"]), seqOf(series))
+		items := again["items"].([]any)
+		assertEq(t, len(items), 2) // the volumes up to the target, not the last
+		for _, it := range items {
+			m := it.(map[string]any)
+			assertEq(t, s(m["reading_seq"]), seqOf(s(m["id"])))
+		}
+
+		// A catalog change since drops volumes from the current scope; the guarded ids keep them.
+		ids := func(res map[string]any) string {
+			var got []string
+			for _, it := range res["items"].([]any) {
+				got = append(got, s(it.(map[string]any)["id"]))
+			}
+			slices.Sort(got)
+			return strings.Join(got, ",")
+		}
+		both := []string{kids[0], kids[1]}
+		slices.Sort(both)
+		f.exec(`UPDATE content SET "order" = 10 WHERE id = $1`, kids[0])
+		body["ids"] = both
+		again = seriesReading(series, body)
+		assertEq(t, s(again["count"]), "0")
+		assertEq(t, ids(again), strings.Join(both, ","))
+		// A cutoff that is no longer valid still gets its receipt.
+		f.exec("UPDATE content SET valid = false WHERE id = $1", kids[1])
+		again = seriesReading(series, body)
+		assertEq(t, s(again["count"]), "0")
+		assertEq(t, ids(again), strings.Join(both, ","))
+		for _, it := range again["items"].([]any) {
+			m := it.(map[string]any)
+			assertEq(t, s(m["reading_seq"]), seqOf(s(m["id"])))
+		}
+	})
+
+	t.Run("a replay is recognized by the series row after its volume left", func(t *testing.T) {
+		reading, rkids := f.series(2)
+		other, _ := f.series(1)
+		f.set(reading, "reading", nil, f.at(1)) // startSeries leaves its revision alone
+		wseq++
+		body := map[string]any{"action": "mark_through", "until_id": rkids[0], "writer_id": w, "seq": wseq,
+			"ids": []string{rkids[0]}}
+		assertEq(t, s(seriesReading(reading, body)["count"]), "1")
+		f.exec("UPDATE content SET parent_id = $2 WHERE id = $1", rkids[0], other)
+		again := seriesReading(reading, body)
+		assertEq(t, s(again["count"]), "0")
+		items := again["items"].([]any)
+		assertEq(t, len(items), 1)
+		assertEq(t, s(items[0].(map[string]any)["id"]), rkids[0])
+		assertEq(t, s(items[0].(map[string]any)["status"]), "completed")
+		assertEq(t, s(items[0].(map[string]any)["reading_seq"]), seqOf(rkids[0]))
+	})
 }
