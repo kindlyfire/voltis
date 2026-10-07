@@ -117,7 +117,7 @@ func Register(ctx context.Context, e *echo.Echo, pool *pgxpool.Pool, st *setting
 		},
 	}))
 
-	e.GET("/api/info", infoHandler(pool, st))
+	e.GET("/api/info", infoHandler(pool, st, staticBuildID(deps.StaticDir)))
 
 	api := e.Group("/api", authMiddleware(res))
 

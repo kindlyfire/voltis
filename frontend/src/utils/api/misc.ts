@@ -13,6 +13,7 @@ export interface Info {
     oidc_enabled: boolean
     oidc_button_label: string
     oidc_auto_redirect: boolean
+    web_build: string
 }
 
 export const miscApi = {

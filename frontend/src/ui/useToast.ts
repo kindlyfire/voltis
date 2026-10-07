@@ -8,7 +8,7 @@ export interface ToastOptions {
         /** Describes how to do the same without the toast. */ altText: string
         onClick: () => void
     }
-    /** Milliseconds. */
+    /** Milliseconds. `Infinity` keeps it until dismissed. */
     duration?: number
 }
 
@@ -51,7 +51,10 @@ function show(options: ToastOptions) {
     const id = nextId++
     toasts.value.push({ ...options, id, open: true })
     if (toasts.value.length > MAX_VISIBLE + MAX_WAITING) toasts.value.splice(MAX_VISIBLE, 1)
-    return { dismiss: () => dismissToast(id) }
+    return {
+        dismiss: () => dismissToast(id),
+        isOpen: () => toasts.value.some(t => t.id === id && t.open),
+    }
 }
 
 export function useToast() {

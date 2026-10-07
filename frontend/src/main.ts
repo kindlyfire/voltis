@@ -10,6 +10,7 @@ import router from './router.ts'
 import { syncCatalog } from './utils/api/catalog.ts'
 import { syncWorkerStatus } from './utils/api/metadata.ts'
 import { queryClient } from './utils/misc.ts'
+import { watchForNewBuild } from './utils/newBuild.ts'
 
 const app = createApp(App)
 
@@ -22,5 +23,6 @@ app.use(createHead())
 
 syncCatalog(queryClient)
 syncWorkerStatus(queryClient)
+watchForNewBuild(queryClient)
 
 app.mount('#app')

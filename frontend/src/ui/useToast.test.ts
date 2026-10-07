@@ -18,7 +18,9 @@ describe('useToast', () => {
         const [, second] = [1, 2, 3, 4].map(n => show({ message: `${n}` }))
         expect(visible()).toEqual(['1', '2', '3'])
 
+        expect(second!.isOpen()).toBe(true)
         second!.dismiss()
+        expect(second!.isOpen()).toBe(false)
         expect(toasts.value[1]!.open).toBe(false)
         expect(visible()).toEqual(['1', '2', '3'])
         vi.advanceTimersByTime(200)

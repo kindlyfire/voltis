@@ -727,6 +727,23 @@
                             With action
                         </AButton>
                         <AButton
+                            variant="tonal"
+                            @click="
+                                toast.show({
+                                    message: 'A new version is available.',
+                                    tone: 'info',
+                                    duration: Infinity,
+                                    action: {
+                                        label: 'Reload',
+                                        altText: 'Reload the page',
+                                        onClick: () => toast.show({ message: 'Reloaded' }),
+                                    },
+                                })
+                            "
+                        >
+                            Persistent
+                        </AButton>
+                        <AButton
                             variant="text"
                             @click="
                                 ['First', 'Second', 'Third', 'Fourth', 'Fifth'].forEach(m =>

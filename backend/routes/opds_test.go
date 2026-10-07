@@ -167,10 +167,15 @@ func TestAppKeys(t *testing.T) {
 	pool := newTestPool(t)
 	ctx := context.Background()
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<!doctype html><title>spa</title>"), 0o644); err != nil {
-		t.Fatal(err)
+	for name, body := range map[string]string{"index.html": "<!doctype html><title>spa</title>", "build.json": `{"id":"b1"}`} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	admin := newServerClient(t, pool, config.ProxyAuth{}, dir)
+	assertEq(t, s(admin.Get("/api/info").Assert(t, 200).JSON()["web_build"]), "b1")
+	assertEq(t, admin.Get("/lists").Assert(t, 200).Headers.Get("Cache-Control"), "no-cache")
+	admin.Get("/assets/missing.js").Assert(t, 404)
 	admin.Post("/api/auth/register", map[string]any{"username": "admin", "password": "adminpass123"}).Assert(t, 200)
 	member, memberID := newMemberClient(t, admin)
 	anon := admin.newSession(t)

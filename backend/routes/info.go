@@ -23,9 +23,10 @@ type infoDTO struct {
 	OIDCEnabled          bool   `json:"oidc_enabled"`
 	OIDCButtonLabel      string `json:"oidc_button_label"`
 	OIDCAutoRedirect     bool   `json:"oidc_auto_redirect"`
+	WebBuild             string `json:"web_build"`
 }
 
-func infoHandler(pool *pgxpool.Pool, st *settings.Store) echo.HandlerFunc {
+func infoHandler(pool *pgxpool.Pool, st *settings.Store, webBuild string) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		first, err := isFirstUserFlow(reqCtx(c), pool, st)
 		if err != nil {
@@ -42,6 +43,7 @@ func infoHandler(pool *pgxpool.Pool, st *settings.Store) echo.HandlerFunc {
 			OIDCEnabled:          oidcOn,
 			OIDCButtonLabel:      st.String(settings.OIDCButtonLabel),
 			OIDCAutoRedirect:     oidcOn && st.Bool(settings.OIDCAutoRedirect),
+			WebBuild:             webBuild,
 		})
 	}
 }
