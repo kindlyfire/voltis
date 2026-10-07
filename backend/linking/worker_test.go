@@ -40,42 +40,42 @@ func (e *env) woken() bool {
 	}
 }
 
+// Library IDs mix cases, so the database's order is not the bytes'.
 func TestWorkerMatchesLibrariesInTurn(t *testing.T) {
 	e := setup(t)
 	for i := range 25 {
-		e.series("l1", fmt.Sprintf("a%02d", i), "Nothing")
+		e.series("l_aX", fmt.Sprintf("a%02d", i), "Nothing")
 	}
 	for i := range 21 {
-		e.series("l2", fmt.Sprintf("b%02d", i), "Nothing")
+		e.series("l_BY", fmt.Sprintf("b%02d", i), "Nothing")
 	}
+	start := time.Now()
 	var libs []string
+	var lastWorkEnd time.Time
 	for e.step() == 0 {
 		libs = append(libs, e.svc.Status().LibraryID)
+		lastWorkEnd = time.Now()
 	}
-	if !slices.Equal(libs, []string{"l1", "l2", "l1", "l2"}) {
+	if !slices.Equal(libs, []string{"l_aX", "l_BY", "l_aX", "l_BY"}) {
 		t.Fatalf("matched %v", libs)
 	}
 	e.step() // idle again: the last pass stays
 	st := e.svc.Status()
-	if st.Activity != Idle || st.Matched != (MatchResult{Unmatched: 46}) || st.MatchPass.Counts != st.Matched ||
-		st.MatchPass.Finished == nil || st.RefreshPass != (Pass[RefreshResult]{}) {
-		t.Fatalf("status = %+v", st)
+	if p := st.MatchPass; st.Activity != Idle || p.Counts != (MatchResult{Unmatched: 46}) || p.Running ||
+		p.Started.Before(start) || p.Ended.Before(*p.Started) || p.Ended.After(lastWorkEnd) ||
+		st.RefreshPass != (Pass[RefreshResult]{}) {
+		t.Fatalf("status = %+v, lastWorkEnd %v", st, lastWorkEnd)
 	}
-}
 
-// Library IDs mix cases, so the database's order is not the bytes'.
-func TestWorkerTakesLibrariesInTurnWhateverTheirCase(t *testing.T) {
-	e := setup(t)
-	for i := range 21 {
-		e.series("l_aX", fmt.Sprintf("a%02d", i), "Nothing")
-		e.series("l_BY", fmt.Sprintf("b%02d", i), "Nothing")
+	e.svc = New(e.pool, e.svc.store, e.svc.reg, e.svc.covers, e.svc.notify)
+	if err := e.svc.loadPasses(context.Background()); err != nil {
+		t.Fatal(err)
 	}
-	var libs []string
-	for e.step() == 0 {
-		libs = append(libs, e.svc.Status().LibraryID)
-	}
-	if !slices.Equal(libs, []string{"l_aX", "l_BY", "l_aX", "l_BY"}) {
-		t.Fatalf("matched %v", libs)
+	// Postgres truncates to the microsecond.
+	want, got := st.MatchPass, e.svc.Status().MatchPass
+	if got.Counts != want.Counts || got.Running ||
+		!got.Started.Equal(want.Started.Truncate(time.Microsecond)) || !got.Ended.Equal(want.Ended.Truncate(time.Microsecond)) {
+		t.Fatalf("loaded pass = %+v, want %+v", got, want)
 	}
 }
 
@@ -103,7 +103,7 @@ func TestWorkerSkipsUntitledSeries(t *testing.T) {
 	e.exec(`INSERT INTO metadata_links (library_id, content_id, provider, state, retry_at)
 		VALUES ('l1', 'u', 'fake', 'unmatched', now() + interval '1 day')`)
 	e.retitle("u", "")
-	if wait := e.untilIdle(); wait < 14*time.Minute || e.svc.Status().Matched != (MatchResult{}) {
+	if wait := e.untilIdle(); wait < 14*time.Minute || e.svc.Status().MatchPass.Counts != (MatchResult{}) {
 		t.Fatalf("waits %v, status %+v", wait, e.svc.Status())
 	}
 	if res, err := e.svc.MatchLibrary(context.Background(), "l1", func(string) bool { return false }, nil); err != nil ||
@@ -208,13 +208,13 @@ func TestPausedWorkerOnlyRefreshes(t *testing.T) {
 	if wait := e.untilIdle(); wait < 14*time.Minute {
 		t.Fatalf("waits %v for a series it may not match", wait)
 	}
-	if st := e.svc.Status(); !st.Paused || st.Refreshed != (RefreshResult{Refreshed: 1}) || st.MatchPass != (Pass[MatchResult]{}) ||
+	if st := e.svc.Status(); !st.Paused || st.RefreshPass.Counts != (RefreshResult{Refreshed: 1}) || st.MatchPass != (Pass[MatchResult]{}) ||
 		e.link("t").State != StateNone || e.view("s").Merged.Title.V != "Refreshed" {
 		t.Fatalf("status = %+v", st)
 	}
 	e.paused = false
 	e.untilIdle()
-	if st := e.svc.Status(); st.Paused || st.Matched != (MatchResult{Linked: 1}) {
+	if st := e.svc.Status(); st.Paused || st.MatchPass.Counts != (MatchResult{Linked: 1}) {
 		t.Fatalf("status = %+v", st)
 	}
 }
@@ -227,7 +227,7 @@ func TestWorkerResumesAfterARestart(t *testing.T) {
 	e.step()
 	e.svc = New(e.pool, e.svc.store, e.svc.reg, e.svc.covers, e.svc.notify)
 	e.untilIdle()
-	if st := e.svc.Status(); st.Matched != (MatchResult{Unmatched: 5}) {
+	if st := e.svc.Status(); st.MatchPass.Counts != (MatchResult{Unmatched: 5}) {
 		t.Fatalf("status = %+v", st)
 	}
 }
@@ -301,6 +301,7 @@ func TestRunWakesAndStops(t *testing.T) {
 	defer func(d time.Duration) { pushDelay = d }(pushDelay)
 	pushDelay = 0
 	e.series("l1", "s", "Remote One")
+	start := time.Now()
 	statuses := make(chan WorkerStatus, 100)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -308,23 +309,25 @@ func TestRunWakesAndStops(t *testing.T) {
 		e.svc.Run(ctx, nil, func(string) bool { return false }, func(st WorkerStatus) { statuses <- st })
 		close(done)
 	}()
-	idleWith := func(linked int) {
+	// Each pass starts over, so a later one is told apart by its Started time, not a growing count.
+	idleWith := func(since time.Time) {
 		t.Helper()
 		for {
 			select {
 			case st := <-statuses:
-				if st.Activity == Idle && st.Matched.Linked == linked {
+				if st.Activity == Idle && st.MatchPass.Counts.Linked == 1 && !st.MatchPass.Started.Before(since) {
 					return
 				}
 			case <-time.After(10 * time.Second):
-				t.Fatalf("never idle with %d linked", linked)
+				t.Fatalf("never idle with a match pass since %v", since)
 			}
 		}
 	}
-	idleWith(1)
+	idleWith(start)
 	e.series("l1", "t", "Remote Two")
+	beforeWake := time.Now()
 	e.svc.Wake()
-	idleWith(2)
+	idleWith(beforeWake)
 	cancel()
 	<-done
 }
@@ -347,7 +350,7 @@ func TestWorkerDefersLibrariesBeingScanned(t *testing.T) {
 	scanning = false
 	e.fake.OnMatch(func(string) { scanning = true })
 	e.step()
-	if st := e.svc.Status(); st.Matched != (MatchResult{Skipped: 2}) || e.link("s").State != StateNone {
+	if st := e.svc.Status(); st.MatchPass.Counts != (MatchResult{Skipped: 2}) || e.link("s").State != StateNone {
 		t.Fatalf("status = %+v", st)
 	}
 	scanning = false
@@ -372,10 +375,23 @@ func TestWorkerKeepsGoingPastAMatchError(t *testing.T) {
 	e.exec(`CREATE TRIGGER refuse BEFORE INSERT ON metadata_links FOR EACH ROW
 		WHEN (NEW.content_id = 'bad') EXECUTE FUNCTION refuse()`)
 
-	if _, err := e.svc.step(context.Background(), false); err == nil {
+	ctx := context.Background()
+	if _, err := e.svc.step(ctx, false); err == nil {
 		t.Fatal("no error")
 	}
-	if st := e.svc.Status(); st.Matched != (MatchResult{Unmatched: 1}) || st.Refreshed != (RefreshResult{Refreshed: 1}) {
+	st := e.svc.Status()
+	if st.MatchPass.Counts != (MatchResult{Unmatched: 1}) || !st.MatchPass.Running ||
+		st.RefreshPass.Counts != (RefreshResult{Refreshed: 1}) || !st.RefreshPass.Running {
+		t.Fatalf("status = %+v", st)
+	}
+	prev := st.MatchPass.Ended
+
+	// 'bad' fails again, with zero counts this round, which finishes both passes.
+	if _, err := e.svc.step(ctx, false); err == nil {
+		t.Fatal("no error")
+	}
+	st = e.svc.Status()
+	if st.MatchPass.Running || !st.MatchPass.Ended.Equal(*prev) || st.RefreshPass.Running {
 		t.Fatalf("status = %+v", st)
 	}
 }

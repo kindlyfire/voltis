@@ -18,6 +18,7 @@ import (
 )
 
 // reviewTabs select the links each tab of the review page lists.
+// Keep in sync with the query in Summary.
 var reviewTabs = map[string]string{
 	"review":    "l.state = 'review'",
 	"unmatched": "l.state = 'unmatched'",
@@ -127,12 +128,13 @@ func (s *Service) Review(ctx context.Context, q ReviewQuery) (ReviewPage, error)
 	return page, nil
 }
 
-// ReviewSummary counts a library's links waiting for an admin.
+// ReviewSummary counts a library's links on each tab of the review page.
 type ReviewSummary struct {
 	LibraryID string `json:"library_id" db:"library_id"`
 	Review    int    `json:"review"     db:"review"`
 	Unmatched int    `json:"unmatched"  db:"unmatched"`
-	Failed    int    `json:"failed"     db:"failed"` // the last attempt failed
+	Auto      int    `json:"auto"       db:"auto"`
+	Ignored   int    `json:"ignored"    db:"ignored"`
 }
 
 // ProviderHealth tells how refreshing a provider's entries goes.
@@ -150,13 +152,13 @@ type Summary struct {
 }
 
 func (s *Service) Summary(ctx context.Context) (Summary, error) {
-	out := Summary{Libraries: []ReviewSummary{}, Worker: s.Status()}
+	out := Summary{Libraries: []ReviewSummary{}}
 	libs, err := db.Select[ReviewSummary](ctx, s.pool, `
 		SELECT l.library_id, count(*) FILTER (WHERE l.state = 'review') AS review,
 			count(*) FILTER (WHERE l.state = 'unmatched') AS unmatched,
-			count(*) FILTER (WHERE l.last_error IS NOT NULL) AS failed
-		FROM metadata_links l
-		WHERE l.state IN ('review', 'unmatched') AND l.provider = ANY($1)
+			count(*) FILTER (WHERE l.state = 'linked' AND l.origin = 'auto') AS auto,
+			count(*) FILTER (WHERE l.state = 'ignored') AS ignored
+		FROM metadata_links l WHERE l.provider = ANY($1)
 		GROUP BY l.library_id ORDER BY l.library_id
 	`, s.providerNames())
 	if err != nil {
@@ -172,7 +174,13 @@ func (s *Service) Summary(ctx context.Context) (Summary, error) {
 			(SELECT max(fetched_at) FROM provider_entries WHERE provider = p AND fetched_at > '-infinity') AS last_fetched
 		FROM unnest($1::text[]) p
 	`, s.providerNames())
-	return out, err
+	if err != nil {
+		return out, err
+	}
+	// Read after the queries, which narrows the window where a slower HTTP response could
+	// overwrite a newer WS push with a stale status.
+	out.Worker = s.Status()
+	return out, nil
 }
 
 type ReviewAction struct {

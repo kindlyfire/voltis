@@ -163,7 +163,7 @@ func TestMatchFailureBacksOff(t *testing.T) {
 		t.Fatalf("not due, yet = %+v", res)
 	}
 	summary, err := e.svc.Summary(context.Background())
-	if err != nil || !slices.Equal(summary.Libraries, []ReviewSummary{{LibraryID: "l1", Unmatched: 1, Failed: 1}}) {
+	if err != nil || !slices.Equal(summary.Libraries, []ReviewSummary{{LibraryID: "l1", Unmatched: 1}}) {
 		t.Fatalf("summary = %+v (%v)", summary, err)
 	}
 
@@ -624,6 +624,17 @@ func TestSummaryHealth(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// "a" auto-links to a new entry, and "u" finds nothing and is then ignored; s and t are skipped,
+	// already linked.
+	e.fake.Put("4", providertest.Series("Something Else", metadata.Manga))
+	e.series("l1", "a", "Something Else")
+	e.series("l1", "u", "Nothing")
+	e.match()
+	rev := e.link("u").Rev
+	if _, err := e.svc.Ignore(ctx, "u", "fake", &rev); err != nil {
+		t.Fatal(err)
+	}
+
 	e.exec("UPDATE provider_entries SET raw = '{}' WHERE external_id = '1'")
 	e.exec("UPDATE provider_entries SET attempts = 2, last_error = 'down' WHERE external_id = '2'")
 	e.tx(func(tx pgx.Tx) error {
@@ -635,9 +646,12 @@ func TestSummaryHealth(t *testing.T) {
 		t.Fatal(err)
 	}
 	summary, err := e.svc.Summary(ctx)
-	if p := summary.Providers; err != nil || len(p) != 1 || p[0].Provider != "fake" || p[0].Failing != 1 ||
+	if err != nil || !slices.Equal(summary.Libraries, []ReviewSummary{{LibraryID: "l1", Auto: 1, Ignored: 1}}) {
+		t.Fatalf("libraries = %+v (%v)", summary.Libraries, err)
+	}
+	if p := summary.Providers; len(p) != 1 || p[0].Provider != "fake" || p[0].Failing != 1 ||
 		p[0].Undecodable != 1 || !p[0].LastFetched.Equal(last) {
-		t.Fatalf("providers = %+v (%v)", p, err)
+		t.Fatalf("providers = %+v", p)
 	}
 	// The series show why.
 	if l := e.view("s").Links[0]; l.LastError == nil {

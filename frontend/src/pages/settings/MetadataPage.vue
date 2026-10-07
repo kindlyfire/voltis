@@ -16,7 +16,7 @@
                         <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
                             <template v-for="row in details" :key="row.label">
                                 <dt class="text-fg-muted">{{ row.label }}</dt>
-                                <dd>{{ row.value }}</dd>
+                                <dd :title="row.title">{{ row.value }}</dd>
                             </template>
                         </dl>
                     </APopover>
@@ -59,7 +59,14 @@
         <QueryError :mutation="mRefresh" closable />
 
         <div class="flex flex-wrap items-center gap-3">
-            <ASegmented v-model="tab" :options="tabOptions" label="Series" />
+            <div class="max-w-full overflow-x-auto">
+                <ASegmented
+                    v-model="tab"
+                    :options="tabOptions"
+                    label="Series"
+                    class="max-w-none shrink-0"
+                />
+            </div>
             <ATextField
                 v-model="searchInput"
                 label="Search titles"
@@ -322,6 +329,7 @@ import {
 import { settingsApi, settingValue } from '@/utils/api/settings'
 import { libraryAutoMatches } from '@/utils/librarySettings'
 import { plural, useRouteQueryParams } from '@/utils/misc'
+import { formatDuration } from '@/utils/readingTime'
 import { useUndoToast } from '@/utils/useUndoToast'
 
 useHead({ title: 'Metadata' })
@@ -345,6 +353,12 @@ const EMPTY: Record<ReviewTab, string> = {
     unmatched: 'None',
     auto: 'None',
     ignored: 'None',
+}
+const TAB_LABEL: Record<ReviewTab, string> = {
+    review: 'Needs review',
+    unmatched: 'No match',
+    auto: 'Auto-linked',
+    ignored: 'Ignored',
 }
 
 const toast = useToast()
@@ -391,24 +405,15 @@ const qSummary = metadataApi.useSummary()
 const libraryOptions = computed(() =>
     (qLibraries.data.value ?? []).map(l => ({ value: l.id, label: l.name }))
 )
-const counts = computed(() => {
+const tabOptions = computed(() => {
     const rows = (qSummary.data.value?.libraries ?? []).filter(
         s => !libraryId.value || s.library_id === libraryId.value
     )
-    return {
-        review: rows.reduce((n, s) => n + s.review, 0),
-        unmatched: rows.reduce((n, s) => n + s.unmatched, 0),
-    }
+    return TABS.map(t => ({
+        value: t,
+        label: `${TAB_LABEL[t]} (${rows.reduce((n, s) => n + s[t], 0)})`,
+    }))
 })
-const tabOptions = computed(() => [
-    { value: 'review' as const, label: `Needs review (${counts.value.review})` },
-    {
-        value: 'unmatched' as const,
-        label: `No match (${counts.value.unmatched})`,
-    },
-    { value: 'auto' as const, label: 'Auto-linked' },
-    { value: 'ignored' as const, label: 'Ignored' },
-])
 
 function libraryName(id: string) {
     return qLibraries.data.value?.find(l => l.id === id)?.name ?? id
@@ -423,6 +428,7 @@ const activity = computed(() => {
         return { label: `Matching ${libraryName(w.library_id ?? '')}…`, tone: 'primary' } as const
     }
     if (w?.activity === 'refreshing') return { label: 'Refreshing…', tone: 'primary' } as const
+    if (w?.activity === 'idle' && w.retrying) return { label: 'Retrying', tone: 'warning' } as const
     return w?.paused
         ? ({ label: 'Paused', tone: 'warning' } as const)
         : ({ label: 'Idle', tone: 'neutral' } as const)
@@ -457,16 +463,24 @@ const matchCounts = (c: MatchCounts) =>
         .join(', ')
 const refreshCounts = (c: RefreshCounts) =>
     [`${c.refreshed} refreshed`, c.failed && `${c.failed} failed`].filter(Boolean).join(', ')
-function passValue<T extends object>(pass: WorkerPass<T>, counts: (c: T) => string) {
-    if (!Object.values(pass.counts).some(Boolean)) return '—'
-    return `${pass.finished ? ago(pass.finished) : 'Running'}: ${counts(pass.counts)}`
+/** A running pass reads as finished once the worker is idle. */
+function passRow<T extends object>(label: string, pass: WorkerPass<T>, counts: (c: T) => string) {
+    if (!pass.started) return { label, value: 'Never' }
+    const running = pass.running && worker.value?.activity !== 'idle'
+    const end = running ? now.value.getTime() : Date.parse(pass.ended!)
+    const took = formatDuration((end - Date.parse(pass.started)) / 60_000)
+    const when = running ? `Running for ${took}` : `${ago(pass.ended!)}, took ${took}`
+    return {
+        label,
+        value: `${when}: ${counts(pass.counts)}`,
+        title: new Date(pass.started).toLocaleString(),
+    }
 }
-const details = computed(() => {
+const details = computed<{ label: string; value: string; title?: string }[]>(() => {
     const w = worker.value!
     return [
-        { label: 'Last match', value: passValue(w.match_pass, matchCounts) },
-        { label: 'Last refresh', value: passValue(w.refresh_pass, refreshCounts) },
-        { label: 'Since start', value: `${matchCounts(w.matched)}, ${refreshCounts(w.refreshed)}` },
+        passRow('Last match', w.match_pass, matchCounts),
+        passRow('Last refresh', w.refresh_pass, refreshCounts),
         ...(qSummary.data.value?.providers ?? []).map(h => ({
             label: `${providerLabel(h.provider)} fetched`,
             value: h.last_fetched ? ago(h.last_fetched) : 'Never',

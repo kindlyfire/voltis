@@ -2,6 +2,7 @@ package linking
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"maps"
@@ -30,36 +31,92 @@ type WorkerStatus struct {
 	LibraryID   string              `json:"library_id,omitempty"` // the library being matched
 	Stale       int                 `json:"stale"`                // rows left for recomputing
 	Paused      bool                `json:"paused"`               // matching is paused
-	Matched     MatchResult         `json:"matched"`              // since the server started
-	Refreshed   RefreshResult       `json:"refreshed"`
-	MatchPass   Pass[MatchResult]   `json:"match_pass"` // the running or last one
+	Retrying    bool                `json:"retrying"`             // waiting out the error backoff
+	MatchPass   Pass[MatchResult]   `json:"match_pass"`           // the running or last finished one
 	RefreshPass Pass[RefreshResult] `json:"refresh_pass"`
 }
 
-// Pass is a run of rounds that had work.
+// Pass is the running or last finished run of rounds that had work, for one kind.
 type Pass[T any] struct {
-	Counts   T          `json:"counts"`
-	Finished *time.Time `json:"finished"` // nil while it runs
+	Counts  T          `json:"counts"`
+	Started *time.Time `json:"started"` // nil: none yet
+	Ended   *time.Time `json:"ended"`   // end of its last round with work
+	Running bool       `json:"running"`
 }
 
-// advance adds a round's counts to the running pass, or starts one, and to total. A round without
-// any finishes the running pass.
-func advance[T interface {
+// counter is a round's outcome: comparable, so a zero value means none happened, and summable into
+// a pass's running total.
+type counter[T any] interface {
 	comparable
 	plus(T) T
-}](p *Pass[T], total *T, counts T) {
-	var none T
-	running := p.Finished == nil && p.Counts != none
-	switch {
-	case counts == none:
-		if running {
-			p.Finished = new(time.Now())
+}
+
+// advancePass adds a round's counts to the selected pass, starting one if none runs. A round
+// without any finishes it, whether or not it errored, and saves it outside the status lock.
+func advancePass[T counter[T]](ctx context.Context, s *Service, kind string, pass func(*WorkerStatus) *Pass[T],
+	counts T, start, end time.Time) {
+	var finished *Pass[T]
+	s.update(func(st *WorkerStatus) {
+		p := pass(st)
+		var none T
+		switch {
+		case counts == none:
+			if p.Running {
+				p.Running = false
+				finished = new(*p)
+			}
+			return
+		case !p.Running:
+			*p = Pass[T]{Started: &start}
 		}
+		p.Counts, p.Ended, p.Running = p.Counts.plus(counts), &end, true
+	})
+	if finished == nil {
 		return
-	case !running:
-		*p = Pass[T]{}
 	}
-	p.Counts, *total = p.Counts.plus(counts), (*total).plus(counts)
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO metadata_passes (kind, started_at, ended_at, counts) VALUES ($1, $2, $3, $4)
+		ON CONFLICT (kind) DO UPDATE SET
+			started_at = EXCLUDED.started_at, ended_at = EXCLUDED.ended_at, counts = EXCLUDED.counts
+	`, kind, finished.Started, finished.Ended, finished.Counts)
+	if err != nil && ctx.Err() == nil {
+		slog.Error("[linking] save pass", "kind", kind, "err", err)
+	}
+}
+
+// loadPass decodes a saved pass's counts into p.
+func loadPass[T any](p *Pass[T], counts json.RawMessage, started, ended time.Time) error {
+	if err := json.Unmarshal(counts, &p.Counts); err != nil {
+		return err
+	}
+	p.Started, p.Ended = &started, &ended
+	return nil
+}
+
+// loadPasses loads each kind's last finished pass, so it survives a restart.
+func (s *Service) loadPasses(ctx context.Context) error {
+	type row struct {
+		Kind      string          `db:"kind"`
+		StartedAt time.Time       `db:"started_at"`
+		EndedAt   time.Time       `db:"ended_at"`
+		Counts    json.RawMessage `db:"counts"`
+	}
+	rows, err := db.Select[row](ctx, s.pool, "SELECT kind, started_at, ended_at, counts FROM metadata_passes")
+	if err != nil {
+		return err
+	}
+	var errs []error
+	s.update(func(st *WorkerStatus) {
+		for _, r := range rows {
+			switch r.Kind {
+			case "match":
+				errs = append(errs, loadPass(&st.MatchPass, r.Counts, r.StartedAt, r.EndedAt))
+			case "refresh":
+				errs = append(errs, loadPass(&st.RefreshPass, r.Counts, r.StartedAt, r.EndedAt))
+			}
+		}
+	})
+	return errors.Join(errs...)
 }
 
 var pushDelay = time.Second
@@ -106,12 +163,18 @@ func (s *Service) Run(ctx context.Context, paused func() bool, scanning func(lib
 	s.mu.Lock()
 	s.onStatus = onStatus
 	s.mu.Unlock()
+	if err := s.loadPasses(ctx); err != nil {
+		slog.Error("[linking] load passes", "err", err)
+	}
 	for ctx.Err() == nil {
 		wait, err := s.step(ctx, paused != nil && paused())
-		if err != nil && ctx.Err() == nil {
+		switch {
+		case err != nil && ctx.Err() == nil:
 			slog.Error("[linking] background work failed", "err", err)
-			s.update(func(st *WorkerStatus) { st.Activity, st.LibraryID = Idle, "" })
+			s.update(func(st *WorkerStatus) { st.Activity, st.LibraryID, st.Retrying = Idle, "", true })
 			wait = time.Minute
+		case err == nil:
+			s.update(func(st *WorkerStatus) { st.Retrying = false })
 		}
 		select {
 		case <-ctx.Done():
@@ -134,26 +197,29 @@ func (s *Service) step(ctx context.Context, paused bool) (time.Duration, error) 
 	}
 	var libs []libraryPlan
 	var matched MatchResult
-	var matchErr, refreshErr error
+	var matchErr error
+	matchStart := time.Now()
 	if !paused {
 		if libs, matchErr = s.matchLibraries(ctx); matchErr == nil {
 			matched, matchErr = s.matchNext(ctx, c, libs)
 		}
 	}
+	if ctx.Err() == nil {
+		advancePass(ctx, s, "match", func(st *WorkerStatus) *Pass[MatchResult] { return &st.MatchPass },
+			matched, matchStart, time.Now())
+	}
+
 	// A match failing again and again must not hold refreshes back.
 	var refreshed RefreshResult
+	var refreshErr error
+	refreshStart := time.Now()
 	if ctx.Err() == nil {
 		refreshed, refreshErr = s.refreshBatch(ctx, c)
 	}
-
-	s.update(func(st *WorkerStatus) {
-		if matched != (MatchResult{}) || matchErr == nil {
-			advance(&st.MatchPass, &st.Matched, matched)
-		}
-		if refreshed != (RefreshResult{}) || refreshErr == nil {
-			advance(&st.RefreshPass, &st.Refreshed, refreshed)
-		}
-	})
+	if ctx.Err() == nil {
+		advancePass(ctx, s, "refresh", func(st *WorkerStatus) *Pass[RefreshResult] { return &st.RefreshPass },
+			refreshed, refreshStart, time.Now())
+	}
 	if err := errors.Join(matchErr, refreshErr); err != nil {
 		return 0, err
 	}

@@ -157,12 +157,12 @@ func TestMetadataReview(t *testing.T) {
 	}
 	summary := c.Get("/api/metadata/summary").Assert(t, 200).JSON()
 	if libs := summary["libraries"].([]any); len(libs) != 1 || s(libs[0].(map[string]any)["library_id"]) != lib ||
-		libs[0].(map[string]any)["review"] != 1.0 || libs[0].(map[string]any)["failed"] != 0.0 {
+		libs[0].(map[string]any)["review"] != 1.0 {
 		t.Fatalf("summary = %v", summary)
 	}
 	waitUntil(t, "the worker's status", func() bool {
 		worker := c.Get("/api/metadata/summary").Assert(t, 200).JSON()["worker"].(map[string]any)
-		return worker["matched"].(map[string]any)["review"] == 1.0
+		return worker["match_pass"].(map[string]any)["counts"].(map[string]any)["review"] == 1.0
 	})
 
 	res := c.Post("/api/metadata/review/resolve", map[string]any{"items": []map[string]any{

@@ -168,12 +168,14 @@ export interface ReviewItem {
     link: MetadataLink
 }
 
-/** Links waiting for an admin in a library; `failed` counts unmatched ones whose last attempt failed. */
+/** A library's links on each tab of the review page. */
 export interface ReviewSummary {
     library_id: string
     review: number
     unmatched: number
-    failed: number
+    /** Linked automatically; excludes manual links. */
+    auto: number
+    ignored: number
 }
 
 export interface MatchCounts {
@@ -191,12 +193,14 @@ export interface RefreshCounts {
     failed: number
 }
 
-/** A run of the worker's rounds that had work. */
+/** The running or last finished run of the worker's rounds that had work. */
 export interface WorkerPass<T> {
-    /** All zero: none yet. */
     counts: T
-    /** Null while it runs. */
-    finished: string | null
+    /** Null: none yet. */
+    started: string | null
+    /** The end of its last round with work. */
+    ended: string | null
+    running: boolean
 }
 
 /** What background matching and refreshing is doing. */
@@ -207,10 +211,8 @@ export interface WorkerStatus {
     /** Rows left to recompute for a new metadata version. */
     stale: number
     paused: boolean
-    /** Since the server started. */
-    matched: MatchCounts
-    refreshed: RefreshCounts
-    /** The running or last pass. */
+    /** Waiting out the error backoff. */
+    retrying: boolean
     match_pass: WorkerPass<MatchCounts>
     refresh_pass: WorkerPass<RefreshCounts>
 }

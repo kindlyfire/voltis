@@ -77,8 +77,12 @@ beforeEach(async () => {
             return { fields: [], providers: [{ name: 'mangabaka', label: 'MangaBaka' }] }
         }
         if (url === '/metadata/summary') {
+            const now = Date.now()
             return {
-                libraries: [{ library_id: 'l1', review: 2, unmatched: 0, failed: 0 }],
+                libraries: [
+                    { library_id: 'l1', review: 2, unmatched: 0, auto: 3, ignored: 1 },
+                    { library_id: 'l2', review: 0, unmatched: 0, auto: 0, ignored: 0 },
+                ],
                 providers: [
                     {
                         provider: 'mangabaka',
@@ -91,16 +95,20 @@ beforeEach(async () => {
                     activity: 'matching',
                     library_id: 'l1',
                     paused: false,
-                    matched: { linked: 3, review: 2, unmatched: 1, failed: 0, skipped: 0 },
-                    refreshed: { refreshed: 0, failed: 0 },
+                    retrying: false,
+                    // Still running: started 12 minutes ago.
                     match_pass: {
                         counts: { linked: 3, review: 2, unmatched: 1, failed: 0, skipped: 0 },
-                        finished: null,
+                        started: new Date(now - 12 * 60_000).toISOString(),
+                        ended: new Date(now - 1000).toISOString(),
+                        running: true,
                     },
+                    // Finished: ran for 12 minutes, ending 2 hours ago.
                     refresh_pass: {
-                        counts: { refreshed: 0, failed: 0 },
-                        started: null,
-                        finished: null,
+                        counts: { refreshed: 5, failed: 0 },
+                        started: new Date(now - 2 * 60 * 60_000 - 12 * 60_000).toISOString(),
+                        ended: new Date(now - 2 * 60 * 60_000).toISOString(),
+                        running: false,
                     },
                 },
             }
@@ -249,7 +257,7 @@ describe('MetadataPage', () => {
 
     it('rematches an ignored series, undoably', async () => {
         await flushPromises()
-        await button('Ignored').trigger('click')
+        await button('Ignored (1)').trigger('click')
         await flushPromises()
         await wrapper
             .findAll('button')
@@ -301,7 +309,7 @@ describe('MetadataPage', () => {
 
     it('keeps the list state in the URL', async () => {
         await flushPromises()
-        await button('Auto-linked').trigger('click')
+        await button('Auto-linked (3)').trigger('click')
         await flushPromises()
         expect(router.currentRoute.value.query.tab).toBe('auto')
         await button('Needs review (2)').trigger('click')
@@ -338,9 +346,8 @@ describe('MetadataPage', () => {
         await button('Details').trigger('click')
         await flushPromises()
         const details = document.querySelector('[role="dialog"]')!.textContent
-        expect(details).toContain('Last matchRunning: 3 linked, 2 review, 1 unmatched')
-        expect(details).toContain('Last refresh—')
-        expect(details).toContain('Since start3 linked, 2 review, 1 unmatched, 0 refreshed')
+        expect(details).toContain('Last matchRunning for 12 min: 3 linked, 2 review, 1 unmatched')
+        expect(details).toContain('Last refresh2 hours ago, took 12 min: 5 refreshed')
         expect(details).toContain('MangaBaka fetched')
 
         await button('Match now').trigger('click')
@@ -355,9 +362,13 @@ describe('MetadataPage', () => {
     it('disables Match now where nothing matches automatically', async () => {
         await flushPromises()
         expect(button('Match now').attributes('aria-disabled')).toBeUndefined()
+        expect(wrapper.text()).toContain('Needs review (2)')
         wrapper.findComponent(ASelect).vm.$emit('update:modelValue', 'l2')
         await flushPromises()
         expect(button('Match now').attributes('aria-disabled')).toBe('true')
+        // The counts follow the library filter too.
+        expect(wrapper.text()).toContain('Needs review (0)')
+        expect(wrapper.text()).toContain('Auto-linked (0)')
         await button('Match now').trigger('click')
         await flushPromises()
         expect(requests).toEqual([])
