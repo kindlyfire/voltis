@@ -85,6 +85,9 @@ func facetKind(c echo.Context) (string, error) {
 }
 
 func (fr *FacetRoutes) list(c echo.Context) error {
+	if _, err := requireUser(c); err != nil {
+		return err
+	}
 	kind, err := facetKind(c)
 	if err != nil {
 		return err
@@ -153,6 +156,9 @@ func (fr *FacetRoutes) list(c echo.Context) error {
 }
 
 func (fr *FacetRoutes) entry(c echo.Context) error {
+	if _, err := requireUser(c); err != nil {
+		return err
+	}
 	kind, err := facetKind(c)
 	if err != nil {
 		return err

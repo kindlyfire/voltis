@@ -63,6 +63,13 @@ func TestFacetRoutes(t *testing.T) {
 		}
 	})
 
+	t.Run("anonymous", func(t *testing.T) {
+		anon := newClient(t, pool)
+		for _, path := range []string{"people", "people/dana-kell", "colors"} {
+			anon.Get("/api/facets/"+path).Assert(t, 401)
+		}
+	})
+
 	entry := func(path string) string {
 		e := c.Get("/api/facets/"+path).Assert(t, 200).JSON()
 		return fmt.Sprintf("%v:%v:%v %v", e["key"], e["name"], e["count"], e["roles"])
