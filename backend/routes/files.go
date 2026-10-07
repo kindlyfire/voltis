@@ -569,7 +569,7 @@ func (fr *FileRoutes) getDownloadInfo(c echo.Context) error {
 		TotalSize *int `db:"total_size"`
 	}
 	err = fr.pool.QueryRow(ctx, `
-		SELECT COUNT(*) AS file_count, SUM(file_size)::int AS total_size
+		SELECT COUNT(*) AS file_count, SUM(file_size)::bigint AS total_size
 		FROM content WHERE parent_id = $1 AND file_uri IS NOT NULL
 	`, contentID).Scan(&stats.FileCount, &stats.TotalSize)
 	if err != nil {

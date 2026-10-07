@@ -364,3 +364,28 @@ func readFrames(t *testing.T, body []byte) (map[string]any, []offlineFrame) {
 	}
 	return manifest, frames
 }
+
+func TestDownloadInfoAbove2GiB(t *testing.T) {
+	pool := newTestPool(t)
+	c := newAdminClient(t, pool)
+	seriesID := newTestContent(t, pool)
+	mustExec(t, pool, `UPDATE content SET type = 'comic_series' WHERE id = $1`, seriesID)
+
+	var childID string
+	for i, size := range []int64{3_000_000_000, 1} {
+		id := models.MakeContentID()
+		mustExec(t, pool, `
+			INSERT INTO content (id, uri_part, uri, type, library_id, parent_id, file_uri, file_size)
+			SELECT $1, $1, 'file:///lib/' || $1, 'comic', library_id, id, '/lib/' || $1 || '.cbz', $3
+			FROM content WHERE id = $2
+		`, id, seriesID, size)
+		if i == 0 {
+			childID = id
+		}
+	}
+
+	info := c.Get("/api/files/download-info/"+seriesID).Assert(t, 200).JSON()
+	assertEq(t, info["file_count"], any(2.0))
+	assertEq(t, info["total_size"], any(3_000_000_001.0))
+	assertEq(t, c.Get("/api/files/download-info/"+childID).Assert(t, 200).JSON()["total_size"], any(3_000_000_000.0))
+}
