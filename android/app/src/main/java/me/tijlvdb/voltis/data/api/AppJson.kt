@@ -6,4 +6,6 @@ import kotlinx.serialization.json.Json
 val AppJson = Json {
     ignoreUnknownKeys = true
     explicitNulls = false
+    // A null for a property with a default, or an unknown enum value, takes the default.
+    coerceInputValues = true
 }

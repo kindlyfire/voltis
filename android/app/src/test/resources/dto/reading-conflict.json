@@ -1,0 +1,24 @@
+{
+    "message": "reading state changed elsewhere",
+    "state": {
+        "revision": "tq7k2m9x4c1v8b3n0:41",
+        "status": "reading",
+        "status_updated_at": "2026-10-05T09:16:26.757088+04:00",
+        "progress": {
+            "current_page": 2,
+            "progress_percent": 33.3
+        },
+        "progress_updated_at": "2026-10-05T09:16:26.757088+04:00",
+        "last_read_at": "2026-10-05T09:16:26.757088+04:00"
+    },
+    "series": {
+        "id": "c_X4C2JtLo",
+        "status": "reading",
+        "revision": "tq7k2m9x4c1v8b3n0:41",
+        "caught_up": false,
+        "children_count": 3,
+        "completed_children_count": 0,
+        "dropped_children_count": 0
+    },
+    "writer": "tq7k2m9x4c1v8b3n0"
+}

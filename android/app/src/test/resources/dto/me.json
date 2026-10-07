@@ -1,0 +1,15 @@
+{
+  "id": "u_HW9gQvOq",
+  "created_at": "2026-10-04T13:32:55.282221+04:00",
+  "updated_at": "2026-10-04T18:33:22.92455+04:00",
+  "username": "demo",
+  "email": null,
+  "permissions": ["ADMIN"],
+  "preferences": {
+    "tutorials": { "comicReader": true },
+    "libraries": { "l_a1": { "visibility": "overflow" }, "l_b2": {} }
+  },
+  "has_password": true,
+  "session_method": "password",
+  "can_logout": true
+}

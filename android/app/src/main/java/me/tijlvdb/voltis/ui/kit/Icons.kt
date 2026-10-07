@@ -1,0 +1,58 @@
+package me.tijlvdb.voltis.ui.kit
+
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.res.painterResource
+import me.tijlvdb.voltis.R
+
+/** Material Symbols (light), the glyphs `frontend/src/ui/icons.ts` re-exports, as vector drawables. */
+object VIcons {
+    val AlertCircle: Painter @Composable get() = painterResource(R.drawable.ic_error_outline)
+    val ArrowLeft: Painter @Composable get() = painterResource(R.drawable.ic_arrow_back)
+    val ArrowRight: Painter @Composable get() = painterResource(R.drawable.ic_arrow_forward)
+    val BookOpen: Painter @Composable get() = painterResource(R.drawable.ic_menu_book_outline)
+    val BookOpenFilled: Painter @Composable get() = painterResource(R.drawable.ic_menu_book)
+    val BookmarkFilled: Painter @Composable get() = painterResource(R.drawable.ic_bookmark)
+    val Bookshelf: Painter @Composable get() = painterResource(R.drawable.ic_shelves_outline)
+    val BookshelfFilled: Painter @Composable get() = painterResource(R.drawable.ic_shelves)
+    val Check: Painter @Composable get() = painterResource(R.drawable.ic_check)
+    val ChevronDown: Painter @Composable get() = painterResource(R.drawable.ic_keyboard_arrow_down)
+    val ChevronLeft: Painter @Composable get() = painterResource(R.drawable.ic_chevron_left)
+    val ChevronRight: Painter @Composable get() = painterResource(R.drawable.ic_chevron_right)
+    val ChevronUp: Painter @Composable get() = painterResource(R.drawable.ic_keyboard_arrow_up)
+    val Close: Painter @Composable get() = painterResource(R.drawable.ic_close)
+    val CloudOff: Painter @Composable get() = painterResource(R.drawable.ic_cloud_off)
+    val Cog: Painter @Composable get() = painterResource(R.drawable.ic_settings)
+    val CogFilled: Painter @Composable get() = painterResource(R.drawable.ic_settings_filled)
+    val Delete: Painter @Composable get() = painterResource(R.drawable.ic_delete_outline)
+    val DotsVertical: Painter @Composable get() = painterResource(R.drawable.ic_more_vert)
+    val Download: Painter @Composable get() = painterResource(R.drawable.ic_download)
+    val DownloadDone: Painter @Composable get() = painterResource(R.drawable.ic_download_done)
+    val Edit: Painter @Composable get() = painterResource(R.drawable.ic_edit_outline)
+    val Explore: Painter @Composable get() = painterResource(R.drawable.ic_explore_outline)
+    val Filter: Painter @Composable get() = painterResource(R.drawable.ic_filter_list)
+    val Home: Painter @Composable get() = painterResource(R.drawable.ic_home_outline)
+    val HomeFilled: Painter @Composable get() = painterResource(R.drawable.ic_home)
+    val ImageOff: Painter @Composable get() = painterResource(R.drawable.ic_hide_image)
+    val Information: Painter @Composable get() = painterResource(R.drawable.ic_info)
+    val ListAlt: Painter @Composable get() = painterResource(R.drawable.ic_list_alt_outline)
+    val Logout: Painter @Composable get() = painterResource(R.drawable.ic_logout)
+    val Magnify: Painter @Composable get() = painterResource(R.drawable.ic_search)
+    val Menu: Painter @Composable get() = painterResource(R.drawable.ic_menu)
+    val Minus: Painter @Composable get() = painterResource(R.drawable.ic_remove)
+    val OpenInNew: Painter @Composable get() = painterResource(R.drawable.ic_open_in_new)
+    val PauseFilled: Painter @Composable get() = painterResource(R.drawable.ic_pause)
+    val PlayFilled: Painter @Composable get() = painterResource(R.drawable.ic_play_arrow)
+    val Plus: Painter @Composable get() = painterResource(R.drawable.ic_add)
+    val Queued: Painter @Composable get() = painterResource(R.drawable.ic_schedule)
+    val Refresh: Painter @Composable get() = painterResource(R.drawable.ic_refresh)
+    val Restart: Painter @Composable get() = painterResource(R.drawable.ic_restart_alt)
+    val SelectMode: Painter @Composable get() = painterResource(R.drawable.ic_library_add_check_outline)
+    val SelectModeFilled: Painter @Composable get() = painterResource(R.drawable.ic_library_add_check)
+    val SortAscending: Painter @Composable get() = painterResource(R.drawable.ic_arrow_upward)
+    val SortDescending: Painter @Composable get() = painterResource(R.drawable.ic_arrow_downward)
+    val Star: Painter @Composable get() = painterResource(R.drawable.ic_star_outline)
+    val StarFilled: Painter @Composable get() = painterResource(R.drawable.ic_star)
+    val Tune: Painter @Composable get() = painterResource(R.drawable.ic_tune)
+    val Updated: Painter @Composable get() = painterResource(R.drawable.ic_update)
+}

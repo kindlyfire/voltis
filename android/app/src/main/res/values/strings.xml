@@ -1,8 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name">Voltis</string>
     <string name="loading">Loading</string>
     <string name="retry">Retry</string>
+    <string name="back">Back</string>
+    <string name="more_options">More options</string>
+    <string name="cancel">Cancel</string>
+    <string name="confirm">Confirm</string>
 
     <string name="server_title">Connect to a server</string>
     <string name="server_url">Server address</string>
@@ -19,16 +23,539 @@
     <string name="login_setup_needed">This server isn\'t set up yet.</string>
     <string name="login_finish_setup">Finish setup in a browser</string>
     <string name="login_change_server">Change server</string>
+    <string name="login_change_server_confirm">Change server?</string>
+    <string name="login_change_server_text">Your downloads and unsynced changes stay on this device. They come back when you sign in to this server again.</string>
 
-    <string name="home_signed_in_as">Signed in as %1$s</string>
-    <string name="home_method">Sign-in method: %1$s</string>
-    <string name="home_sign_out">Sign out</string>
+    <string name="tab_home">Home</string>
+    <string name="tab_libraries">Libraries</string>
+    <string name="tab_search">Search</string>
+    <string name="tab_settings">Settings</string>
+
+    <string name="home_continue">Continue reading</string>
+    <string name="shortcut_continue">Continue</string>
+    <string name="home_updated">Recently updated</string>
+    <string name="home_added">Recently added</string>
+    <string name="home_nothing_added">Nothing has been added yet.</string>
+    <string name="home_no_libraries">No libraries yet</string>
+    <string name="home_no_libraries_admin">Add one in the web app.</string>
+    <string name="home_no_libraries_user">Ask your server admin to import something.</string>
+    <string name="see_all">See all %1$s</string>
+
+    <string name="libraries_all">All libraries</string>
+    <string name="libraries_others">Others</string>
+    <string name="libraries_collections">Collections</string>
+    <string name="libraries_section">Libraries</string>
+    <string name="library">Library</string>
+    <string name="library_clear">Clear library</string>
+
+    <string name="discover">Discover</string>
+    <string name="facet_genres">Genres</string>
+    <string name="facet_tags">Tags</string>
+    <string name="facet_people">People</string>
+    <string name="facet_publishers">Publishers</string>
+    <string name="discover_filter">Filter</string>
+    <string name="discover_kind">Kind</string>
+    <string name="discover_filter_placeholder">Filter…</string>
+    <string name="discover_name">Name</string>
+    <string name="discover_count">Count</string>
+    <string name="sorted_ascending">Sorted ascending</string>
+    <string name="sorted_descending">Sorted descending</string>
+    <string name="discover_no_matches">No matches</string>
+    <string name="discover_none">None yet</string>
+    <string name="discover_load_more">Load more</string>
+    <!-- A Discover row, as TalkBack reads it: the value, then its count. -->
+    <string name="discover_row">%1$s, %2$s</string>
+    <plurals name="discover_total_genres">
+        <item quantity="one">%1$d genre</item>
+        <item quantity="other">%1$d genres</item>
+    </plurals>
+    <plurals name="discover_total_tags">
+        <item quantity="one">%1$d tag</item>
+        <item quantity="other">%1$d tags</item>
+    </plurals>
+    <plurals name="discover_total_people">
+        <item quantity="one">%1$d person</item>
+        <item quantity="other">%1$d people</item>
+    </plurals>
+    <plurals name="discover_total_publishers">
+        <item quantity="one">%1$d publisher</item>
+        <item quantity="other">%1$d publishers</item>
+    </plurals>
+    <string name="facet_not_found">Not found</string>
+
+    <string name="lists_title">Lists</string>
+    <string name="lists_empty">No lists yet</string>
+    <string name="lists_empty_text">Collect series and books into lists to keep track of them.</string>
+    <plurals name="lists_entries">
+        <item quantity="one">%1$d entry</item>
+        <item quantity="other">%1$d entries</item>
+    </plurals>
+    <string name="lists_updated">Updated %1$s</string>
+    <string name="list_visibility_public">Public</string>
+    <string name="list_visibility_private">Private</string>
+    <string name="list_visibility_unlisted">Unlisted</string>
+    <!-- The visibility, the entry count, then "Updated {date}". -->
+    <string name="list_meta">%1$s · %2$s · %3$s</string>
+    <string name="list_no_entries">No entries yet. Add series or books from their page, or from a library in select mode.</string>
+    <string name="list_gone">This list no longer exists</string>
+    <string name="list_notes">Notes</string>
+    <string name="lists_create">Create list</string>
+    <string name="lists_edit_named">Edit %1$s</string>
+    <string name="list_edit">Edit list</string>
+    <string name="list_name">Name</string>
+    <string name="list_description">Description</string>
+    <string name="list_visibility">Visibility</string>
+    <string name="list_name_required">Name is required</string>
+    <string name="list_create_confirm">Create</string>
+    <string name="list_delete">Delete</string>
+    <string name="list_delete_title">Delete list?</string>
+    <string name="list_delete_text">%1$s and its entries will be deleted. The series and books stay in your libraries.</string>
+    <string name="list_created">Created %1$s</string>
+    <string name="list_saved">List saved</string>
+    <string name="list_deleted">Deleted %1$s</string>
+    <string name="list_create_unknown">Couldn\'t confirm %1$s was created</string>
+    <string name="entry_edit_notes">Edit notes</string>
+    <string name="entry_notes_saved">Notes saved</string>
+    <string name="entry_move_up">Move up</string>
+    <string name="entry_move_down">Move down</string>
+    <string name="entry_remove">Remove from list</string>
+    <string name="entry_removed">Removed %1$s from the list</string>
+    <string name="entry_moved">Moved to %1$d of %2$d</string>
+    <string name="entry_move_unknown">Couldn\'t confirm the move</string>
+    <string name="entry_already_first">Already first</string>
+    <string name="entry_already_last">Already last</string>
+    <string name="entry_gone">No longer in this list</string>
+    <string name="entry_options">More options for %1$s</string>
+    <string name="lists_add_to_list">Add to list</string>
+    <string name="lists_none_addable">These can\'t be added to a list</string>
+    <string name="lists_add_to_lists">Add to lists</string>
+    <plurals name="lists_items_selected">
+        <item quantity="one">%1$d item selected</item>
+        <item quantity="other">%1$d items selected</item>
+    </plurals>
+    <!-- A list in the add-to-list sheet: its name, then its visibility. -->
+    <string name="lists_sheet_row">%1$s · %2$s</string>
+    <string name="lists_added_to">Added to %1$s</string>
+    <string name="lists_removed_from">Removed from %1$s</string>
+    <string name="lists_created_not_added">Created %1$s, but couldn\'t add to it: %2$s</string>
+    <string name="lists_not_added">%1$s couldn\'t be added to %2$s</string>
+    <string name="lists_new">New list</string>
+    <string name="lists_new_name">New list name</string>
+    <string name="lists_add">Add</string>
+    <!-- "Added {entries} to {lists}", from the two plurals below. -->
+    <string name="lists_added_entries">Added %1$s to %2$s</string>
+    <plurals name="lists_added_entry_count">
+        <item quantity="one">%1$d entry</item>
+        <item quantity="other">%1$d entries</item>
+    </plurals>
+    <string name="lists_added_partial">%1$s. %2$s</string>
+    <string name="lists_nothing_added">Nothing was added</string>
+    <plurals name="lists_not_added_count">
+        <item quantity="one">%1$d entry couldn\'t be added</item>
+        <item quantity="other">%1$d entries couldn\'t be added</item>
+    </plurals>
+    <plurals name="lists_already_in">
+        <item quantity="one">Already in this list</item>
+        <item quantity="other">Already in these lists</item>
+    </plurals>
+    <plurals name="lists_added_list_count">
+        <item quantity="one">%1$d list</item>
+        <item quantity="other">%1$d lists</item>
+    </plurals>
+    <string name="facet_role_all">All (%1$d)</string>
+    <string name="facet_role">%1$s (%2$d)</string>
+
+    <string name="grid_display">Display options</string>
+    <string name="grid_filters">Filters</string>
+    <string name="grid_filters_active">Active</string>
+    <string name="grid_starred">Starred only</string>
+    <plurals name="grid_items">
+        <item quantity="one">%1$d item</item>
+        <item quantity="other">%1$d items</item>
+    </plurals>
+    <string name="grid_no_match">Nothing matches these filters.</string>
+    <string name="grid_empty">Nothing here yet.</string>
+    <string name="reset">Reset</string>
+
+    <string name="filter_status">Status</string>
+    <string name="filter_has_status">Has status</string>
+    <string name="filter_no_status">No status</string>
+    <string name="filter_rating">Rating</string>
+    <string name="filter_has_rating">Has rating</string>
+    <string name="filter_no_rating">No rating</string>
+    <string name="filter_sort">Sort</string>
+    <string name="filter_ascending">Ascending</string>
+    <string name="filter_descending">Descending</string>
+    <string name="sort_title">Title</string>
+    <string name="sort_last_read">Recently read</string>
+    <string name="sort_user_rating">My rating</string>
+    <string name="sort_release_date">Release date</string>
+    <string name="sort_unread_count">Unread count</string>
+    <string name="sort_history">Reading history</string>
+
+    <string name="display_columns">Columns</string>
+    <string name="display_fewer_columns">Fewer columns</string>
+    <string name="display_more_columns">More columns</string>
+    <plurals name="display_column_count">
+        <item quantity="one">%1$d column</item>
+        <item quantity="other">%1$d columns</item>
+    </plurals>
+    <string name="display_visibility">Visibility</string>
+    <string name="display_show_all">Show all</string>
+    <string name="display_hide_count">Hide item count</string>
+    <string name="display_hide_status">Hide reading status</string>
+    <string name="display_hide_highlight">Hide reading highlight</string>
+    <string name="display_hide_title">Hide title</string>
+    <string name="display_hide_progress">Hide progress</string>
+    <string name="display_item_count">Item count</string>
+    <string name="display_count_unread">Unread</string>
+    <string name="display_count_total">Total</string>
+
+    <string name="search_placeholder">Search…</string>
+    <string name="search_clear">Clear search</string>
+    <string name="search_searching">Searching…</string>
+    <string name="search_no_results">No results</string>
+    <string name="search_failed">Search failed</string>
+    <plurals name="search_results">
+        <item quantity="one">%1$d result</item>
+        <item quantity="other">%1$d results</item>
+    </plurals>
+    <string name="type_comic">Comic</string>
+    <string name="type_comic_series">Comic Series</string>
+    <string name="type_book">Book</string>
+    <string name="type_book_series">Book Series</string>
+
+    <!-- A card, as TalkBack reads it. The counted words are the same for every count. -->
+    <string name="card_read">Read %1$s</string>
+    <string name="card_details">Details for %1$s</string>
+    <string name="card_new">New</string>
+    <string name="card_new_count" tools:ignore="PluralsCandidate">%1$d new</string>
+    <string name="card_unread" tools:ignore="PluralsCandidate">%1$d unread</string>
+    <string name="card_items" tools:ignore="PluralsCandidate">%1$d items</string>
+    <string name="card_caught_up">%1$s · Caught up</string>
+
+    <string name="status_reading">Reading</string>
+    <string name="status_completed">Completed</string>
+    <string name="status_on_hold">On Hold</string>
+    <string name="status_dropped">Dropped</string>
+    <string name="status_plan_to_read">Plan to Read</string>
+
+    <string name="progress_page">Page %1$d / %2$d</string>
+    <string name="progress_percent">%1$d%%</string>
+    <string name="progress_read" tools:ignore="PluralsCandidate">%1$d/%2$d read</string>
+    <!-- The read label, then the dropped count. -->
+    <string name="progress_dropped" tools:ignore="PluralsCandidate">%1$s · %2$d dropped</string>
+
+    <!-- Item names within a series; the argument is the number. -->
+    <string name="item_volume">Volume %1$s</string>
+    <string name="item_chapter">Chapter %1$s</string>
+    <string name="item_volume_short">Vol. %1$s</string>
+    <string name="item_chapter_short">Ch. %1$s</string>
+    <string name="item_issue">#%1$s</string>
+
+    <string name="content_view_cover">View the cover of %1$s</string>
+    <string name="content_cover">Cover of %1$s</string>
+    <string name="content_close_cover">Close</string>
+    <string name="content_progress">Progress</string>
+    <string name="content_earlier_chapters">Earlier unread chapters</string>
+    <string name="content_publication">Publication: %1$s</string>
+    <string name="content_contents">Contents</string>
+    <string name="content_details">Details</string>
+    <string name="content_books_unsupported">Books aren\'t supported yet</string>
+
+    <string name="continue_start">Start reading</string>
+    <string name="continue_resume">Resume %1$s</string>
+    <string name="continue_earlier">Read earlier volume</string>
+    <string name="continue_again">Read again</string>
+    <string name="continue_empty_chapters">No readable chapters</string>
+    <string name="content_continue_not_downloaded">Not downloaded</string>
+    <string name="continue_failed">Couldn\'t load · Retry</string>
+
+    <string name="status_label">Reading status</string>
+    <string name="status_placeholder">Set status</string>
+    <string name="status_clear">Clear reading status</string>
+    <string name="status_mark_completed">Mark completed</string>
+    <string name="content_starred">Starred</string>
+    <string name="content_update_progress">Update progress</string>
+    <string name="content_clear">Clear status and position</string>
+    <string name="rating_label">Your rating</string>
+    <string name="rating_clear">Clear rating</string>
+    <plurals name="rating_stars">
+        <item quantity="one">%1$d star</item>
+        <item quantity="other">%1$d stars</item>
+    </plurals>
+
+    <string name="show_more">Show more</string>
+    <string name="show_less">Show less</string>
+    <string name="detail_staff">Staff</string>
+    <string name="detail_publishers">Publishers</string>
+    <string name="detail_published">Published</string>
+    <string name="detail_length">Length</string>
+    <string name="detail_genres">Genres</string>
+    <string name="detail_tags">Tags</string>
+    <string name="detail_links">Links</string>
+    <string name="detail_none">No details</string>
+    <string name="detail_link">%1$s, opens in the browser</string>
+
+    <!-- A length summary; the counted words are the same for every count. -->
+    <string name="length_words">%1$s words</string>
+    <string name="length_page">1 page</string>
+    <string name="length_pages">%1$s pages</string>
+    <string name="length_under_minute">&lt; 1 min</string>
+    <string name="length_minutes">%1$d min</string>
+    <string name="length_hours">%1$d h</string>
+    <string name="length_hours_minutes">%1$d h %2$d min</string>
+    <string name="length_total">%1$s · %2$s</string>
+    <string name="length_left">%1$s · %2$s left</string>
+
+    <string name="msg_marked_reading">Marked as Reading</string>
+    <string name="msg_marked_completed">Marked as Completed</string>
+    <string name="msg_marked_on_hold">Marked as On Hold</string>
+    <string name="msg_marked_dropped">Marked as Dropped</string>
+    <string name="msg_marked_plan_to_read">Marked as Plan to Read</string>
+    <string name="msg_status_cleared">Cleared the reading status</string>
+    <string name="msg_cleared">Cleared the status and position</string>
+    <string name="msg_series_completed">Marked the series completed</string>
+    <string name="msg_progress_updated">Updated the reading progress</string>
+    <string name="msg_starred">Starred</string>
+    <string name="msg_unstarred">Removed the star</string>
+    <plurals name="msg_rated">
+        <item quantity="one">Rated %1$d star</item>
+        <item quantity="other">Rated %1$d stars</item>
+    </plurals>
+    <string name="msg_rating_cleared">Cleared your rating</string>
+    <string name="msg_update_failed">Couldn\'t update</string>
+
+    <string name="clear_confirm">Clear</string>
+    <string name="clear_item">Clears the status, position and reading time of %1$s.</string>
+    <plurals name="clear_series_volumes">
+        <item quantity="one">Clears the status, position and reading time of this series and its %1$d volume.</item>
+        <item quantity="other">Clears the status, position and reading time of this series and its %1$d volumes.</item>
+    </plurals>
+    <plurals name="clear_series_chapters">
+        <item quantity="one">Clears the status, position and reading time of this series and its %1$d chapter.</item>
+        <item quantity="other">Clears the status, position and reading time of this series and its %1$d chapters.</item>
+    </plurals>
+    <string name="complete_title">Mark series completed</string>
+    <string name="complete_volumes">Sets the series\' status. Its volumes keep theirs unless you include them.</string>
+    <string name="complete_chapters">Sets the series\' status. Its chapters keep theirs unless you include them.</string>
+    <plurals name="complete_include_volumes">
+        <item quantity="one">Also mark %1$d unread volume as read</item>
+        <item quantity="other">Also mark %1$d unread volumes as read</item>
+    </plurals>
+    <plurals name="complete_include_chapters">
+        <item quantity="one">Also mark %1$d unread chapter as read</item>
+        <item quantity="other">Also mark %1$d unread chapters as read</item>
+    </plurals>
+    <string name="update_mark_all">Mark all as read</string>
+    <string name="update_mark_through">Mark read through…</string>
+    <string name="update_volume">Volume</string>
+    <string name="update_chapter">Chapter</string>
+    <string name="update_select_volume">Select a volume</string>
+    <string name="update_select_chapter">Select a chapter</string>
+    <string name="update_hint_volumes">Volumes up to and including the selected one are marked completed. Others are unchanged.</string>
+    <string name="update_hint_chapters">Chapters up to and including the selected one are marked completed. Others are unchanged.</string>
+    <string name="update_no_volumes">This series has no volumes.</string>
+    <string name="update_no_chapters">This series has no chapters.</string>
+
+    <string name="reader_page">Page %1$d</string>
+    <string name="reader_pages">Pages %1$d–%2$d</string>
+    <string name="reader_page_of">%1$d of %2$d</string>
+    <string name="reader_page_slider">Page</string>
+    <string name="reader_progress">Reading progress</string>
+    <string name="reader_volumes">Volumes</string>
+    <string name="reader_details">Details</string>
+    <string name="reader_prev_volume">Previous volume</string>
+    <string name="reader_next_volume">Next volume</string>
+    <string name="reader_read_next">Read next</string>
+    <string name="reader_end_series">End of the last chapter</string>
+    <string name="reader_end">The end</string>
+    <string name="reader_back_series">Back to the series</string>
+    <string name="reader_back_comic">Back to the comic</string>
+    <string name="reader_finding_next">Finding what comes next</string>
+    <string name="reader_siblings_error">Couldn\'t find out what comes next.</string>
+    <string name="reader_prev_page">Previous page</string>
+    <string name="reader_next_page">Next page</string>
+    <string name="reader_settings">Display settings</string>
+    <string name="reader_display">Display</string>
+    <string name="reader_auto">Auto</string>
+    <string name="reader_auto_is">Auto: %1$s</string>
+    <string name="reader_mode">Mode</string>
+    <string name="reader_mode_paged">Paged</string>
+    <string name="reader_mode_longstrip">Longstrip</string>
+    <string name="reader_width">Width</string>
+    <string name="reader_percent">%1$d%%</string>
+    <string name="reader_direction">Direction</string>
+    <string name="reader_direction_ltr">LTR</string>
+    <string name="reader_direction_rtl">RTL</string>
+    <string name="reader_left_to_right">Left to right</string>
+    <string name="reader_right_to_left">Right to left</string>
+    <string name="reader_invert_controls">Invert controls</string>
+    <string name="reader_fit">Fit</string>
+    <string name="reader_fit_screen">Screen</string>
+    <string name="reader_fit_width">Width</string>
+    <string name="reader_fit_height">Height</string>
+    <string name="reader_spread">Spread</string>
+    <string name="reader_spread_single">Single</string>
+    <string name="reader_spread_double">Double</string>
+    <string name="reader_shift_spreads">Shift spreads</string>
+    <string name="reader_zoom_wide">Zoom wide pages</string>
+    <string name="sync_changed_elsewhere">Changed on another device</string>
+    <string name="sync_review">Review</string>
+    <string name="sync_review_named">Review %1$s</string>
+    <string name="sync_not_saved">Progress not saved</string>
+    <string name="sync_not_saved_storage_full">Progress not saved: storage is full</string>
+    <string name="sync_page">p.%1$d</string>
+    <string name="sync_percent">%1$d%%</string>
+    <string name="sync_end">the end</string>
+    <string name="sync_here_saved">Here: %1$s · Saved: %2$s</string>
+    <string name="sync_moved_title">You read on another device</string>
+    <string name="sync_stay">Stay here</string>
+    <string name="sync_go">Go there</string>
+    <string name="sync_completed_title">Completed on another device</string>
+    <string name="sync_completed_text">This was marked completed elsewhere. Reading on keeps it completed.</string>
+    <string name="sync_keep_reading">Keep reading</string>
+    <string name="sync_reset">Reset &amp; read again</string>
+    <string name="sync_reset_title">Cleared on another device</string>
+    <string name="sync_reset_text">Its status and position were cleared elsewhere.</string>
+    <string name="sync_continue">Continue here</string>
+    <string name="sync_start">Go to start</string>
+    <string name="sync_followed">Moved to %1$s from another device</string>
+    <string name="sync_status_elsewhere">Marked %1$s on another device</string>
+    <string name="sync_status_cleared_elsewhere">Status cleared on another device</string>
+    <string name="sync_clear_failed">Couldn\'t clear: %1$s</string>
+    <string name="undo">Undo</string>
+    <string name="sync_moved_to_reading">Moved to Reading</string>
+    <string name="sync_marked_completed">Marked completed</string>
+    <string name="sync_series_moved">Series moved to Reading</string>
+    <string name="sync_undo_failed">Couldn\'t undo: %1$s</string>
+    <string name="sync_move_series_failed">Couldn\'t move the series to Reading: %1$s</string>
+    <string name="sync_complete_series_failed">Couldn\'t complete the series: %1$s</string>
+    <string name="sync_held_on_hold">Series on hold</string>
+    <string name="sync_held_dropped">Series dropped</string>
+    <string name="sync_held_text">This series is %1$s. Move it to Reading?</string>
+    <string name="sync_held_moved">%1$s moved to Reading. This series is %2$s. Move it to Reading?</string>
+    <string name="sync_held_completed">%1$s marked completed. This series is %2$s. Move it to Reading?</string>
+    <string name="sync_this_item">This item</string>
+    <string name="sync_held_keep">Keep %1$s</string>
+    <string name="sync_held_move">Move to Reading</string>
+    <string name="attention_title">Needs attention</string>
+    <plurals name="attention_items">
+        <item quantity="one">%d item needs attention</item>
+        <item quantity="other">%d items need attention</item>
+    </plurals>
+    <string name="attention_empty">Nothing needs attention.</string>
+    <string name="attention_dismiss">Dismiss</string>
+    <string name="attention_dismiss_named">Dismiss %1$s</string>
+    <string name="attention_unsynced">Couldn\'t sync: %1$s</string>
+    <string name="attention_unsynced_text">The star or rating wasn\'t sent.</string>
+    <string name="attention_discard">Discard</string>
+    <string name="attention_discard_named">Discard %1$s</string>
+    <string name="attention_discard_title">Discard this change?</string>
+    <string name="attention_discard_text">The star and rating set on this device for %1$s won\'t be sent.</string>
+    <string name="attention_review_failed">Couldn\'t check</string>
+    <string name="notice_not_applied">%1$s wasn\'t applied: changed on another device</string>
+    <string name="notice_maybe_not_applied">%1$s may not have been applied: changed on another device</string>
+    <plurals name="notices_not_applied">
+        <item quantity="one">%d change wasn\'t applied</item>
+        <item quantity="other">%d changes weren\'t applied</item>
+    </plurals>
+    <string name="notices_view">View</string>
+    <string name="notice_refused">Couldn\'t sync: %1$s</string>
+    <string name="notice_gone">No longer on the server</string>
+    <string name="notice_titled">%1$s: %2$s</string>
+    <string name="notice_cmd_clear">Clear</string>
+    <string name="notice_cmd_mark_completed">Mark completed</string>
+    <string name="notice_cmd_mark_through">Update progress</string>
+    <string name="notice_cmd_series_completed">Mark series completed</string>
+    <string name="notice_cmd_undo">Undo</string>
+    <string name="notice_cmd_other">A change</string>
+    <string name="reader_status_more">More reading actions</string>
+    <string name="reader_no_status">No status</string>
+    <string name="reader_not_tracking">%1$s · not tracking</string>
+    <string name="reader_series_is">Series is %1$s</string>
+    <string name="reader_track">Track progress</string>
+    <string name="reader_resume_series">Resume series</string>
+    <string name="reader_set_reading">Set to Reading</string>
+    <string name="reader_saved_here">Saved on this device</string>
+    <string name="reader_update_failed">Couldn\'t update: %1$s</string>
+    <string name="reader_caught_up">Caught up · %1$s</string>
+    <string name="reader_earlier_volume">Read earlier volume</string>
+    <string name="reader_complete_series">Mark series completed</string>
+
+    <string name="tutorial_title">Comic reader tutorial</string>
+    <string name="tutorial_previous">Previous</string>
+    <string name="tutorial_menu">Menu</string>
+    <string name="tutorial_next">Next</string>
+    <string name="tutorial_zones">Tap the previous and next zones to turn pages, or to scroll in longstrip mode.</string>
+    <string name="tutorial_swipe">You can also swipe left or right.</string>
+    <string name="tutorial_zoom">Pinch to zoom.</string>
+    <string name="tutorial_center">Tap the center for the menu.</string>
+    <string name="tutorial_done">Got it</string>
+
+    <string name="settings_account">Account</string>
+    <string name="settings_server">Server</string>
+    <string name="settings_method">Sign-in method: %1$s</string>
+    <string name="settings_sign_out">Sign out</string>
+    <string name="settings_sign_out_confirm">Sign out of %1$s?</string>
+    <plurals name="sign_out_downloads">
+        <item quantity="one">%1$d download</item>
+        <item quantity="other">%1$d downloads</item>
+    </plurals>
+    <plurals name="sign_out_changes">
+        <item quantity="one">%1$d change that hasn\'t synced</item>
+        <item quantity="other">%1$d changes that haven\'t synced</item>
+    </plurals>
+    <string name="sign_out_both">%1$s and %2$s</string>
+    <string name="sign_out_kept">%1$s stay on this device for when you sign in again.</string>
+    <string name="sign_out_kept_one">%1$s stays on this device for when you sign in again.</string>
+    <string name="sign_out_delete">Also delete them</string>
+    <string name="settings_interface">Interface</string>
+    <string name="settings_theme">Theme</string>
+    <string name="theme_system">System</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="settings_about">About</string>
+    <string name="about_version">Version %1$s</string>
+    <string name="about_server_version">Server %1$s</string>
+    <string name="about_fonts">Fonts: Figtree and Source Serif 4, under the SIL Open Font License 1.1.</string>
+    <string name="about_figtree_license">Figtree license</string>
+    <string name="about_source_serif_license">Source Serif 4 license</string>
+
+    <string name="sessions_title">Sessions</string>
+    <string name="sessions_browser">Browser</string>
+    <string name="sessions_signed_in">Signed in %1$s</string>
+    <!-- The sign-in method, then the date. -->
+    <string name="sessions_last_used">%1$s · Last used %2$s</string>
+    <string name="sessions_current">This session</string>
+    <!-- The device, then the sign-in date, which tells browser rows apart. -->
+    <string name="sessions_full_label">%1$s, signed in %2$s</string>
+    <string name="sessions_revoke">Sign out %1$s</string>
+    <string name="sessions_revoke_title">Sign out session</string>
+    <string name="sessions_revoke_confirm">Sign out %1$s?</string>
+    <string name="sessions_revoked">Signed out %1$s</string>
+
+    <string name="defaults_title">Reader defaults</string>
+    <string name="defaults_longstrip_width">Longstrip width</string>
+    <string name="defaults_invert_controls">Invert controls when reading right to left</string>
+    <string name="defaults_show_tutorial">Show reader tutorial</string>
+    <string name="defaults_tutorial_reset">The tutorial shows when you next open a comic</string>
+
+    <string name="visibility_title">Library visibility</string>
+    <!-- Names a library's Show / Overflow / Hide control. -->
+    <string name="visibility_group">%1$s visibility</string>
+    <string name="visibility_show">Show</string>
+    <string name="visibility_overflow">Overflow</string>
+    <string name="visibility_hide">Hide</string>
+    <string name="visibility_saved">Saved library visibility</string>
+    <string name="save">Save</string>
     <string name="method_password">Password</string>
     <string name="method_oidc">SSO</string>
     <string name="method_proxy">Proxy</string>
 
     <string name="error_bad_url">Enter an address starting with http:// or https://</string>
     <string name="error_http">Server error (HTTP %1$d)</string>
+    <string name="error_unexpected_response">The server sent something this app can\'t read.</string>
     <string name="error_not_json">This address returned a web page, not Voltis. Is a login proxy in front of it?</string>
     <string name="error_unknown_host">Server not found</string>
     <string name="error_tls">Secure connection failed</string>
@@ -36,11 +563,227 @@
     <string name="error_unreachable">Can\'t reach the server</string>
     <string name="error_network">Network error</string>
     <string name="error_unexpected">Something went wrong</string>
+    <string name="error_offline_data">Couldn\'t open offline data</string>
+    <string name="error_signed_out">Signed out</string>
+    <string name="error_needs_connection">Needs a connection</string>
     <string name="error_not_voltis">No Voltis server at this address (HTTP %1$d)</string>
     <string name="error_downgrade">This server redirects to an unencrypted address</string>
-    <string name="error_old_server">Update the Voltis server</string>
+    <string name="error_old_server">This server is too old for the app. Update Voltis on the server.</string>
+    <string name="error_old_server_version">This server is too old for the app. Update Voltis on the server. It runs %1$s.</string>
+    <string name="error_storage_full">Storage is full</string>
+    <string name="error_downloads_not_started">Couldn\'t start the downloads</string>
+    <string name="error_not_saved_storage_full">Not saved yet: storage is full</string>
+    <string name="error_page_damaged">This page is damaged. Connect and download again.</string>
     <string name="error_no_server">No server selected</string>
     <string name="error_credentials">Wrong username or password</string>
     <string name="error_sign_in_expired">Sign-in expired. Try again.</string>
     <string name="error_no_browser">No browser found</string>
+
+    <!-- Downloads -->
+    <string name="downloads_title">Downloads</string>
+    <string name="downloads_page_of">Page %1$d of %2$d</string>
+    <string name="downloads_starting">Starting…</string>
+    <string name="downloads_download">Download</string>
+    <string name="downloads_downloaded_size">Downloaded · %1$s</string>
+    <string name="downloads_pause">Pause</string>
+    <string name="downloads_resume">Resume</string>
+    <string name="downloads_queued">Queued</string>
+    <string name="downloads_paused">Paused</string>
+    <string name="downloads_failed_notification">Download failed</string>
+    <string name="downloads_storage">%1$s on this device · %2$s free</string>
+    <string name="downloads_queue">Queue</string>
+    <string name="downloads_done_heading">Downloaded</string>
+    <string name="downloads_pause_all">Pause all</string>
+    <string name="downloads_resume_all">Resume all</string>
+    <string name="downloads_waiting_wifi">Waiting for Wi-Fi</string>
+    <string name="downloads_paused_storage">Paused: not enough storage</string>
+    <string name="downloads_empty">Nothing downloaded yet.</string>
+    <string name="downloads_delete">Delete</string>
+    <string name="downloads_delete_all">Delete all</string>
+    <string name="downloads_delete_one">Delete %1$s?</string>
+    <string name="downloads_delete_text">It can be downloaded again.</string>
+    <string name="downloads_delete_all_confirm">Delete all downloads?</string>
+    <string name="downloads_delete_all_text">Reading that hasn\'t synced stays on this device.</string>
+    <string name="downloads_open_series">Open %1$s</string>
+    <string name="downloads_expand">Show volumes of %1$s</string>
+    <string name="downloads_collapse">Hide volumes of %1$s</string>
+    <string name="downloads_pause_named">Pause %1$s</string>
+    <string name="downloads_resume_named">Resume %1$s</string>
+    <string name="downloads_retry_named">Retry %1$s</string>
+    <string name="downloads_cancel_named">Cancel %1$s</string>
+    <string name="downloads_delete_named">Delete %1$s</string>
+    <string name="downloads_download_again_named">Download %1$s again</string>
+    <string name="downloads_wifi_only">Download on Wi-Fi only</string>
+    <string name="download_settings_delete_all">Delete all downloads</string>
+    <string name="download_settings_others">Data from other accounts</string>
+    <string name="download_settings_others_confirm">Delete data from other accounts?</string>
+    <string name="download_settings_others_text">Deletes the downloads of other accounts on this device, and any reading of theirs that hasn\'t synced.</string>
+    <string name="sync_up_to_date">Up to date</string>
+    <plurals name="sync_waiting">
+        <item quantity="one">%1$d change waiting to sync</item>
+        <item quantity="other">%1$d changes waiting to sync</item>
+    </plurals>
+    <string name="sync_now">Sync now</string>
+    <plurals name="downloads_volumes">
+        <item quantity="one">%1$d volume · %2$s</item>
+        <item quantity="other">%1$d volumes · %2$s</item>
+    </plurals>
+    <plurals name="downloads_delete_series">
+        <item quantity="one">Delete %1$d download of %2$s?</item>
+        <item quantity="other">Delete %1$d downloads of %2$s?</item>
+    </plurals>
+    <plurals name="downloads_active">
+        <item quantity="one">%1$d downloading</item>
+        <item quantity="other">%1$d downloading</item>
+    </plurals>
+    <string name="downloads_error_unreachable">Waiting for a connection</string>
+    <string name="downloads_error_broken_off">The download keeps breaking off</string>
+    <string name="downloads_error_no_space">Not enough storage</string>
+    <string name="downloads_error_write_failed">Couldn\'t write to storage</string>
+    <string name="downloads_error_gone">No longer on the server</string>
+    <string name="downloads_error_file_changed">The file changed on the server. Scan the library, then retry.</string>
+    <string name="downloads_error_missing_files">Files are missing</string>
+    <string name="downloads_error_no_pages">It has no pages</string>
+    <string name="downloads_error_server">The server couldn\'t send it</string>
+    <string name="downloads_error_failed">Download failed</string>
+    <string name="downloads_error_protocol">The server\'s answer couldn\'t be read</string>
+    <string name="downloads_error_unexpected">Something went wrong</string>
+    <string name="settings_downloads">Downloads</string>
+    <string name="downloads_damaged">Damaged</string>
+    <string name="downloads_stale_version">Updated on the server</string>
+    <string name="downloads_download_again">Download again</string>
+    <string name="downloads_download_series">Download…</string>
+    <string name="downloads_auto">Auto-download</string>
+    <string name="downloads_auto_off">Off</string>
+    <string name="downloads_auto_next">Next %1$d</string>
+    <string name="downloads_auto_mark">Auto</string>
+    <string name="downloads_auto_keep">Keep next volumes downloaded</string>
+    <string name="downloads_auto_volumes">Volumes</string>
+    <string name="downloads_auto_fewer">Fewer volumes</string>
+    <string name="downloads_auto_more">More volumes</string>
+    <string name="downloads_auto_delete">Delete after finishing</string>
+    <string name="downloads_auto_saving">Loading…</string>
+    <plurals name="downloads_auto_deletes">
+        <item quantity="one">Deletes %1$d finished volume</item>
+        <item quantity="other">Deletes %1$d finished volumes</item>
+    </plurals>
+    <string name="downloads_range_from">From</string>
+    <string name="downloads_range_to">To</string>
+    <string name="downloads_range_choose">Choose</string>
+    <string name="downloads_range_search">Search</string>
+    <string name="downloads_range_no_match">No matches</string>
+    <string name="downloads_range_all">All</string>
+    <string name="downloads_range_unread">Unread</string>
+    <string name="downloads_range_next">Next %1$d</string>
+    <string name="downloads_range_clear">Clear</string>
+    <string name="downloads_range_none">Choose where to start</string>
+    <string name="downloads_range_title">%1$s – %2$s</string>
+    <string name="downloads_range_count" tools:ignore="PluralsCandidate">%1$d to download · %2$s</string>
+    <string name="downloads_range_at_least">%1$s or more</string>
+    <string name="downloads_range_nothing">Nothing new to download</string>
+    <string name="downloads_range_skipped" tools:ignore="PluralsCandidate">%1$d already on this phone or queued</string>
+    <string name="downloads_range_stuck" tools:ignore="PluralsCandidate">%1$d paused or failed, left as they are</string>
+    <string name="downloads_range_too_many">At most %1$d at a time</string>
+    <string name="downloads_download_count" tools:ignore="PluralsCandidate">Download %1$d</string>
+    <string name="downloads_series_line" tools:ignore="PluralsCandidate">%1$d of %2$d downloaded · %3$s</string>
+    <string name="downloads_series_queued" tools:ignore="PluralsCandidate">%1$d of %2$d queued for download</string>
+    <string name="badge_queued">Queued for download</string>
+    <string name="badge_downloading">Downloading</string>
+    <string name="badge_downloaded">Downloaded</string>
+    <string name="badge_failed">Download failed</string>
+    <string name="badge_stale">Download out of date</string>
+    <string name="reader_not_downloaded">Not downloaded</string>
+
+    <!-- Select mode and bulk status (P4 §6) -->
+    <string name="select_items">Select items</string>
+    <string name="select_item">Select</string>
+    <string name="select_cancel">Cancel selection</string>
+    <plurals name="selected_count">
+        <item quantity="one">%d selected</item>
+        <item quantity="other">%d selected</item>
+    </plurals>
+    <string name="select_full">Up to 500 items at a time</string>
+    <string name="select_none">Nothing selected</string>
+    <string name="bulk_status">Status</string>
+    <string name="bulk_clear">Clear</string>
+    <string name="bulk_busy">Another update is running</string>
+    <string name="bulk_status_title">Set reading status</string>
+    <plurals name="bulk_items_selected">
+        <item quantity="one">%d item selected</item>
+        <item quantity="other">%d items selected</item>
+    </plurals>
+    <string name="bulk_no_status">No status</string>
+    <string name="bulk_include_unread">Also mark unread volumes as read</string>
+    <string name="bulk_hide">Hide</string>
+    <string name="bulk_saving">Saving…</string>
+    <string name="bulk_progress">Saving… %1$d of %2$d</string>
+    <plurals name="bulk_clear_text">
+        <item quantity="one">This clears the status, position and reading time of %1$d item, and of the volumes of any series among them%2$s</item>
+        <item quantity="other">This clears the status, position and reading time of %1$d items, and of the volumes of any series among them%2$s</item>
+    </plurals>
+    <string name="bulk_selected_titles">Selected items</string>
+    <plurals name="bulk_set">
+        <item quantity="one">Set %1$d item to %2$s</item>
+        <item quantity="other">Set %1$d items to %2$s</item>
+    </plurals>
+    <plurals name="bulk_status_cleared">
+        <item quantity="one">Cleared the status of %d item</item>
+        <item quantity="other">Cleared the status of %d items</item>
+    </plurals>
+    <plurals name="bulk_cleared">
+        <item quantity="one">Cleared the status and position of %d item</item>
+        <item quantity="other">Cleared the status and position of %d items</item>
+    </plurals>
+    <plurals name="bulk_all_failed">
+        <item quantity="one">%d couldn\'t be updated</item>
+        <item quantity="other">%d couldn\'t be updated</item>
+    </plurals>
+    <plurals name="bulk_not_saved">
+        <item quantity="one">%d change not saved yet: storage is full</item>
+        <item quantity="other">%d changes not saved yet: storage is full</item>
+    </plurals>
+    <plurals name="bulk_failed">
+        <item quantity="one">%1$s. %2$d couldn\'t be updated</item>
+        <item quantity="other">%1$s. %2$d couldn\'t be updated</item>
+    </plurals>
+    <string name="close">Close</string>
+    <string name="bulk_download_title">Download volumes</string>
+    <string name="bulk_download_counting">Counting volumes…</string>
+    <string name="bulk_download_nothing">Nothing to download</string>
+    <string name="bulk_download_wifi">Waits for Wi-Fi</string>
+    <string name="bulk_download_low_space">Only %1$s free on this device</string>
+    <string name="bulk_download_comics_only">Select comics to download</string>
+    <plurals name="bulk_download_count">
+        <item quantity="one">Download %d volume</item>
+        <item quantity="other">Download %d volumes</item>
+    </plurals>
+    <plurals name="bulk_download_summary">
+        <item quantity="one">Download %1$d volume · %2$s</item>
+        <item quantity="other">Download %1$d volumes · %2$s</item>
+    </plurals>
+    <plurals name="bulk_download_summary_min">
+        <item quantity="one">Download %1$d volume · at least %2$s</item>
+        <item quantity="other">Download %1$d volumes · at least %2$s</item>
+    </plurals>
+    <plurals name="bulk_download_already">
+        <item quantity="one">%d already downloaded or queued</item>
+        <item quantity="other">%d already downloaded or queued</item>
+    </plurals>
+    <plurals name="bulk_download_books">
+        <item quantity="one">%d book skipped</item>
+        <item quantity="other">%d books skipped</item>
+    </plurals>
+    <plurals name="bulk_download_too_many">
+        <item quantity="one">That\'s %d volume. Select fewer series.</item>
+        <item quantity="other">That\'s %d volumes. Select fewer series.</item>
+    </plurals>
+    <plurals name="bulk_download_queued">
+        <item quantity="one">Downloading %d volume</item>
+        <item quantity="other">Downloading %d volumes</item>
+    </plurals>
+    <string name="reader_connect_to_read">Not downloaded. Connect to read.</string>
+    <string name="offline_title">You\'re offline</string>
+    <string name="offline_banner">Offline</string>
+    <string name="offline_downloads">Go to Downloads</string>
+    <string name="content_read">Read</string>
 </resources>

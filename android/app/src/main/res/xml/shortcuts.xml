@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The launcher's static shortcuts (P5 §6). Each action is a LaunchTarget's. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:icon="@drawable/ic_shortcut_continue"
+        android:shortcutId="continue"
+        android:shortcutLongLabel="@string/home_continue"
+        android:shortcutShortLabel="@string/shortcut_continue">
+        <intent
+            android:action="me.tijlvdb.voltis.action.CONTINUE"
+            android:targetClass="me.tijlvdb.voltis.MainActivity"
+            android:targetPackage="me.tijlvdb.voltis" />
+    </shortcut>
+    <shortcut
+        android:icon="@drawable/ic_shortcut_search"
+        android:shortcutId="search"
+        android:shortcutShortLabel="@string/tab_search">
+        <intent
+            android:action="me.tijlvdb.voltis.action.SEARCH"
+            android:targetClass="me.tijlvdb.voltis.MainActivity"
+            android:targetPackage="me.tijlvdb.voltis" />
+    </shortcut>
+    <shortcut
+        android:icon="@drawable/ic_shortcut_downloads"
+        android:shortcutId="downloads"
+        android:shortcutShortLabel="@string/downloads_title">
+        <intent
+            android:action="me.tijlvdb.voltis.action.DOWNLOADS"
+            android:targetClass="me.tijlvdb.voltis.MainActivity"
+            android:targetPackage="me.tijlvdb.voltis" />
+    </shortcut>
+</shortcuts>

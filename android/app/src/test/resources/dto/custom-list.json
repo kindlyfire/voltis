@@ -1,0 +1,61 @@
+{
+  "id": "cl_l8uotzrr",
+  "created_at": "2026-10-05T16:27:07.454224+04:00",
+  "updated_at": "2026-10-05T16:27:07.456932+04:00",
+  "name": "Quartz Lantern picks",
+  "description": "Made-up picks\nfor a rainy day",
+  "visibility": "private",
+  "user_id": "u_vbW3Y5O2",
+  "entry_count": 2,
+  "entries": [
+    {
+      "id": "clc_DA7mcY3d",
+      "created_at": "2026-10-05T16:27:07.456932+04:00",
+      "updated_at": "2026-10-05T16:27:07.456932+04:00",
+      "library_id": "l_AfKC8jmz",
+      "uri": "comic/Frost Thimble",
+      "content": null,
+      "notes": null,
+      "order": 1
+    },
+    {
+      "id": "clc_yH4iVkcL",
+      "created_at": "2026-10-05T16:27:07.456932+04:00",
+      "updated_at": "2026-10-05T16:27:07.456932+04:00",
+      "library_id": "l_AfKC8jmz",
+      "uri": "comic/Frost Sparrow",
+      "content": {
+        "id": "c_cp4mYrKw",
+        "created_at": "2026-10-05T05:27:02.724747Z",
+        "updated_at": "2026-10-05T05:27:02.724747Z",
+        "uri_part": "Frost Sparrow",
+        "uri": "comic/Frost Sparrow",
+        "title": "Frost Sparrow",
+        "valid": true,
+        "file_uri": "/srv/comics/Frost Sparrow",
+        "file_mtime": "2026-10-04T18:03:06.91292Z",
+        "file_size": null,
+        "cover_uri": "/srv/comics/Frost Sparrow/Frost Sparrow v01.cbz/001.jpg",
+        "cover_version": "dlw92ke5ec3k",
+        "type": "comic_series",
+        "order": null,
+        "order_parts": [],
+        "meta": {
+          "title": "Frost Sparrow"
+        },
+        "file_data": {},
+        "parent_id": null,
+        "library_id": "l_AfKC8jmz",
+        "children_count": null,
+        "unread_children_count": null,
+        "completed_children_count": null,
+        "dropped_children_count": null,
+        "new_children_count": null,
+        "user_data": null,
+        "continue": null
+      },
+      "notes": "A made-up note",
+      "order": 2
+    }
+  ]
+}

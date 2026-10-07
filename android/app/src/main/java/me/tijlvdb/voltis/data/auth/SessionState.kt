@@ -8,6 +8,9 @@ data class Server(val id: String, val url: HttpUrl)
 sealed interface SessionState {
     val server: Server? get() = null
 
+    /** Names the signed-in user on its server; null unless signed in. What is kept per user is dropped when it changes. */
+    val account: String? get() = null
+
     /** Stored state hasn't been read yet. */
     data object Loading : SessionState
 
@@ -18,5 +21,7 @@ sealed interface SessionState {
     /** The token was rejected or dropped; the user ID is kept so later phases can keep their data. */
     data class NeedsReauth(override val server: Server, val userId: String) : SessionState
 
-    data class SignedIn(override val server: Server, val userId: String, val username: String) : SessionState
+    data class SignedIn(override val server: Server, val userId: String, val username: String) : SessionState {
+        override val account get() = "${server.id}/$userId"
+    }
 }

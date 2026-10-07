@@ -1,8 +1,13 @@
 package me.tijlvdb.voltis.data.auth
 
 import android.os.Build
+import android.util.Log
+import coil3.ImageLoader
+import dagger.Lazy
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import me.tijlvdb.voltis.R
@@ -12,6 +17,8 @@ import me.tijlvdb.voltis.data.api.TokenRequest
 import me.tijlvdb.voltis.data.api.VoltisApi
 import me.tijlvdb.voltis.data.api.api
 import me.tijlvdb.voltis.data.api.serverMessage
+import me.tijlvdb.voltis.data.db.AccountStores
+import me.tijlvdb.voltis.domain.net.MIN_API_VERSION
 import me.tijlvdb.voltis.ui.UiText
 import okhttp3.HttpUrl
 import retrofit2.HttpException
@@ -23,6 +30,8 @@ class AuthException(val text: UiText) : Exception()
 class AuthRepository @Inject constructor(
     private val api: VoltisApi,
     private val store: SessionStore,
+    private val images: Lazy<ImageLoader>,
+    private val stores: AccountStores,
 ) {
     /**
      * Checks [url] is a Voltis server this app supports and makes it current. A redirect (http to
@@ -33,7 +42,11 @@ class AuthRepository @Inject constructor(
         val info = response.body() ?: throw AuthException(
             response.serverMessage()?.let(UiText::Raw) ?: UiText.Res(R.string.error_not_voltis, response.code()),
         )
-        if (info.apiVersion < 1 || info.serverId.isBlank()) throw AuthException(UiText.Res(R.string.error_old_server))
+        if (info.apiVersion < MIN_API_VERSION || info.serverId.isBlank()) {
+            throw AuthException(
+                if (info.version.isBlank()) UiText.Res(R.string.error_old_server) else UiText.Res(R.string.error_old_server_version, info.version),
+            )
+        }
         val final = response.raw().request.url
         if (url.isHttps && !final.isHttps) throw AuthException(UiText.Res(R.string.error_downgrade))
         store.connect(info.serverId, ServerUrl.fromInfoUrl(final) ?: url)
@@ -78,15 +91,43 @@ class AuthRepository @Inject constructor(
         store.takeFlow()
     }
 
-    /** Ends the session on the server if it can, and always locally. */
-    suspend fun logout() = withContext(NonCancellable) {
-        runCatching { api.logout() }
-        store.signOut()
+    /**
+     * Ends the session on the server if it can, and always locally. The account's downloads and
+     * unsent changes stay for its next sign-in, unless [deleteData] (P2 §11): then they go once its
+     * store has closed.
+     */
+    suspend fun logout(deleteData: Boolean = false) = withContext(NonCancellable) {
+        // The session the user confirmed: everything below acts on it only, never on a newer one.
+        val sent = store.active() ?: return@withContext
+        val account = sent.account
+        // Tagged with the session, so a request that waits for the dispatcher can't pick up newer credentials when it runs.
+        if (account != null) runCatching { api.logout(session = sent) }
+        // The delete intent is stored with the sign-out. A failure here propagates: still signed in.
+        if (!store.signOut(sent, deleteIntent = account.takeIf { deleteData })) return@withContext
+        // The session has ended: what follows is best effort and must not fail the caller.
+        bestEffort("clear the image cache") { clearImages() }
+        if (deleteData && account != null) {
+            bestEffort("delete the account's data") {
+                if (stores.deleteClosed(account) { store.generationOf(sent.server.id) == sent.generation }) store.clear(account)
+            }
+        }
+    }
+
+    private suspend fun bestEffort(what: String, block: suspend () -> Unit) {
+        try {
+            block()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Couldn't $what", e)
+        }
     }
 
     /** Also drops a pending browser flow, so a late callback can't reach whatever is entered next. */
     suspend fun changeServer() {
         store.takeFlow()
+        // Before the state changes: that disposes the scope this runs in.
+        clearImages()
         store.clearCurrent()
     }
 
@@ -96,12 +137,19 @@ class AuthRepository @Inject constructor(
 
     private fun currentServer(): Server = store.active()?.server ?: throw AuthException(UiText.Res(R.string.error_no_server))
 
+    /** Covers and pages are cached per server, not per user. */
+    private suspend fun clearImages() = withContext(Dispatchers.IO) {
+        images.get().memoryCache?.clear()
+        images.get().diskCache?.clear()
+    }
+
     private suspend fun finishSignIn(server: Server, token: String) {
         val me = api.meAt(server.url.api("api/users/me"), "Bearer $token")
         store.signIn(server.id, token, me.id, me.username)
     }
 
     private companion object {
+        const val TAG = "AuthRepository"
         // The web login can take a while; the server's 2-minute code only starts at Continue.
         const val FLOW_MAX_AGE_MS = 30 * 60 * 1000L
     }

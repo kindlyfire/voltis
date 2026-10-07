@@ -1,15 +1,10 @@
 package me.tijlvdb.voltis.ui.login
 
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.input.TextFieldLineLimits
-import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedSecureTextField
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -21,20 +16,25 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.contentType
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.dp
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
-import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import me.tijlvdb.voltis.R
 import me.tijlvdb.voltis.data.api.Info
 import me.tijlvdb.voltis.data.auth.AuthCallbacks
 import me.tijlvdb.voltis.data.auth.SessionState
-import me.tijlvdb.voltis.ui.ErrorText
-import me.tijlvdb.voltis.ui.FormScreen
 import me.tijlvdb.voltis.ui.Loaded
-import me.tijlvdb.voltis.ui.rememberLocalNetworkAction
+import me.tijlvdb.voltis.ui.SignInScreen
+import me.tijlvdb.voltis.ui.kit.QueryError
+import me.tijlvdb.voltis.ui.kit.VButton
+import me.tijlvdb.voltis.ui.kit.VButtonStyle
+import me.tijlvdb.voltis.ui.kit.VDialog
+import me.tijlvdb.voltis.ui.kit.VTextField
 import me.tijlvdb.voltis.ui.openInBrowser
+import me.tijlvdb.voltis.ui.rememberLocalNetworkAction
 
 @Composable
 fun LoginScreen(vm: LoginViewModel = hiltViewModel()) {
@@ -47,7 +47,7 @@ fun LoginScreen(vm: LoginViewModel = hiltViewModel()) {
     val loadInfo = rememberLocalNetworkAction(vm::loadInfo)
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.loadInfo() }
 
-    FormScreen(stringResource(R.string.login_title), server?.url?.host) {
+    SignInScreen(stringResource(R.string.login_title), server?.url?.host) {
         if (session is SessionState.NeedsReauth) Text(stringResource(R.string.login_reauth))
 
         when (val c = callback) {
@@ -55,20 +55,19 @@ fun LoginScreen(vm: LoginViewModel = hiltViewModel()) {
                 val label = stringResource(R.string.login_signing_in)
                 LinearProgressIndicator(Modifier.fillMaxWidth().semantics { contentDescription = label })
             }
-            is AuthCallbacks.Status.Failed -> ErrorText(c.text)
+            is AuthCallbacks.Status.Failed -> QueryError(c.text)
             AuthCallbacks.Status.Idle -> Unit
         }
 
         Loaded(vm.info, vm.infoError, retry = { loadInfo(server?.url) }) { info ->
             if (info.firstUserFlow) {
                 Text(stringResource(R.string.login_setup_needed))
-                Button(
+                VButton(
+                    stringResource(R.string.login_finish_setup),
                     onClick = { if (server?.let { context.openInBrowser(it.url.toString()) } == false) vm.browserFailed() },
-                    enabled = enabled,
                     modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(stringResource(R.string.login_finish_setup))
-                }
+                    enabled = enabled,
+                )
             } else {
                 SignInForm(vm, info, enabled) {
                     scope.launch {
@@ -79,41 +78,44 @@ fun LoginScreen(vm: LoginViewModel = hiltViewModel()) {
             }
         }
 
-        ErrorText(vm.error)
-        TextButton(onClick = vm::changeServer, enabled = enabled) {
-            Text(stringResource(R.string.login_change_server))
-        }
+        QueryError(vm.error)
+        // A text button's label is 12 dp inside it: it lines up with the card's content.
+        VButton(stringResource(R.string.login_change_server), vm::changeServer, Modifier.offset(x = (-12).dp), VButtonStyle.Text, enabled)
+    }
+    if (vm.confirmingChange) {
+        VDialog(
+            stringResource(R.string.login_change_server_confirm),
+            stringResource(R.string.login_change_server),
+            onConfirm = { vm.confirmChange(true) },
+            onDismiss = { vm.confirmChange(false) },
+            text = stringResource(R.string.login_change_server_text),
+        )
     }
 }
 
 @Composable
 private fun SignInForm(vm: LoginViewModel, info: Info, enabled: Boolean, onBrowser: () -> Unit) {
     if (info.passwordLoginEnabled) {
-        OutlinedTextField(
+        VTextField(
             state = vm.username,
-            label = { Text(stringResource(R.string.login_username)) },
-            lineLimits = TextFieldLineLimits.SingleLine,
+            label = stringResource(R.string.login_username),
             keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Next),
             enabled = enabled,
             modifier = Modifier.fillMaxWidth().semantics { contentType = ContentType.Username },
         )
-        OutlinedSecureTextField(
+        VTextField(
             state = vm.password,
-            label = { Text(stringResource(R.string.login_password)) },
+            label = stringResource(R.string.login_password),
+            secure = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             onKeyboardAction = { vm.signIn() },
             enabled = enabled,
             modifier = Modifier.fillMaxWidth().semantics { contentType = ContentType.Password },
         )
-        Button(onClick = vm::signIn, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.login_submit))
-        }
+        VButton(stringResource(R.string.login_submit), vm::signIn, Modifier.fillMaxWidth(), enabled = enabled)
     }
     // The browser covers every web login (SSO, a login proxy, password), so it's always offered.
     val label = if (info.oidcEnabled) info.oidcButtonLabel else stringResource(R.string.login_browser)
-    if (info.oidcEnabled || !info.passwordLoginEnabled) {
-        Button(onClick = onBrowser, enabled = enabled, modifier = Modifier.fillMaxWidth()) { Text(label) }
-    } else {
-        OutlinedButton(onClick = onBrowser, enabled = enabled, modifier = Modifier.fillMaxWidth()) { Text(label) }
-    }
+    val style = if (info.oidcEnabled || !info.passwordLoginEnabled) VButtonStyle.Filled else VButtonStyle.Tonal
+    VButton(label, onBrowser, Modifier.fillMaxWidth(), style, enabled)
 }

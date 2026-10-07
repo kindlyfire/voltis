@@ -49,6 +49,12 @@ object ServerUrl {
         return isLocalHost(h) && h != "localhost" && ipLiteral(h)?.isLoopbackAddress != true
     }
 
+    /** This device: the server needs no network to be reached (the emulator's `adb reverse`, a server on the phone). */
+    fun isLoopback(host: String): Boolean {
+        val h = host.lowercase().removeSuffix(".")
+        return h == "localhost" || ipLiteral(h)?.isLoopbackAddress == true
+    }
+
     private fun ipLiteral(h: String): InetAddress? {
         // Never resolve a name: this runs on the main thread as the user types, and Android looks up
         // partial addresses such as "192.168". OkHttp only keeps a ':' in a valid IPv6 literal.

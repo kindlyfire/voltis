@@ -1,0 +1,1041 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "df7c42479dbbc4b25b83526304af7632",
+    "entities": [
+      {
+        "tableName": "reading_snapshot",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`content_id` TEXT NOT NULL, `seq` INTEGER NOT NULL, `revision` TEXT, `status` TEXT, `status_updated_at` TEXT, `progress` TEXT NOT NULL, `progress_updated_at` TEXT, `last_read_at` TEXT, PRIMARY KEY(`content_id`))",
+        "fields": [
+          {
+            "fieldPath": "contentId",
+            "columnName": "content_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "seq",
+            "columnName": "seq",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "revision",
+            "columnName": "revision",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "statusUpdatedAt",
+            "columnName": "status_updated_at",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "progress",
+            "columnName": "progress",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "progressUpdatedAt",
+            "columnName": "progress_updated_at",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastReadAt",
+            "columnName": "last_read_at",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "content_id"
+          ]
+        }
+      },
+      {
+        "tableName": "reading_lane",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`content_id` TEXT NOT NULL, `library_id` TEXT, `uri` TEXT, `parent_id` TEXT, `type` TEXT, `title` TEXT, `page_count` INTEGER, `acked` INTEGER NOT NULL, `rebase` INTEGER NOT NULL, `revision` TEXT, `status` TEXT, `status_updated_at` TEXT, `progress` TEXT NOT NULL, `progress_updated_at` TEXT, `last_read_at` TEXT, `seq` INTEGER NOT NULL, `foreign_epoch` INTEGER NOT NULL, `series` TEXT, `here` TEXT, `tracking` INTEGER NOT NULL, `failed` INTEGER NOT NULL, `failures` INTEGER NOT NULL, `needs_review` INTEGER NOT NULL, `shown_status` TEXT, `shown_progress` TEXT NOT NULL, `shown_last_read_at` TEXT, `touched_at` INTEGER NOT NULL, PRIMARY KEY(`content_id`))",
+        "fields": [
+          {
+            "fieldPath": "contentId",
+            "columnName": "content_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "libraryId",
+            "columnName": "library_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "uri",
+            "columnName": "uri",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "parentId",
+            "columnName": "parent_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "pageCount",
+            "columnName": "page_count",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "acked",
+            "columnName": "acked",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rebase",
+            "columnName": "rebase",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "revision",
+            "columnName": "revision",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "statusUpdatedAt",
+            "columnName": "status_updated_at",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "progress",
+            "columnName": "progress",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "progressUpdatedAt",
+            "columnName": "progress_updated_at",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastReadAt",
+            "columnName": "last_read_at",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "seq",
+            "columnName": "seq",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "foreignEpoch",
+            "columnName": "foreign_epoch",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "series",
+            "columnName": "series",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "here",
+            "columnName": "here",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "tracking",
+            "columnName": "tracking",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "failed",
+            "columnName": "failed",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "failures",
+            "columnName": "failures",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "needsReview",
+            "columnName": "needs_review",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shownStatus",
+            "columnName": "shown_status",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "shownProgress",
+            "columnName": "shown_progress",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shownLastReadAt",
+            "columnName": "shown_last_read_at",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "touchedAt",
+            "columnName": "touched_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "content_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_reading_lane_parent_id",
+            "unique": false,
+            "columnNames": [
+              "parent_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_reading_lane_parent_id` ON `${TABLE_NAME}` (`parent_id`)"
+          }
+        ]
+      },
+      {
+        "tableName": "reading_op",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `content_id` TEXT NOT NULL, `kind` TEXT NOT NULL, `payload` TEXT NOT NULL, `sealed` INTEGER NOT NULL, `after` TEXT, `sent_seq` INTEGER, `sent_writer` TEXT, `epoch` INTEGER, `guard` TEXT, `attempts` INTEGER NOT NULL, `last_error` TEXT, `created_at` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contentId",
+            "columnName": "content_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payload",
+            "columnName": "payload",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sealed",
+            "columnName": "sealed",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "after",
+            "columnName": "after",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "sentSeq",
+            "columnName": "sent_seq",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "sentWriter",
+            "columnName": "sent_writer",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "epoch",
+            "columnName": "epoch",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "guard",
+            "columnName": "guard",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "attempts",
+            "columnName": "attempts",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastError",
+            "columnName": "last_error",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_reading_op_content_id_id",
+            "unique": false,
+            "columnNames": [
+              "content_id",
+              "id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_reading_op_content_id_id` ON `${TABLE_NAME}` (`content_id`, `id`)"
+          }
+        ]
+      },
+      {
+        "tableName": "sync_notice",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `content_id` TEXT, `title` TEXT NOT NULL, `kind` TEXT NOT NULL, `detail` TEXT NOT NULL, `created_at` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contentId",
+            "columnName": "content_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "detail",
+            "columnName": "detail",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "content",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `library_id` TEXT, `uri` TEXT, `parent_id` TEXT, `type` TEXT NOT NULL, `title` TEXT NOT NULL, `position` INTEGER, `valid` INTEGER NOT NULL, `file_mtime` TEXT, `file_size` INTEGER, `cover_version` TEXT, `json` TEXT NOT NULL, `detail` INTEGER NOT NULL, `fetched_at` INTEGER NOT NULL, `volumes_known` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "libraryId",
+            "columnName": "library_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "uri",
+            "columnName": "uri",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "parentId",
+            "columnName": "parent_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "valid",
+            "columnName": "valid",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fileMtime",
+            "columnName": "file_mtime",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "fileSize",
+            "columnName": "file_size",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "coverVersion",
+            "columnName": "cover_version",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "json",
+            "columnName": "json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "detail",
+            "columnName": "detail",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fetchedAt",
+            "columnName": "fetched_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "volumesKnown",
+            "columnName": "volumes_known",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_content_library_id_uri",
+            "unique": false,
+            "columnNames": [
+              "library_id",
+              "uri"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_content_library_id_uri` ON `${TABLE_NAME}` (`library_id`, `uri`)"
+          },
+          {
+            "name": "index_content_parent_id",
+            "unique": false,
+            "columnNames": [
+              "parent_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_content_parent_id` ON `${TABLE_NAME}` (`parent_id`)"
+          }
+        ]
+      },
+      {
+        "tableName": "download",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`content_id` TEXT NOT NULL, `series_id` TEXT NOT NULL, `state` TEXT NOT NULL, `error` TEXT, `error_kind` TEXT, `error_detail` TEXT, `attempts` INTEGER NOT NULL, `requested_by` TEXT NOT NULL, `queued_at` INTEGER NOT NULL, `transfer_id` TEXT, `version` TEXT, `page_count` INTEGER, `pages_done` INTEGER NOT NULL, `bytes_done` INTEGER NOT NULL, `file_size` INTEGER, `file_mtime` TEXT, `copy_id` TEXT, `copy_version` TEXT, `copy_page_count` INTEGER, `copy_bytes` INTEGER NOT NULL, `copy_file_size` INTEGER, `copy_file_mtime` TEXT, `copy_cover` INTEGER NOT NULL, `copy_series_cover` INTEGER NOT NULL, `completed_at` INTEGER, `damaged_copy` TEXT, `stale` TEXT, `seen_at` INTEGER, `seen_gone` INTEGER NOT NULL, `seen_mtime` TEXT, `seen_size` INTEGER, `keep` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`content_id`))",
+        "fields": [
+          {
+            "fieldPath": "contentId",
+            "columnName": "content_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "seriesId",
+            "columnName": "series_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "error",
+            "columnName": "error",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "errorKind",
+            "columnName": "error_kind",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "errorDetail",
+            "columnName": "error_detail",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "attempts",
+            "columnName": "attempts",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "requestedBy",
+            "columnName": "requested_by",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "queuedAt",
+            "columnName": "queued_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "transferId",
+            "columnName": "transfer_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "version",
+            "columnName": "version",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "pageCount",
+            "columnName": "page_count",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "pagesDone",
+            "columnName": "pages_done",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bytesDone",
+            "columnName": "bytes_done",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fileSize",
+            "columnName": "file_size",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "fileMtime",
+            "columnName": "file_mtime",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "copyId",
+            "columnName": "copy_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "copyVersion",
+            "columnName": "copy_version",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "copyPageCount",
+            "columnName": "copy_page_count",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "copyBytes",
+            "columnName": "copy_bytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "copyFileSize",
+            "columnName": "copy_file_size",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "copyFileMtime",
+            "columnName": "copy_file_mtime",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "copyCover",
+            "columnName": "copy_cover",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "copySeriesCover",
+            "columnName": "copy_series_cover",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "completedAt",
+            "columnName": "completed_at",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "damagedCopy",
+            "columnName": "damaged_copy",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "stale",
+            "columnName": "stale",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "seenAt",
+            "columnName": "seen_at",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "seenGone",
+            "columnName": "seen_gone",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "seenMtime",
+            "columnName": "seen_mtime",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "seenSize",
+            "columnName": "seen_size",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "keep",
+            "columnName": "keep",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "content_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_download_series_id",
+            "unique": false,
+            "columnNames": [
+              "series_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_download_series_id` ON `${TABLE_NAME}` (`series_id`)"
+          },
+          {
+            "name": "index_download_state_queued_at",
+            "unique": false,
+            "columnNames": [
+              "state",
+              "queued_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_download_state_queued_at` ON `${TABLE_NAME}` (`state`, `queued_at`)"
+          },
+          {
+            "name": "index_download_copy_id",
+            "unique": true,
+            "columnNames": [
+              "copy_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_download_copy_id` ON `${TABLE_NAME}` (`copy_id`)"
+          },
+          {
+            "name": "index_download_transfer_id",
+            "unique": true,
+            "columnNames": [
+              "transfer_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_download_transfer_id` ON `${TABLE_NAME}` (`transfer_id`)"
+          }
+        ]
+      },
+      {
+        "tableName": "custom_list",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `position` INTEGER NOT NULL, `name` TEXT NOT NULL, `description` TEXT, `visibility` TEXT NOT NULL, `entry_count` INTEGER NOT NULL, `updated_at` TEXT NOT NULL, `covers` TEXT NOT NULL, `entries_updated_at` TEXT, `fetched_at` INTEGER NOT NULL, `detail_fetched_at` INTEGER, `revision` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "description",
+            "columnName": "description",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "visibility",
+            "columnName": "visibility",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "entryCount",
+            "columnName": "entry_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "covers",
+            "columnName": "covers",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "entriesUpdatedAt",
+            "columnName": "entries_updated_at",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "fetchedAt",
+            "columnName": "fetched_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "detailFetchedAt",
+            "columnName": "detail_fetched_at",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "revision",
+            "columnName": "revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "custom_list_entry",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`list_id` TEXT NOT NULL, `library_id` TEXT NOT NULL, `uri` TEXT NOT NULL, `entry_id` TEXT NOT NULL, `position` INTEGER NOT NULL, `notes` TEXT, `content_id` TEXT, `title` TEXT NOT NULL, `type` TEXT, `cover_version` TEXT, PRIMARY KEY(`list_id`, `library_id`, `uri`))",
+        "fields": [
+          {
+            "fieldPath": "listId",
+            "columnName": "list_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "libraryId",
+            "columnName": "library_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "uri",
+            "columnName": "uri",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "entryId",
+            "columnName": "entry_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notes",
+            "columnName": "notes",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "contentId",
+            "columnName": "content_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "coverVersion",
+            "columnName": "cover_version",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "list_id",
+            "library_id",
+            "uri"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_custom_list_entry_content_id",
+            "unique": false,
+            "columnNames": [
+              "content_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_custom_list_entry_content_id` ON `${TABLE_NAME}` (`content_id`)"
+          }
+        ]
+      },
+      {
+        "tableName": "pending_user_data",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`content_id` TEXT NOT NULL, `library_id` TEXT, `uri` TEXT, `title` TEXT NOT NULL, `wanted` INTEGER NOT NULL, `starred` INTEGER, `rating_set` INTEGER NOT NULL, `rating` INTEGER, `rev` INTEGER NOT NULL, `landed_seq` INTEGER, `landed_starred` INTEGER NOT NULL, `landed_rating` INTEGER, `attempts` INTEGER NOT NULL, `last_error` TEXT, `created_at` INTEGER NOT NULL, PRIMARY KEY(`content_id`))",
+        "fields": [
+          {
+            "fieldPath": "contentId",
+            "columnName": "content_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "libraryId",
+            "columnName": "library_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "uri",
+            "columnName": "uri",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "wanted",
+            "columnName": "wanted",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "starred",
+            "columnName": "starred",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "ratingSet",
+            "columnName": "rating_set",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rating",
+            "columnName": "rating",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "rev",
+            "columnName": "rev",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "landedSeq",
+            "columnName": "landed_seq",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "landedStarred",
+            "columnName": "landed_starred",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "landedRating",
+            "columnName": "landed_rating",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "attempts",
+            "columnName": "attempts",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastError",
+            "columnName": "last_error",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "content_id"
+          ]
+        }
+      },
+      {
+        "tableName": "series_policy",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`series_id` TEXT NOT NULL, `keep_next` INTEGER NOT NULL, `delete_finished` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, PRIMARY KEY(`series_id`))",
+        "fields": [
+          {
+            "fieldPath": "seriesId",
+            "columnName": "series_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "keepNext",
+            "columnName": "keep_next",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deleteFinished",
+            "columnName": "delete_finished",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "series_id"
+          ]
+        }
+      },
+      {
+        "tableName": "auto_offer",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`series_id` TEXT NOT NULL, `content_id` TEXT NOT NULL, PRIMARY KEY(`series_id`, `content_id`))",
+        "fields": [
+          {
+            "fieldPath": "seriesId",
+            "columnName": "series_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contentId",
+            "columnName": "content_id",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "series_id",
+            "content_id"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'df7c42479dbbc4b25b83526304af7632')"
+    ]
+  }
+}

@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#FF1F2937</color>
+    <!-- LightPrimary in ui/theme/Color.kt -->
+    <color name="ic_launcher_background">#FFA84100</color>
+    <!-- LightBg in ui/theme/Color.kt -->
+    <color name="window_background">#FFFDF6ED</color>
+    <!-- LightBg, in both themes: the shortcut glyphs are LightPrimary. -->
+    <color name="shortcut_background">#FFFDF6ED</color>
 </resources>

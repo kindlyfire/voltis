@@ -18,6 +18,7 @@ import me.tijlvdb.voltis.data.api.attempt
 import me.tijlvdb.voltis.data.auth.AuthCallbacks
 import me.tijlvdb.voltis.data.auth.AuthRepository
 import me.tijlvdb.voltis.data.auth.SessionStore
+import me.tijlvdb.voltis.data.db.AccountStores
 import me.tijlvdb.voltis.ui.UiText
 
 @HiltViewModel
@@ -25,6 +26,7 @@ class LoginViewModel @Inject constructor(
     private val api: VoltisApi,
     private val auth: AuthRepository,
     private val callbacks: AuthCallbacks,
+    private val stores: AccountStores,
     store: SessionStore,
 ) : ViewModel() {
     val session = store.state
@@ -74,7 +76,20 @@ class LoginViewModel @Inject constructor(
         viewModelScope.launch { attempt { auth.cancelBrowserSignIn() } }
     }
 
-    fun changeServer() = action { auth.changeServer() }
+    /** This server's accounts left data on this device: Change server says it stays (P2 §11). */
+    var confirmingChange by mutableStateOf(false)
+        private set
+
+    /** Asks first when this server's accounts left downloads or unsent changes here. */
+    fun changeServer() = action {
+        val server = session.value.server
+        if (server != null && stores.dataOf(server.id).any) confirmingChange = true else auth.changeServer()
+    }
+
+    fun confirmChange(confirmed: Boolean) {
+        confirmingChange = false
+        if (confirmed) action { auth.changeServer() }
+    }
 
     private fun action(block: suspend () -> Unit) {
         viewModelScope.launch { act(block) }

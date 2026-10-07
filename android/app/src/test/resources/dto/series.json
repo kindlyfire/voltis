@@ -1,0 +1,94 @@
+{
+    "id": "c_fG5e8OEy",
+    "created_at": "2026-10-04T15:13:10.61486+04:00",
+    "updated_at": "2026-10-04T15:13:10.61486+04:00",
+    "uri_part": "Gravel Choir",
+    "title": "Gravel Choir",
+    "valid": true,
+    "file_uri": "/library/comics/Gravel Choir",
+    "file_mtime": "2026-10-04T15:12:55.877297+04:00",
+    "file_size": null,
+    "cover_uri": "/library/comics/Gravel Choir/Gravel Choir v01.cbz/001.jpg",
+    "cover_version": "dlw0ci8m85ew",
+    "type": "comic_series",
+    "order": null,
+    "order_parts": [],
+    "meta": {
+        "title": "Gravel Choir",
+        "alt_titles": [
+            "The Gravel Choir"
+        ],
+        "description": "A quarry town's choir rehearses for a concert nobody has announced.\nThen the quarry floods.",
+        "staff": [
+            {
+                "name": "Odalys Venn",
+                "role": "writer"
+            },
+            {
+                "name": "Tobin Marsh",
+                "role": "artist"
+            }
+        ],
+        "publishers": [
+            "Lowtide Press"
+        ],
+        "language": "en",
+        "publication_date": "2019-03",
+        "genres": [
+            "slice_of_life",
+            "mystery"
+        ],
+        "tags": [
+            "Small town"
+        ],
+        "status": "completed",
+        "kind": "manga",
+        "links": [
+            {
+                "label": "Lowtide Press",
+                "url": "https://lowtide.example/gravel-choir"
+            }
+        ]
+    },
+    "file_data": {},
+    "parent_id": null,
+    "library_id": "l_a0ePXEvG",
+    "children_count": 3,
+    "unread_children_count": 3,
+    "completed_children_count": 0,
+    "dropped_children_count": 0,
+    "new_children_count": 0,
+    "user_data": {
+        "starred": true,
+        "status": "reading",
+        "status_updated_at": "2026-10-04T15:13:32.075024+04:00",
+        "notes": null,
+        "rating": 4,
+        "progress": {},
+        "progress_updated_at": null,
+        "revision": "srv:id6q3qm2srifmnyorpooh326l2",
+        "last_read_at": null
+    },
+    "length": {
+        "unit": "pages",
+        "total": 42,
+        "remaining": 42
+    },
+    "continue": null,
+    "facet_keys": {
+        "tags": [
+            "small town"
+        ],
+        "staff": [
+            "odalys venn",
+            null
+        ],
+        "genres": [
+            "slice of life",
+            "mystery"
+        ],
+        "publishers": [
+            "lowtide press"
+        ]
+    }
+}

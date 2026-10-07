@@ -1,0 +1,33 @@
+[
+  {
+    "id": "cl_l8uotzrr",
+    "created_at": "2026-10-05T16:27:07.454224+04:00",
+    "updated_at": "2026-10-05T16:27:07.456932+04:00",
+    "name": "Quartz Lantern picks",
+    "description": null,
+    "visibility": "private",
+    "user_id": "u_vbW3Y5O2",
+    "entry_count": 2,
+    "covers": [
+      {
+        "id": "c_CoPZdcYK",
+        "cover_version": "dlw92keebu68"
+      },
+      {
+        "id": "c_cp4mYrKw",
+        "cover_version": "dlw92ke5ec3k"
+      }
+    ]
+  },
+  {
+    "id": "cl_Kq3wPz7e",
+    "created_at": "2026-10-05T16:20:01.120004+04:00",
+    "updated_at": "2026-10-05T16:20:01.120004+04:00",
+    "name": "Brass Meridian reruns",
+    "description": "Made-up",
+    "visibility": "unlisted",
+    "user_id": "u_vbW3Y5O2",
+    "entry_count": 0,
+    "covers": []
+  }
+]
