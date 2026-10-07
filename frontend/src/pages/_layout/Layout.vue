@@ -19,20 +19,40 @@
 
     <header
         class="header"
-        :class="{ 'is-hidden': store.navbarHidden.value, 'has-menu': !store.sidebarPersistent }"
+        :class="{
+            'is-hidden': store.navbarHidden.value,
+            'has-menu': !store.sidebarPersistent,
+            'is-compact': compactSearch && !searchOpen,
+        }"
     >
-        <div v-if="!store.sidebarPersistent" class="brand">
+        <!-- On narrow screens the search takes over the whole header. -->
+        <template v-if="compactSearch && searchOpen">
+            <AIconButton :icon="IconArrowLeft" label="Close search" @click="closeSearch" />
+            <SearchBox autofocus class="flex-1" @close="closeSearch" />
+        </template>
+        <template v-else>
+            <div v-if="!store.sidebarPersistent" class="brand">
+                <AIconButton
+                    id="sidebar-toggle"
+                    :icon="IconMenu"
+                    :label="store.sidebarTemporary.value ? 'Menu' : 'Show sidebar'"
+                    :aria-expanded="store.sidebarOpen"
+                    @click="toggleSidebar"
+                />
+                <RouterLink to="/" class="wordmark a-focus rounded-md">Voltis</RouterLink>
+            </div>
             <AIconButton
-                id="sidebar-toggle"
-                :icon="IconMenu"
-                :label="store.sidebarTemporary.value ? 'Menu' : 'Show sidebar'"
-                :aria-expanded="store.sidebarOpen"
-                @click="toggleSidebar"
+                v-if="compactSearch"
+                id="search-open"
+                :icon="IconMagnify"
+                label="Search"
+                aria-keyshortcuts="Control+K"
+                class="ml-auto"
+                @click="searchOpen = true"
             />
-            <RouterLink to="/" class="wordmark a-focus rounded-md">Voltis</RouterLink>
-        </div>
-        <SearchBox class="nav:max-w-[560px] flex-1" />
-        <ScanIndicator />
+            <SearchBox v-else class="nav:max-w-[560px] flex-1" />
+            <ScanIndicator />
+        </template>
     </header>
 
     <main id="main" tabindex="-1" class="main outline-none">
@@ -62,12 +82,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, watch } from 'vue'
+import { useEventListener, useMediaQuery } from '@vueuse/core'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import ADrawer from '@/ui/ADrawer.vue'
 import AIconButton from '@/ui/AIconButton.vue'
 import AToastRegion from '@/ui/AToastRegion.vue'
-import { IconMenu } from '@/ui/icons'
+import { IconArrowLeft, IconMagnify, IconMenu } from '@/ui/icons'
 import { usersApi } from '@/utils/api/users'
 import { ModalContainer } from '@/utils/modals'
 import NotFoundPage from '../NotFoundPage.vue'
@@ -82,11 +103,32 @@ const route = useRoute()
 const qMe = usersApi.useMe()
 const isAdmin = computed(() => !!qMe.data.value?.permissions.includes('ADMIN'))
 
-// The temporary drawer closes on navigation (the reader drawers don't).
+const compactSearch = useMediaQuery('(width < 40rem)')
+const searchOpen = ref(false)
+watch(compactSearch, () => (searchOpen.value = false))
+
+// The temporary drawer and the compact search close on navigation (the reader drawers don't).
 watch(
     () => route.fullPath,
-    () => store.closeDrawer()
+    () => {
+        store.closeDrawer()
+        searchOpen.value = false
+    }
 )
+
+async function closeSearch() {
+    searchOpen.value = false
+    await nextTick()
+    document.getElementById('search-open')?.focus()
+}
+
+// SearchBox handles Ctrl K itself while it's mounted.
+useEventListener(window, 'keydown', (e: KeyboardEvent) => {
+    if (!compactSearch.value || searchOpen.value) return
+    if (!e.ctrlKey || e.altKey || e.metaKey || e.key.toLowerCase() !== 'k') return
+    e.preventDefault()
+    searchOpen.value = true
+})
 
 function skipToMain() {
     document.getElementById('main')?.focus()
@@ -195,13 +237,24 @@ async function toggleSidebar() {
         padding-left: var(--layout-left);
     }
 
+    /* Icon buttons carry their own inset, so an edge with one gets less padding than one with the
+     * search pill. */
     @media (width < 60rem) {
         .header {
             gap: 8px;
 
             &,
             &.has-menu {
-                padding: 0 8px 0 4px;
+                padding: 0 12px 0 4px;
+            }
+
+            &:not(.is-compact) > :deep([data-scan-trigger]) {
+                margin-right: -8px;
+            }
+
+            &.is-compact {
+                gap: 4px;
+                padding: 0 4px;
             }
         }
     }

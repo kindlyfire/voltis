@@ -7,7 +7,7 @@
         open-on-focus
         :reset-search-term-on-blur="false"
         :reset-search-term-on-select="false"
-        class="search"
+        class="min-w-0"
         @update:open="open => (wantOpen = open)"
         @update:model-value="navigate"
     >
@@ -84,7 +84,7 @@ import {
     ComboboxRoot,
     ComboboxViewport,
 } from 'reka-ui'
-import { computed, ref, shallowRef, useTemplateRef, watch } from 'vue'
+import { computed, onMounted, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import ACover from '@/ui/ACover.vue'
 import AIcon from '@/ui/AIcon.vue'
@@ -95,6 +95,10 @@ import { useOverlayLayer } from '@/ui/overlay'
 import { contentApi, coverUrl } from '@/utils/api/content'
 import type { Content, UncountedPage } from '@/utils/api/types'
 import { displayContentType } from '@/utils/misc'
+
+const props = defineProps<{ autofocus?: boolean }>()
+/** Esc on an empty term. */
+const emit = defineEmits<{ close: [] }>()
 
 const router = useRouter()
 const root = useTemplateRef('root')
@@ -191,7 +195,8 @@ function guardEnter(e: KeyboardEvent) {
 
 /** With the results closed, Esc clears the term (and stays away from a drawer around it). */
 function onEscape(e: KeyboardEvent) {
-    if (isOpen.value || !term.value) return
+    if (isOpen.value) return
+    if (!term.value) return emit('close')
     e.preventDefault()
     term.value = ''
 }
@@ -200,6 +205,10 @@ function onEscape(e: KeyboardEvent) {
 function onBlur() {
     if (!isOpen.value) wantOpen.value = false
 }
+
+onMounted(() => {
+    if (props.autofocus) input.value?.$el.focus()
+})
 
 function clear() {
     term.value = ''
@@ -216,10 +225,6 @@ function navigate(id: unknown) {
 
 <style scoped>
 @layer ui {
-    .search {
-        min-width: 0;
-    }
-
     .search__pill {
         display: flex;
         align-items: center;
