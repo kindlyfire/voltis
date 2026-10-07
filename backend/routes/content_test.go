@@ -248,6 +248,7 @@ func TestContentListWindow(t *testing.T) {
 	for _, q := range []string{"lantern", "quay"} {
 		res := c.Get("/api/content?library_id="+libID+"&search="+q).Assert(t, 200).JSON()
 		assertEq(t, s(dataIDs(res)), s([]string{echoID}))
+		assertEq(t, res["data"].([]any)[0].(map[string]any)["uri"], any("file:///lib/"+echoID))
 	}
 
 	// Keys and values are listed ascending; "" is the null key. value reads an item's sort value.

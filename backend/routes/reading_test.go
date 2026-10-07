@@ -3,11 +3,14 @@ package routes
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
 
 	"voltis/db"
+	"voltis/lib/fp"
 	"voltis/models"
 
 	"github.com/jackc/pgx/v5"
@@ -26,101 +29,80 @@ func readingOf(t *testing.T, c *testClient, id string) map[string]any {
 	return c.Get("/api/content/"+id+"/reading").Assert(t, 200).JSON()["state"].(map[string]any)
 }
 
+// TestReadingTransition runs the transition table that the Android app's port runs too.
 func TestReadingTransition(t *testing.T) {
+	type state struct {
+		Status   *string         `json:"status"`
+		Progress json.RawMessage `json:"progress"`
+		LastRead *string         `json:"last_read"`
+	}
+	var cases []struct {
+		Name string `json:"name"`
+		Cur  state  `json:"cur"`
+		Op   struct {
+			Op       string          `json:"op"`
+			Status   *string         `json:"status"`
+			Progress json.RawMessage `json:"progress"`
+			Snapshot *state          `json:"snapshot"`
+		} `json:"op"`
+		End  json.RawMessage `json:"end"`
+		Want struct {
+			state
+			Outcome  string `json:"outcome"`
+			Previous bool   `json:"previous"`
+			Write    bool   `json:"write"`
+		} `json:"want"`
+	}
+	raw, err := os.ReadFile("testdata/reading_transitions.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &cases); err != nil || len(cases) == 0 {
+		t.Fatal("no cases", err)
+	}
 	now := time.Now()
 	earlier := now.Add(-time.Hour)
-	pos := json.RawMessage(`{"current_page":3}`)
-	end := json.RawMessage(`{"at_end":true}`)
-	type want struct {
-		status, outcome string
-		previous, write bool
-	}
-	events := map[string]map[string]want{
-		"": {
-			"position": {"reading", "started", false, true},
-			"finish":   {"completed", "completed", false, true},
-		},
-		"plan_to_read": {
-			"position": {"reading", "moved_to_reading", true, true},
-			"finish":   {"completed", "completed", true, true},
-		},
-		"on_hold": {
-			"position": {"reading", "moved_to_reading", true, true},
-			"finish":   {"completed", "completed", true, true},
-		},
-		"dropped": {
-			"position": {"reading", "moved_to_reading", true, true},
-			"finish":   {"completed", "completed", true, true},
-		},
-		"reading": {
-			"position": {"reading", "saved", false, true},
-			"finish":   {"completed", "completed", false, true},
-		},
-		"completed": {
-			"position": {"completed", "saved", false, true},
-			"finish":   {"completed", "none", false, false},
-		},
-	}
 	str := func(p *string) string {
 		if p == nil {
 			return ""
 		}
 		return *p
 	}
-	for status, ops := range events {
-		cur := readingSnapshot{Progress: json.RawMessage(`{"current_page":1}`), LastReadAt: &earlier}
-		if status != "" {
-			cur.Status = &status
+	at := func(label *string) *time.Time {
+		switch str(label) {
+		case "now":
+			return &now
+		case "earlier":
+			return &earlier
 		}
-		for op, w := range ops {
-			next, outcome, previous, write := transition(cur, readingOp{Op: op, Progress: pos}, end, now)
-			if str(next.Status) != w.status || outcome != w.outcome || (previous != nil) != w.previous || write != w.write {
-				t.Errorf("%s %s: got %s %s %v %v, want %+v", status, op, str(next.Status), outcome, previous != nil, write, w)
-			}
-			if previous != nil && str(previous.Status) != status {
-				t.Errorf("%s %s: previous %s", status, op, str(previous.Status))
-			}
-			wantProgress, wantLastRead := pos, &now
-			if op == "finish" {
-				wantProgress = end
-			}
-			if !write {
-				wantProgress, wantLastRead = cur.Progress, &earlier
-			}
-			if string(next.Progress) != string(wantProgress) || !next.LastReadAt.Equal(*wantLastRead) {
-				t.Errorf("%s %s: progress %s at %v", status, op, next.Progress, next.LastReadAt)
-			}
-		}
+		return nil
 	}
-
-	cur := readingSnapshot{Status: new("on_hold"), Progress: pos, LastReadAt: &earlier}
-	for _, status := range []string{"reading", "on_hold", "dropped", "plan_to_read", ""} {
-		op := readingOp{Op: "set_status"}
-		if status != "" {
-			op.Status = &status
-		}
-		next, outcome, previous, _ := transition(cur, op, end, now)
-		if str(next.Status) != status || outcome != "status_set" || previous != nil ||
-			string(next.Progress) != string(pos) || !next.LastReadAt.Equal(earlier) {
-			t.Errorf("set_status %s: %+v %s", status, next, outcome)
-		}
+	snapshot := func(s state) readingSnapshot {
+		return readingSnapshot{Status: s.Status, Progress: s.Progress, LastReadAt: at(s.LastRead)}
 	}
-	for _, op := range []readingOp{{Op: "mark_completed"}, {Op: "set_status", Status: new("completed")}} {
-		next, outcome, _, _ := transition(cur, op, end, now)
-		if str(next.Status) != "completed" || outcome != "completed" || string(next.Progress) != string(end) ||
-			!next.LastReadAt.Equal(earlier) {
-			t.Errorf("%s: %+v %s", op.Op, next, outcome)
+	sameJSON := func(a, b json.RawMessage) bool {
+		var x, y any
+		return json.Unmarshal(a, &x) == nil && json.Unmarshal(b, &y) == nil && reflect.DeepEqual(x, y)
+	}
+	for _, tc := range cases {
+		op := readingOp{Op: tc.Op.Op, Status: tc.Op.Status, Progress: tc.Op.Progress}
+		if tc.Op.Snapshot != nil {
+			op.Snapshot = new(snapshot(*tc.Op.Snapshot))
 		}
-	}
-	next, outcome, _, _ := transition(cur, readingOp{Op: "clear"}, end, now)
-	if next.Status != nil || string(next.Progress) != "{}" || next.LastReadAt != nil || outcome != "cleared" {
-		t.Errorf("clear: %+v %s", next, outcome)
-	}
-	snap := readingSnapshot{Status: new("dropped"), Progress: pos, LastReadAt: &earlier}
-	next, outcome, _, _ = transition(cur, readingOp{Op: "restore", Snapshot: &snap}, end, now)
-	if str(next.Status) != "dropped" || string(next.Progress) != string(pos) || !next.LastReadAt.Equal(earlier) ||
-		outcome != "restored" {
-		t.Errorf("restore: %+v %s", next, outcome)
+		next, outcome, previous, write := transition(snapshot(tc.Cur), op, tc.End, now)
+		w := tc.Want
+		if !fp.PtrEq(next.Status, w.Status) || outcome != w.Outcome || (previous != nil) != w.Previous ||
+			write != w.Write || !sameJSON(next.Progress, w.Progress) {
+			t.Errorf("%s: got %v %s %v %v %s", tc.Name, str(next.Status), outcome, previous != nil, write,
+				next.Progress)
+		}
+		if wantAt := at(w.LastRead); (next.LastReadAt == nil) != (wantAt == nil) ||
+			wantAt != nil && !next.LastReadAt.Equal(*wantAt) {
+			t.Errorf("%s: last read %v", tc.Name, next.LastReadAt)
+		}
+		if previous != nil && !fp.PtrEq(previous.Status, tc.Cur.Status) {
+			t.Errorf("%s: previous %v", tc.Name, str(previous.Status))
+		}
 	}
 }
 

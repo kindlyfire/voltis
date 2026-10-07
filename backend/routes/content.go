@@ -82,6 +82,7 @@ type ContentDTO struct {
 	CreatedAt    time.Time       `json:"created_at"`
 	UpdatedAt    time.Time       `json:"updated_at"`
 	URIPart      string          `json:"uri_part"`
+	URI          string          `json:"uri"`
 	Title        string          `json:"title"`
 	Valid        bool            `json:"valid"`
 	FileURI      *string         `json:"file_uri"`
@@ -165,6 +166,7 @@ func contentToDTO(c models.Content, opts contentDTOOpts) ContentDTO {
 		CreatedAt:    c.CreatedAt,
 		UpdatedAt:    c.UpdatedAt,
 		URIPart:      c.URIPart,
+		URI:          c.URI,
 		Title:        m.Title,
 		Valid:        c.Valid,
 		FileURI:      c.FileURI,
