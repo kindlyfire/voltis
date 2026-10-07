@@ -22,3 +22,7 @@ $$;
 
 CREATE TRIGGER user_to_content_reading_seq BEFORE INSERT OR UPDATE ON user_to_content
     FOR EACH ROW EXECUTE FUNCTION user_to_content_stamp_reading_seq();
+
+-- An older scanner wrote the JSON literal null (not SQL NULL) to content.file_data; clients expect an object.
+UPDATE content SET file_data = '{}' WHERE jsonb_typeof(file_data) <> 'object';
+UPDATE users SET preferences = '{}' WHERE jsonb_typeof(preferences) <> 'object';

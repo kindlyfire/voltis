@@ -63,7 +63,7 @@ func utcToDTO(u *models.UserToContent) *UserToContentDTO {
 		return nil
 	}
 	progress := u.Progress
-	if progress == nil {
+	if !isJSONObject(progress) {
 		progress = json.RawMessage("{}")
 	}
 	return &UserToContentDTO{
@@ -143,11 +143,11 @@ type contentDTOOpts struct {
 
 func contentToDTO(c models.Content, opts contentDTOOpts) ContentDTO {
 	meta := json.RawMessage("{}")
-	if opts.includeMeta && opts.meta != nil {
+	if opts.includeMeta && isJSONObject(opts.meta) {
 		meta = opts.meta
 	}
 	fileData := json.RawMessage("{}")
-	if opts.includeFileData && c.FileData != nil {
+	if opts.includeFileData && isJSONObject(c.FileData) {
 		fileData = c.FileData
 	}
 

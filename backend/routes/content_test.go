@@ -999,6 +999,11 @@ func TestComicPageSizes(t *testing.T) {
 		assertEq(t, stored(t, id), unsized)
 	})
 
+	t.Run("a JSON null is served as an object", func(t *testing.T) {
+		id := newComic(t, cbz(t), "null")
+		assertEq(t, served(t, "/api/content/"+id), "{}")
+	})
+
 	t.Run("with the flag", func(t *testing.T) {
 		id := newComic(t, cbz(t), unsized)
 		assertEq(t, served(t, "/api/content/"+id+"?page_sizes=1"), normalize(sized))
