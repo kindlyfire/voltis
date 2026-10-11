@@ -14,10 +14,15 @@
                 <ABadge :icon="statusIcon" :label="statusLabel" aria-hidden="true" />
             </template>
             <template
-                v-if="newLabel || (childrenCount != null && !settings.hideItemCount)"
+                v-if="
+                    content.special ||
+                    newLabel ||
+                    (childrenCount != null && !settings.hideItemCount)
+                "
                 #topRight
             >
                 <span class="flex gap-1">
+                    <ABadge v-if="content.special" aria-hidden="true">Special</ABadge>
                     <ABadge v-if="newLabel" class="content-card__new" aria-hidden="true">
                         {{ newLabel }}
                     </ABadge>
@@ -217,6 +222,7 @@ const linkLabel = computed(() => {
         parts.push(itemTitle)
         if (readLabel.value) parts.push(readLabel.value)
     }
+    if (props.content.special) parts.push('Special')
     if (newLabel.value) parts.push(newLabel.value)
     if (statusLabel.value) parts.push(statusLabel.value)
     if (childrenCount.value != null) {

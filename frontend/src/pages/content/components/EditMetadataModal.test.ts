@@ -37,6 +37,13 @@ const config = {
             editable: true,
         },
         {
+            key: 'special',
+            label: 'Special',
+            type: 'bool',
+            content_types: ['comic_series'],
+            editable: true,
+        },
+        {
             key: 'volume',
             label: 'Volume',
             type: 'string',
@@ -172,6 +179,26 @@ describe('EditMetadataModal', () => {
         await settle()
 
         expect(saves).toEqual([{ rev: 2, fields: { volume: '3' } }])
+    })
+
+    it('drops a bool override set back to Automatic', async () => {
+        view = viewAt(2, { title: 'Mine', volume: '3', special: false })
+        showEditMetadataModal('c_1')
+        await settle()
+        expect(() => button('Clear Special')).toThrow()
+
+        button('Edit Special').click()
+        await settle()
+        const auto = [...document.querySelectorAll('label')].find(
+            l => l.textContent?.trim() === 'Automatic'
+        )
+        auto!.querySelector('input')!.click()
+        button('OK').click()
+        await settle()
+        button('Save').click()
+        await settle()
+
+        expect(saves).toEqual([{ rev: 2, fields: { title: 'Mine', volume: '3' } }])
     })
 
     it('reopens and saves unsaved staff edits', async () => {

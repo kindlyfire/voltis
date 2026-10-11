@@ -72,6 +72,7 @@ export function listSearchParams(p: ContentListParams): URLSearchParams {
     if (p.facet_kind) searchParams.append('facet_kind', p.facet_kind)
     if (p.facet) searchParams.append('facet', p.facet)
     if (p.facet_role) searchParams.append('facet_role', p.facet_role)
+    if (p.section) searchParams.append('section', p.section)
     return searchParams
 }
 
@@ -116,11 +117,15 @@ export const contentApi = {
             })
         ),
 
-    useBuckets: (params: MaybeRefOrGetter<ContentListParams>) =>
+    useBuckets: (
+        params: MaybeRefOrGetter<ContentListParams>,
+        enabled: MaybeRefOrGetter<boolean> = true
+    ) =>
         useQuery({
             queryKey: computed(() => [...contentWindowKey(toValue(params)), 'buckets'] as const),
             queryFn: async ({ queryKey }) =>
                 apiFetch<ContentBuckets>(`/content/buckets?${listSearchParams(queryKey[4])}`),
+            enabled: computed(() => toValue(enabled)),
         }),
 
     /** Page `page` of the window, without the total, which comes from the buckets. */

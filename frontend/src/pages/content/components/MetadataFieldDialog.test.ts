@@ -88,6 +88,27 @@ describe('MetadataFieldDialog', () => {
         expect(field('Name').value).toBe('Ann')
     })
 
+    it('edits a bool, starting from its value', async () => {
+        const def: FieldDef = { ...staffDef, key: 'special', label: 'Special', type: 'bool' }
+        const radio = (label: string) =>
+            [...document.querySelectorAll('label')]
+                .find(l => l.textContent?.trim() === label)!
+                .querySelector('input')!
+        const choose = async (from: unknown, label: string, checked: string) => {
+            await wrapper.setProps({ open: false, value: from })
+            await wrapper.setProps({ open: true })
+            await settle()
+            expect(radio(checked).checked).toBe(true)
+            radio(label).click()
+            button('OK').click()
+            await settle()
+        }
+        await show(def, undefined)
+        await choose(true, 'No', 'Yes')
+        await choose(false, 'Yes', 'No')
+        expect(wrapper.emitted('confirm')).toEqual([[false], [true]])
+    })
+
     it('refuses invalid numbers and dates', async () => {
         const def: FieldDef = { ...staffDef, key: 'rating', label: 'Rating', type: 'int', max: 100 }
         await show(def, 150)

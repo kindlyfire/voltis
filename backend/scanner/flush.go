@@ -31,7 +31,8 @@ const contentUpsert = `
 	ON CONFLICT (id) DO UPDATE SET
 		uri_part = $4, uri = $5, valid = $6, file_uri = $7, file_mtime = $8,
 		file_size = $9, cover_uri = $10, type = $11, "order" = $12, order_parts = $13,
-		file_data = $14, parent_id = $15, updated_at = $3, word_count = $17, page_count = $18,
+		file_data = $14, parent_id = $15, special = content.special AND $15::text IS NOT NULL,
+		updated_at = $3, word_count = $17, page_count = $18,
 		data_raw = COALESCE($19, content.data_raw), data = COALESCE($20, content.data),
 		data_version = COALESCE($21, content.data_version),
 		meta_updated_at = CASE WHEN $19 IS NOT NULL AND (content.data_raw <> $19 OR content.data <> $20)
@@ -233,7 +234,7 @@ func commit(ctx context.Context, tx pgx.Tx, store *metadata.Store, s FileScanner
 		if changed {
 			touched = append(touched, st.write.id)
 		}
-		if err := leaves.add(ctx, tx, leafRow(st.write.id, libraryID, uri, *item, parentID, old, now), &meta); err != nil {
+		if err := leaves.add(ctx, tx, leafRow(st.write.id, libraryID, uri, *item, docs[st.write.id].Overrides, parentID, old, now), &meta); err != nil {
 			return Counts{}, nil, err
 		}
 		// Only the row tells an add from a moved file reclaiming a deleted item's ID.
@@ -369,34 +370,68 @@ func commitSeries(ctx context.Context, tx pgx.Tx, store *metadata.Store, s FileS
 			continue
 		}
 		ref := sets[id].Ref
-		ordered := order(kids)
-
-		orderIDs := make([]string, len(ordered))
-		orderVals := make([]int, len(ordered))
-		for i := range ordered {
-			orderIDs[i], orderVals[i] = ordered[i].ID, i
+		ordered := order(markSpecials(kids))
+		ids := make([]string, len(ordered))
+		orders := make([]int, len(ordered))
+		specials := make([]bool, len(ordered))
+		for i, c := range ordered {
+			ids[i], orders[i], specials[i] = c.ID, i, c.special
 		}
 		_, err := tx.Exec(ctx, `
-			UPDATE content c SET "order" = r.o
-			FROM unnest($2::text[], $3::int[]) AS r(id, o)
-			WHERE c.library_id = $1 AND c.id = r.id AND c."order" IS DISTINCT FROM r.o
-		`, libraryID, orderIDs, orderVals)
+			UPDATE content c SET "order" = r.o, special = r.s
+			FROM unnest($2::text[], $3::int[], $4::bool[]) AS r(id, o, s)
+			WHERE c.library_id = $1 AND c.id = r.id AND (c."order" IS DISTINCT FROM r.o OR c.special IS DISTINCT FROM r.s)
+		`, libraryID, ids, orders, specials)
 		if err != nil {
 			return err
 		}
-
-		cover, mtime := s.SeriesCover(ref, ordered)
+		uri, mtime := s.SeriesCover(ref, ordered)
 		_, err = tx.Exec(ctx, `
 			UPDATE content SET cover_uri = $2, file_mtime = $3, updated_at = $4
 			WHERE id = $1 AND (cover_uri IS DISTINCT FROM $2 OR file_mtime IS DISTINCT FROM $3)
-		`, id, cover, mtime, now)
+		`, id, uri, mtime, now)
 		if err != nil {
 			return err
 		}
-
 		seriesMeta = append(seriesMeta, metadata.FileLayer{ContentID: id, Fields: seriesLayer(ref, ordered)})
 	}
 	return store.WriteFileLayers(ctx, tx, seriesMeta, now)
+}
+
+// ApplyPosition updates content after its position overrides change: its order parts when
+// parts is set (a special-only change keeps them, which a row not yet force-scanned needs), then
+// its series' order, special flags, cover and file layer. The caller holds LockMetadata.
+func ApplyPosition(ctx context.Context, tx pgx.Tx, store *metadata.Store, contentID string, parts bool, now time.Time) error {
+	var libraryID, typ string
+	var parentID *string
+	var doc metadata.Doc
+	err := tx.QueryRow(ctx, "SELECT library_id, type, parent_id, data_raw FROM content WHERE id = $1", contentID).
+		Scan(&libraryID, &typ, &parentID, &doc)
+	if err != nil || (typ != "comic" && typ != "book") {
+		return err
+	}
+	if parts {
+		_, err := tx.Exec(ctx, "UPDATE content SET order_parts = $2 WHERE id = $1 AND order_parts IS DISTINCT FROM $2",
+			contentID, position(typ, scannedPosition(typ, doc.File), doc.Overrides))
+		if err != nil {
+			return err
+		}
+	}
+	if parentID == nil {
+		return nil
+	}
+
+	ref := SeriesRef{ID: *parentID}
+	err = tx.QueryRow(ctx, "SELECT uri, uri_part, type, file_uri FROM content WHERE id = $1", ref.ID).
+		Scan(&ref.URI, &ref.URIPart, &ref.Type, &ref.FileURI)
+	if err != nil {
+		return err
+	}
+	var sc FileScanner = &ComicsScanner{}
+	if ref.Type == "book_series" {
+		sc = &BooksScanner{}
+	}
+	return commitSeries(ctx, tx, store, sc, libraryID, now, map[string]*SeriesChanges{ref.ID: {Ref: ref}}, []string{ref.ID}, nil)
 }
 
 // loadChildren reads the children of series, with their file layers, leaving out dropped ones.
@@ -410,16 +445,18 @@ func loadChildren(ctx context.Context, tx pgx.Tx, libraryID string, seriesIDs []
 	var parentID string
 	err := query(ctx, tx, `
 		SELECT c.id, c.uri_part, c.order_parts, c.cover_uri, c.file_mtime, NOT c.valid, c.parent_id,
-		       COALESCE(c.data_raw->'file', '{}')
+		       COALESCE(c.data_raw->'file', '{}'),
+		       COALESCE(substring(c.file_uri from '[^/]+$'), ''), COALESCE(c.data_raw->'overrides', '{}')
 		FROM content c
 		WHERE c.library_id = $1 AND c.parent_id = ANY($2::text[])
 	`, []any{libraryID, seriesIDs},
-		[]any{&kid.ID, &kid.URIPart, &kid.OrderParts, &kid.CoverURI, &kid.FileMtime, &kid.Invalid, &parentID, &kid.Meta}, func() error {
+		[]any{&kid.ID, &kid.URIPart, &kid.OrderParts, &kid.CoverURI, &kid.FileMtime, &kid.Invalid, &parentID, &kid.Meta,
+			&kid.FileName, &kid.Overrides}, func() error {
 			if !dropped[kid.ID] {
 				children[parentID] = append(children[parentID], kid)
 			}
 			// JSON scans merge into the destination, so the next row starts from empty.
-			kid.Meta = metadata.Fields{}
+			kid.Meta, kid.Overrides = metadata.Fields{}, metadata.Fields{}
 			return nil
 		})
 	return children, err
@@ -537,7 +574,8 @@ const leafUpsert = `
 		uri_part = excluded.uri_part, uri = excluded.uri, valid = excluded.valid, file_uri = excluded.file_uri,
 		file_mtime = excluded.file_mtime, file_size = excluded.file_size, cover_uri = excluded.cover_uri,
 		type = excluded.type, "order" = excluded."order", order_parts = excluded.order_parts,
-		file_data = excluded.file_data, parent_id = excluded.parent_id, updated_at = excluded.updated_at,
+		file_data = excluded.file_data, parent_id = excluded.parent_id,
+		special = content.special AND excluded.parent_id IS NOT NULL, updated_at = excluded.updated_at,
 		word_count = excluded.word_count, page_count = excluded.page_count,
 		data_raw = excluded.data_raw, data = excluded.data, data_version = excluded.data_version,
 		meta_updated_at = CASE WHEN content.data_raw <> excluded.data_raw OR content.data <> excluded.data

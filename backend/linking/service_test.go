@@ -476,7 +476,8 @@ func TestBuildQuery(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		return e.svc.store.SetOverrides(context.Background(), tx, target, 0, metadata.Fields{Title: metadata.Val("Bar")})
+		_, err = e.svc.store.SetOverrides(context.Background(), tx, target, 0, metadata.Fields{Title: metadata.Val("Bar")})
+		return err
 	})
 
 	target, _ := metadata.ReadTarget(context.Background(), e.pool, "s")

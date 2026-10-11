@@ -183,11 +183,12 @@ type Content struct {
 	LibraryID  string     `db:"library_id" json:"library_id"`
 	WordCount  *int       `db:"word_count" json:"word_count"`
 	PageCount  *int       `db:"page_count" json:"page_count"`
+	Special    bool       `db:"special" json:"special"`
 }
 
 var contentColumns = []string{"id", "created_at", "updated_at", "uri_part", "uri", "valid", "file_uri",
 	"file_mtime", "file_size", "cover_uri", "type", `"order"`, "order_parts", "file_data", "parent_id",
-	"library_id", "word_count", "page_count"}
+	"library_id", "word_count", "page_count", "special"}
 
 // ContentColumns lists the columns Content reads, qualified by alias unless it is empty. The
 // table also holds the metadata, which strict row scans would reject.

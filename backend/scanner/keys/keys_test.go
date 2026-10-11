@@ -111,7 +111,7 @@ func TestKeysParseBookFileVolume(t *testing.T) {
 			"Ironbound Zero - From Nothing to Legend's End", 6},
 		{"The Day I Woke Up as a Teapot v17", "The Day I Woke Up as a Teapot", 17},
 		{"Series (2019) Vol. 2 (Digital)", "Series (2019)", 2},
-		// The SP stems parse; IsBookSpecial keeps them out of inference.
+		// The SP stems parse; IsBookExtra keeps them out of inference.
 		{ser + " SP02 - Volume 10 [STORE☆FRONT Exclusive Short Story] [Group]", ser + " SP02", 10},
 		{ser + " SP01 - Short Stories [Pub] [Tier] [Group] {x}", "", 0},
 		{"Plenty - Jane Author", "", 0},
@@ -125,7 +125,7 @@ func TestKeysParseBookFileVolume(t *testing.T) {
 	}
 }
 
-func TestKeysIsBookSpecial(t *testing.T) {
+func TestKeysIsBookExtra(t *testing.T) {
 	cases := []struct {
 		in   string
 		want bool
@@ -145,8 +145,57 @@ func TestKeysIsBookSpecial(t *testing.T) {
 		{"Crisp3 Vol. 1", false},
 	}
 	for _, c := range cases {
-		if got := IsBookSpecial(c.in); got != c.want {
-			t.Errorf("IsBookSpecial(%q) = %v, want %v", c.in, got, c.want)
+		if got := IsBookExtra(c.in); got != c.want {
+			t.Errorf("IsBookExtra(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
+func TestKeysSpecialMarkers(t *testing.T) {
+	sp := []struct {
+		in          string
+		ok, special bool
+		want        string
+	}{
+		{"SP - Notes", true, true, "nil"},
+		{"SP01 - Holiday", true, true, "1"},
+		{"x_sp2_y", true, true, "2"},
+		{"Omake", false, true, "nil"},
+		{"Bluefin Omake SP01 - Holiday", true, true, "1"},
+		{"Special Edition", false, false, "nil"},
+		{"Spare Parts", false, false, "nil"},
+	}
+	for _, c := range sp {
+		if ok, num := SPMarker(c.in); ok != c.ok || fmtFloatPtr(num) != c.want {
+			t.Errorf("SPMarker(%q) = %v/%s, want %v/%s", c.in, ok, fmtFloatPtr(num), c.ok, c.want)
+		}
+		if got := SpecialMarker(c.in); got != c.special {
+			t.Errorf("SpecialMarker(%q) = %v, want %v", c.in, got, c.special)
+		}
+	}
+
+	numbers := []struct {
+		in   string
+		ok   bool
+		want string
+	}{
+		{"SP", true, "nil"}, {"sp1", true, "1"}, {"SP 2", true, "2"}, {"5", false, "nil"}, {"SPx", false, "nil"},
+	}
+	for _, c := range numbers {
+		if ok, num := IsSpecialNumber(c.in); ok != c.ok || fmtFloatPtr(num) != c.want {
+			t.Errorf("IsSpecialNumber(%q) = %v/%s, want %v/%s", c.in, ok, fmtFloatPtr(num), c.ok, c.want)
+		}
+	}
+
+	titles := []struct{ in, want string }{
+		{"SP - Notes", "Notes"},
+		{"SP01 - Holiday", "Holiday"},
+		{"Artbook", "Artbook"},
+		{"SP01", "SP01"},
+	}
+	for _, c := range titles {
+		if got := UnnumberedTitle(c.in); got != c.want {
+			t.Errorf("UnnumberedTitle(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }

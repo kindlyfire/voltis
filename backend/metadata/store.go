@@ -123,26 +123,27 @@ func (s *Store) WriteFileLayers(ctx context.Context, tx pgx.Tx, rows []FileLayer
 }
 
 // SetOverrides replaces a locked row's overrides, failing with ErrConflict unless they are still
-// at expectRev.
-func (s *Store) SetOverrides(ctx context.Context, tx pgx.Tx, t Target, expectRev int64, o Fields) error {
+// at expectRev. It returns the overrides it replaced.
+func (s *Store) SetOverrides(ctx context.Context, tx pgx.Tx, t Target, expectRev int64, o Fields) (prev Fields, err error) {
 	docs, err := readDocs(ctx, tx, []string{t.ContentID})
 	if err != nil {
-		return err
+		return Fields{}, err
 	}
 	d := docs[t.ContentID]
 	if d.Rev != expectRev {
-		return ErrConflict
+		return Fields{}, ErrConflict
 	}
 	now := time.Now().UTC()
 	if matchInputs(d.File, d.Overrides) != matchInputs(d.File, o) {
 		if err := TouchLinks(ctx, tx, []string{t.ContentID}, now); err != nil {
-			return err
+			return Fields{}, err
 		}
 	}
+	prev = d.Overrides
 	d.Rev, d.Overrides = d.Rev+1, o
 	docs[t.ContentID] = d
 	_, err = s.write(ctx, tx, docs, true, now)
-	return err
+	return prev, err
 }
 
 // Recompute derives data from the local layers and linked snapshots, and reports whether it

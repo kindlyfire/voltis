@@ -32,6 +32,12 @@
                 :label="draft.def.label"
                 clearable
             />
+            <ARadioGroup
+                v-else-if="draft.def.type === 'bool'"
+                v-model="draft.choice"
+                :options="CHOICES"
+                :label="draft.def.label"
+            />
             <ATextField
                 v-else-if="draft.def.type === 'int' || draft.def.type === 'float'"
                 v-model="draft.number"
@@ -63,6 +69,7 @@ import { computed, ref, useId, watch } from 'vue'
 import AButton from '@/ui/AButton.vue'
 import ADialog from '@/ui/ADialog.vue'
 import AIconButton from '@/ui/AIconButton.vue'
+import ARadioGroup from '@/ui/ARadioGroup.vue'
 import ASelect from '@/ui/ASelect.vue'
 import ATextField from '@/ui/ATextField.vue'
 import { IconDelete, IconPlus } from '@/ui/icons'
@@ -74,15 +81,23 @@ const props = defineProps<{
     value: unknown
 }>()
 const isOpen = defineModel<boolean>('open', { required: true })
+/** Emits `undefined` for a bool set to Automatic: no override. */
 const emit = defineEmits<{ confirm: [value: unknown] }>()
 
 const formId = useId()
+
+const CHOICES = [
+    { label: 'Automatic', value: 'auto' },
+    { label: 'Yes', value: 'yes' },
+    { label: 'No', value: 'no' },
+] as const
 
 interface Draft {
     def: FieldDef
     text: string | null
     number: number | null
     staff: StaffEntry[]
+    choice: (typeof CHOICES)[number]['value']
 }
 
 /** Kept after the dialog closes, so its content stays put while it animates out. */
@@ -101,6 +116,7 @@ watch(isOpen, opened => {
             def.type === 'staff' && Array.isArray(value)
                 ? value.map(({ name, role }: StaffEntry) => ({ name, role }))
                 : [],
+        choice: value === true ? 'yes' : value === false ? 'no' : 'auto',
     }
 })
 
@@ -135,6 +151,8 @@ function serialize(d: Draft): unknown {
         case 'int':
         case 'float':
             return d.number
+        case 'bool':
+            return d.choice === 'auto' ? undefined : d.choice === 'yes'
         case 'staff': {
             const staff = d.staff.filter(s => s.name.trim())
             return staff.length ? staff : null

@@ -58,7 +58,8 @@ func setOverrides(t *testing.T, pool *pgxpool.Pool, rev int64, o metadata.Fields
 		if err != nil {
 			return err
 		}
-		return store.SetOverrides(context.Background(), tx, target, rev, o)
+		_, err = store.SetOverrides(context.Background(), tx, target, rev, o)
+		return err
 	})
 }
 

@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"voltis/lib/fp"
 	"voltis/metadata"
 	"voltis/models"
 )
@@ -60,11 +62,11 @@ func TestOrderSortsByPartsThenURIPartThenID(t *testing.T) {
 			"a,m,z",
 		},
 		{
-			"equal parts fall back to uri part before id",
+			"numbered ties fall back to uri part before file name and id",
 			[]Child{
-				{ID: "a", URIPart: "SP03", OrderParts: []*float32{f32(100000)}},
-				{ID: "b", URIPart: "SP01", OrderParts: []*float32{f32(100000)}},
-				{ID: "c", URIPart: "SP02", OrderParts: []*float32{f32(100000)}},
+				{ID: "a", URIPart: "SP03", FileName: "SP01.cbz", OrderParts: []*float32{f32(100000)}},
+				{ID: "b", URIPart: "SP01", FileName: "SP03.cbz", OrderParts: []*float32{f32(100000)}},
+				{ID: "c", URIPart: "SP02", FileName: "SP02.cbz", OrderParts: []*float32{f32(100000)}},
 				{ID: "d", URIPart: "v14", OrderParts: []*float32{f32(14)}},
 			},
 			"d,b,c,a",
@@ -77,12 +79,33 @@ func TestOrderSortsByPartsThenURIPartThenID(t *testing.T) {
 			},
 			"short,long",
 		},
+		{
+			"specials tab after unnumbered contents",
+			[]Child{
+				{ID: "tab", URIPart: "a", OrderParts: []*float32{nil, nil}},
+				{ID: "plain", URIPart: "z", OrderParts: []*float32{nil, nil},
+					Overrides: metadata.Fields{Special: metadata.Val(false)}},
+				{ID: "num", OrderParts: []*float32{f32(1), nil}},
+			},
+			"num,plain,tab",
+		},
+		{
+			"specials by sp number then natural file name",
+			[]Child{
+				{ID: "a10", FileName: "Atlas 10.cbz", OrderParts: []*float32{nil, nil}},
+				{ID: "a9", FileName: "atlas 9.cbz", OrderParts: []*float32{nil, nil}},
+				{ID: "num", OrderParts: []*float32{f32(1), nil}},
+				{ID: "sp10", FileName: "Bluefin SP10.cbz", OrderParts: []*float32{nil, nil}},
+				{ID: "sp2", FileName: "Bluefin SP2.cbz", OrderParts: []*float32{nil, nil}},
+			},
+			"num,sp2,sp10,a9,a10",
+		},
 		{"empty", nil, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			before := ids(c.in)
-			got := order(c.in)
+			got := order(markSpecials(c.in))
 			if ids(got) != c.want {
 				t.Fatalf("order = %s, want %s", ids(got), c.want)
 			}
@@ -91,6 +114,125 @@ func TestOrderSortsByPartsThenURIPartThenID(t *testing.T) {
 			}
 			if ids(order(got)) != c.want {
 				t.Fatalf("order not idempotent: %s", ids(order(got)))
+			}
+		})
+	}
+}
+
+func TestMarkSpecials(t *testing.T) {
+	unnum := []*float32{nil, nil}
+	num := []*float32{f32(1), nil}
+	marked := metadata.Fields{Special: metadata.Val(true)}
+	cases := []struct {
+		name    string
+		in      []Child
+		special string // ids of special children
+		tab     string // ids in the Specials tab
+	}{
+		{
+			"unnumbered among numbered",
+			[]Child{{ID: "n", OrderParts: num}, {ID: "u", OrderParts: unnum}},
+			"u", "u",
+		},
+		{
+			"unnumbered with a marker",
+			[]Child{{ID: "u", OrderParts: unnum, Meta: marked}, {ID: "v", OrderParts: unnum}},
+			"u", "u",
+		},
+		{
+			"nothing numbered, no marker",
+			[]Child{{ID: "u", OrderParts: unnum}, {ID: "v", OrderParts: []*float32{}}},
+			"", "",
+		},
+		{
+			"numbered with a marker",
+			[]Child{{ID: "n", OrderParts: num, Meta: marked}},
+			"n", "",
+		},
+		{
+			"override no on unnumbered",
+			[]Child{{ID: "n", OrderParts: num}, {ID: "u", OrderParts: unnum,
+				Meta: marked, Overrides: metadata.Fields{Special: metadata.Val(false)}}},
+			"", "",
+		},
+		{
+			"null override clears only the marker",
+			[]Child{{ID: "u", OrderParts: unnum, Meta: marked, Overrides: metadata.Fields{Special: metadata.Opt[bool]{P: metadata.Null}}}},
+			"", "",
+		},
+		{
+			"override yes on numbered",
+			[]Child{{ID: "n", OrderParts: num, Overrides: marked}},
+			"n", "",
+		},
+		{
+			"invalid numbered child doesn't count",
+			[]Child{{ID: "n", OrderParts: num, Invalid: true}, {ID: "u", OrderParts: unnum}},
+			"", "",
+		},
+	}
+	pick := func(cs []Child, f func(Child) bool) string {
+		return ids(slices.DeleteFunc(slices.Clone(cs), func(c Child) bool { return !f(c) }))
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := markSpecials(c.in)
+			if s := pick(got, func(c Child) bool { return c.special }); s != c.special {
+				t.Errorf("special = %q, want %q", s, c.special)
+			}
+			if s := pick(got, func(c Child) bool { return c.tab }); s != c.tab {
+				t.Errorf("tab = %q, want %q", s, c.tab)
+			}
+		})
+	}
+
+	sp := markSpecials([]Child{
+		{ID: "number", Meta: metadata.Fields{Number: metadata.Val("SP 3")}, FileName: "SP01.cbz"},
+		{ID: "file", FileName: "Bluefin SP07 - Notes.cbz"},
+	})
+	if *sp[0].spNum != 3 || *sp[1].spNum != 7 {
+		t.Errorf("spNum = %v/%v, want 3/7", *sp[0].spNum, *sp[1].spNum)
+	}
+}
+
+func TestPosition(t *testing.T) {
+	comic := metadata.Fields{Volume: metadata.Val("2"), Number: metadata.Val("Ch. 5")}
+	null := metadata.Opt[string]{P: metadata.Null}
+	cases := []struct {
+		name, typ string
+		file, o   metadata.Fields
+		scanned   []*float32 // nil derives from file
+		want      string
+	}{
+		{"scanned comic", "comic", comic, metadata.Fields{}, nil, "[2 5]"},
+		{"volume value", "comic", comic, metadata.Fields{Volume: metadata.Val("1.5")}, nil, "[1.5 5]"},
+		{"sp keeps the scanned number", "comic", comic, metadata.Fields{Number: metadata.Val("SP")}, nil, "[2 5]"},
+		{"null clears", "comic", comic, metadata.Fields{Volume: null}, nil, "[nil 5]"},
+		{"number keeps the scanned volume", "comic", comic, metadata.Fields{Number: metadata.Val("7")}, nil, "[2 7]"},
+		{"empty scanned pads", "comic", comic, metadata.Fields{Number: metadata.Val("3")}, []*float32{}, "[nil 3]"},
+		{"book index", "book", metadata.Fields{SeriesIndex: metadata.Val(2.0)},
+			metadata.Fields{SeriesIndex: metadata.Val(4.0)}, nil, "[4]"},
+		{"unholdable values keep the scanned parts", "comic", comic,
+			metadata.Fields{Volume: metadata.Val("1e40"), Number: metadata.Val("NaN")}, nil, "[2 5]"},
+		{"unholdable book index keeps the scanned one", "book", metadata.Fields{SeriesIndex: metadata.Val(2.0)},
+			metadata.Fields{SeriesIndex: metadata.Val(-1e300)}, nil, "[2]"},
+		{"book sentinel is unnumbered", "book", metadata.Fields{SeriesIndex: metadata.Val(100000.0)},
+			metadata.Fields{}, nil, "[nil]"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			scanned := c.scanned
+			if scanned == nil {
+				scanned = scannedPosition(c.typ, c.file)
+			}
+			got := fmt.Sprint(fp.Map(position(c.typ, scanned, c.o), func(p *float32) any {
+				if p == nil {
+					return "nil"
+				}
+				return *p
+			}))
+			if got != c.want {
+				t.Errorf("position = %s, want %s", got, c.want)
 			}
 		})
 	}
@@ -315,7 +457,7 @@ func TestLeafRowKeepsCreationAndCover(t *testing.T) {
 		CoverURI: new("/lib/s/ch1.cbz/old.jpg"), Order: new(3),
 	}
 
-	kept := leafRow("leaf", "library", "comic/s/ch1", item, new("p"), &old, now)
+	kept := leafRow("leaf", "library", "comic/s/ch1", item, metadata.Fields{}, new("p"), &old, now)
 	if !kept.CreatedAt.Equal(baseTime) || !kept.UpdatedAt.Equal(now) {
 		t.Fatalf("times = %v/%v", kept.CreatedAt, kept.UpdatedAt)
 	}
@@ -332,7 +474,7 @@ func TestLeafRowKeepsCreationAndCover(t *testing.T) {
 	}
 
 	item.CoverSuffix = new("001.jpg")
-	replaced := leafRow("leaf", "library", "comic/s/ch1", item, nil, &old, now)
+	replaced := leafRow("leaf", "library", "comic/s/ch1", item, metadata.Fields{}, nil, &old, now)
 	if replaced.CoverURI == nil || *replaced.CoverURI != "/lib/s/ch1.cbz/001.jpg" {
 		t.Fatalf("cover = %v", replaced.CoverURI)
 	}
@@ -340,7 +482,7 @@ func TestLeafRowKeepsCreationAndCover(t *testing.T) {
 		t.Fatalf("row = %+v", replaced)
 	}
 
-	created := leafRow("fresh", "library", "comic/s/ch1", item, nil, nil, now)
+	created := leafRow("fresh", "library", "comic/s/ch1", item, metadata.Fields{}, nil, nil, now)
 	if !created.CreatedAt.Equal(now) || created.Order != nil {
 		t.Fatalf("row = %+v", created)
 	}

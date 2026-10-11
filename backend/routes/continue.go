@@ -57,7 +57,7 @@ func kidArrays(hasPos string) string {
 	return `array_agg(k.id) AS id, array_agg(k."order") AS ord, array_agg(k.created_at) AS created_at,
 	array_agg(ku.status) AS status, array_agg(` + recencyExpr("ku") + `) AS recency,
 	array_agg(ku.last_read_at IS NOT NULL OR ku.status IN ('reading', 'completed', 'on_hold', 'dropped')) AS read,
-	array_agg(COALESCE(` + hasPos + `, false)) AS has_pos`
+	array_agg(COALESCE(` + hasPos + `, false)) AS has_pos, array_agg(` + specialsTab("k") + `) AS sp`
 }
 
 // seriesKids reads series s's children as kids.
@@ -69,21 +69,15 @@ var seriesKids = `
 	) kids`
 
 // kidRows are seriesKids' children as rows k.
-const kidRows = `unnest(kids.id, kids.ord, kids.created_at, kids.status, kids.recency, kids.read, kids.has_pos)
-	AS k(id, "order", created_at, status, recency, read, has_pos)`
+const kidRows = `unnest(kids.id, kids.ord, kids.created_at, kids.status, kids.recency, kids.read, kids.has_pos, kids.sp)
+	AS k(id, "order", created_at, status, recency, read, has_pos, sp)`
 
-// seriesLaterals resolve series s from its kids: anchor a (the child read or set last), target t,
-// the counts g, and is_new and action in x.
-var seriesLaterals = `
+// seriesLaterals resolve series s from its kids: anchor a (the child read or set last, skipping
+// finished Specials tab children), target t, the counts g, and is_new and action in x. Specials
+// tab children are never new.
+var seriesLaterals = lastRead("a", "(NOT k.sp OR k.status = 'reading')") + `
 	LEFT JOIN LATERAL (
-		SELECT k.id, k."order", k.created_at, k.status, k.recency
-		FROM ` + kidRows + `
-		WHERE k.read
-		ORDER BY k.recency DESC NULLS LAST, ` + ordKey("k") + ` DESC
-		LIMIT 1
-	) a ON true
-	LEFT JOIN LATERAL (
-		SELECT k.id, k.created_at, k.has_pos
+		SELECT k.id, k.created_at, k.has_pos, k.sp
 		FROM ` + kidRows + `
 		WHERE ` + eligible("k") + `
 			AND (a.id IS NULL OR CASE WHEN ` + eligible("a") + ` THEN k.id = a.id
@@ -94,16 +88,28 @@ var seriesLaterals = `
 	LEFT JOIN LATERAL (
 		SELECT COUNT(*) AS valid_n,
 			COUNT(*) FILTER (WHERE k.status IN ('completed', 'dropped')) AS done_n,
-			COUNT(*) FILTER (WHERE NOT ` + done("k") + ` AND k.created_at > a.recency) AS new_n,
+			COUNT(*) FILTER (WHERE NOT ` + done("k") + ` AND k.created_at > a.recency AND NOT k.sp) AS new_n,
 			MAX(k.created_at) FILTER (WHERE NOT ` + done("k") + ` AND k.created_at > a.recency
-				AND ` + ordKey("k") + ` > ` + ordKey("a") + `) AS new_added_at
+				AND ` + ordKey("k") + ` > ` + ordKey("a") + ` AND NOT k.sp) AS new_added_at
 		FROM ` + kidRows + `
 	) g ON true
 	CROSS JOIN LATERAL (
-		SELECT t.id <> a.id AND t.created_at > a.recency AND ` + newGuard("g.new_n", "g.valid_n") + ` AS is_new,
+		SELECT t.id <> a.id AND NOT t.sp AND t.created_at > a.recency AND ` + newGuard("g.new_n", "g.valid_n") + ` AS is_new,
 			CASE WHEN t.has_pos THEN 'resume' WHEN a.id IS NULL OR t.id = a.id THEN 'start' ELSE 'next' END
 				AS action
 	) x`
+
+// lastRead joins as alias the child read or set last among those matching cond.
+func lastRead(alias, cond string) string {
+	return `
+	LEFT JOIN LATERAL (
+		SELECT k.id, k."order", k.created_at, k.status, k.recency
+		FROM ` + kidRows + `
+		WHERE k.read AND ` + cond + `
+		ORDER BY k.recency DESC NULLS LAST, ` + ordKey("k") + ` DESC
+		LIMIT 1
+	) ` + alias + ` ON true`
+}
 
 func done(a string) string { return "COALESCE(" + a + ".status IN ('completed', 'dropped'), false)" }
 
@@ -136,7 +142,7 @@ var continueTargetsSQL = `
 		WHERE su.status IS NULL OR su.status = 'reading'
 			OR @ignore_series_status AND su.status IN ('on_hold', 'dropped')
 	), children AS MATERIALIZED (
-		SELECT k.id, k.parent_id, k."order", k.created_at
+		SELECT k.id, k.parent_id, k."order", k.created_at, k.special, k.order_parts
 		FROM cs
 		CROSS JOIN LATERAL (SELECT k.* FROM content k WHERE k.parent_id = cs.id AND k.valid OFFSET 0) k
 	), kids AS (
@@ -272,9 +278,11 @@ func resolveContinue(ctx context.Context, q db.Querier, userID, contentID string
 			SELECT t.id AS target_id, x.action, x.is_new, e.id AS earlier_id, h.id AS held_id,
 				h.has_pos AS held_has_pos, g.valid_n, g.done_n
 			FROM content s`+seriesKids+seriesLaterals+`
+			-- r is the last read Contents child, so a special being read doesn't make every
+			-- unread volume earlier.`+lastRead("r", "NOT k.sp")+`
 			LEFT JOIN LATERAL (
 				SELECT k.id FROM `+kidRows+`
-				WHERE `+eligible("k")+` AND a.id IS NOT NULL AND `+ordKey("k")+` < `+ordKey("a")+`
+				WHERE `+eligible("k")+` AND r.id IS NOT NULL AND `+ordKey("k")+` < `+ordKey("r")+` AND NOT k.sp
 				ORDER BY `+ordKey("k")+` LIMIT 1
 			) e ON true
 			LEFT JOIN LATERAL (

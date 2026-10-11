@@ -219,7 +219,7 @@
 
                 <KitGroup
                     title="ATabs"
-                    description="Panels stay mounted and scroll on their own below the tab bar."
+                    description="Panels stay mounted and scroll on their own below the tab bar. Shared mode filters one panel that scrolls with the page."
                     :min="300"
                 >
                     <KitDemo label="in a bounded column" stack>
@@ -253,6 +253,21 @@
                                 </template>
                             </ATabs>
                         </div>
+                    </KitDemo>
+                    <KitDemo label="shared panel" stack>
+                        <ATabs v-model="sharedTab" :options="SHARED_TABS" label="Contents" shared>
+                            <ul class="py-2 text-sm">
+                                <li
+                                    v-for="c in sharedTab === 'specials'
+                                        ? SPECIALS
+                                        : CHAPTERS.slice(0, 5)"
+                                    :key="c.value"
+                                    class="py-1"
+                                >
+                                    {{ c.label }}
+                                </li>
+                            </ul>
+                        </ATabs>
                     </KitDemo>
                 </KitGroup>
 
@@ -1368,6 +1383,14 @@ const STATUS = [
     { value: 'dropped', label: 'Dropped', disabled: true },
     { value: 'plan_to_read', label: 'Plan to read' },
 ]
+const SHARED_TABS = [
+    { value: 'contents', label: 'Contents' },
+    { value: 'specials', label: 'Specials' },
+] as const
+const SPECIALS = [
+    { value: 'atlas', label: 'Atlas' },
+    { value: 'notes', label: 'Field Notes' },
+]
 const CHAPTERS = Array.from({ length: 30 }, (_, i) => ({
     value: `c${i + 1}`,
     label: `Chapter ${i + 1}${i % 7 === 3 ? ': The one with a much longer title' : ''}`,
@@ -1417,6 +1440,7 @@ const visibility = ref<string>('show')
 const countMode = ref<string>('unread')
 const readerMode = ref<string>('auto')
 const kitTab = ref('contents')
+const sharedTab = ref<'contents' | 'specials'>('contents')
 const columns = ref(6)
 const minusHold = usePressAndHold(() => columns.value > 1 && columns.value--)
 const plusHold = usePressAndHold(() => columns.value < 20 && columns.value++)

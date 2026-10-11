@@ -16,6 +16,7 @@ import (
 
 	"voltis/lib/fp"
 	"voltis/lib/tasks"
+	"voltis/metadata"
 	"voltis/models"
 
 	"golang.org/x/text/cases"
@@ -62,6 +63,8 @@ type writer struct {
 	indexed  map[string]string
 	behind   map[string][]string
 	gone     map[string]bool
+	queued   map[string]bool     // leaf IDs whose files this scan parses again
+	parked   map[string][]Result // results whose key a queued leaf holds, by that leaf's ID
 	trust    bool
 	roots    []string // directory walk roots, resolved, longest first
 	tally    map[string]*rootTally
@@ -94,6 +97,8 @@ func newWriter(in ScanInput, tc *tasks.TaskContext, notify Notifier, res *resolv
 		indexed: map[string]string{},
 		behind:  map[string][]string{},
 		gone:    map[string]bool{},
+		queued:  map[string]bool{},
+		parked:  map[string][]Result{},
 		trust:   true,
 		tally:   map[string]*rootTally{},
 		under:   map[string]string{},
@@ -210,6 +215,12 @@ func (w *writer) run(ctx context.Context, events <-chan Event, walkDone <-chan e
 		w.publish()
 	}
 
+	// Left parked: holders that never settled, as two results that want each other's key.
+	clear(w.queued)
+	for _, id := range slices.Sorted(maps.Keys(w.parked)) {
+		w.unpark(id)
+	}
+
 	w.prog.Phase = "saving"
 	w.publish()
 	select {
@@ -268,6 +279,9 @@ func (w *writer) event(ev Event) {
 			}
 		}
 		if changed(ev.File, old, exists, w.in.Force) {
+			if exists {
+				w.queued[old.ID] = true
+			}
 			w.queue = append(w.queue, ev.File)
 			w.prog.Total++
 		} else {
@@ -409,7 +423,19 @@ func (w *writer) suppress(reason string) {
 
 func (w *writer) place(r Result) {
 	w.prog.Processed++
+	w.settle(r)
+}
+
+// settle places r, or parks it when a leaf whose file is queued holds its key: that leaf's own
+// result may move it elsewhere. Once r settles, the results parked behind its row are retried.
+func (w *writer) settle(r Result) (parked bool) {
 	old, hadOld := w.at(r.File.Path)
+	defer func() {
+		if hadOld && !parked {
+			delete(w.queued, old.ID)
+			w.unpark(old.ID)
+		}
+	}()
 
 	if r.Item == nil {
 		w.prog.Failed++
@@ -427,6 +453,9 @@ func (w *writer) place(r Result) {
 		slog.Warn("[scanner] inferred series conflicts, keeping the book standalone", "path", r.File.Path,
 			"uri_prefix", r.Item.Series.URIPrefix, "uri_part", r.Item.Series.URIPart)
 		r.Item.Series, parent, ok = nil, "", true
+		if r.Item.IndexInferred {
+			r.Item.MetaRaw.SeriesIndex, r.Item.OrderParts = metadata.Opt[float64]{}, []*float32{nil}
+		}
 	}
 	if !ok {
 		w.prog.Failed++
@@ -443,7 +472,8 @@ func (w *writer) place(r Result) {
 	if r.Item.Series == nil && r.Item.ContentType == "book" && w.series[occ].Type == "book_series" {
 		parent, k = occ, Key{occ, r.Item.URIPart}
 		occ = w.keys[k]
-		r.Item.OrderParts = []*float32{nil} // a volume inferred for another series means nothing here
+		// A volume inferred for another series means nothing here.
+		r.Item.MetaRaw.SeriesIndex, r.Item.OrderParts = metadata.Opt[float64]{}, []*float32{nil}
 	}
 	s := w.set(parent)
 
@@ -459,6 +489,9 @@ func (w *writer) place(r Result) {
 		id = own
 		delete(w.gone, occ)
 		s.Deletes = append(s.Deletes, deletion{occ, w.tick})
+	case w.queued[occ]:
+		w.parked[occ] = append(w.parked[occ], r)
+		return true
 	default:
 		w.prog.Failed++
 		slog.Warn("[scanner] URI conflict, skipping", "path", r.File.Path, "uri_part", r.Item.URIPart, "parent_id", parent)
@@ -480,6 +513,15 @@ func (w *writer) place(r Result) {
 	}
 	w.keys[k] = id
 	s.Writes = append(s.Writes, write{id: id, item: r.Item, tick: w.tick})
+	return
+}
+
+func (w *writer) unpark(id string) {
+	rs := w.parked[id]
+	delete(w.parked, id)
+	for _, r := range rs {
+		w.settle(r)
+	}
 }
 
 func (w *writer) resolveSeries(p *ParsedSeries) (string, bool) {

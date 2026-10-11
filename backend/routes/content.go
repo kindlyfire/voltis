@@ -96,6 +96,7 @@ type ContentDTO struct {
 	Type         string          `json:"type"`
 	Order        *int            `json:"order"`
 	OrderParts   []*float32      `json:"order_parts"`
+	Special      bool            `json:"special"`
 	Meta         json.RawMessage `json:"meta"`
 	FileData     json.RawMessage `json:"file_data"`
 	ParentID     *string         `json:"parent_id"`
@@ -180,6 +181,7 @@ func contentToDTO(c models.Content, opts contentDTOOpts) ContentDTO {
 		Type:         c.Type,
 		Order:        c.Order,
 		OrderParts:   orderParts,
+		Special:      c.Special,
 		Meta:         meta,
 		FileData:     fileData,
 		ParentID:     c.ParentID,
@@ -485,6 +487,7 @@ type contentListQuery struct {
 	SortOrder     string   `query:"sort_order"      validate:"omitempty,oneof=asc desc" default:"desc"`
 	Count         string   `query:"count"           validate:"omitempty,oneof=true false"`
 	Include       string   `query:"include"`
+	Section       string   `query:"section"         validate:"omitempty,oneof=contents specials"`
 	// omitempty stops validation of an empty field, so required_with goes first.
 	FacetKind string `query:"facet_kind" validate:"required_with=Facet,omitempty,oneof=genres tags people publishers"`
 	Facet     string `query:"facet"      validate:"required_with=FacetKind,omitempty,max=1000"`
@@ -512,6 +515,7 @@ func (q contentListQuery) filter() contentFilter {
 		FacetKind:          facetKinds[q.FacetKind],
 		Facet:              q.Facet,
 		FacetRole:          q.FacetRole,
+		Section:            q.Section,
 	}
 	switch q.Sort {
 	case "history":
@@ -569,6 +573,13 @@ type contentFilter struct {
 	// FacetKind is content_facets' singular kind; Facet any spelling of the value; FacetRole a
 	// role the value must carry.
 	FacetKind, Facet, FacetRole string
+	Section                     string // a series' "contents" or "specials" tab
+}
+
+// specialsTab reports whether the content row a sits in its series' Specials tab: special and
+// unnumbered.
+func specialsTab(a string) string {
+	return "(" + a + ".special AND array_remove(" + a + ".order_parts, NULL) = '{}')"
 }
 
 // joins are the optional joins of a grid query.
@@ -657,6 +668,12 @@ func (f contentFilter) where(args pgx.NamedArgs) (cond string, j joins) {
 	if f.Search != "" {
 		args["search"] = f.Search
 		where = append(where, metadata.TitleMatch("c", f.ParentID == "null"))
+	}
+	switch f.Section {
+	case "specials":
+		where = append(where, specialsTab("c"))
+	case "contents":
+		where = append(where, "NOT "+specialsTab("c"))
 	}
 	if f.RecentlyUpdated {
 		where = append(where, "ct.is_new AND ct.series_status = 'reading'")

@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"voltis/db"
 	"voltis/lib/fp"
 	"voltis/linking"
 	"voltis/metadata"
 	"voltis/providers"
+	"voltis/scanner"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -79,7 +81,15 @@ func (r *MetadataRoutes) setOverrides(c echo.Context) error {
 		if t, err = r.store.Lock(ctx, tx, c.Param("id")); err != nil {
 			return err
 		}
-		return r.store.SetOverrides(ctx, tx, t, *req.Rev, o)
+		prev, err := r.store.SetOverrides(ctx, tx, t, *req.Rev, o)
+		if err != nil {
+			return err
+		}
+		parts := prev.Volume != o.Volume || prev.Number != o.Number || prev.SeriesIndex != o.SeriesIndex
+		if parts || prev.Special != o.Special {
+			return scanner.ApplyPosition(ctx, tx, r.store, t.ContentID, parts, time.Now().UTC())
+		}
+		return nil
 	})
 	if err == nil {
 		r.hub.LibraryChanged(t.LibraryID)

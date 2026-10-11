@@ -35,11 +35,13 @@ type ParsedItem struct {
 	ContentType string
 	URIPart     string
 	OrderParts  []*float32
-	CoverSuffix *string
-	FileData    json.RawMessage
-	MetaRaw     metadata.Fields
-	WordCount   *int
-	PageCount   *int
+	// IndexInferred marks a book's MetaRaw.SeriesIndex as the inferred volume.
+	IndexInferred bool
+	CoverSuffix   *string
+	FileData      json.RawMessage
+	MetaRaw       metadata.Fields
+	WordCount     *int
+	PageCount     *int
 }
 
 type Result struct {

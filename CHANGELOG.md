@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- Comics without a volume or chapter number, such as SP booklets, artbooks and
+  specials sharing a year, are no longer skipped or numbered from their file
+  name. Run a forced scan to give existing ones their new keys
+- Specials (SP, Omake, ComicInfo Format "Special") get a Special badge, and
+  unnumbered ones move to a Specials tab on the series page. Continue reading
+  follows the numbered items. Run a forced scan to mark existing series' specials
+- Editing an item's Volume, Number or Series index moves it in its series, and
+  Special can be set to Yes or No. Run a forced scan before editing positions
+
 ## [1.0.0-beta.2] - 2026-10-04
 
 - Discover pages list the genres, tags, people and publishers of your

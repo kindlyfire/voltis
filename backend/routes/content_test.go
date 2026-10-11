@@ -831,6 +831,27 @@ func TestContinueReading(t *testing.T) {
 		expectUpdated(t)
 	})
 
+	run("specials don't move the anchor", func(t *testing.T) {
+		series, kids := f.series(1)
+		f.set(series, "reading", nil, f.at(0))
+		// Specials sort last; the fixture's empty order_parts is unnumbered.
+		sp := f.content("comic", &series, 100)
+		f.exec("UPDATE content SET special = true WHERE id = $1", sp)
+		f.set(kids[0], "completed", nil, f.at(1))
+		f.set(sp, "completed", nil, f.at(2))
+		vol := f.content("comic", &series, 1)
+		f.added(vol, 3)
+		assertEq(t, target(t, series), vol+" next <nil> true <nil>")
+		expect(t, vol+"@"+series+"*")
+		expectUpdated(t, vol+"@"+series+"*")
+
+		// A special being read is resumed; earlier unread counts from the last Contents read.
+		f.set(sp, "reading", f.at(4), f.at(4))
+		assertEq(t, target(t, series), sp+" resume <nil> false <nil>")
+		expect(t, sp+"@"+series)
+		expectUpdated(t)
+	})
+
 	run("mass re-add guard", func(t *testing.T) {
 		series, kids := f.series(2)
 		f.set(series, "reading", nil, f.at(0))
@@ -1216,6 +1237,17 @@ func TestContinueListSorts(t *testing.T) {
 	assertEq(t, s(idsOf("sort=recently_updated&sort_order=asc")), s(updated))
 	buckets := c.Get("/api/content/buckets?sort=recently_updated&sort_order=asc").Assert(t, 200).JSON()
 	assertEq(t, s(buckets["total"]), "2")
+
+	// A series' sections split its children; the fixture's empty order_parts is unnumbered.
+	e, eKids := f.series(3)
+	f.exec("UPDATE content SET special = true WHERE id = $1", eKids[2])
+	specials := "parent_id=" + e + "&sort=order&sort_order=asc&section=specials"
+	assertEq(t, s(ids(specials)), s(eKids[2:]))
+	assertEq(t, s(idsOf(specials)), s(eKids[2:]))
+	assertEq(t, s(c.Get("/api/content/buckets?"+specials).Assert(t, 200).JSON()["total"]), "1")
+	contents := c.Get("/api/content?parent_id="+e+"&sort=order&sort_order=asc&section=contents").Assert(t, 200).JSON()["data"].([]any)
+	assertEq(t, s(fp.Map(contents, func(e any) any { return e.(map[string]any)["id"] })), s(eKids[:2]))
+	assertEq(t, contents[0].(map[string]any)["special"], any(false))
 }
 
 // TestContinueListMatrix checks the continue and recently updated sorts together across the list,

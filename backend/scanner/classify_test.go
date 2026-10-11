@@ -27,33 +27,85 @@ func TestClassifyComicTuples(t *testing.T) {
 		{
 			"chapter only",
 			"/lib/Other Series/Other Series ch7.cbz", metadata.Fields{},
-			"prefix=comic type=comic part=ch7 order=[nil,7] cover=001.jpg title=Ch. 7 series=comic|comic_series|Other Series index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]}",
+			"prefix=comic type=comic part=ch7 order=[nil,7] cover=001.jpg title=Ch. 7 series=comic|comic_series|Other Series index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]} file=|7",
 		},
 		{
 			"fallback chapter strips directory prefix and tags",
 			"/lib/Series 1000/Series 1000 002 (2019).cbz", metadata.Fields{},
-			"prefix=comic type=comic part=ch2 order=[nil,2] cover=001.jpg title=Ch. 2 series=comic|comic_series|Series 1000 index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]}",
+			"prefix=comic type=comic part=ch2 order=[nil,2] cover=001.jpg title=Ch. 2 series=comic|comic_series|Series 1000 index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]} file=|2",
 		},
 		{
 			"metadata year without comicinfo year",
 			"/lib/Plain/Plain ch1.cbz", metadata.Fields{Series: metadata.Val("Plain Series")},
-			"prefix=comic type=comic part=ch1 order=[nil,1] cover=001.jpg title=Ch. 1 series=comic|comic_series|Plain Series index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]}",
+			"prefix=comic type=comic part=ch1 order=[nil,1] cover=001.jpg title=Ch. 1 series=comic|comic_series|Plain Series index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]} file=|1",
 		},
 		{
 			"comicinfo number ignores filename issue marker",
 			"/lib/Tide Atlas/0074 - Spare Extra #1.cbz", metadata.Fields{Number: metadata.Val("74")},
-			"prefix=comic type=comic part=ch74 order=[nil,74] cover=001.jpg title=Ch. 74 series=comic|comic_series|Tide Atlas index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]}",
+			"prefix=comic type=comic part=ch74 order=[nil,74] cover=001.jpg title=Ch. 74 series=comic|comic_series|Tide Atlas index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]} file=|74",
 		},
 		{
 			"series name is not a chapter marker",
 			"/lib/C3 Unit/C3 Unit v02.cbz", metadata.Fields{},
-			"prefix=comic type=comic part=v2 order=[2,nil] cover=001.jpg title=Vol. 2 series=comic|comic_series|C3 Unit index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]}",
+			"prefix=comic type=comic part=v2 order=[2,nil] cover=001.jpg title=Vol. 2 series=comic|comic_series|C3 Unit index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]} file=2|",
+		},
+		{
+			"unnumbered special keyed by stem",
+			"/lib/Bluefin (1985)/Bluefin SP - Field Notes (2007).cbz", metadata.Fields{},
+			"prefix=comic type=comic part=Bluefin SP - Field Notes (2007) order=[nil,nil] cover=001.jpg title=Field Notes series=comic|comic_series|Bluefin_1985 index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]} special",
+		},
+		{
+			"special of the same year keyed apart",
+			"/lib/Bluefin (1985)/Bluefin SP - Atlas (2007).cbz", metadata.Fields{},
+			"prefix=comic type=comic part=Bluefin SP - Atlas (2007) order=[nil,nil] cover=001.jpg title=Atlas series=comic|comic_series|Bluefin_1985 index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]} special",
+		},
+		{
+			"sp number is not a chapter",
+			"/lib/Bluefin (1985)/Bluefin SP01 - Holiday.cbz", metadata.Fields{},
+			"prefix=comic type=comic part=Bluefin SP01 - Holiday order=[nil,nil] cover=001.jpg title=Holiday series=comic|comic_series|Bluefin_1985 index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]} special",
+		},
+		{
+			"comicinfo sp number blocks the file name chapter",
+			"/lib/Bluefin (1985)/Bluefin 012.cbz", metadata.Fields{Number: metadata.Val("SP1")},
+			"prefix=comic type=comic part=Bluefin 012 order=[nil,nil] cover=001.jpg title=012 series=comic|comic_series|Bluefin_1985 index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]} file=|SP1 special",
+		},
+		{
+			"unreadable comicinfo number gives way to the file name chapter",
+			"/lib/Bluefin/Bluefin 3.cbz", metadata.Fields{Number: metadata.Val("abc")},
+			"prefix=comic type=comic part=ch3 order=[nil,3] cover=001.jpg title=Ch. 3 series=comic|comic_series|Bluefin index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]} file=|3",
+		},
+		{
+			"comicinfo number kept as written",
+			"/lib/Bluefin/Bluefin 3.cbz", metadata.Fields{Number: metadata.Val("Ch. 5")},
+			"prefix=comic type=comic part=ch5 order=[nil,5] cover=001.jpg title=Ch. 5 series=comic|comic_series|Bluefin index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]} file=|Ch. 5",
+		},
+		{
+			"numbered sp item keyed by stem, apart from the volume",
+			"/lib/Bluefin (1985)/Bluefin v03.5 SP - Booklet.cbz", metadata.Fields{},
+			"prefix=comic type=comic part=Bluefin v03.5 SP - Booklet order=[3.5,nil] cover=001.jpg title=Vol. 3.5 series=comic|comic_series|Bluefin_1985 index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]} file=3.5| special",
+		},
+		{
+			"special edition is no marker",
+			"/lib/Bluefin (1985)/Bluefin v03.5 - Special Edition Booklet.cbz", metadata.Fields{},
+			"prefix=comic type=comic part=v3.5 order=[3.5,nil] cover=001.jpg title=Vol. 3.5 series=comic|comic_series|Bluefin_1985 index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]} file=3.5|",
+		},
+		{
+			"comicinfo special format",
+			"/lib/Bluefin (1985)/Bluefin v04.cbz", metadata.Fields{Format: metadata.Val(" special ")},
+			"prefix=comic type=comic part=v4 order=[4,nil] cover=001.jpg title=Vol. 4 series=comic|comic_series|Bluefin_1985 index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]} file=4| special",
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			file := FSFile{Path: c.path, Mtime: baseTime, Size: 10}
-			got := summarize(classifyComic(file, c.meta, nil, testPages))
+			item := classifyComic(file, c.meta, nil, testPages)
+			got := summarize(item)
+			if v, n := item.MetaRaw.Volume, item.MetaRaw.Number; v.P == metadata.Value || n.P == metadata.Value {
+				got += fmt.Sprintf(" file=%s|%s", v.V, n.V)
+			}
+			if item.MetaRaw.Special.V {
+				got += " special"
+			}
 			if got != c.want {
 				t.Errorf("got  %s\nwant %s", got, c.want)
 			}
@@ -73,7 +125,11 @@ func TestClassifyBookTuples(t *testing.T) {
 	check := func(t *testing.T, path string, meta epub.Metadata, want string) {
 		t.Helper()
 		item := classifyBook(FSFile{Path: path, Mtime: baseTime, Size: 10}, meta, false, nil, false)
-		if got := summarize(&item); got != want {
+		got := summarize(&item)
+		if item.MetaRaw.Special.V {
+			got += " special"
+		}
+		if got != want {
 			t.Errorf("got  %s\nwant %s", got, want)
 		}
 	}
@@ -84,6 +140,10 @@ func TestClassifyBookTuples(t *testing.T) {
 	t.Run("series without index", func(t *testing.T) {
 		check(t, "/lib/Books/no-index.epub", epub.Metadata{Title: "No Index", Series: "Book Series"},
 			"prefix=book type=book part=no-index order=[nil] cover=nil title=No Index series=book|book_series|Book Series index=0 data=")
+	})
+	t.Run("calibre sentinel index is unnumbered", func(t *testing.T) {
+		check(t, "/lib/Books/extra.epub", epub.Metadata{Title: "Extra", Series: "Book Series", SeriesIndex: 10000, HasSeriesIndex: true},
+			"prefix=book type=book part=extra order=[nil] cover=nil title=Extra series=book|book_series|Book Series index=10000 data= special")
 	})
 }
 
@@ -116,7 +176,7 @@ func TestClassifyBookInference(t *testing.T) {
 		{
 			"metadata series wins", ser + " SP03",
 			epub.Metadata{Title: "Other Vol. 3", Series: "Meta Series", SeriesIndex: 100000, HasSeriesIndex: true}, true,
-			"Meta Series", f32(100000),
+			"Meta Series", nil,
 		},
 		{
 			"explicit index wins over the inferred volume", "Zero v01",
@@ -144,9 +204,14 @@ func TestClassifyBookInference(t *testing.T) {
 			if len(item.OrderParts) != 1 || !reflect.DeepEqual(item.OrderParts[0], c.order) {
 				t.Errorf("order = %v, want [%v]", item.OrderParts, c.order)
 			}
-			if item.MetaRaw.Series.V != c.meta.Series || item.MetaRaw.SeriesIndex.V != c.meta.SeriesIndex {
-				t.Errorf("child series = %q/%g, want the metadata values %q/%g",
-					item.MetaRaw.Series.V, item.MetaRaw.SeriesIndex.V, c.meta.Series, c.meta.SeriesIndex)
+			// The index is the metadata's, else the inferred volume.
+			index, inferred := c.meta.SeriesIndex, !c.meta.HasSeriesIndex && c.order != nil
+			if inferred {
+				index = float64(*c.order)
+			}
+			if item.MetaRaw.Series.V != c.meta.Series || item.MetaRaw.SeriesIndex.V != index || item.IndexInferred != inferred {
+				t.Errorf("child series = %q/%g (inferred %v), want %q/%g (%v)", item.MetaRaw.Series.V,
+					item.MetaRaw.SeriesIndex.V, item.IndexInferred, c.meta.Series, index, inferred)
 			}
 		})
 	}

@@ -7,6 +7,7 @@ import (
 
 	"voltis/db"
 	"voltis/metadata"
+	"voltis/models"
 	"voltis/providers/providertest"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -63,6 +64,33 @@ func TestMetadataOverrides(t *testing.T) {
 	member, _ := newMemberClient(t, c)
 	member.Get("/api/metadata/content/"+id).Assert(t, 403)
 	c.Get("/api/metadata/content/c_missing").Assert(t, 404)
+
+	// Position overrides re-arrange the series without a scan.
+	kid := func(part, file, parts string, special bool) string {
+		k := models.MakeContentID()
+		mustExec(t, pool, `INSERT INTO content (id, uri_part, uri, type, library_id, parent_id, order_parts, special, data_raw)
+			VALUES ($1, $2, 'comic/s/' || $2, 'comic', $3, $4, $5::text::real[], $6, $7)`,
+			k, part, contentLibrary(t, pool, id), id, parts, special, `{"v": 2, "file": `+file+`}`)
+		return k
+	}
+	kid("v1", `{"volume": "1"}`, "{1,NULL}", false)
+	kid("v2", `{"volume": "2"}`, "{2,NULL}", false)
+	sp := kid("sp", `{}`, "{NULL,NULL}", true)
+	stale := kid("stale", `{}`, "{3,NULL}", false) // not force-scanned: no numbers in its file layer
+	save := func(kid string, rev int, fields map[string]any, want string) {
+		t.Helper()
+		c.Post("/api/metadata/content/"+kid+"/overrides", map[string]any{"rev": rev, "fields": fields}).Assert(t, 200)
+		got, err := db.SelectScalar[string](context.Background(), pool, `
+			SELECT string_agg(uri_part || order_parts::text || CASE WHEN special THEN '*' ELSE '' END, ' ' ORDER BY "order")
+			FROM content WHERE parent_id = $1`, id)
+		if err != nil || got != want {
+			t.Fatalf("children = %q (%v), want %q", got, err, want)
+		}
+	}
+	save(sp, 0, map[string]any{"volume": "1.5"}, "v1{1,NULL} sp{1.5,NULL} v2{2,NULL} stale{3,NULL}")
+	save(sp, 1, map[string]any{}, "v1{1,NULL} v2{2,NULL} stale{3,NULL} sp{NULL,NULL}*")
+	save(stale, 0, map[string]any{"title": "Renamed"}, "v1{1,NULL} v2{2,NULL} stale{3,NULL} sp{NULL,NULL}*")
+	save(stale, 1, map[string]any{"special": true}, "v1{1,NULL} v2{2,NULL} stale{3,NULL}* sp{NULL,NULL}*")
 }
 
 func TestMetadataLinking(t *testing.T) {

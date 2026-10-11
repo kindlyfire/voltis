@@ -16,29 +16,31 @@ import (
 	"voltis/scanner/keys"
 )
 
+// sentinelIndex and above is calibre's index for books without one.
+const sentinelIndex = 10000
+
 func classifyBook(file FSFile, meta epub.Metadata, coverValid bool, words *epub.WordCounts, infer bool) ParsedItem {
 	stem := strings.TrimSuffix(filepath.Base(file.Path), filepath.Ext(file.Path))
 
-	var order *float32
-	if meta.HasSeriesIndex {
-		order = new(float32(meta.SeriesIndex))
-	}
+	index, hasIndex := meta.SeriesIndex, meta.HasSeriesIndex
 
-	// The inferred name and volume only group and order the book; child metadata stays as read.
+	// The inferred name and volume group and order the book; the volume shows as its index.
 	series, inferred := meta.Series, false
 	if series == "" && infer {
 		if name, vol, ok := inferBookSeries(file.Path, meta.Title, stem); ok {
 			series, inferred = name, true
-			order = cmp.Or(order, new(float32(vol)))
+			if !hasIndex {
+				index, hasIndex = vol, true
+			}
 		}
 	}
 
 	item := ParsedItem{
-		File:        file,
-		URIPrefix:   "book",
-		ContentType: "book",
-		URIPart:     sanitizeURIPart(stem),
-		OrderParts:  []*float32{order},
+		File:          file,
+		URIPrefix:     "book",
+		ContentType:   "book",
+		URIPart:       sanitizeURIPart(stem),
+		IndexInferred: inferred && !meta.HasSeriesIndex,
 		MetaRaw: metadata.Fields{
 			Title:           metadata.Val(cmp.Or(meta.Title, stem)),
 			Description:     metadata.Set(meta.Description),
@@ -47,8 +49,13 @@ func classifyBook(file FSFile, meta epub.Metadata, coverValid bool, words *epub.
 			Series:          metadata.Set(meta.Series),
 		},
 	}
-	if meta.HasSeriesIndex {
-		item.MetaRaw.SeriesIndex = metadata.Val(meta.SeriesIndex)
+	if hasIndex {
+		item.MetaRaw.SeriesIndex = metadata.Val(index)
+	}
+	item.OrderParts = scannedPosition("book", item.MetaRaw)
+	// A calibre sentinel index reads as unnumbered, and marks a special.
+	if (meta.HasSeriesIndex && meta.SeriesIndex >= sentinelIndex) || keys.SpecialMarker(stem) || keys.SpecialMarker(meta.Title) {
+		item.MetaRaw.Special = metadata.Val(true)
 	}
 	if meta.Publisher != "" {
 		item.MetaRaw.Publishers = metadata.Val([]string{meta.Publisher})
@@ -79,7 +86,7 @@ func classifyBook(file FSFile, meta epub.Metadata, coverValid bool, words *epub.
 // inferBookSeries takes the series name and volume from the title, else from the filename, never
 // pairing a name from one with a volume from the other.
 func inferBookSeries(path, title, stem string) (string, float64, bool) {
-	if keys.IsBookSpecial(title) || keys.IsBookSpecial(stem) {
+	if keys.IsBookExtra(title) || keys.IsBookExtra(stem) {
 		return "", 0, false
 	}
 	name, vol, ok := keys.ParseBookVolume(title)
@@ -114,50 +121,61 @@ func classifyComic(file FSFile, meta metadata.Fields, year *int, pages []comic.P
 	// Without the series name, so "C3 Unit v02" doesn't read as chapter 3.
 	name := keys.RemoveCommonPrefix(keys.CleanSeriesName(stem), dirName)
 
+	// Only SP blocks the fallback chapter: "Omake 3" stays chapter 3.
+	sp, _ := keys.SPMarker(name)
+	spNumber, _ := keys.IsSpecialNumber(meta.Number.V)
+
 	var volNum, chNum *float64
 	if n, ok := meta.Number.Get(); ok {
-		if f, err := keys.ParseFloatStr(n); err == nil {
-			chNum = &f
-		} else {
-			chNum = keys.ParseChapter(n)
-		}
+		chNum = keys.ParseNumber(n)
 	} else {
 		volNum = keys.ParseVolume(name)
 		chNum = keys.ParseChapter(name)
 	}
 	if v, ok := meta.Volume.Get(); ok {
-		if f, err := keys.ParseFloatStr(v); err == nil {
-			volNum = &f
-		}
+		volNum = cmp.Or(keys.ParseVolumeStr(v), volNum)
 	}
 
 	yearNum := keys.ParseSeriesYear(stem)
-	if volNum == nil && chNum == nil {
+	if volNum == nil && chNum == nil && !sp && !spNumber {
 		chNum = keys.ParseFallbackChapter(name)
 	}
 
+	// The file layer holds the numbers used, so overrides can be reset to them.
+	meta.Volume = scannedNum(meta.Volume, volNum, keys.ParseVolumeStr)
+	meta.Number = scannedNum(meta.Number, chNum, keys.ParseNumber)
+
 	var uriParts, titleParts []string
-	orderParts := make([]*float32, 2)
 	if volNum != nil {
 		n := keys.FormatNum(*volNum)
 		uriParts = append(uriParts, "v"+n)
 		titleParts = append(titleParts, "Vol. "+n)
-		orderParts[0] = new(float32(*volNum))
 	}
 	if chNum != nil {
 		n := keys.FormatNum(*chNum)
 		uriParts = append(uriParts, "ch"+n)
 		titleParts = append(titleParts, "Ch. "+n)
-		orderParts[1] = new(float32(*chNum))
+	}
+	// SP items and unnumbered ones take the stem, which keeps them apart from regular items and
+	// each other; an unnumbered one-shot named like its folder keeps its year key.
+	if len(uriParts) > 0 && (sp || spNumber) {
+		uriParts = []string{stem}
 	}
 	if len(uriParts) == 0 {
-		if yearNum == nil {
-			return nil
+		switch {
+		case keys.HasText(name):
+			uriParts, titleParts = []string{stem}, []string{keys.UnnumberedTitle(name)}
+		case yearNum != nil:
+			uriParts = []string{fmt.Sprintf("y%d", *yearNum)}
+			titleParts = []string{fmt.Sprintf("%s (%d)", seriesName, *yearNum)}
+		default:
+			uriParts, titleParts = []string{stem}, []string{seriesName}
 		}
-		uriParts = append(uriParts, fmt.Sprintf("y%d", *yearNum))
-		titleParts = append(titleParts, fmt.Sprintf("%s (%d)", seriesName, *yearNum))
 	}
 	meta.Title = cmp.Or(meta.Title, metadata.Val(strings.Join(titleParts, " ")))
+	if spNumber || keys.SpecialMarker(name) || strings.EqualFold(strings.TrimSpace(meta.Format.V), "special") {
+		meta.Special = metadata.Val(true)
+	}
 
 	// Archive page sizes are computed when the reader first opens the comic.
 	pageTuples := fp.Map(pages, func(p comic.PageInfo) any {
@@ -173,7 +191,7 @@ func classifyComic(file FSFile, meta metadata.Fields, year *int, pages []comic.P
 		URIPrefix:   "comic",
 		ContentType: "comic",
 		URIPart:     sanitizeURIPart(strings.Join(uriParts, "_")),
-		OrderParts:  orderParts,
+		OrderParts:  scannedPosition("comic", meta),
 		CoverSuffix: new(pages[0].Name),
 		FileData:    fd,
 		MetaRaw:     meta,
@@ -185,6 +203,18 @@ func classifyComic(file FSFile, meta metadata.Fields, year *int, pages []comic.P
 			FileURI:     new(dir),
 		},
 	}
+}
+
+// scannedNum keeps a ComicInfo value that reads as the number used ("Ch. 5"), else stores the
+// number itself.
+func scannedNum(o metadata.Opt[string], num *float64, parse func(string) *float64) metadata.Opt[string] {
+	if fp.PtrEq(parse(o.V), num) {
+		return o
+	}
+	if num == nil {
+		return metadata.Opt[string]{}
+	}
+	return metadata.Val(keys.FormatNum(*num))
 }
 
 func sanitizeURIPart(s string) string {

@@ -81,6 +81,7 @@ type Fields struct {
 	Volume          Opt[string]  `json:"volume,omitzero"`
 	Count           Opt[int]     `json:"count,omitzero"`
 	SeriesIndex     Opt[float64] `json:"series_index,omitzero"`
+	Special         Opt[bool]    `json:"special,omitzero"`
 	Imprint         Opt[string]  `json:"imprint,omitzero"`
 	Format          Opt[string]  `json:"format,omitzero"`
 	Web             Opt[string]  `json:"web,omitzero"`
@@ -108,6 +109,7 @@ const (
 	TypeEnum       FieldType = "enum"
 	TypeLinks      FieldType = "links"
 	TypeCover      FieldType = "cover"
+	TypeBool       FieldType = "bool"
 )
 
 type FieldDef struct {
@@ -156,6 +158,7 @@ var defs = []FieldDef{
 	{Key: "count", Label: "Count", Type: TypeInt, Min: new(0.0), ContentTypes: []string{"comic", "comic_series", "book_series"},
 		Editable: true},
 	{Key: "series_index", Label: "Series index", Type: TypeFloat, ContentTypes: []string{"book"}, Editable: true},
+	{Key: "special", Label: "Special", Type: TypeBool, ContentTypes: []string{"comic", "book"}, Editable: true},
 	{Key: "imprint", Label: "Imprint", Type: TypeString, ContentTypes: comicTypes, Editable: true},
 	{Key: "format", Label: "Format", Type: TypeString, ContentTypes: comicTypes, Editable: true},
 	{Key: "web", Label: "Web", Type: TypeString, ContentTypes: comicTypes, Editable: true},

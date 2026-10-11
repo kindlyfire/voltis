@@ -196,7 +196,7 @@ func TestMerge(t *testing.T) {
 func TestDecodeOverrides(t *testing.T) {
 	f, err := DecodeOverrides(json.RawMessage(`{
 		"title": "  Kept ", "description": "", "genres": [], "count": 0, "rating": null,
-		"cover": null, "status": "hiatus", "publication_date": "2014-6"
+		"cover": null, "status": "hiatus", "publication_date": "2014-6", "special": true
 	}`))
 	if err != nil {
 		t.Fatal(err)
@@ -204,7 +204,7 @@ func TestDecodeOverrides(t *testing.T) {
 	want := Fields{
 		Title: Val("Kept"), Description: Opt[string]{P: Null}, Genres: Opt[[]string]{P: Null},
 		Count: Val(0), Rating: Opt[float64]{P: Null}, Cover: Opt[CoverRef]{P: Null}, Status: Val(Hiatus),
-		PublicationDate: Val("2014-06"),
+		PublicationDate: Val("2014-06"), Special: Val(true),
 	}
 	if !reflect.DeepEqual(f, want) {
 		t.Fatalf("got  %+v\nwant %+v", f, want)
@@ -220,6 +220,7 @@ func TestDecodeOverrides(t *testing.T) {
 		`{"rating": 101}`:                "rating",
 		`{"status": "done"}`:             "status",
 		`{"publication_date": "sooner"}`: "publication_date",
+		`{"special": "yes"}`:             "special",
 	} {
 		_, err := DecodeOverrides(json.RawMessage(body))
 		if ve, ok := errors.AsType[*ValidationError](err); !ok || ve.Field != field {

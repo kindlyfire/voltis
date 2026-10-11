@@ -59,6 +59,7 @@ export type FieldType =
     | 'enum'
     | 'links'
     | 'cover'
+    | 'bool'
 
 export interface FieldDef {
     key: string

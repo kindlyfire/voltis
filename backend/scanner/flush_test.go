@@ -324,7 +324,53 @@ func TestFlushRanksTiedChildrenByURIPart(t *testing.T) {
 	for _, part := range parts {
 		r.place(withOrder(comicResult("/lib/S/"+part+".cbz", part, "S", "/lib/S"), 0))
 	}
+	// Unnumbered specials go last, in natural file-name order rather than by URI part.
+	r.place(withOrder(comicResult("/lib/B/v2.cbz", "v2", "B", "/lib/B"), 2))
+	r.place(withOrder(comicResult("/lib/B/v1.cbz", "v1", "B", "/lib/B"), 1))
+	for _, sp := range []struct{ path, part string }{{"/lib/B/notes 10.cbz", "a"}, {"/lib/B/Notes 9.cbz", "b"}} {
+		res := comicResult(sp.path, sp.part, "B", "/lib/B")
+		res.Item.OrderParts = []*float32{nil, nil}
+		r.place(res)
+	}
 	r.commit(false)
+
+	type row struct {
+		part    string
+		special bool
+	}
+	seriesRows := func() []row {
+		t.Helper()
+		kids, err := db.Select[models.Content](context.Background(), r.pool,
+			`SELECT `+models.ContentColumns("")+` FROM content WHERE parent_id = $1 ORDER BY "order"`, r.w.byURI["comic/B"])
+		must(t, err)
+		return fp.Map(kids, func(c models.Content) row { return row{c.URIPart, c.Special} })
+	}
+	if got, want := seriesRows(), []row{{"v1", false}, {"v2", false}, {"b", true}, {"a", true}}; !slices.Equal(got, want) {
+		t.Fatalf("series B = %v, want %v", got, want)
+	}
+	r.reload()
+	r.place(comicResult("/lib/B/notes 10.cbz", "a", "", ""))
+	r.commit(false)
+	if got := readContent(t, r.pool, r.w.keys[Key{"", "a"}]); got.Special || got.ParentID != nil {
+		t.Fatalf("standalone ex-special = %+v, want not special", got)
+	}
+
+	// A volume override numbers the special on the next scan.
+	notes := r.w.keys[Key{r.w.byURI["comic/B"], "b"}]
+	_, err := r.pool.Exec(context.Background(),
+		`UPDATE content SET data_raw = jsonb_set(data_raw, '{overrides}', '{"volume": "1.5"}') WHERE id = $1`, notes)
+	must(t, err)
+	r.reload()
+	res := comicResult("/lib/B/Notes 9.cbz", "b", "B", "/lib/B")
+	res.Item.OrderParts = []*float32{nil, nil}
+	r.place(res)
+	r.commit(false)
+	if got, want := seriesRows(), []row{{"v1", false}, {"b", false}, {"v2", false}}; !slices.Equal(got, want) {
+		t.Fatalf("series B = %v, want %v", got, want)
+	}
+	if got := readContent(t, r.pool, notes).OrderParts; len(got) != 2 || got[0] == nil || *got[0] != 1.5 || got[1] != nil {
+		t.Fatalf("order parts = %v, want [1.5 nil]", got)
+	}
 
 	kids, err := db.Select[models.Content](context.Background(), r.pool,
 		`SELECT `+models.ContentColumns("")+` FROM content WHERE parent_id = $1 ORDER BY "order"`, r.w.byURI["comic/S"])

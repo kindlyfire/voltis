@@ -436,6 +436,8 @@ export interface Content {
     type: ContentType
     order: number | null
     order_parts: (number | null)[]
+    /** Marked special, or unnumbered among numbered siblings. */
+    special: boolean
     meta: DisplayMetadata
     file_data: ContentFileData
     parent_id: string | null
@@ -519,6 +521,8 @@ export interface ContentListParams {
     facet_kind?: FacetKind
     facet?: string
     facet_role?: string
+    /** A series' tab: its unnumbered specials, or everything else. */
+    section?: 'contents' | 'specials'
 }
 
 export type FacetKind = 'genres' | 'tags' | 'people' | 'publishers'

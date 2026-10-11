@@ -69,7 +69,7 @@
                                 @click="openEditor(row.def)"
                             />
                             <AIconButton
-                                v-if="row.value !== null"
+                                v-if="row.value !== null && row.def.type !== 'bool'"
                                 :icon="IconClose"
                                 :label="
                                     row.def.type === 'cover'
@@ -275,6 +275,7 @@ const addable = computed(() =>
 )
 
 function formatValue(value: unknown): string {
+    if (typeof value === 'boolean') return value ? 'Yes' : 'No'
     if (!Array.isArray(value))
         return typeof value === 'object' ? formatValue([value]) : String(value)
     return value
@@ -294,13 +295,17 @@ const editorOpen = ref(false)
 const editorField = ref<{ def: FieldDef; value: unknown }>()
 
 function openEditor(def: FieldDef) {
-    editorField.value = { def, value: effective(def.key) }
+    let value = effective(def.key)
+    // A bool editor starts from the override, so none shows as Automatic.
+    if (def.type === 'bool') value = overridden(def.key) ? override(def.key) : undefined
+    editorField.value = { def, value }
     editorOpen.value = true
 }
 
 async function confirmEdit(value: unknown) {
     const key = editorField.value!.def.key
-    edits.set(key, value)
+    if (value === undefined) reset(key)
+    else edits.set(key, value)
     // The field's own button, or the Source select when it was added from a chip.
     await nextTick()
     const button = document.getElementById(`${idPrefix}-${key}`)

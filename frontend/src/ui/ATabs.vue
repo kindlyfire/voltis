@@ -1,32 +1,56 @@
 <template>
-    <TabsRoot class="a-tabs" :model-value="modelValue ?? undefined" @update:model-value="select">
-        <TabsList class="a-tabs__list" :aria-label="label">
+    <TabsRoot
+        :class="['a-tabs', { 'a-tabs--shared': shared }]"
+        :model-value="modelValue ?? undefined"
+        @update:model-value="select"
+    >
+        <TabsList v-if="!shared || items.length" class="a-tabs__list" :aria-label="label">
+            <!-- As a child, so the shared panel's aria-controls wins over Reka's. -->
             <TabsTrigger
                 v-for="option in items"
                 :key="option.value"
                 :value="option.value"
                 :disabled="option.disabled"
-                class="a-tabs__trigger a-state"
+                as-child
             >
-                <span class="a-tabs__label"
-                    ><slot :name="`tab-${option.value}`">{{ option.label }}</slot></span
+                <button
+                    type="button"
+                    class="a-tabs__trigger a-state"
+                    v-bind="shared ? { 'aria-controls': panelId } : {}"
                 >
+                    <span class="a-tabs__label"
+                        ><slot :name="`tab-${option.value}`">{{ option.label }}</slot></span
+                    >
+                </button>
             </TabsTrigger>
             <TabsIndicator class="a-tabs__indicator" />
         </TabsList>
+        <!-- Without tabs, the same element stays (so the slot isn't remounted), minus the panel role. -->
+        <TabsContent
+            v-if="shared"
+            :id="panelId"
+            :value="modelValue ?? ''"
+            force-mount
+            class="a-tabs__panel"
+            v-bind="items.length ? {} : notAPanel"
+        >
+            <slot />
+        </TabsContent>
         <!-- Hidden here rather than by Reka (`unmount-on-hide`): its Presence flips `hidden` a tick after
         the selection, too late for a consumer restoring the shown panel's scroll. -->
-        <TabsContent
-            v-for="option in items"
-            :key="option.value"
-            :ref="el => setPanel(option.value, el)"
-            :value="option.value"
-            force-mount
-            :hidden="option.value !== modelValue"
-            class="a-tabs__panel"
-        >
-            <slot :name="String(option.value)" />
-        </TabsContent>
+        <template v-else>
+            <TabsContent
+                v-for="option in items"
+                :key="option.value"
+                :ref="el => setPanel(option.value, el)"
+                :value="option.value"
+                force-mount
+                :hidden="option.value !== modelValue"
+                class="a-tabs__panel"
+            >
+                <slot :name="String(option.value)" />
+            </TabsContent>
+        </template>
     </TabsRoot>
 </template>
 
@@ -39,7 +63,7 @@ import {
     TabsTrigger,
     type AcceptableValue,
 } from 'reka-ui'
-import { computed, type ComponentPublicInstance } from 'vue'
+import { computed, useId, type ComponentPublicInstance } from 'vue'
 import { normalizeOptions, type Options, type OptionValue } from './options'
 
 /**
@@ -47,13 +71,21 @@ import { normalizeOptions, type Options, type OptionValue } from './options'
  * tab's label (to add a status icon, say). Every panel stays mounted (keeping its DOM and
  * state) and scrolls on its own, below a fixed tab bar: give the tabs a bounded height (a flex
  * column parent, like the drawer's body).
+ *
+ * `shared` instead renders the default slot in a single panel that follows the selection and
+ * scrolls with the page, for one view filtered by tab. Without options it shows no tab bar.
  */
 const props = defineProps<{
     modelValue: V | null | undefined
     options: Options<V>
     /** Accessible name of the tab list. */
     label: string
+    shared?: boolean
 }>()
+
+// Reka keys a panel's id by its value, which the shared panel changes.
+const panelId = useId()
+const notAPanel = { role: undefined, 'aria-labelledby': undefined, tabindex: undefined }
 
 const emit = defineEmits<{ 'update:modelValue': [value: V] }>()
 
@@ -155,6 +187,22 @@ defineExpose({
         transition-duration: var(--duration-medium);
         transition-timing-function: var(--ease-standard);
         pointer-events: none;
+    }
+
+    .a-tabs--shared {
+        flex: none;
+        min-height: auto;
+
+        & .a-tabs__trigger {
+            flex: none;
+        }
+
+        & > .a-tabs__panel {
+            flex: none;
+            min-height: auto;
+            overflow: visible;
+            overscroll-behavior: auto;
+        }
     }
 
     .a-tabs__panel {

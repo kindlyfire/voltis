@@ -74,6 +74,12 @@ describe('ContentGrid Item', () => {
         expect(w.classes()).not.toContain('reading')
     })
 
+    it('marks a special', () => {
+        const w = mountItem({ ...item(), special: true }, false)
+        expect(links(w).card.attributes('aria-label')).toBe('Read Vol. 4, Special')
+        expect(w.findComponent(ABadge).text()).toBe('Special')
+    })
+
     it('names the status of a series item being read', async () => {
         const w = mountItem(item('reading'), true, { highlightReading: true })
         expect(links(w).card.attributes('aria-label')).toBe(

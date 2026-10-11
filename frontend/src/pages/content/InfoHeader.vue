@@ -44,6 +44,7 @@
                     </h1>
                     <div class="flex flex-wrap justify-center gap-1.5 sm:justify-start">
                         <AChip size="sm">{{ displayContentType(content.type) }}</AChip>
+                        <AChip v-if="content.special" size="sm">Special</AChip>
                         <AChip v-if="meta.kind" size="sm">{{ capitalize(meta.kind) }}</AChip>
                         <AChip v-if="meta.status" size="sm">
                             Publication: {{ capitalize(meta.status) }}

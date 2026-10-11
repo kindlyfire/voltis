@@ -48,7 +48,7 @@ func partKey(prefix, part string) (numKey, bool) {
 			return numKey{'y', n}, true
 		}
 	case "book":
-		if keys.IsBookSpecial(part) {
+		if keys.IsBookExtra(part) {
 			return numKey{}, false
 		}
 		if _, n, ok := keys.ParseBookFileVolume(part); ok {

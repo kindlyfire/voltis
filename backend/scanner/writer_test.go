@@ -10,6 +10,7 @@ import (
 
 	"voltis/lib/epub"
 	"voltis/lib/fp"
+	"voltis/metadata"
 )
 
 func leafFP(id, path, part, parent string) Fingerprint {
@@ -135,6 +136,52 @@ func TestWriterPlacementConflict(t *testing.T) {
 	if w.keys[Key{"p1", "ch1"}] != "l1" {
 		t.Fatal("key must stay with its holder")
 	}
+
+	classified := func(path string) Result {
+		file := fsFile(path, baseTime, 10)
+		return Result{File: file, Item: classifyComic(file, metadata.Fields{}, nil, testPages)}
+	}
+
+	t.Run("holder re-parsed later", func(t *testing.T) {
+		const sp, ch1 = "/lib/Bluefin/Bluefin SP01 - Holiday.cbz", "/lib/Bluefin/Bluefin Ch. 1.cbz"
+		cases := []struct {
+			name   string
+			holder Result
+			failed int
+		}{
+			{"holder moves", classified(sp), 0},
+			{"holder keeps the key", comicResult(sp, "ch1", "Bluefin", "/lib/Bluefin"), 1},
+		}
+		for _, c := range cases {
+			t.Run(c.name, func(t *testing.T) {
+				w := testWriter(
+					[]Fingerprint{leafFP("l1", sp, "ch1", "p1")},
+					[]SeriesRef{seriesRefOf("p1", "Bluefin", "/lib/Bluefin")},
+				)
+				w.event(Event{Kind: Seen, File: fsFile(sp, baseTime.Add(time.Second), 10)})
+				w.event(Event{Kind: Seen, File: fsFile(ch1, baseTime, 10)})
+
+				w.place(classified(ch1))
+				if w.prog.Failed != 0 || len(w.sets["p1"].Writes) != 0 {
+					t.Fatalf("chapter behind a queued holder: progress = %+v, writes = %+v", w.prog, w.sets["p1"].Writes)
+				}
+
+				w.place(c.holder)
+				if w.prog.Failed != c.failed || len(w.parked) != 0 {
+					t.Fatalf("progress = %+v, parked = %v", w.prog, w.parked)
+				}
+				held := w.keys[Key{"p1", "ch1"}]
+				if c.failed == 0 {
+					if w.keys[Key{"p1", "Bluefin SP01 - Holiday"}] != "l1" || held == "" || held == "l1" ||
+						len(w.sets["p1"].Writes) != 2 {
+						t.Fatalf("keys = %v, writes = %v", w.keys, writeIDs(w.sets["p1"]))
+					}
+				} else if held != "l1" || !slices.Equal(writeIDs(w.sets["p1"]), []string{"l1"}) {
+					t.Fatalf("keys = %v, writes = %v", w.keys, writeIDs(w.sets["p1"]))
+				}
+			})
+		}
+	})
 }
 
 func TestWriterDepartureMarksBothParents(t *testing.T) {

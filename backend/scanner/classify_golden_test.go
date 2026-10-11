@@ -130,9 +130,9 @@ func TestClassifyComicGoldens(t *testing.T) {
 			"prefix=comic type=comic part=y1995 order=[nil,nil] cover=001.jpg title=Yearly (1995) series=comic|comic_series|Yearly index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]}",
 		},
 		{
-			"unidentifiable",
+			"no number or year",
 			"Plain/Plain.cbz", "",
-			"nil",
+			"prefix=comic type=comic part=Plain order=[nil,nil] cover=001.jpg title=Plain series=comic|comic_series|Plain index=0 data={\"pages\":[[\"001.jpg\"],[\"002.jpg\"]]}",
 		},
 	}
 	cs := &ComicsScanner{}
@@ -209,7 +209,7 @@ func TestClassifyBookGoldens(t *testing.T) {
 			opfWith(`<dc:title>Ironbound: From Nothing to Legend’s End Vol. 02</dc:title>`+pubMeta, ``),
 			"prefix=book type=book part=" + ser + " v02 [Pub] [Tier] [Group] {x} order=[2] cover=nil " +
 				"title=Ironbound: From Nothing to Legend’s End Vol. 02 " +
-				"series=book|book_series|Ironbound: From Nothing to Legend’s End index=0 data=",
+				"series=book|book_series|Ironbound: From Nothing to Legend’s End index=2 data=",
 		},
 		{
 			"special with calibre series",
@@ -218,7 +218,7 @@ func TestClassifyBookGoldens(t *testing.T) {
 				`<meta name="calibre:series" content="Ironbound: From Nothing to Legend's End"/>`+
 				`<meta name="calibre:series_index" content="100000"/>`, ``),
 			"prefix=book type=book part=" + ser + " SP02 - Volume 10 [STORE☆FRONT Exclusive Short Story] [Group] " +
-				"order=[100000] cover=nil title=Ironbound Volume 10 - STORE☆FRONT Exclusive Popularity Poll Short Story " +
+				"order=[nil] cover=nil title=Ironbound Volume 10 - STORE☆FRONT Exclusive Popularity Poll Short Story " +
 				"series=book|book_series|Ironbound: From Nothing to Legend's End index=100000 data=",
 		},
 		{
@@ -226,7 +226,7 @@ func TestClassifyBookGoldens(t *testing.T) {
 			"Ironbound Zero - From Nothing to Legend's End v01 [Pub] [Crew].epub",
 			opfWith(`<dc:title>Ironbound Zero: Volume 1</dc:title>`+pubMeta, ``),
 			"prefix=book type=book part=Ironbound Zero - From Nothing to Legend's End v01 [Pub] [Crew] " +
-				"order=[1] cover=nil title=Ironbound Zero: Volume 1 series=book|book_series|Ironbound Zero index=0 data=",
+				"order=[1] cover=nil title=Ironbound Zero: Volume 1 series=book|book_series|Ironbound Zero index=1 data=",
 		},
 	}
 	bs := &BooksScanner{Infer: true}
