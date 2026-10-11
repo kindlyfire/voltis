@@ -265,6 +265,8 @@ export interface SeriesReadingInfo {
     children_count: number
     completed_children_count: number
     dropped_children_count: number
+    /** The reader that wrote the series row, if one did. */
+    writer: string | null
 }
 
 /** An item's state with its series', read together. */

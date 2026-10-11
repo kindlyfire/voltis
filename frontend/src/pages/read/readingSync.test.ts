@@ -22,7 +22,7 @@ import { attachReading, resetReadingActor, type ReadingSync } from './readingSyn
 
 vi.mock('@/utils/api/reading', async importOriginal => ({
     ...(await importOriginal<typeof import('@/utils/api/reading')>()),
-    readingApi: { get: vi.fn(), post: vi.fn(), seriesReading: vi.fn() },
+    readingApi: { get: vi.fn(), post: vi.fn(), seriesReading: vi.fn(), continueTarget: vi.fn() },
     invalidateReading: vi.fn(),
     markPositionSaved: vi.fn(),
     bumpContinueReading: vi.fn(),
@@ -57,6 +57,7 @@ const samePage = (a: ReadingProgress, b: ReadingProgress) =>
 
 async function open(id: string) {
     const placements: ReadingProgress[] = []
+    const leaves: string[] = []
     const sync: ReadingSync = attachReading(id, {
         content: () => ({ id, title: id, parent_id: server.parents.get(id) ?? null }) as Content,
         restore(p) {
@@ -66,10 +67,11 @@ async function open(id: string) {
         describe: p => `p.${(p.current_page ?? 0) + 1}`,
         samePosition: samePage,
         samePlace: samePage,
+        leave: to => leaves.push(to),
     })
     const loaded = sync.load()
     await settle()
-    return { sync, placements, opened: await loaded }
+    return { sync, placements, leaves, opened: await loaded }
 }
 
 /** Real reading, written after the debounce. */
@@ -360,18 +362,26 @@ describe('checks', () => {
         expect(dialogs).toEqual([])
     })
 
-    it('follows another device when idle, with an Undo that writes nothing', async () => {
-        server.set('c', { status: 'reading', progress: page(2) })
-        const { sync, placements } = await open('c')
-        server.set('c', { progress: page(53) })
-        sync.check()
-        await settle()
-        expect(placements).toEqual([page(53)])
-        toastAction('Moved to p.54 from another device')()
-        expect(placements).toEqual([page(53), page(2)])
-        await vi.advanceTimersByTimeAsync(5000)
-        expect(writes()).toEqual([])
-    })
+    it.each([
+        ['moved', page(53), 'Moved to p.54 from another device'],
+        ['cleared', {}, 'Cleared on another device'],
+    ])(
+        'follows another device when idle: %s, with an Undo that writes nothing',
+        async (what, placed, message) => {
+            server.set('c', { status: 'reading', progress: page(2) })
+            const { sync, placements } = await open('c')
+            if (what === 'moved') server.set('c', { progress: page(53) })
+            else server.clear('c')
+            sync.check()
+            await settle()
+            expect(dialogs).toEqual([])
+            expect(placements).toEqual([placed])
+            toastAction(message)()
+            expect(placements).toEqual([placed, page(2)])
+            await vi.advanceTimersByTimeAsync(5000)
+            expect(writes()).toEqual([])
+        }
+    )
 
     it.each([
         ['with a position', page(2)],
@@ -401,10 +411,7 @@ describe('checks', () => {
         )
     })
 
-    it.each([
-        ['stay', 23],
-        ['go', 79],
-    ])('asks when both moved: %s', async (choice, saved) => {
+    it.each(['stay', 'follow'])('asks when both moved: %s', async choice => {
         server.set('c', { status: 'reading', progress: page(2) })
         const { sync, placements } = await open('c')
         server.holding = true
@@ -416,8 +423,12 @@ describe('checks', () => {
         expect(dialogs[0]!.props).toMatchObject({ kind: 'moved', here: 'p.23', saved: 'p.80' })
         await answer(choice)
         await vi.advanceTimersByTimeAsync(1000)
-        expect(server.stateOf('c').progress).toEqual(page(saved))
-        expect(placements).toEqual(choice === 'go' ? [page(79)] : [])
+        // Neither choice sends the position here.
+        expect(server.stateOf('c').progress).toEqual(page(79))
+        expect(placements).toEqual(choice === 'follow' ? [page(79)] : [])
+        expect(sync.tracking).toBe(true)
+        await read(sync, 24)
+        expect(server.stateOf('c').progress).toEqual(page(24))
     })
 
     it('drops reading whose send failed when the reader goes to the other device', async () => {
@@ -433,7 +444,7 @@ describe('checks', () => {
         server.set('c', { progress: page(79) })
         sync.check()
         await settle()
-        await answer('go')
+        await answer('follow')
         sync.retry()
         await vi.advanceTimersByTimeAsync(5000)
         expect(server.stateOf('c').progress).toEqual(page(79))
@@ -452,10 +463,12 @@ describe('checks', () => {
         hide(false)
         sync.check()
         await settle()
+        const sent = writes().length
         await answer('stay')
         await settle()
         expect(sync.stale).toBe(false)
-        expect(server.stateOf('c').progress).toEqual(page(5))
+        expect(server.stateOf('c').progress).toEqual(page(79))
+        expect(writes()).toHaveLength(sent)
         expect(dialogs).toEqual([])
     })
 
@@ -476,7 +489,7 @@ describe('checks', () => {
         expect(dialogs[0]!.props).toMatchObject({ kind: 'moved' })
         await answer('stay')
         await settle()
-        expect(server.stateOf('c').progress).toEqual(page(2))
+        expect(server.stateOf('c').progress).toEqual(page(60))
         expect(server.stateOf('s').status).toBe('dropped')
     })
 
@@ -490,9 +503,12 @@ describe('checks', () => {
         await settle()
         expect(dialogs).toHaveLength(1)
         await answer('keep')
-        expect(dialogs[0]!.props).toMatchObject({ kind: 'reset' })
-        await answer('start')
+        // Nothing unsaved is left: the clear is followed without asking.
+        expect(dialogs).toEqual([])
         expect(placements).toEqual([{}])
+        expect(toast).toHaveBeenCalledWith(
+            expect.objectContaining({ message: 'Cleared on another device' })
+        )
     })
 
     it('keeps a clear acknowledged after a check that read the state before it', async () => {
@@ -536,7 +552,7 @@ describe('checks', () => {
         const command = sync.seriesCommand('reading')
         await settle()
         expect(dialogs[0]!.props).toMatchObject({ kind: 'moved', saved: 'p.61' })
-        await answer('go')
+        await answer('follow')
         await command
         await vi.advanceTimersByTimeAsync(1000)
         expect(server.stateOf('c').progress).toEqual(page(60))
@@ -560,7 +576,11 @@ describe('checks', () => {
         expect(dialogs[0]!.props).toMatchObject({ kind: 'moved', here: 'p.10', saved: 'p.41' })
         await answer('stay')
         await again
-        expect(server.stateOf('c').status).toBe('completed')
+        // The finish survives; the unsent positions don't.
+        expect(server.stateOf('c')).toMatchObject({
+            status: 'completed',
+            progress: { at_end: true },
+        })
     })
 })
 
@@ -650,6 +670,8 @@ describe('finish', () => {
         await answer('stay')
         await settle()
         expect(server.stateOf('c').status).toBe('completed')
+        // The first met the conflict; the second is it, kept.
+        expect(ops()).toEqual(['finish', 'finish'])
     })
 
     it.each(['here', 'elsewhere'])('is taken again after a clear made %s', async where => {
@@ -664,8 +686,10 @@ describe('finish', () => {
             server.clear('c')
             sync.check()
             await settle()
-            expect(dialogs[0]!.props).toMatchObject({ kind: 'reset' })
-            await answer('start')
+            expect(dialogs).toEqual([])
+            expect(toast).toHaveBeenCalledWith(
+                expect.objectContaining({ message: 'Cleared on another device' })
+            )
         }
         expect(placements).toEqual([{}])
         sync.finish({ current_page: LAST, at_end: true })
@@ -794,6 +818,7 @@ describe('series completion', () => {
         expect(sync.acked?.status).toBe('completed')
         expect(sync.series?.status).toBe('completed')
         expect(dialogs).toEqual([])
+        expect(toast).toHaveBeenCalledOnce()
         expect(toast).toHaveBeenCalledWith({ message: 'Marked the series completed' })
     })
 
@@ -1002,5 +1027,270 @@ describe('reading out when something replaces it', () => {
             progress: { at_end: true },
         })
         expect(server.sent.filter(s => s.req !== 'GET' && s.req.op === 'position')).toHaveLength(1)
+    })
+})
+
+describe('another device', () => {
+    const end = { current_page: LAST, at_end: true }
+
+    /** `c` and `d` in series `s`, reading, with `c` opened. */
+    async function inSeries() {
+        server.parents.set('c', 's')
+        server.parents.set('d', 's')
+        server.set('s', { status: 'reading' })
+        server.set('c', { status: 'reading', progress: page(2) })
+        return open('c')
+    }
+
+    describe.each([
+        ['with a next volume', 'd', 'Continue reading', '/r/d?page=resume'],
+        ['when the lookup fails', 'fail', 'Back to the series', '/s'],
+    ])('finished elsewhere %s', (_name, next, label, to) => {
+        beforeEach(() => {
+            server.next = next
+            vi.spyOn(console, 'error').mockImplementation(() => {})
+        })
+
+        it('asks about unsaved reading, and follows', async () => {
+            const { sync, leaves } = await inSeries()
+            sync.moved(page(5))
+            server.set('c', { status: 'completed', progress: end })
+            sync.check()
+            await settle()
+            expect(dialogs[0]!.props).toMatchObject({
+                kind: 'finished',
+                next: { label, title: next === 'fail' ? null : next },
+            })
+            await answer('follow')
+            await vi.advanceTimersByTimeAsync(1000)
+            expect(leaves).toEqual([to])
+            expect(writes()).toEqual([])
+            expect(sync.acked?.status).toBe('completed')
+        })
+
+        it('tells of it when nothing is unsaved', async () => {
+            const { sync, leaves } = await inSeries()
+            server.set('c', { status: 'completed', progress: end })
+            sync.check()
+            await settle()
+            expect(dialogs).toEqual([])
+            expect(toast).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    message: 'Finished on another device',
+                    action: expect.objectContaining({ label }),
+                })
+            )
+            toastAction('Finished on another device')()
+            expect(leaves).toEqual([to])
+
+            // A lookup still out when a later clear is adopted shows nothing.
+            server.clear('c')
+            sync.check()
+            await settle()
+            const lookup = Promise.withResolvers<void>()
+            server.lookup = lookup.promise
+            server.set('c', { status: 'completed', progress: end })
+            sync.check()
+            await settle()
+            server.clear('c')
+            sync.check()
+            await settle()
+            toast.mockClear()
+            lookup.resolve()
+            await settle()
+            expect(toast).not.toHaveBeenCalled()
+        })
+    })
+
+    it.each(['finished', 'series'] as const)(
+        'does nothing with an answer after the reader left, and asks again on reopening: %s',
+        async kind => {
+            const { sync, leaves } = await inSeries()
+            sync.moved(page(5))
+            if (kind === 'series') server.set('s', { status: 'completed' })
+            server.set('c', { status: 'completed', progress: end })
+            sync.check()
+            await settle()
+            sync.detach()
+            await answer('follow')
+            await vi.advanceTimersByTimeAsync(1000)
+            expect(leaves).toEqual([])
+            expect(writes()).toEqual([])
+            expect(sync.stale).toBe(true)
+            const again = open('c')
+            await settle()
+            expect(dialogs[0]!.props).toMatchObject({ kind })
+            if (kind === 'series') {
+                expect(dialogs[0]!.props).toMatchObject({ next: { label: 'Back to the series' } })
+            }
+            await answer('stay')
+            await again
+        }
+    )
+
+    it('shows no dialog for a reader that left during the lookup', async () => {
+        const { sync, leaves } = await inSeries()
+        const lookup = Promise.withResolvers<void>()
+        server.lookup = lookup.promise
+        sync.moved(page(5))
+        server.set('c', { status: 'completed', progress: end })
+        sync.check()
+        await settle()
+        sync.detach()
+        lookup.resolve()
+        await settle()
+        expect(dialogs).toEqual([])
+        expect(leaves).toEqual([])
+        expect(writes()).toEqual([])
+    })
+
+    describe('series completed elsewhere', () => {
+        it('asks when the item was completed with it, and Stay sends nothing', async () => {
+            const { sync } = await inSeries()
+            sync.moved(page(5))
+            server.set('s', { status: 'completed' })
+            server.set('c', { status: 'completed', progress: end })
+            sync.check()
+            await settle()
+            expect(dialogs[0]!.props).toMatchObject({
+                kind: 'series',
+                next: { label: 'Back to the series' },
+            })
+            await answer('stay')
+            await vi.advanceTimersByTimeAsync(1000)
+            expect(writes()).toEqual([])
+            expect(sync.series?.status).toBe('completed')
+            expect(sync.tracking).toBe(true)
+        })
+
+        it("is told of on the reader's own save when only the series completed", async () => {
+            const { sync, leaves } = await inSeries()
+            server.set('s', { status: 'completed' })
+            await read(sync, 3)
+            expect(dialogs).toEqual([])
+            toastAction('Series completed on another device')()
+            expect(leaves).toEqual(['/s'])
+            expect(server.stateOf('c').progress).toEqual(page(3))
+        })
+
+        it('keeps the reading queued after its own finish', async () => {
+            const { sync } = await inSeries()
+            server.holding = true
+            sync.finish(end)
+            sync.moved(page(70))
+            server.set('s', { status: 'completed' })
+            server.release()
+            await vi.advanceTimersByTimeAsync(1000)
+            expect(dialogs).toEqual([])
+            expect(toast).toHaveBeenCalledOnce()
+            expect(toast).toHaveBeenCalledWith(
+                expect.objectContaining({ message: 'Series completed on another device' })
+            )
+            expect(server.stateOf('c').progress).toEqual(page(70))
+        })
+
+        it('waits while hidden, and is told of once', async () => {
+            const { sync } = await inSeries()
+            server.set('s', { status: 'completed' })
+            hide()
+            sync.check()
+            await settle()
+            expect(sync.stale).toBe(true)
+            expect(toast).not.toHaveBeenCalled()
+            hide(false)
+            sync.check()
+            await settle()
+            sync.check()
+            await settle()
+            expect(toast).toHaveBeenCalledOnce()
+        })
+
+        it("offers Undo, not Series moved to Reading, when this reader's save reopened it", async () => {
+            server.parents.set('c', 's')
+            server.set('s', { status: 'reading' })
+            const { sync } = await open('c')
+            server.set('s', { status: 'completed', status_updated_at: 'then' })
+            await read(sync, 1)
+            expect(server.stateOf('s').status).toBe('reading')
+            expect(toast).toHaveBeenCalledOnce()
+            toastAction('Series completed on another device, moved back to Reading')()
+            await settle()
+            expect(server.stateOf('s')).toMatchObject({
+                status: 'completed',
+                status_updated_at: 'then',
+            })
+        })
+    })
+
+    it.each(['retained load', 'check'])(
+        're-checks a change held by a dialog while a %s was out',
+        async how => {
+            const other = await open('d')
+            let again: ReturnType<typeof open> | null = null
+            let sync: ReadingSync
+            server.parents.set('c', 's')
+            server.set('s', { status: 'reading' })
+            server.set('c', { status: 'reading', progress: page(2) })
+            if (how === 'check') {
+                sync = (await open('c')).sync
+                sync.moved(page(5))
+                server.holding = true
+                sync.check()
+            } else {
+                const first = await open('c')
+                server.holding = true
+                first.sync.finish(end)
+                first.sync.detach()
+                server.set('c', { progress: page(40) })
+                server.release()
+                await settle()
+                server.holding = true
+                again = open('c')
+            }
+            await settle()
+            server.set('s', { status: 'completed' })
+            server.set('c', { status: 'completed', progress: end })
+            other.sync.resetAndReadAgain()
+            await settle()
+            server.release()
+            await settle()
+            await answer(true)
+            await settle()
+            expect(dialogs[0]!.props).toMatchObject({ kind: 'series' })
+            await answer('stay')
+            await settle()
+            sync ??= (await again!).sync
+            expect(sync.stale).toBe(false)
+            expect(dialogs).toEqual([])
+        }
+    )
+
+    it('does not retry a failed check on its own', async () => {
+        vi.spyOn(console, 'error').mockImplementation(() => {})
+        server.set('c', { status: 'reading', progress: page(2) })
+        const { sync } = await open('c')
+        server.set('c', { progress: page(79) })
+        hide()
+        sync.moved(page(5))
+        sync.hide()
+        await settle()
+        hide(false)
+        server.offline = true
+        const gets = () => server.sent.filter(s => s.id === 'c' && s.req === 'GET').length
+        const before = gets()
+        sync.check()
+        await settle()
+        expect(gets()).toBe(before + 1)
+        expect(sync.stale).toBe(true)
+        server.offline = false
+        const other = await open('d')
+        await read(other.sync, 3)
+        expect(server.stateOf('d').progress).toEqual(page(3))
+        expect(gets()).toBe(before + 1)
+        sync.check()
+        await settle()
+        expect(dialogs[0]!.props).toMatchObject({ kind: 'moved' })
+        await answer('stay')
+        expect(sync.stale).toBe(false)
     })
 })

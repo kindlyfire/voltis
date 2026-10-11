@@ -9,6 +9,7 @@ export class FakeNav implements BookNav {
     index = -1
     session: BookSession | null = null
     leaveGuard: (() => void) | null = null
+    leave() {}
 
     beforeLeave(callback: () => void) {
         this.leaveGuard = callback

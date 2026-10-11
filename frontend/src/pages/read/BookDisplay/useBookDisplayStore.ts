@@ -24,6 +24,9 @@ export function createBookNav(router: Router, contentId: string): BookNav {
         replace(target) {
             router.replace({ query: anchorQuery(target) })
         },
+        leave(to) {
+            void router.push(to)
+        },
         saveLocator(locator) {
             history.replaceState(
                 { ...(history.state ?? {}), bookLocator: { contentId, locator } },

@@ -244,6 +244,7 @@ func TestReading(t *testing.T) {
 		info := res["series"].(map[string]any)
 		assertEq(t, info["status"], any("reading"))
 		assertEq(t, s(info["revision"]), a+":"+s(seqs[a]))
+		assertEq(t, info["writer"], any(a))
 		assertNil(t, "item status", state(res)["status"])
 
 		// Delivered again: applied once.
@@ -327,6 +328,8 @@ func TestReading(t *testing.T) {
 		setStatus(t, c, series, "on_hold")
 		res = event(kids[2], a, "position", readingOf(t, c, kids[2])["revision"], page(1), 200)
 		assertNil(t, "series_previous", res["series_previous"])
+		// A page write has no reader.
+		assertNil(t, "series writer", res["series"].(map[string]any)["writer"])
 		assertEq(t, readingOf(t, c, series)["status"], any("on_hold"))
 
 		// A saved position on a reading item starts nothing; a planned series starts.

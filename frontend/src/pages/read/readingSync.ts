@@ -26,7 +26,11 @@ import { queryClient } from '@/utils/misc'
 import { Modals } from '@/utils/modals'
 import { showClearReadingModal } from '../content/components/ClearReadingModal.vue'
 import { showMarkSeriesCompletedModal } from '../content/components/MarkSeriesCompletedModal.vue'
-import ReadingConflictModal, { type ConflictChoice } from './ReadingConflictModal.vue'
+import { readerExit } from './readerExit'
+import ReadingConflictModal, {
+    type ConflictChoice,
+    type ConflictKind,
+} from './ReadingConflictModal.vue'
 import SeriesHeldModal, { type SeriesHeldChoice } from './SeriesHeldModal.vue'
 
 const WRITE_DEBOUNCE = 1000
@@ -41,6 +45,8 @@ export interface ReaderAdapter {
     samePosition(a: ReadingProgress, b: ReadingProgress): boolean
     /** Exactly the same place (locator, page): a report there trails a finish taken there. */
     samePlace(a: ReadingProgress, b: ReadingProgress): boolean
+    /** Leaves the reader for an app route, as its own links do. */
+    leave(to: string): void
 }
 
 type Command = Extract<
@@ -53,9 +59,13 @@ interface Lane {
     id: string
     adapter: ReaderAdapter | null
     /** The content when its reader detached, for feedback and cache keys. */
-    content: Pick<Content, 'title' | 'parent_id'> | null
+    content: Pick<Content, 'title' | 'parent_id' | 'type'> | null
     acked: ReadingState | null
     series: SeriesReadingInfo | null
+    /** A reopen of a series completed elsewhere, held until the lane can show it. */
+    reopened: SeriesPrevious | null
+    /** A response held because a dialog was open: read again once the dialog and the read are done. */
+    recheck: boolean
     here: ReadingProgress | null
     tracking: boolean
     /** The reader has placed itself: placements now go to it, not to where it opens. */
@@ -168,6 +178,8 @@ export function createReadingActor() {
                 content: null,
                 acked: null,
                 series: null,
+                reopened: null,
+                recheck: false,
                 here: null,
                 tracking: true,
                 ready: false,
@@ -217,6 +229,8 @@ export function createReadingActor() {
         keepalive = false
         void run(job, init).finally(() => {
             current = null
+            if (!dialog)
+                for (const lane of lanes.values()) if (lane.recheck && lane.adapter) check(lane)
             pump()
         })
     }
@@ -239,11 +253,16 @@ export function createReadingActor() {
         pump()
     }
 
-    function dropReading(lane: Lane) {
+    /** `keepFinish`: only positions go; a finish not yet saved is still sent. */
+    function dropReading(lane: Lane, opts?: { keepFinish?: boolean }) {
+        const keep = (job: Job) => opts?.keepFinish && job.kind === 'finish'
         for (let i = queue.length - 1; i >= 0; i--) {
-            if (queue[i]!.lane === lane && isReading(queue[i]!)) queue.splice(i, 1)
+            const job = queue[i]!
+            if (job.lane === lane && isReading(job) && !keep(job)) queue.splice(i, 1)
         }
-        if (current?.lane === lane && isReading(current)) current.superseded = true
+        if (current?.lane === lane && isReading(current) && !keep(current)) {
+            current.superseded = true
+        }
         lane.failed = false
         lane.failures = 0
     }
@@ -253,17 +272,45 @@ export function createReadingActor() {
         lane.series = env.series
     }
 
-    /** Every response's way in: the expected state is adopted, anything else compared. */
-    function receive(lane: Lane, env: ReadingStateResponse) {
-        lane.series = env.series
-        const acked = lane.acked
-        if (!acked || env.state.revision === acked.revision || env.writer === writerId) {
-            return adopt(lane, env)
+    /** What the series did that this reader didn't, against the baseline it last adopted. */
+    function seriesChange(
+        lane: Lane,
+        env: ReadingStateResponse,
+        previous: SeriesPrevious | null
+    ): 'completed' | 'reopened' | null {
+        const was = lane.series
+        const now = env.series
+        if (!lane.acked || !was || !now || now.id !== was.id || was.status === 'completed') {
+            return null
         }
+        if (now.status === 'completed' && now.writer !== writerId) return 'completed'
+        if ((previous ?? lane.reopened)?.status === 'completed') return 'reopened'
+        return null
+    }
+
+    /** Every response's way in: the expected state is adopted, anything else compared. */
+    function receive(
+        lane: Lane,
+        env: ReadingStateResponse,
+        seriesPrevious: SeriesPrevious | null = null
+    ) {
+        const series = seriesChange(lane, env, seriesPrevious)
+        // The reopen is announced with the completion, not as a plain move to Reading.
+        if (series === 'reopened') shown.add(`reopen:${env.series!.id}`)
+        const acked = lane.acked
+        const own = !acked || env.state.revision === acked.revision || env.writer === writerId
+        if (own && !series) return adopt(lane, env)
         if (!lane.adapter || dialog || !visible()) {
+            // The baseline stays, so the series change is still seen when it can be shown.
+            if (own) lane.acked = env.state
+            if (dialog && lane.adapter) lane.recheck = true
+            if (series === 'reopened') lane.reopened = seriesPrevious ?? lane.reopened
             lane.stale = lane.held = true
             return
         }
+        const reopened = seriesPrevious ?? lane.reopened
+        lane.reopened = null
+        if (series) return seriesCompleted(lane, env, series, own, reopened)
         compare(lane, env)
     }
 
@@ -319,7 +366,7 @@ export function createReadingActor() {
             const res = await readingApi.post(lane.id, req, init)
             if (frozen) return abandon(job)
             if (isReading(job)) lane.failures = 0
-            receive(lane, res)
+            receive(lane, res, res.series_previous)
             if (job.kind === 'command') job.done.resolve()
             if (job.kind === 'undo') receipts.delete(job.receipt)
             if (isReading(job)) feedback(lane, res)
@@ -344,8 +391,9 @@ export function createReadingActor() {
             return
         }
         if (conflicted && err.current.writer === writerId) {
-            // Our own write, whose acknowledgement was lost: this one goes again on top of it.
-            adopt(lane, err.current)
+            // Our own write, whose acknowledgement was lost: this one goes again on top of it,
+            // and its response is compared against the series.
+            lane.acked = err.current.state
             return void queue.unshift(job)
         }
         if (isReading(job)) {
@@ -539,6 +587,7 @@ export function createReadingActor() {
     function check(lane: Lane) {
         const reading = (j: Job | null) => j?.lane === lane && j.kind === 'read'
         if (frozen || !lane.acked || reading(current) || queue.some(reading)) return
+        lane.recheck = false
         lane.held = true
         queue.unshift({ kind: 'read', lane })
         pump()
@@ -562,16 +611,104 @@ export function createReadingActor() {
         if (lane.ready) lane.adapter?.restore(progress)
     }
 
+    const backLabel = (lane: Lane) =>
+        contentOf(lane)?.type === 'book' ? 'Back to the book' : 'Back to the comic'
+
+    /** Where a follow from a finished item or series leaves for. */
+    async function exitFor(
+        lane: Lane,
+        kind: 'finished' | 'series'
+    ): Promise<{ label: string; to: string; title: string | null }> {
+        const parent = parentOf(lane)
+        const fallback = { ...readerExit(parent, lane.id, backLabel(lane)), title: null }
+        if (kind !== 'finished' || !parent) return fallback
+        try {
+            const c = await readingApi.continueTarget(parent)
+            if (c.target && c.target.id !== lane.id && c.reason !== 'earlier_unread') {
+                return {
+                    label: 'Continue reading',
+                    to: `/r/${c.target.id}?page=resume`,
+                    title: c.target.title,
+                }
+            }
+        } catch (err) {
+            console.error('Failed to look up what to read next', err)
+        }
+        return fallback
+    }
+
+    /** A toast's way out: nothing happens once the reader has left. */
+    function leave(lane: Lane, adapter: ReaderAdapter, to: string) {
+        if (lane.adapter === adapter && !frozen) adapter.leave(to)
+    }
+
+    function seriesCompleted(
+        lane: Lane,
+        remote: ReadingStateResponse,
+        change: 'completed' | 'reopened',
+        own: boolean,
+        reopened: SeriesPrevious | null
+    ) {
+        const adapter = lane.adapter!
+        const acked = lane.acked!
+        const here = lane.here ?? acked.progress
+        if (change === 'reopened') {
+            useToast().show({
+                message: 'Series completed on another device, moved back to Reading',
+                action: {
+                    label: 'Undo',
+                    altText: 'Set the status on the series page',
+                    onClick: () => restoreSeries(lane, reopened!),
+                },
+            })
+            return own ? adopt(lane, remote) : compare(lane, remote)
+        }
+        // Completed elsewhere along with the series. This reader's own finish never counts.
+        const turned = !own && acked.status !== 'completed' && remote.state.status === 'completed'
+        if (turned && hasReading(lane)) return resolve(lane, 'series', remote, here)
+        lane.series = remote.series
+        const exit = readerExit(parentOf(lane), lane.id, backLabel(lane))
+        useToast().show({
+            message: 'Series completed on another device',
+            tone: 'info',
+            action: {
+                label: exit.label,
+                altText: 'Open the series from the reader menu',
+                onClick: () => leave(lane, adapter, exit.to),
+            },
+        })
+        if (own || turned) adopt(lane, remote)
+        else compare(lane, remote)
+    }
+
     function compare(lane: Lane, remote: ReadingStateResponse) {
         const adapter = lane.adapter!
         const acked = lane.acked!
         const next = remote.state
         const here = lane.here ?? acked.progress
-        if (isCleared(next) && !isCleared(acked)) return resolve(lane, 'reset', remote, here)
+        const cleared = isCleared(next) && !isCleared(acked)
         if (next.status === 'completed' && acked.status !== 'completed') {
-            return resolve(lane, 'completed', remote, here)
+            if (hasReading(lane)) return resolve(lane, 'finished', remote, here)
+            adopt(lane, remote)
+            // The lookup is slow: a later change adopted meanwhile makes this notice obsolete.
+            const revision = next.revision
+            const current = () =>
+                lane.adapter === adapter && !frozen && lane.acked?.revision === revision
+            return void exitFor(lane, 'finished').then(
+                exit =>
+                    current() &&
+                    useToast().show({
+                        message: 'Finished on another device',
+                        tone: 'info',
+                        action: {
+                            label: exit.label,
+                            altText: 'Use the series page',
+                            onClick: () => current() && leave(lane, adapter, exit.to),
+                        },
+                    })
+            )
         }
-        if (adapter.samePosition(next.progress, acked.progress)) {
+        if (!cleared && adapter.samePosition(next.progress, acked.progress)) {
             adopt(lane, remote)
             if (next.status !== acked.status) {
                 useToast().show({
@@ -583,11 +720,13 @@ export function createReadingActor() {
             }
             return
         }
-        if (hasReading(lane)) return resolve(lane, 'moved', remote, here)
+        if (hasReading(lane)) return resolve(lane, cleared ? 'cleared' : 'moved', remote, here)
         adopt(lane, remote)
-        place(lane, next.progress)
+        place(lane, cleared ? {} : next.progress)
         useToast().show({
-            message: `Moved to ${adapter.describe(next.progress)} from another device`,
+            message: cleared
+                ? 'Cleared on another device'
+                : `Moved to ${adapter.describe(next.progress)} from another device`,
             tone: 'info',
             action: {
                 label: 'Undo',
@@ -599,27 +738,30 @@ export function createReadingActor() {
 
     function resolve(
         lane: Lane,
-        kind: 'moved' | 'completed' | 'reset',
+        kind: ConflictKind,
         remote: ReadingStateResponse,
         here: ReadingProgress
     ) {
         const adapter = lane.adapter!
         lane.held = true
         openDialog(async () => {
+            const exit = kind === 'finished' || kind === 'series' ? await exitFor(lane, kind) : null
+            // Gone meanwhile: the lane keeps its baseline and unsent reading, and the next load asks again.
+            const gone = () => lane.adapter !== adapter || frozen
+            if (gone()) return void (lane.stale = true)
             const choice = await Modals.show<ConflictChoice>(ReadingConflictModal, {
                 kind,
                 here: adapter.describe(here),
                 saved: adapter.describe(remote.state.progress),
+                next: exit && { label: exit.label, title: exit.title },
             })
-            // Stay, Keep reading and Continue here send what's retained on top of it.
+            if (gone()) return void (lane.stale = true)
             adopt(lane, remote)
             lane.held = false
-            if (choice === 'go' || choice === 'start') {
-                dropReading(lane)
-                place(lane, choice === 'go' ? remote.state.progress : {})
-            } else if (choice === 'reset' && (await showClearReadingModal(lane.id, true))) {
-                clear(lane)
-            }
+            dropReading(lane, choice === 'stay' ? { keepFinish: true } : undefined)
+            if (choice !== 'follow') return
+            if (exit) adapter.leave(exit.to)
+            else place(lane, kind === 'moved' ? remote.state.progress : {})
         })
     }
 
@@ -720,7 +862,11 @@ export function createReadingActor() {
             detach() {
                 if (lane.adapter !== adapter) return
                 const content = adapter.content()
-                lane.content = content && { title: content.title, parent_id: content.parent_id }
+                lane.content = content && {
+                    title: content.title,
+                    parent_id: content.parent_id,
+                    type: content.type,
+                }
                 lane.adapter = null
                 sendNow()
                 if (lane.dirty) {

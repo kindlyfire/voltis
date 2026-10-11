@@ -17,6 +17,8 @@ export interface ComicStateValues {
         onReady: () => void
         /** Places the reader on a page, writing nothing. */
         onPlace: (page: number) => void
+        /** Leaves the reader for an app route. */
+        onLeave: (to: string) => void
     } | null
     loaders: PageLoaderState[]
     pageDimensions: PageDimensions[]
@@ -69,6 +71,7 @@ export function createComicState(contentId: string, initialPage: number | 'last'
         describe: progress => `p.${pageFor(progress) + 1}`,
         samePosition: samePage,
         samePlace: samePage,
+        leave: to => state.handlers?.onLeave(to),
     })
 
     /** Reads the content and its saved state, then places the reader; again after a failure. */

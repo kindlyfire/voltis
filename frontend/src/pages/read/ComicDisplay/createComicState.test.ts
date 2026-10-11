@@ -13,14 +13,21 @@ vi.mock('@/utils/api/reading', async original => {
     const actual = await original<typeof import('@/utils/api/reading')>()
     return {
         ...actual,
-        readingApi: { get: vi.fn(), post: vi.fn(), seriesReading: vi.fn() },
+        readingApi: {
+            get: vi.fn(),
+            post: vi.fn(),
+            seriesReading: vi.fn(),
+            continueTarget: vi.fn(),
+        },
         invalidateReading: vi.fn(),
         markPositionSaved: vi.fn(),
         bumpContinueReading: vi.fn(),
     }
 })
 
-vi.mock('@/utils/modals', () => ({ Modals: { show: vi.fn(async () => 'start') } }))
+vi.mock('@/utils/modals', () => ({
+    Modals: { show: vi.fn(async () => 'stay') },
+}))
 
 vi.mock('./usePageLoader', async original => ({
     ...(await original<typeof import('./usePageLoader')>()),
@@ -90,7 +97,7 @@ function open(
             }) as ReadingResponse
     )
     const comic = createComicState('c_1', initialPage)
-    comic.setHandlers({ onReady: vi.fn(), onPlace: vi.fn() })
+    comic.setHandlers({ onReady: vi.fn(), onPlace: vi.fn(), onLeave: vi.fn() })
     return comic
 }
 
@@ -179,7 +186,9 @@ it('preloads ahead, and keeps the last of many pages below 100% until a finish',
     vi.mocked(contentApi.get).mockResolvedValue({
         id: 'c_1',
         parent_id: null,
-        file_data: { pages: Array.from({ length: 2000 }, (_, i) => [`${i}.png`, 800, 1200]) },
+        file_data: {
+            pages: Array.from({ length: 2000 }, (_, i) => [`${i}.png`, 800, 1200]),
+        },
     } as unknown as Content)
     vi.mocked(readingApi.get).mockResolvedValue({
         state: state({ current_page: 0 }),
@@ -187,14 +196,17 @@ it('preloads ahead, and keeps the last of many pages below 100% until a finish',
         writer: null,
     })
     const comic = createComicState('c_1', 'resume')
-    comic.setHandlers({ onReady: vi.fn(), onPlace: vi.fn() })
+    comic.setHandlers({ onReady: vi.fn(), onPlace: vi.fn(), onLeave: vi.fn() })
     await vi.advanceTimersByTimeAsync(0)
     // Each load that settles starts the next, past the first three.
     const requested = comic.loaders.filter(l => vi.mocked(l.load).mock.calls.length)
     expect(requested.map(l => l.index)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
     comic.setPage(1999)
     await vi.advanceTimersByTimeAsync(1000)
-    expect(writes().at(-1)).toMatchObject({ op: 'position', progress: { progress_percent: 99.9 } })
+    expect(writes().at(-1)).toMatchObject({
+        op: 'position',
+        progress: { progress_percent: 99.9 },
+    })
     comic.dispose()
 })
 
@@ -213,7 +225,7 @@ describe('reopened with reading kept through a conflict', () => {
         server.set('c_1', { status: 'reading', progress: { current_page: 0 } })
         vi.mocked(contentApi.get).mockResolvedValue(COMIC)
         const first = createComicState('c_1', 'resume')
-        first.setHandlers({ onReady: vi.fn(), onPlace: vi.fn() })
+        first.setHandlers({ onReady: vi.fn(), onPlace: vi.fn(), onLeave: vi.fn() })
         await vi.advanceTimersByTimeAsync(0)
         server.holding = true
         first.setPage(1)
@@ -228,7 +240,7 @@ describe('reopened with reading kept through a conflict', () => {
         vi.mocked(contentApi.get).mockReturnValueOnce(content.promise)
         vi.mocked(Modals.show).mockResolvedValueOnce(choice)
         const comic = createComicState('c_1', 'resume')
-        comic.setHandlers({ onReady: vi.fn(), onPlace: vi.fn() })
+        comic.setHandlers({ onReady: vi.fn(), onPlace: vi.fn(), onLeave: vi.fn() })
         // Back on the page, and the old write's 409, before the pages are known.
         window.dispatchEvent(new Event('focus'))
         server.release()
@@ -241,6 +253,7 @@ describe('reopened with reading kept through a conflict', () => {
             kind: 'moved',
             here: 'p.3',
             saved: 'p.2',
+            next: null,
         })
         return { server, comic }
     }
@@ -258,9 +271,9 @@ describe('reopened with reading kept through a conflict', () => {
         comic.dispose()
     })
 
-    it('opens at the start when the reader chooses it', async () => {
-        const { server, comic } = await reopen('start')
-        expect(comic.page).toBe(0)
+    it('opens at the saved page when the reader follows', async () => {
+        const { server, comic } = await reopen('follow')
+        expect(comic.page).toBe(1)
         expect(server.stateOf('c_1')).toMatchObject({
             status: 'reading',
             progress: { current_page: 1 },
@@ -288,7 +301,9 @@ it('opens again after its saved state failed to load', async () => {
 it('requests page sizes and maps unsized pages to 0, 0', async () => {
     const comic = open({ current_page: 1 }, 'resume', [['0.png', 800, 1200], ['1.png']])
     await vi.waitFor(() => expect(comic.handlers!.onReady).toHaveBeenCalled())
-    expect(vi.mocked(contentApi.get).mock.lastCall?.[2]).toEqual({ pageSizes: true })
+    expect(vi.mocked(contentApi.get).mock.lastCall?.[2]).toEqual({
+        pageSizes: true,
+    })
     expect(comic.pageDimensions).toEqual([
         { width: 800, height: 1200 },
         { width: 0, height: 0 },

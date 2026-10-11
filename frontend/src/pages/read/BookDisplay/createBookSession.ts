@@ -72,6 +72,8 @@ export interface BookNav {
     historyLocator(): BookLocator | null
     /** Runs before any router navigation moves off the current entry. */
     beforeLeave(callback: () => void): () => void
+    /** Leaves the reader for an app route. */
+    leave(to: string): void
 }
 
 export interface BookSessionValues {
@@ -926,6 +928,7 @@ export function createBookSession(
             return samePlace(a, b)
         },
         samePlace,
+        leave: to => nav.leave(to),
     })
 
     async function closeStandalone() {

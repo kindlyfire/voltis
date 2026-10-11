@@ -1,14 +1,12 @@
 <template>
-    <ADialog :open="open" :title="copy.title" size="sm" @update:open="v => !v && close(copy.keep)">
+    <ADialog :open="open" :title="copy.title" size="sm" @update:open="v => !v && close('stay')">
         <p v-if="kind === 'moved'" class="text-sm">
             Here: <strong>{{ here }}</strong> · Saved: <strong>{{ saved }}</strong>
         </p>
-        <p v-else class="text-sm">{{ copy.message }}</p>
+        <p v-else-if="message" class="text-sm">{{ message }}</p>
         <template #actions>
-            <AButton variant="text" tone="neutral" @click="close(copy.other)">
-                {{ copy.otherLabel }}
-            </AButton>
-            <AButton autofocus @click="close(copy.keep)">{{ copy.keepLabel }}</AButton>
+            <AButton variant="text" tone="neutral" @click="close('stay')">Stay here</AButton>
+            <AButton autofocus @click="close('follow')">{{ followLabel }}</AButton>
         </template>
     </ADialog>
 </template>
@@ -21,41 +19,40 @@ import ADialog from '@/ui/ADialog.vue'
 const props = defineProps<{
     open: boolean
     close: (choice: ConflictChoice) => void
-    kind: 'moved' | 'completed' | 'reset'
+    kind: ConflictKind
     here: string
     saved: string
+    /** Where following leaves for: finished and series only. */
+    next: { label: string; title: string | null } | null
 }>()
 
-/** Dismissing keeps what this reader has. */
+/** Dismissing stays. */
 const COPY = {
-    moved: {
-        title: 'You read on another device',
-        message: '',
-        keep: 'stay',
-        keepLabel: 'Stay here',
-        other: 'go',
-        otherLabel: 'Go there',
-    },
-    completed: {
-        title: 'Completed on another device',
-        message: 'This was marked completed elsewhere. Reading on keeps it completed.',
-        keep: 'keep',
-        keepLabel: 'Keep reading',
-        other: 'reset',
-        otherLabel: 'Reset & read again',
-    },
-    reset: {
+    moved: { title: 'You read on another device', message: '', follow: 'Move to new position' },
+    cleared: {
         title: 'Cleared on another device',
-        message: 'Its status and position were cleared elsewhere.',
-        keep: 'continue',
-        keepLabel: 'Continue here',
-        other: 'start',
-        otherLabel: 'Go to start',
+        message: 'Its status and position were cleared.',
+        follow: 'Go to start',
+    },
+    finished: { title: 'Finished on another device', message: '', follow: '' },
+    series: {
+        title: 'Series completed',
+        message: 'This series was completed on another device.',
+        follow: '',
     },
 } as const
 const copy = computed(() => COPY[props.kind])
+const message = computed(() =>
+    props.kind === 'finished'
+        ? props.next?.title
+            ? `Continue with ${props.next.title}?`
+            : ''
+        : copy.value.message
+)
+const followLabel = computed(() => props.next?.label ?? copy.value.follow)
 </script>
 
 <script lang="ts">
-export type ConflictChoice = 'go' | 'stay' | 'keep' | 'reset' | 'continue' | 'start'
+export type ConflictKind = 'moved' | 'cleared' | 'finished' | 'series'
+export type ConflictChoice = 'stay' | 'follow'
 </script>

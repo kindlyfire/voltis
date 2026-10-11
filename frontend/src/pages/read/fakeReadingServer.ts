@@ -1,6 +1,7 @@
 import { vi } from 'vitest'
 import { ReadingConflict, readingApi } from '@/utils/api/reading'
 import type {
+    Content,
     ReadingRequest,
     ReadingResponse,
     ReadingState,
@@ -38,6 +39,7 @@ export function createReadingServer(last: number) {
             id: parent,
             status: stateOf(parent).status,
             revision: stateOf(parent).revision,
+            writer: writerOf(stateOf(parent).revision),
             children_count: kids.length,
             completed_children_count: kids.filter(s => s === 'completed').length,
             dropped_children_count: kids.filter(s => s === 'dropped').length,
@@ -148,6 +150,10 @@ export function createReadingServer(last: number) {
         /** The next write lands, but its response is lost. */
         loseAck: false,
         holding: false,
+        /** The series' next item for a continue lookup: an id, or 'fail' to reject. */
+        next: null as string | null,
+        /** While set, a continue lookup waits for it. */
+        lookup: null as Promise<void> | null,
         held: [] as (() => void)[],
         inFlight: 0,
         maxInFlight: 0,
@@ -199,6 +205,19 @@ export function createReadingServer(last: number) {
             return { count: kids.length }
         })
     )
+    vi.mocked(readingApi.continueTarget).mockImplementation(async id => {
+        await server.lookup
+        if (server.next === 'fail') throw new TypeError('Failed to fetch')
+        const next = server.next
+        return {
+            target: next ? ({ id: next, title: next } as Content) : null,
+            series_id: id,
+            action: next ? 'next' : null,
+            reason: next ? null : 'caught_up',
+            is_new: false,
+            earlier_unread_id: null,
+        }
+    })
     vi.mocked(readingApi.post).mockImplementation((id, req, init) =>
         call(id, req as Sent, init, () => apply(id, req as Sent))
     )

@@ -71,6 +71,8 @@ export function markPositionSaved(contentId: string, parentId: string | null) {
     })
 }
 
+const fetchContinue = (id: string) => apiFetch<ContinueTarget>(`/content/${id}/continue`)
+
 export const readingApi = {
     get: (id: string, init?: RequestInit) =>
         apiFetch<ReadingStateResponse>(`/content/${id}/reading`, init),
@@ -119,9 +121,16 @@ export const readingApi = {
     useContinue: (id: MaybeRefOrGetter<string | null | undefined>) =>
         useQuery({
             queryKey: ['content', id, 'continue'],
-            queryFn: async () => apiFetch<ContinueTarget>(`/content/${toValue(id)}/continue`),
+            queryFn: async () => fetchContinue(toValue(id)!),
             enabled: isEnabled(id),
         }),
+
+    continueTarget: async (id: string) => {
+        const queryKey = ['content', id, 'continue']
+        // A fetch already in flight may predate the change that prompted this: start over.
+        await queryClient.cancelQueries({ queryKey, exact: true })
+        return queryClient.fetchQuery({ queryKey, queryFn: () => fetchContinue(id), staleTime: 0 })
+    },
 
     useContinueReading: (limit = 10) =>
         useQuery({

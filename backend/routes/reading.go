@@ -57,6 +57,8 @@ type SeriesReadingInfo struct {
 	ChildrenCount          int  `json:"children_count"           db:"children_count"`
 	CompletedChildrenCount int  `json:"completed_children_count" db:"completed_children_count"`
 	DroppedChildrenCount   int  `json:"dropped_children_count"   db:"dropped_children_count"`
+	// The reader that wrote the series row, if one did.
+	Writer *string `json:"writer" db:"-"`
 }
 
 // readingEnvelope is an item's state with its series', read together, and the reader that wrote the
@@ -580,6 +582,7 @@ func seriesReadingInfo(ctx context.Context, q db.Querier, userID, seriesID strin
 		FROM content c`+utcJoin+childCountsJoin+`
 		WHERE c.id = @id
 	`, pgx.NamedArgs{"user_id": userID, "id": seriesID})
+	info.Writer = revisionWriter(info.Revision)
 	return &info, err
 }
 

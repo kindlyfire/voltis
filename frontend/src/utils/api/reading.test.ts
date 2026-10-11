@@ -37,6 +37,31 @@ describe('invalidateContinueReading', () => {
     })
 })
 
+describe('continueTarget', () => {
+    it('refetches past a continue fetch already in flight', async () => {
+        let resolveStale!: (r: Response) => void
+        const responses = [
+            new Promise<Response>(r => (resolveStale = r)),
+            Promise.resolve(Response.json({ id: 'fresh' })),
+        ]
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(() => responses.shift()!)
+        )
+        const observer = new QueryObserver(queryClient, {
+            queryKey: ['content', 's_1', 'continue'],
+            queryFn: () => fetch('/continue').then(r => r.json()),
+        })
+        const unsubscribe = observer.subscribe(() => {})
+
+        const target = readingApi.continueTarget('s_1')
+        resolveStale(Response.json({ id: 'stale' }))
+
+        expect(await target).toEqual({ id: 'fresh' })
+        unsubscribe()
+    })
+})
+
 describe.each([
     ['seriesReading', () => readingApi.seriesReading('s_1', { action: 'clear' })],
     [

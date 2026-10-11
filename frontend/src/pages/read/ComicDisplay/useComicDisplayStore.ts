@@ -228,6 +228,9 @@ export const useReaderStore = defineStore('reader', () => {
             onPlace: page => {
                 if (state.value === s) goToPage(page, 'instant')
             },
+            onLeave: to => {
+                if (state.value === s) void router.push(to)
+            },
             onReady: () => {
                 if (state.value !== s) return
                 // This is to replace "last" or "resume" in the URL with the
