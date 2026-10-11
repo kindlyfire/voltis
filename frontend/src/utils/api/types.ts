@@ -342,14 +342,66 @@ export interface BrokenRefsSummaryItem {
 
 export interface LibraryUrisResponse {
     content_uris: string[]
-    user_uris: string[]
 }
 
-export interface BrokenRefsFixRequest {
-    delete?: string[]
-    update?: Record<string, string>
-    /** Per updated row: whose reading state survives a merge. Defaults to the newer. */
-    keep?: Record<string, 'source' | 'target'>
+export interface BrokenListEntry {
+    id: string
+    list_id: string
+    list_name: string
+    uri: string
+    notes: string | null
+}
+
+/** A series whose children would pair with the group's; `same` is the group's own URI. */
+export interface BrokenRefSuggestion {
+    uri: string
+    matched: number
+    total: number
+    same: boolean
+}
+
+/** A library's broken refs under one series or top-level URI. */
+export interface BrokenRefGroup {
+    uri: string
+    items: BrokenUserToContent[]
+    list_entries: BrokenListEntry[]
+    suggestions: BrokenRefSuggestion[]
+}
+
+/** Whose reading state survives a move onto a URI that has the user's data already. */
+export type BrokenRefsKeep = 'newer' | 'source' | 'target'
+
+export interface BrokenRefsPreviewRequest {
+    from: string
+    to: string
+    /** Per source URI: its destination, or null to leave it broken. */
+    overrides?: Record<string, string | null>
+}
+
+export interface BrokenRefPair {
+    from: string
+    to: string
+    by: 'root' | 'exact' | 'number' | 'manual'
+    /** The user's row at `to`, when the user also has one at `from`. */
+    existing: BrokenUserToContent | null
+    list_merges: number
+}
+
+export interface BrokenRefsPreview {
+    pairs: BrokenRefPair[]
+    leftovers: string[]
+    free_targets: string[]
+}
+
+export interface BrokenRefsSaveRequest {
+    moves: { keep: BrokenRefsKeep; pairs: Record<string, string> }[]
+    delete: { refs: string[]; list_entries: string[] }
+}
+
+export interface BrokenRefsSaveResponse {
+    moved: number
+    merged: number
+    deleted: number
 }
 
 export interface UserToContentUpdate {

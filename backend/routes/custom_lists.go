@@ -362,8 +362,18 @@ type createEntryRequest struct {
 	Notes     *string `json:"notes"`
 }
 
+// lockLists locks list rows. Writers lock a list before its entries, as deleting a list does
+// through the cascade; any other order could deadlock with them.
+func lockLists(ctx context.Context, tx pgx.Tx, ids ...string) error {
+	_, err := tx.Exec(ctx, "SELECT id FROM custom_lists WHERE id = ANY($1) ORDER BY id FOR UPDATE", ids)
+	return err
+}
+
 // createEntryInner expects the caller to hold lockUserData for the content.
 func createEntryInner(ctx context.Context, tx pgx.Tx, listID string, contentID string, notes *string) error {
+	if err := lockLists(ctx, tx, listID); err != nil {
+		return err
+	}
 	libraryID, uri, err := contentURI(ctx, tx, contentID)
 	if err != nil {
 		return err
@@ -460,6 +470,9 @@ func (cr *CustomListRoutes) bulkCreateEntries(c echo.Context) error {
 		if err := lockUserData(ctx, tx, user.ID, ids...); err != nil {
 			return err
 		}
+		if err := lockLists(ctx, tx, listIDs...); err != nil {
+			return err
+		}
 		args := pgx.NamedArgs{"ids": ids, "now": time.Now().UTC(), "list_ids": listIDs}
 		for _, listID := range listIDs {
 			entryIDs := make([]string, len(ids))
@@ -530,6 +543,9 @@ func (cr *CustomListRoutes) reorderEntries(c echo.Context) error {
 	}
 
 	err = db.WithTx(ctx, cr.pool, func(tx pgx.Tx) error {
+		if err := lockLists(ctx, tx, cl.ID); err != nil {
+			return err
+		}
 		for i, id := range req.CTCIDs {
 			_, err := tx.Exec(ctx, `UPDATE custom_list_to_content SET "order" = $1 WHERE id = $2`, i, id)
 			if err != nil {

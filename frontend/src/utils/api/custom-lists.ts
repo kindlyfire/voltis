@@ -14,8 +14,9 @@ import type {
     OkResponse,
 } from './types'
 
-const listsKey = ['custom-lists']
-const detailKey = (id: string | undefined | null) => [...listsKey, id]
+/** Every custom-list query. */
+export const customListsKey = ['custom-lists']
+const detailKey = (id: string | undefined | null) => [...customListsKey, id]
 
 export const customListsApi = {
     useList: (
@@ -23,7 +24,7 @@ export const customListsApi = {
         options: QueryOptions<CustomListPartial[]> = {}
     ) =>
         useQuery({
-            queryKey: [...listsKey, 'list', userFilter],
+            queryKey: [...customListsKey, 'list', userFilter],
             queryFn: async () => {
                 const filter = toValue(userFilter) ?? 'all'
                 const params = filter ? `?user=${filter}` : ''
@@ -57,7 +58,7 @@ export const customListsApi = {
                     body: JSON.stringify(body),
                 }),
             onSuccess: () => {
-                queryClient.invalidateQueries({ queryKey: listsKey })
+                queryClient.invalidateQueries({ queryKey: customListsKey })
             },
         })
     },
@@ -73,7 +74,7 @@ export const customListsApi = {
                 })
             },
             onSuccess: (_data, variables) => {
-                queryClient.invalidateQueries({ queryKey: listsKey })
+                queryClient.invalidateQueries({ queryKey: customListsKey })
                 queryClient.invalidateQueries({ queryKey: detailKey(variables.id) })
             },
         })
@@ -85,7 +86,7 @@ export const customListsApi = {
             mutationFn: async (id: string) =>
                 apiFetch<OkResponse>(`/custom-lists/${id}`, { method: 'DELETE' }),
             onSuccess: (_data, id) => {
-                queryClient.invalidateQueries({ queryKey: listsKey })
+                queryClient.invalidateQueries({ queryKey: customListsKey })
                 queryClient.invalidateQueries({ queryKey: detailKey(id) })
             },
         })
@@ -100,7 +101,7 @@ export const customListsApi = {
                     body: JSON.stringify(body),
                 }),
             onSuccess: () => {
-                queryClient.invalidateQueries({ queryKey: listsKey })
+                queryClient.invalidateQueries({ queryKey: customListsKey })
             },
         })
     },
@@ -117,7 +118,7 @@ export const customListsApi = {
             },
             onSuccess: (_data, variables) => {
                 queryClient.invalidateQueries({ queryKey: detailKey(variables.listId) })
-                queryClient.invalidateQueries({ queryKey: listsKey })
+                queryClient.invalidateQueries({ queryKey: customListsKey })
             },
         })
     },
@@ -136,7 +137,7 @@ export const customListsApi = {
             },
             onSuccess: (_data, variables) => {
                 queryClient.invalidateQueries({ queryKey: detailKey(variables.listId) })
-                queryClient.invalidateQueries({ queryKey: listsKey })
+                queryClient.invalidateQueries({ queryKey: customListsKey })
             },
         })
     },
@@ -150,7 +151,7 @@ export const customListsApi = {
                 }),
             onSuccess: (_data, variables) => {
                 queryClient.invalidateQueries({ queryKey: detailKey(variables.listId) })
-                queryClient.invalidateQueries({ queryKey: listsKey })
+                queryClient.invalidateQueries({ queryKey: customListsKey })
             },
         })
     },
@@ -167,7 +168,7 @@ export const customListsApi = {
             },
             onSuccess: (_data, variables) => {
                 queryClient.invalidateQueries({ queryKey: detailKey(variables.listId) })
-                queryClient.invalidateQueries({ queryKey: listsKey })
+                queryClient.invalidateQueries({ queryKey: customListsKey })
             },
         })
     },

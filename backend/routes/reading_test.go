@@ -485,9 +485,8 @@ func TestReadingWriteLocks(t *testing.T) {
 	assertEq(t, s(codes), s([]int{200, 409}))
 }
 
-// TestReadingSeq checks that every state a row reaches gets a greater reading_seq, that the
-// endpoints report the row's current one, and that a row leaving live content keeps a versioned
-// empty state.
+// TestReadingSeq checks that every state a row reaches gets a greater reading_seq, and that the
+// endpoints report the row's current one.
 func TestReadingSeq(t *testing.T) {
 	pool := newTestPool(t)
 	c := newAdminClient(t, pool)
@@ -502,15 +501,6 @@ func TestReadingSeq(t *testing.T) {
 			SELECT COALESCE((SELECT utc.reading_seq FROM content c JOIN user_to_content utc
 				ON utc.library_id = c.library_id AND utc.uri = c.uri AND utc.user_id = $2 WHERE c.id = $1), 0)::text`,
 			id, f.userID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return v
-	}
-	rowID := func(id string) string {
-		t.Helper()
-		v, err := db.SelectScalar[string](ctx, pool, `SELECT utc.id FROM content c JOIN user_to_content utc
-			ON utc.library_id = c.library_id AND utc.uri = c.uri AND utc.user_id = $2 WHERE c.id = $1`, id, f.userID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -534,10 +524,11 @@ func TestReadingSeq(t *testing.T) {
 	x := f.content("comic", nil, 0)
 	f.exec("UPDATE content SET page_count = 10 WHERE id = $1", x)
 	series, kids := f.series(3)
-	moved, target, dropped := f.content("comic", nil, 0), f.content("comic", nil, 0), f.content("comic", nil, 0)
+	moved, target := f.content("comic", nil, 0), f.content("comic", nil, 0)
 	f.set(moved, "reading", f.at(1), f.at(1))
 	f.set(target, "completed", f.at(2), f.at(2))
-	f.set(dropped, "reading", f.at(1), f.at(1))
+	f.exec("UPDATE user_to_content SET uri = 'comic/Gone Ferry_2003' WHERE user_id = $1 AND uri = 'file:///lib/' || $2",
+		f.userID, moved)
 	all := append([]string{series}, kids...)
 
 	steps := []struct {
@@ -567,18 +558,12 @@ func TestReadingSeq(t *testing.T) {
 				assertEq(t, s(m["reading_seq"]), seqOf(s(m["id"])))
 			}
 		}},
-		{"move onto a live row", []string{moved, target}, func() {
+		{"move onto a live row", []string{target}, func() {
 			c.Post("/api/content/broken-refs/"+f.libID, map[string]any{
-				"update": map[string]string{rowID(moved): "file:///lib/" + target},
-				"keep":   map[string]string{rowID(moved): "source"},
+				"moves": []any{map[string]any{"keep": "source",
+					"pairs": map[string]string{"comic/Gone Ferry_2003": "file:///lib/" + target}}},
 			}).Assert(t, 200)
-			// The source identity stays, empty.
-			assertEq(t, f.userData(moved), "- {}")
-		}},
-		{"delete", []string{dropped}, func() {
-			c.Post("/api/content/broken-refs/"+f.libID, map[string]any{"delete": []string{rowID(dropped)}}).
-				Assert(t, 200)
-			assertEq(t, f.userData(dropped), "- {}")
+			assertEq(t, f.userData(target), `reading {"current_page": 1} t`)
 		}},
 	}
 	for _, st := range steps {

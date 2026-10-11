@@ -6,9 +6,12 @@ import { isEnabled, type QueryOptions } from './_utils'
 import { invalidateMatching, isContentWindow, libraryScope } from './catalog'
 import type {
     BookStructure,
-    BrokenRefsFixRequest,
+    BrokenRefGroup,
+    BrokenRefsPreview,
+    BrokenRefsPreviewRequest,
+    BrokenRefsSaveRequest,
+    BrokenRefsSaveResponse,
     BrokenRefsSummaryItem,
-    BrokenUserToContent,
     CountResponse,
     Content,
     ContentBuckets,
@@ -236,28 +239,34 @@ export const contentApi = {
     useBrokenRefs: (
         libraryId: MaybeRefOrGetter<string | undefined | null>,
         params: MaybeRefOrGetter<PageParams> = {},
-        options: QueryOptions<Paginated<BrokenUserToContent>> = {}
+        options: QueryOptions<Paginated<BrokenRefGroup>> = {}
     ) =>
         useQuery({
             queryKey: ['content', 'broken-refs', libraryScope(libraryId), params],
             queryFn: async () =>
-                apiFetch<Paginated<BrokenUserToContent>>(
+                apiFetch<Paginated<BrokenRefGroup>>(
                     `/content/broken-refs/${toValue(libraryId)}${pageQuery(toValue(params))}`
                 ),
             enabled: isEnabled(libraryId),
             ...options,
         }),
 
-    /** The user's row at `uri`, which repairing a broken ref onto it would merge with. */
-    userDataAt: async (libraryId: string, uri: string) =>
-        apiFetch<BrokenUserToContent | null>(
-            `/content/refs/${libraryId}/user-data?${new URLSearchParams({ uri })}`
-        ),
+    /** How a group's broken URIs would pair with `req.to`, as `useQuery` options. */
+    brokenRefsPreviewQuery: (libraryId: string, req: BrokenRefsPreviewRequest) => ({
+        queryKey: ['content', 'broken-refs-preview', libraryScope(libraryId), req],
+        queryFn: async () =>
+            apiFetch<BrokenRefsPreview>(`/content/broken-refs/${libraryId}/preview`, {
+                method: 'POST',
+                body: JSON.stringify(req),
+            }),
+    }),
 
-    fixBrokenRefs: async (libraryId: string, body: BrokenRefsFixRequest): Promise<void> => {
-        await apiFetch(`/content/broken-refs/${libraryId}`, {
+    saveBrokenRefs: async (
+        libraryId: string,
+        body: BrokenRefsSaveRequest
+    ): Promise<BrokenRefsSaveResponse> =>
+        apiFetch<BrokenRefsSaveResponse>(`/content/broken-refs/${libraryId}`, {
             method: 'POST',
             body: JSON.stringify(body),
-        })
-    },
+        }),
 }
