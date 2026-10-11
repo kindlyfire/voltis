@@ -363,8 +363,8 @@ private fun EntryCard(entry: EntryView, library: String?, actions: RowActions, o
             Column(Modifier.weight(1f), Arrangement.spacedBy(6.dp)) {
                 Text(entry.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 FlowRow(Modifier.fillMaxWidth(), Arrangement.spacedBy(8.dp), Arrangement.spacedBy(4.dp), itemVerticalAlignment = Alignment.CenterVertically) {
-                    entry.type?.let { VTag(typeLabel(it), onCard = true) }
                     library?.let { VLinkChip(it, openLibrary) }
+                    entry.type?.let { VTag(typeLabel(it), onCard = true) }
                 }
                 entry.notes?.takeIf { it.isNotBlank() }?.let { notes ->
                     Text(stringResource(R.string.list_notes), color = muted, style = MaterialTheme.typography.labelMedium)

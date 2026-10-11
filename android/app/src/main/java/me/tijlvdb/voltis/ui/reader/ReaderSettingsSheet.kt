@@ -2,8 +2,11 @@ package me.tijlvdb.voltis.ui.reader
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -32,6 +35,7 @@ import me.tijlvdb.voltis.domain.comic.ReaderMode
 import me.tijlvdb.voltis.domain.comic.ReadingDirection
 import me.tijlvdb.voltis.domain.comic.SpreadSetting
 import me.tijlvdb.voltis.domain.comic.resolveDouble
+import me.tijlvdb.voltis.ui.isLarge
 import me.tijlvdb.voltis.ui.kit.AnchorFocusReturn
 import me.tijlvdb.voltis.ui.kit.PopoverAnchor
 import me.tijlvdb.voltis.ui.kit.VSettingChoice
@@ -39,40 +43,48 @@ import me.tijlvdb.voltis.ui.kit.VSheet
 import me.tijlvdb.voltis.ui.kit.VSwitchRow
 
 /** The "Display" section of `ReaderSidebar.vue`, with its conditions. Every change is a placement. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReaderSettingsSheet(vm: ReaderViewModel, viewport: IntSize, onDismiss: () -> Unit, anchor: PopoverAnchor? = null) {
     // Outside the sheet's own window: the anchor is in the reader's.
     AnchorFocusReturn(anchor)
-    VSheet(stringResource(R.string.reader_display), onDismiss) {
+    VSheet(stringResource(R.string.reader_display), onDismiss, width = if (isLarge()) 880.dp else BottomSheetDefaults.SheetMaxWidth) {
         ReaderSettingsRows(vm, viewport)
     }
 }
 
 /**
- * The rows of the Display settings, in a sheet on a phone and in a side panel on a large window.
- * [viewport] is the page area the reader measured, which Auto spread resolves on.
+ * The rows of the Display settings: one column, two on a large window. [viewport] is the page area
+ * the reader measured, which Auto spread resolves on.
  */
 @Composable
 fun ReaderSettingsRows(vm: ReaderViewModel, viewport: IntSize) {
     val settings = vm.settings
-    run {
-        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            val view by vm.sync.view.collectAsState()
-            ReaderStatusRow(view, vm.statusBusy, vm::runStatus)
-            val paged = stringResource(R.string.reader_mode_paged)
-            val longstrip = stringResource(R.string.reader_mode_longstrip)
-            val auto = stringResource(R.string.reader_auto)
-            VSettingChoice(
-                stringResource(R.string.reader_mode),
-                listOf(ReaderMode.Paged to paged, ReaderMode.Longstrip to longstrip, null to auto),
-                vm.seriesSettings.mode,
-                vm::setMode,
-                auto = (if (vm.autoMode == ReaderMode.Longstrip) longstrip else paged).takeIf { vm.seriesSettings.mode == null },
-            )
-            if (vm.mode == ReaderMode.Longstrip) {
-                WidthSlider(settings.longstripWidth) { width -> vm.changeSettings { it.copy(longstripWidth = width) } }
-                return@Column
+    val longstrip = vm.mode == ReaderMode.Longstrip
+    val auto = stringResource(R.string.reader_auto)
+    val status: @Composable ColumnScope.() -> Unit = {
+        val view by vm.sync.view.collectAsState()
+        ReaderStatusRow(view, vm.statusBusy, vm::runStatus)
+    }
+    val mode: @Composable ColumnScope.() -> Unit = {
+        val paged = stringResource(R.string.reader_mode_paged)
+        val strip = stringResource(R.string.reader_mode_longstrip)
+        VSettingChoice(
+            stringResource(R.string.reader_mode),
+            listOf(ReaderMode.Paged to paged, ReaderMode.Longstrip to strip, null to auto),
+            vm.seriesSettings.mode,
+            vm::setMode,
+            auto = (if (vm.autoMode == ReaderMode.Longstrip) strip else paged).takeIf { vm.seriesSettings.mode == null },
+        )
+    }
+    // The longstrip's sliders or the paged direction.
+    val flow: @Composable ColumnScope.() -> Unit = {
+        if (longstrip) {
+            WidthSlider(settings.longstripWidth) { width -> vm.changeSettings { it.copy(longstripWidth = width) } }
+            WidthSlider(settings.longstripTapScroll, stringResource(R.string.reader_tap_scroll)) { amount ->
+                vm.changeSettings(places = false) { it.copy(longstripTapScroll = amount) }
             }
+        } else {
             VSettingChoice(
                 stringResource(R.string.reader_direction),
                 listOf(
@@ -91,16 +103,40 @@ fun ReaderSettingsRows(vm: ReaderViewModel, viewport: IntSize) {
                     vm.changeSettings { it.copy(invertRtlControls = on) }
                 })
             }
+        }
+    }
+    val page: @Composable ColumnScope.() -> Unit = {
+        if (!longstrip) {
             FitChoice(settings.fit) { fit -> vm.changeSettings { it.copy(fit = fit) } }
-            SpreadChoice(settings.spread, viewport) { spread -> vm.changeSettings { it.copy(spread = spread) } }
-            if (settings.spread != SpreadSetting.Single) {
-                VSwitchRow(stringResource(R.string.reader_shift_spreads), vm.shifted, { vm.toggleShift() })
-            }
             if (settings.fit == Fit.Screen) {
                 VSwitchRow(stringResource(R.string.reader_zoom_wide), settings.zoomWide, { on ->
                     vm.changeSettings { it.copy(zoomWide = on) }
                 })
             }
+            SpreadChoice(settings.spread, viewport) { spread -> vm.changeSettings { it.copy(spread = spread) } }
+            if (settings.spread != SpreadSetting.Single) {
+                VSwitchRow(stringResource(R.string.reader_shift_spreads), vm.shifted, { vm.toggleShift() })
+            }
+        }
+    }
+    val spaced = Arrangement.spacedBy(16.dp)
+    Column(verticalArrangement = spaced) {
+        status()
+        if (isLarge()) {
+            Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(32.dp)) {
+                Column(Modifier.weight(1f), spaced) {
+                    mode()
+                    if (!longstrip) flow()
+                }
+                Column(Modifier.weight(1f), spaced) {
+                    if (longstrip) flow()
+                    page()
+                }
+            }
+        } else {
+            mode()
+            flow()
+            page()
         }
     }
 }
@@ -137,7 +173,7 @@ fun SpreadChoice(spread: SpreadSetting, viewport: IntSize? = null, onSelect: (Sp
     )
 }
 
-/** 10 to 100% in steps of 5. The strip is laid out again at each step. */
+/** 10 to 100% in steps of 5. */
 @Composable
 fun WidthSlider(width: Int, name: String = stringResource(R.string.reader_width), onChange: (Int) -> Unit) {
     // The thumb follows the finger; the stored value follows a moment later.

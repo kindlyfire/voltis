@@ -367,7 +367,9 @@ private suspend fun PagerState.turnTo(page: Int, velocity: FloatArray) {
     scroll(MutatePriority.PreventUserInput) {
         fun step() = layoutInfo.pageSize + layoutInfo.pageSpacing
         var at = currentPage + currentPageOffsetFraction
-        animate(at, page.toFloat(), velocity[0], spring(stiffness = Spring.StiffnessMediumLow)) { pos, v ->
+        // The spring runs in pages: its default threshold of 0.01 is about 10 px, which the snap below would then jump.
+        val settle = 0.5f / step().coerceAtLeast(1)
+        animate(at, page.toFloat(), velocity[0], spring(stiffness = Spring.StiffnessMediumLow, visibilityThreshold = settle)) { pos, v ->
             velocity[0] = v
             val size = step()
             if (size > 0) at += scrollBy(turnDelta(pos, at, size)) / size

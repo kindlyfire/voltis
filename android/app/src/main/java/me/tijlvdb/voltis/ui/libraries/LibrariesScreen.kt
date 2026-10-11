@@ -2,7 +2,6 @@ package me.tijlvdb.voltis.ui.libraries
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -85,7 +84,7 @@ fun LibrariesScreen(
             Heading(stringResource(R.string.libraries_section))
             // Downloads is the row above.
             if (!isOnline()) return@Column ServerOffline(downloads = false)
-            Box(Modifier.padding(horizontal = pageGutter())) { LoadStatus(vm.libraries == null, vm.error, vm::load) }
+            LoadStatus(vm.libraries == null, vm.error, modifier = Modifier.padding(horizontal = pageGutter()), retry = vm::load)
             val libraries = vm.libraries ?: return@Column
             if (libraries.isEmpty()) {
                 Text(

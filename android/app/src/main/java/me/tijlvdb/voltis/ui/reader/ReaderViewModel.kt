@@ -354,14 +354,16 @@ class ReaderViewModel @AssistedInject constructor(
     /**
      * A change from the settings sheet. It lays the page out anew, so it is a placement, counted
      * with the stored settings as they arrive: the page is placed once, in its new layout.
+     * [places] is false for a setting that doesn't touch the layout, which leaves the reader where it is.
      */
-    fun changeSettings(change: (ReaderSettings) -> ReaderSettings) {
+    fun changeSettings(places: Boolean = true, change: (ReaderSettings) -> ReaderSettings) {
         if (comic == null) return
         viewModelScope.launch {
             val before = mode
             settings = settingsStore.update(change) ?: return@launch
             // The strip leaves the end set: in another mode the reader shows its page, not the end card.
             if (mode != before) atEnd = false
+            if (!places) return@launch
             placement++
             sync.placed(position(page, pageCount))
         }

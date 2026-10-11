@@ -4,7 +4,9 @@ import androidx.activity.compose.LocalActivity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.EnterExitState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.navigation3.ui.LocalNavAnimatedContentScope
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -71,7 +73,7 @@ import androidx.compose.ui.focus.focusRequester
 
 /**
  * The bars over the page, hidden until a centre tap, and the edge progress bar, which stays.
- * While it is composed the screen stays on, and the system bars show only with the bars.
+ * The system bars show only with them: see [ReaderBars].
  */
 @Composable
 fun ReaderChrome(
@@ -101,7 +103,6 @@ fun ReaderChrome(
     onDetails: () -> Unit,
     onRetrySiblings: () -> Unit,
 ) {
-    Immersive(barsVisible = visible)
     var picking by rememberSaveable { mutableStateOf(false) }
     val hasVolumes = siblings.status == Siblings.Status.Ready && siblings.items.isNotEmpty()
     val colors = MaterialTheme.colorScheme
@@ -116,6 +117,16 @@ fun ReaderChrome(
                 overlay = true,
                 onTitleClick = if (hasVolumes) ({ picking = true }) else null,
                 titleClickLabel = stringResource(R.string.reader_volumes),
+                actions = {
+                    if (hasVolumes && siblings.index >= 0) {
+                        Text(
+                            stringResource(R.string.reader_volume_of, siblings.index + 1, siblings.items.size, siblings.items.size - siblings.index - 1),
+                            Modifier.padding(end = 16.dp),
+                            color = colors.onSurfaceVariant,
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
+                },
             )
         }
 
@@ -275,13 +286,17 @@ private fun PageSlider(page: Int, pageCount: Int, rtl: Boolean, onPlace: (Int) -
     }
 }
 
-/** Idempotent, so it can run again after a rotation; undone when the reader leaves. */
+/**
+ * Held by the nav while a reader is the top screen, so a volume replacing a reader never lets the bars
+ * through in between: the screen stays on and the bars are put back when the reader is left.
+ */
 @Composable
-private fun Immersive(barsVisible: Boolean) {
+fun ReaderWindow(reading: Boolean) {
     val view = LocalView.current
     val window = LocalActivity.current?.window ?: return
     val controller = remember(window, view) { WindowCompat.getInsetsController(window, view) }
-    DisposableEffect(controller) {
+    DisposableEffect(controller, reading) {
+        if (!reading) return@DisposableEffect onDispose {}
         view.keepScreenOn = true
         controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         onDispose {
@@ -289,8 +304,20 @@ private fun Immersive(barsVisible: Boolean) {
             controller.show(WindowInsetsCompat.Type.systemBars())
         }
     }
-    LaunchedEffect(controller, barsVisible) {
+}
+
+/**
+ * The system bars follow the menu: shown with it, hidden without. Composed for the reader's whole screen, loading
+ * included; a screen on its way out (closed, or replaced by another volume) leaves them to the one that stays.
+ */
+@Composable
+fun ReaderBars(visible: Boolean) {
+    if (LocalNavAnimatedContentScope.current.transition.targetState != EnterExitState.Visible) return
+    val view = LocalView.current
+    val window = LocalActivity.current?.window ?: return
+    val controller = remember(window, view) { WindowCompat.getInsetsController(window, view) }
+    LaunchedEffect(controller, visible) {
         val bars = WindowInsetsCompat.Type.systemBars()
-        if (barsVisible) controller.show(bars) else controller.hide(bars)
+        if (visible) controller.show(bars) else controller.hide(bars)
     }
 }

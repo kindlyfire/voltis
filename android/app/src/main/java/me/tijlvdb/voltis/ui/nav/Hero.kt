@@ -3,7 +3,13 @@ package me.tijlvdb.voltis.ui.nav
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.EnterExitState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateSetOf
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
@@ -38,9 +44,24 @@ class HeroTaps {
     private var key: HeroKey? = null
     private var at = 0L
 
-    fun tap(key: HeroKey) {
+    /** Covers in flight, out and back: their cards hide their badges until their screen is back at rest, or is pruned. */
+    private val flown = mutableStateSetOf<HeroKey>()
+
+    fun tap(key: HeroKey, flies: Boolean = false) {
         this.key = key
         at = System.nanoTime()
+        if (flies) flown += key
+    }
+
+    /** Drops the flights of entries no longer in the back stack: [live] are their uids, the start of a key's origin. */
+    internal fun prune(live: List<String>) {
+        flown.removeAll { it.origin.substringBefore('/') !in live }
+    }
+
+    internal fun isFlying(key: HeroKey) = key in flown
+
+    internal fun landed(key: HeroKey) {
+        flown -= key
     }
 
     /** The origin of the tap that opened [contentId], once, and only if it just happened (a tap that opened nothing goes stale). */
@@ -72,4 +93,26 @@ fun Modifier.heroElement(key: HeroKey?): Modifier {
             boundsTransform = { _, _ -> HeroBounds },
         )
     }
+}
+
+/**
+ * Whether the cover of [key] is in flight (see [HeroTaps]): the card's badges fade out for it and back in once it
+ * lands. Landing is the card's screen back at rest; a tap that opened nothing ends after a second.
+ */
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+fun HeroTaps.flying(key: HeroKey?): Boolean {
+    if (key == null || LocalSharedTransitionScope.current == null || !animationsEnabled()) return false
+    val flying = isFlying(key)
+    if (flying) {
+        val transition = LocalNavAnimatedContentScope.current.transition
+        LaunchedEffect(key) {
+            withTimeoutOrNull(1000) {
+                snapshotFlow { transition.currentState != EnterExitState.Visible || transition.targetState != EnterExitState.Visible }.first { it }
+            }
+            snapshotFlow { transition.currentState == EnterExitState.Visible && transition.targetState == EnterExitState.Visible }.first { it }
+            landed(key)
+        }
+    }
+    return flying
 }

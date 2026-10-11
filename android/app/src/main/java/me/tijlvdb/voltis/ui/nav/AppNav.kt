@@ -44,6 +44,7 @@ import me.tijlvdb.voltis.ui.lists.ListScreen
 import me.tijlvdb.voltis.ui.lists.ListsScreen
 import me.tijlvdb.voltis.ui.login.LoginScreen
 import me.tijlvdb.voltis.ui.reader.ReaderScreen
+import me.tijlvdb.voltis.ui.reader.ReaderWindow
 import me.tijlvdb.voltis.ui.search.SearchScreen
 import me.tijlvdb.voltis.ui.server.ServerScreen
 import me.tijlvdb.voltis.ui.settings.DownloadSettingsScreen
@@ -126,8 +127,11 @@ private fun MainNav(nav: MainNavState, account: String, targets: LaunchTargets, 
             }
         }
     }
+    ReaderWindow(nav.reader != null)
     val transitions = rememberNavTransitions()
     val taps = remember { HeroTaps() }
+    val live = nav.entries.map { it.uid.toString() }
+    LaunchedEffect(live) { taps.prune(live) }
     MainScaffold(nav, account) {
         SharedTransitionLayout {
         CompositionLocalProvider(LocalSharedTransitionScope provides this, LocalHeroTaps provides taps) {

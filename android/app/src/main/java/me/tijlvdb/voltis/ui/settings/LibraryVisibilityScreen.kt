@@ -141,7 +141,7 @@ fun LibraryVisibilityScreen(onBack: () -> Unit, vm: LibraryVisibilityViewModel =
         LibraryVisibility.HIDE to stringResource(R.string.visibility_hide),
     )
     PushedScreen(stringResource(R.string.visibility_title), onBack) {
-        LoadStatus(vm.libraries == null, vm.error, vm::load)
+        LoadStatus(vm.libraries == null, vm.error, retry = vm::load)
         val libraries = vm.libraries ?: return@PushedScreen
         if (me == null) return@PushedScreen
         if (libraries.isEmpty()) Text(stringResource(R.string.home_no_libraries), color = MaterialTheme.colorScheme.onSurfaceVariant)

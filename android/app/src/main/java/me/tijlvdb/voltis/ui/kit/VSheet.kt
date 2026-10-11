@@ -22,13 +22,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
  * A modal bottom sheet under a heading, with [meta] or [action] at the heading's end. Its content
  * scrolls, and it opens whole: with a half-open state Back would take two presses. [lazy] is for
  * content that is a lazy list, which scrolls itself. [footer] is pinned under the content, always
- * in view.
+ * in view. [width] is the sheet's widest, for content that lays out in columns.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -39,11 +40,13 @@ fun VSheet(
     action: (@Composable () -> Unit)? = null,
     lazy: Boolean = false,
     footer: (@Composable () -> Unit)? = null,
+    width: Dp = BottomSheetDefaults.SheetMaxWidth,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
     ModalBottomSheet(
         onDismiss,
+        sheetMaxWidth = width,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = colors.surfaceContainerLow,
         // The handle is a touch target (its actions collapse and dismiss), 32 dp wide by default.

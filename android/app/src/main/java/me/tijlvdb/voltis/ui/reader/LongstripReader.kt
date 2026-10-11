@@ -6,13 +6,19 @@ import android.graphics.BitmapRegionDecoder
 import android.graphics.Paint
 import android.graphics.Rect
 import android.os.Build
+import androidx.compose.animation.EnterExitState
 import androidx.compose.foundation.background
+import androidx.navigation3.ui.LocalNavAnimatedContentScope
+import kotlinx.coroutines.isActive
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.spring
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancelAndJoin
-import androidx.compose.foundation.MutatePriority
+import androidx.compose.foundation.gestures.FlingBehavior
+import androidx.compose.foundation.gestures.ScrollScope
+import androidx.compose.foundation.gestures.ScrollableDefaults
+import androidx.compose.foundation.gestures.stopScroll
+import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.ui.semantics.scrollByOffset
@@ -83,6 +89,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.job
 import me.tijlvdb.voltis.domain.comic.PageUnsupported
 import java.io.IOException
+import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.min
 import kotlinx.coroutines.flow.Flow
@@ -107,7 +114,7 @@ private class TapScroll {
     var owed = 0f
     var job: Job? = null
 
-    /** When a tap last added to [owed]. A touch that doesn't scroll stops nothing, but the sequence still ends with time. */
+    /** When a tap last added to [owed]. The sequence ends with time. */
     var at = 0L
 
     /** The speed the running scroll had when it was last stopped, for the one that takes over. */
@@ -122,19 +129,27 @@ private class TapScroll {
         velocity = 0f
     }
 
-    /** [reset], then waits for the scroll to end: it holds the list at a priority that a placement can't preempt. */
+    /** [reset], then waits for the scroll to end, so nothing more is dispatched. */
     suspend fun stop() {
         val running = job
         reset()
-        running?.cancelAndJoin()
+        running?.join()
     }
 }
 
-/** The share of the viewport that a tap on a zone scrolls. */
-private const val TAP_SCROLL = 0.80f
-
 /** How long after a tap its scroll may still be owed (ms): longer than the scroll takes. */
 private const val TAP_LAPSE = 900L
+
+/** How much faster than the system's limit the fastest flick goes. */
+private const val FLING_BOOST = 1.5f
+
+/** The system caps a flick's velocity at [maxVelocity]; this lets faster flicks go on up to [FLING_BOOST] times that, and leaves gentle ones alone. */
+private class BoostedFling(private val base: FlingBehavior, private val maxVelocity: Float) : FlingBehavior {
+    override suspend fun ScrollScope.performFling(initialVelocity: Float): Float {
+        val boost = 1f + (FLING_BOOST - 1f) * (abs(initialVelocity) / maxVelocity).coerceAtMost(1f)
+        return with(base) { performFling(initialVelocity * boost) }
+    }
+}
 
 /** A tap's scroll takes 1.25x the default spring's time (the time goes with 1/sqrt(stiffness)). */
 private const val TAP_STIFFNESS = Spring.StiffnessMedium / 1.5625f
@@ -149,6 +164,8 @@ fun LongstripReader(
     page: Int,
     placement: Int,
     widthPercent: Int,
+    /** Percent of the viewport that a tap on a zone scrolls. */
+    tapScrollPercent: Int,
     /** Without a next volume the end card closes the strip. */
     hasEndCard: Boolean,
     moves: Flow<Boolean>,
@@ -213,6 +230,10 @@ fun LongstripReader(
         // The px that taps still have to scroll. A tap during a scroll adds to it, and the scroll goes on
         // from where it is, with its speed, so quick taps chain instead of each starting over.
         val taps = remember(list) { TapScroll() }
+        // Its spring dispatches to this list only: gone with it, and with the screen leaving.
+        DisposableEffect(taps) { onDispose { taps.reset() } }
+        val shown = LocalNavAnimatedContentScope.current.transition.targetState == EnterExitState.Visible
+        LaunchedEffect(shown) { if (!shown) taps.reset() }
         LaunchedEffect(list, placement) {
             taps.stop()
             armed = false
@@ -267,27 +288,37 @@ fun LongstripReader(
             if (SystemClock.uptimeMillis() - at > TAP_LAPSE) reset()
             at = SystemClock.uptimeMillis()
             owed += delta
+            // A new sequence takes the list from a fling or an accessibility scroll; one chaining on a running spring already has it.
+            val chaining = job?.isActive == true
             job?.cancel()
             job = scope.launch {
-                // Not stopped by a touch: a touch-down's stop-scroll is user input, which this priority rejects.
-                list.scroll(MutatePriority.PreventUserInput) {
-                    var last = 0f
-                    val target = owed
-                    animate(0f, target, velocity, spring(stiffness = TAP_STIFFNESS)) { value, v ->
-                        velocity = v
-                        val step = value - last
-                        last = value
-                        val done = scrollBy(step)
-                        owed -= done
-                        // The end of the list: nothing more to scroll.
-                        if (done != step) owed = 0f
+                if (!chaining) {
+                    try {
+                        list.stopScroll()
+                    } catch (e: CancellationException) {
+                        // A drag owns the list: nothing is owed then.
+                        if (currentCoroutineContext().isActive) reset()
+                        throw e
                     }
+                }
+                // Raw deltas, no scroll lock: a touch neither stops this nor is rejected by it. A drag, a pinch or another scroll ends it (reset).
+                var last = 0f
+                val target = owed
+                animate(0f, target, velocity, spring(stiffness = TAP_STIFFNESS, visibilityThreshold = 0.5f)) { value, v ->
+                    velocity = v
+                    val step = value - last
+                    last = value
+                    val done = list.dispatchRawDelta(step)
+                    owed -= done
+                    // The end of the list: nothing more to scroll.
+                    if (done != step) owed = 0f
                 }
                 owed = 0f
                 velocity = 0f
             }
         }
         // [interrupt]: the tap came down on a scroll of the reader's own taps, which a tap past the end only absorbs.
+        val tapScroll by rememberUpdatedState(tapScrollPercent)
         fun move(forward: Boolean, interrupt: Boolean = false) {
             // A tap that scrolls is reading.
             armed = true
@@ -296,7 +327,7 @@ fun LongstripReader(
             when {
                 // Still scrolling that way, so the strip is not at its end yet.
                 taps.owed * sign > 0 || (if (forward) list.canScrollForward else list.canScrollBackward) ->
-                    tapBy(TAP_SCROLL * list.layoutInfo.viewportSize.height * sign)
+                    tapBy(tapScroll / 100f * list.layoutInfo.viewportSize.height * sign)
                 // Another volume opens only from a strip that was already at its end, and not scrolling there.
                 interrupt || taps.job?.isActive == true -> Unit
                 forward -> {
@@ -314,7 +345,7 @@ fun LongstripReader(
                 override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                     if (source == NestedScrollSource.UserInput) {
                         armed = true
-                        // Not for the touch that stops a tap's scroll, which moves nothing: that one may be a tap too.
+                        // Not for a touch that moves nothing: it may be a tap too.
                         if (available.y != 0f) taps.reset()
                     }
                     return Offset.Zero
@@ -322,10 +353,12 @@ fun LongstripReader(
             }
         }
 
+        val maxFling = LocalViewConfiguration.current.maximumFlingVelocity
+        val fling = ScrollableDefaults.flingBehavior().let { base -> remember(base, maxFling) { BoostedFling(base, maxFling) } }
         LazyColumn(
             Modifier
-                // The scroll actions of accessibility services and the page keys would be rejected beside a tap's scroll:
-                // they end it first (and are outermost, so they stand in for the list's own).
+                // The scroll actions of accessibility services and the page keys end a tap's scroll first
+                // (and are outermost, so they stand in for the list's own).
                 .semantics {
                     scrollBy { _, y ->
                         scope.launch { taps.stop(); armed = true; list.animateScrollBy(y) }
@@ -353,7 +386,7 @@ fun LongstripReader(
                     true
                 }
                 // Outside the zoomed layer, so these are screen px. Zones are never flipped here.
-                .watchDrags(drags, scrolling = { taps.job?.isActive == true }, onDrag = { taps.at = 0L }) { at ->
+                .watchDrags(drags, scrolling = { taps.job?.isActive == true }, onDrag = taps::reset) { at ->
                     zoneTap(
                         at, viewport, centerCap, flipped = false,
                         // The touch stopped nothing: a centre tap leaves the scroll running.
@@ -406,6 +439,7 @@ fun LongstripReader(
                     }
                 },
             state = list,
+            flingBehavior = fling,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             // Keyed, so the strip keeps its place when a page above gets its size and its bands.

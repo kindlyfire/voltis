@@ -6,6 +6,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -107,19 +108,19 @@ fun PushedScreen(title: String, onBack: () -> Unit, content: @Composable ColumnS
     }
 }
 
-/** What stands in for data that isn't there: [error] with Retry, else a spinner while [loading]. */
+/** What stands in for data that isn't there: [error] with Retry, else a spinner while [loading]. Full width, centered. */
 @Composable
-fun LoadStatus(loading: Boolean, error: UiText?, retry: () -> Unit) {
-    when {
-        error != null -> QueryError(error, retry = retry)
-        loading -> VSpinner()
+fun LoadStatus(loading: Boolean, error: UiText?, modifier: Modifier = Modifier, retry: () -> Unit) {
+    if (error == null && !loading) return
+    Box(modifier.fillMaxWidth().padding(vertical = 16.dp), Alignment.Center) {
+        if (error != null) QueryError(error, retry = retry) else VSpinner()
     }
 }
 
 /** [content] for a loaded [value]; before that a spinner, and on [error] the message with Retry. */
 @Composable
 fun <T : Any> Loaded(value: T?, error: UiText?, retry: () -> Unit, content: @Composable (T) -> Unit) {
-    if (value != null && error == null) content(value) else LoadStatus(value == null, error, retry)
+    if (value != null && error == null) content(value) else LoadStatus(value == null, error, retry = retry)
 }
 
 /**

@@ -169,6 +169,10 @@
     <string name="grid_filters">Filters</string>
     <string name="grid_filters_active">Active</string>
     <string name="grid_starred">Starred only</string>
+    <string name="grid_page_failed">Couldn\'t load more</string>
+    <string name="rail_jump_to">Jump to</string>
+    <string name="rail_never">Never</string>
+    <string name="rail_unknown">Unknown</string>
     <plurals name="grid_items">
         <item quantity="one">%1$d item</item>
         <item quantity="other">%1$d items</item>
@@ -364,6 +368,7 @@
     <string name="reader_page_slider">Page</string>
     <string name="reader_progress">Reading progress</string>
     <string name="reader_volumes">Volumes</string>
+    <string name="reader_volume_of">Vol %1$d of %2$d · %3$d left</string>
     <string name="reader_details">Details</string>
     <string name="reader_prev_volume">Previous volume</string>
     <string name="reader_next_volume">Next volume</string>
@@ -384,6 +389,7 @@
     <string name="reader_mode_paged">Paged</string>
     <string name="reader_mode_longstrip">Longstrip</string>
     <string name="reader_width">Width</string>
+    <string name="reader_tap_scroll">Tap scroll</string>
     <string name="reader_percent">%1$d%%</string>
     <string name="reader_direction">Direction</string>
     <string name="reader_direction_ltr">LTR</string>

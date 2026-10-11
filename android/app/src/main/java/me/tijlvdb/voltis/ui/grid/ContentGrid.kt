@@ -1,10 +1,32 @@
 package me.tijlvdb.voltis.ui.grid
 
 import androidx.activity.compose.BackHandler
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.ScrollableDefaults
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.scrollable
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.overscroll
+import androidx.compose.foundation.rememberOverscrollEffect
+import androidx.compose.foundation.withoutVisualEffect
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.node.ModifierNodeElement
+import androidx.compose.ui.node.requireLayoutCoordinates
+import androidx.compose.ui.relocation.BringIntoViewModifierNode
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.Constraints
+import me.tijlvdb.voltis.ui.animationsEnabled
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,6 +50,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -46,13 +69,14 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.ScrollAxisRange
+import androidx.compose.ui.semantics.verticalScrollAxisRange
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.paging.LoadState
-import androidx.paging.compose.LazyPagingItems
 import kotlinx.coroutines.launch
 import me.tijlvdb.voltis.R
 import androidx.activity.compose.LocalActivity
@@ -65,9 +89,9 @@ import me.tijlvdb.voltis.ui.lists.ListsSheetViewModel
 import me.tijlvdb.voltis.ui.lists.SheetEffect
 import me.tijlvdb.voltis.data.api.Content
 import me.tijlvdb.voltis.data.api.ContentType
-import me.tijlvdb.voltis.data.api.toUiText
+import me.tijlvdb.voltis.data.content.ContentWindow
 import me.tijlvdb.voltis.data.content.GridFilters
-import me.tijlvdb.voltis.data.content.PagedContent
+import me.tijlvdb.voltis.domain.catalog.Segment
 import me.tijlvdb.voltis.domain.catalog.gridColumns
 import me.tijlvdb.voltis.ui.UiText
 import me.tijlvdb.voltis.ui.LocalOffline
@@ -80,14 +104,14 @@ import me.tijlvdb.voltis.ui.kit.QueryError
 import me.tijlvdb.voltis.ui.kit.VIconButton
 import me.tijlvdb.voltis.ui.kit.VIconToggle
 import me.tijlvdb.voltis.ui.kit.VIcons
-import me.tijlvdb.voltis.ui.kit.VSpinner
 import me.tijlvdb.voltis.ui.kit.VStarToggle
 import me.tijlvdb.voltis.ui.kit.popoverAnchor
 import me.tijlvdb.voltis.ui.pageGutter
 
-/** What a grid shows: the pages of a library or of All libraries, or a plain list (a series' contents). */
+/** What a grid shows: the cards of a library's or All libraries' window, or a plain list (a series' contents). */
 class GridItems(
     val count: Int,
+    /** Null for a card that has not loaded: the grid shows its skeleton. */
     val get: (index: Int) -> Content?,
     /** Of a row, null for none: it keeps its place when rows before it are dropped. Not an Int, which the header's items use. */
     val key: ((index: Int) -> Any)? = null,
@@ -96,12 +120,9 @@ class GridItems(
     /** Reloading what is shown. */
     val refreshing: Boolean = false,
     val error: UiText? = null,
-    val appending: Boolean = false,
-    val appendError: UiText? = null,
-    /** Rows before the retained ones are loading again, or failed to. */
-    val prepending: Boolean = false,
-    val prependError: UiText? = null,
     val retry: () -> Unit,
+    /** Set for a window over a long list: it learns which cards are on screen, and the grid gets a rail. */
+    val windowing: Windowing? = null,
 ) {
     /** A list loaded in one request; null while it loads. */
     constructor(list: List<Content>?, refreshing: Boolean, error: UiText?, retry: () -> Unit) : this(
@@ -114,24 +135,17 @@ class GridItems(
     )
 }
 
-fun LazyPagingItems<PagedContent>.asGridItems(): GridItems {
-    val refresh = loadState.refresh
-    val append = loadState.append
-    val prepend = loadState.prepend
-    return GridItems(
-        count = itemCount,
-        get = { this[it]?.content },
-        key = { peek(it)?.let { row -> "row:${row.offset}" } ?: "gap:$it" },
-        loading = refresh is LoadState.Loading && itemCount == 0,
-        refreshing = refresh is LoadState.Loading && itemCount > 0,
-        error = (refresh as? LoadState.Error)?.error?.toUiText(),
-        appending = append is LoadState.Loading,
-        appendError = (append as? LoadState.Error)?.error?.toUiText(),
-        prepending = prepend is LoadState.Loading,
-        prependError = (prepend as? LoadState.Error)?.error?.toUiText(),
-        retry = ::retry,
-    )
-}
+/** What a window asks of its grid: the cards in view with overscan, the first one (null near the top), drags, and where to open. A null segment key reads [nullLabel]. */
+class Windowing(
+    val segments: List<Segment>,
+    @param:StringRes val nullLabel: Int,
+    val onRange: (first: Int, last: Int) -> Unit,
+    val onDrag: (dragging: Boolean) -> Unit,
+    val onAnchor: (Int?) -> Unit,
+    val restoreIndex: Int?,
+    val onRestored: () -> Unit,
+    val failure: ContentWindow.Failure?,
+)
 
 internal val ColumnGap = 18.dp
 internal val RowGap = 24.dp
@@ -162,6 +176,8 @@ fun ContentGrid(
     filterTop: Int = 0,
     /** False: only the [header] is shown, without the toolbar and the cards (a series page on its Details tab). */
     showItems: Boolean = true,
+    /** The header of a window's grid: with the toolbar, it scrolls with the grid, over the grid's top padding. Null: the toolbar is a grid item. */
+    top: (@Composable ColumnScope.() -> Unit)? = null,
     header: LazyGridScope.() -> Unit = {},
 ) {
     val options = vm.options.collectAsStateWithLifecycle().value ?: return
@@ -171,7 +187,26 @@ fun ContentGrid(
     val notDownloaded = stringResource(R.string.reader_not_downloaded)
     var sheet by rememberSaveable { mutableStateOf<GridSheet?>(null) }
     val scope = rememberCoroutineScope()
-    val toolbarShown by remember { derivedStateOf { state.layoutInfo.visibleItemsInfo.any { it.contentType == "toolbar" } } }
+    var headerHeight by remember { mutableIntStateOf(0) }
+    // The header height the grid's padding uses. A change once the header is scrolled out would shift the cards by
+    // it: the scroll follows, together with the padding and, so as not to cut a fling short, once the grid is idle.
+    // Saved with the grid's own position, which a recreation restores.
+    var applied by rememberSaveable { mutableIntStateOf(0) }
+    val idle = !state.isScrollInProgress
+    val padding = if (headerHeight == 0 || applied > 0 && !idle) applied else headerHeight
+    SideEffect {
+        if (top != null && padding != applied) {
+            if (applied > 0 && (state.headerScroll() ?: applied) >= applied) {
+                state.requestScrollToItem(state.firstVisibleItemIndex, state.firstVisibleItemScrollOffset + padding - applied)
+            }
+            applied = padding
+        }
+    }
+    val toolbarShown by remember {
+        derivedStateOf {
+            if (top == null) state.layoutInfo.visibleItemsInfo.any { it.contentType == "toolbar" } else headerHeight == 0 || (state.headerScroll() ?: headerHeight) < headerHeight
+        }
+    }
     // A new filter opens at the top, not mid-list. With the toolbar in view the first row is already
     // under it, and scrolling would move a popover anchored to it.
     val setFilters = { to: GridFilters ->
@@ -196,46 +231,47 @@ fun ContentGrid(
     BoxWithConstraints(modifier.fillMaxSize()) {
         val width = (maxWidth - gutter * 2).value
         val columns = gridColumns(width, options.itemSize)
-        val fullSpan: LazyGridItemSpanScope.() -> GridItemSpan = { GridItemSpan(maxLineSpan) }
-        PullToRefreshBox(items.refreshing, onRefresh) {
+        // First in the tree, so keyboard focus reaches it before the cards (it draws above them by its z-index).
+        items.windowing?.let { GridRail(state, items, it, columns, if (selection.active) barHeight else bottomSpace()) { headerHeight } }
+        val toolbar: @Composable () -> Unit = {
+            Toolbar(
+                filters,
+                vm.total,
+                sheet,
+                { sheet = it },
+                stored = vm.stored,
+                onStar = { setFilters(filters.copy(starred = it)) },
+                selecting = selection.active,
+                onSelecting = vm::selecting,
+            ) { open, anchor ->
+                when (open) {
+                    GridSheet.Display -> DisplayOptionsSheet(options, width, vm::updateOptions, vm::resetOptions, { sheet = null }, anchor)
+                    GridSheet.Filters -> FilterSheet(filters, vm.sorts, setFilters, { sheet = null }, anchor)
+                }
+            }
+        }
+        // One effect for the header and the cards, so that they stretch together at the top.
+        val overscroll = rememberOverscrollEffect()
+        val grid: @Composable () -> Unit = {
             LazyVerticalGrid(
                 GridCells.Fixed(columns),
                 Modifier.fillMaxSize(),
                 state,
-                PaddingValues(start = gutter, end = gutter, bottom = if (selection.active) 24.dp + barHeight else bottomSpace()),
+                PaddingValues(
+                    start = gutter,
+                    end = gutter,
+                    top = if (top == null) 0.dp else with(density) { padding.toDp() },
+                    bottom = if (selection.active) 24.dp + barHeight else bottomSpace(),
+                ),
                 horizontalArrangement = Arrangement.spacedBy(ColumnGap),
+                overscrollEffect = if (top == null) overscroll else overscroll?.withoutVisualEffect(),
             ) {
                 header()
                 if (!showItems) return@LazyVerticalGrid
-                item(span = fullSpan, contentType = "toolbar") {
-                    Toolbar(
-                        filters,
-                        vm.total,
-                        sheet,
-                        { sheet = it },
-                        stored = vm.stored,
-                        onStar = { setFilters(filters.copy(starred = it)) },
-                        selecting = selection.active,
-                        onSelecting = vm::selecting,
-                    ) { open, anchor ->
-                        when (open) {
-                            GridSheet.Display -> DisplayOptionsSheet(options, width, vm::updateOptions, vm::resetOptions, { sheet = null }, anchor)
-                            GridSheet.Filters -> FilterSheet(filters, vm.sorts, setFilters, { sheet = null }, anchor)
-                        }
-                    }
-                }
+                val fullSpan: LazyGridItemSpanScope.() -> GridItemSpan = { GridItemSpan(maxLineSpan) }
+                if (top == null) item(span = fullSpan, contentType = "toolbar") { toolbar() }
                 if (items.error != null) {
                     item(span = fullSpan, contentType = "error") { QueryError(items.error, Modifier.padding(bottom = RowGap), items.retry) }
-                }
-                // Rows scrolled away from are loaded again in front of the retained ones.
-                if (items.count > 0) {
-                    if (items.prependError != null) {
-                        item(key = "prepend", span = fullSpan, contentType = "error") { QueryError(items.prependError, Modifier.padding(bottom = RowGap), items.retry) }
-                    } else if (items.prepending) {
-                        item(key = "prepend", span = fullSpan, contentType = "appending") {
-                            Box(Modifier.fillMaxWidth().padding(8.dp), Alignment.Center) { VSpinner(Modifier.size(28.dp)) }
-                        }
-                    }
                 }
                 val card = Modifier.padding(bottom = RowGap)
                 when {
@@ -256,9 +292,13 @@ fun ContentGrid(
                             textAlign = TextAlign.Center,
                         )
                     }
-                    // Keyed by offset, not ID: offset paging can repeat a row when the list changes under it.
+                    // Keyed by offset, not ID: a list that changed under its pages can repeat a row.
                     else -> items(items.count, key = items.key, contentType = { "card" }) { index ->
-                        val content = items.get(index) ?: return@items
+                        val content = items.get(index)
+                        if (content == null) {
+                            ContentCardSkeleton(card, subtitle = filters.listsContinue, title = !options.hideTitle)
+                            return@items
+                        }
                         val next = content.continueInfo
                         // Offline, a volume that isn't downloaded can't be opened, and says so.
                         val unavailable = if (content.id in vm.unreadable) notDownloaded else null
@@ -283,13 +323,37 @@ fun ContentGrid(
                         )
                     }
                 }
-                if (items.appendError != null) {
-                    item(span = fullSpan, contentType = "error") { QueryError(items.appendError, retry = items.retry) }
-                } else if (items.appending) {
-                    item(span = fullSpan, contentType = "appending") {
-                        Box(Modifier.fillMaxWidth().padding(8.dp), Alignment.Center) { VSpinner(Modifier.size(28.dp)) }
-                    }
-                }
+            }
+        }
+        PullToRefreshBox(items.refreshing, onRefresh) {
+            if (top == null) {
+                grid()
+            } else {
+                // On the host, which stays placed when the header is scrolled out, so a drag that began on the header goes on.
+                val scrollable = Modifier.scrollable(
+                    state,
+                    Orientation.Vertical,
+                    reverseDirection = ScrollableDefaults.reverseDirection(LocalLayoutDirection.current, Orientation.Vertical, false),
+                    overscrollEffect = overscroll?.withoutVisualEffect(),
+                ).semantics {
+                    // Accessibility scrolls the grid from the header too.
+                    val at = { state.firstVisibleItemIndex + state.firstVisibleItemScrollOffset / 10000f }
+                    verticalScrollAxisRange = ScrollAxisRange(at, { at() + if (state.canScrollForward) 100f else 0f })
+                }.showOnFocus(state, animationsEnabled())
+                GridWithHeader(
+                    state,
+                    headerHeight,
+                    { headerHeight = it },
+                    Modifier.fillMaxSize().overscroll(overscroll).clipToBounds(),
+                    scrollable,
+                    header = {
+                        Column(Modifier.fillMaxWidth().padding(horizontal = gutter)) {
+                            top()
+                            toolbar()
+                        }
+                    },
+                    grid = grid,
+                )
             }
         }
         if (selection.active) {
@@ -423,5 +487,75 @@ private fun Toolbar(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodyMedium,
         )
+    }
+}
+
+/**
+ * The grid's scroll from its very top, into the header that its top padding makes room for: 0 at the top.
+ * Null once item 0 is out of view, past the header.
+ */
+internal fun LazyGridState.headerScroll(): Int? =
+    layoutInfo.visibleItemsInfo.firstOrNull { it.index == 0 }?.let { -it.offset.y }
+        // A header taller than the viewport leaves no item in view.
+        ?: firstVisibleItemScrollOffset.takeIf { firstVisibleItemIndex == 0 }
+
+/**
+ * The header over the top padding of the grid, [headerHeight] px high: it moves up by the grid's own scroll, so that
+ * one scroll state drives both. Scrolled out, its content is not placed, so focus and semantics skip it.
+ */
+@Composable
+private fun GridWithHeader(
+    state: LazyGridState,
+    headerHeight: Int,
+    onHeight: (Int) -> Unit,
+    modifier: Modifier,
+    headerModifier: Modifier,
+    header: @Composable () -> Unit,
+    grid: @Composable () -> Unit,
+) {
+    val content = @Composable {
+        // The host is always placed, its content only while in view.
+        Layout(header, headerModifier) { measurables, constraints ->
+            val head = measurables[0].measure(Constraints(minWidth = constraints.maxWidth, maxWidth = constraints.maxWidth))
+            layout(head.width, head.height) { if ((state.headerScroll() ?: head.height) < head.height) head.place(0, 0) }
+        }
+        grid()
+    }
+    Layout(content, modifier) { measurables, constraints ->
+        val head = measurables[0].measure(Constraints(minWidth = constraints.maxWidth, maxWidth = constraints.maxWidth))
+        val body = measurables[1].measure(constraints)
+        if (head.height != headerHeight) onHeight(head.height)
+        layout(body.width, body.height) {
+            body.place(0, 0)
+            head.place(0, -minOf(state.headerScroll() ?: head.height, head.height), zIndex = 1f)
+        }
+    }
+}
+
+/** Focus in the header scrolls the grid to show it, as it would the grid's own items. */
+private fun Modifier.showOnFocus(state: LazyGridState, animate: Boolean): Modifier = this then ShowOnFocus(state, animate)
+
+private data class ShowOnFocus(val state: LazyGridState, val animate: Boolean) : ModifierNodeElement<ShowOnFocusNode>() {
+    override fun create() = ShowOnFocusNode(state, animate)
+
+    override fun update(node: ShowOnFocusNode) {
+        node.state = state
+        node.animate = animate
+    }
+}
+
+private class ShowOnFocusNode(var state: LazyGridState, var animate: Boolean) : Modifier.Node(), BringIntoViewModifierNode {
+    override suspend fun bringIntoView(childCoordinates: LayoutCoordinates, boundsProvider: () -> Rect?) {
+        val child = boundsProvider() ?: return
+        val scrolled = state.headerScroll() ?: return
+        val rect = child.translate(requireLayoutCoordinates().localPositionOf(childCoordinates, Offset.Zero))
+        val viewport = state.layoutInfo.viewportSize.height
+        val top = rect.top - scrolled
+        val delta = when {
+            top < 0f -> top
+            rect.bottom - scrolled > viewport -> minOf(rect.bottom - scrolled - viewport, top)
+            else -> return
+        }
+        if (animate) state.animateScrollBy(delta) else state.scrollBy(delta)
     }
 }

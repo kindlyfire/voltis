@@ -59,8 +59,7 @@ internal class DragWatch {
 /**
  * Follows every touch before the scrollers below see it, and reports to [onTap] the one case their handlers can't:
  * a stationary tap that interrupts a scroll the reader's own taps started ([scrolling], read as the finger lands).
- * That scroll runs at a priority user input can't preempt, so the touch stops nothing; the release is consumed here,
- * so a handler that sees it (a pager that takes no user scroll, an end-card button) doesn't act too. Every other tap is theirs:
+ * The release is consumed here, so a handler that sees it (a pager that takes no user scroll, an end-card button) doesn't act too. Every other tap is theirs:
  * a button, the end card or the settings panel keeps its ownership, and so does a touch an ancestor consumed.
  */
 internal fun Modifier.watchDrags(
@@ -126,11 +125,12 @@ internal sealed interface PagedTurn {
 /**
  * The turn a tap or button asks for. Pages run 0..[last], the end card being [last]. Another volume opens only from a
  * pager settled on the first page or the end card, and not counted from an [aimed] page: a turn that would go past an
- * edge it is only heading for stops at the edge. A tap that came down during a turn is not [settled], however still the pager is by the time it is acted on.
+ * edge it is only heading for stops at the edge. Once the pager has settled on the edge itself, taps in quick succession
+ * go on to the volume. A tap that came down during a turn is not [settled], however still the pager is by the time it is acted on.
  */
 internal fun pagedTurn(forward: Boolean, current: Int, aimed: Int?, settled: Boolean, last: Int): PagedTurn {
     val to = (aimed ?: current) + if (forward) 1 else -1
-    val steady = settled && aimed == null
+    val steady = settled && (aimed == null || aimed == current)
     return when {
         to < 0 -> if (steady && current == 0) PagedTurn.PreviousVolume else PagedTurn.Go(0)
         to > last -> if (steady && current == last) PagedTurn.NextVolume else PagedTurn.Go(last)

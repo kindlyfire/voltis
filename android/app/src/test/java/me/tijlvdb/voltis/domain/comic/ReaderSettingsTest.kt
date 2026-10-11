@@ -8,7 +8,7 @@ import org.junit.Test
 class ReaderSettingsTest {
     @Test
     fun parsesFieldByField() {
-        val defaults = ReaderSettings(100, Fit.Screen, SpreadSetting.Auto, zoomWide = true, invertRtlControls = true)
+        val defaults = ReaderSettings(100, 70, Fit.Screen, SpreadSetting.Auto, zoomWide = true, invertRtlControls = true)
         for (stored in listOf(null, "", "not json", "[]", "{}")) assertEquals(stored, defaults, ReaderSettings.parse(stored))
 
         // One bad value doesn't discard the rest.
@@ -19,6 +19,7 @@ class ReaderSettingsTest {
         assertEquals(
             ReaderSettings(
                 100,
+                30,
                 Fit.Width,
                 SpreadSetting.Double,
                 zoomWide = false,
@@ -27,7 +28,7 @@ class ReaderSettingsTest {
                 setOf("c_1"),
             ),
             ReaderSettings.parse(
-                """{"longstripWidth": 5, "fit": "width", "spread": "double", "zoomWide": false, "invertRtlControls": false,
+                """{"longstripWidth": 5, "longstripTapScroll": 30, "fit": "width", "spread": "double", "zoomWide": false, "invertRtlControls": false,
                 "seriesSettings": {"s_1": {"mode": "longstrip", "direction": "rtl"}, "c_9": {"mode": "upside", "direction": "ltr"}},
                 "shiftedBooks": {"c_1": true}}""",
             ),
@@ -48,7 +49,7 @@ class ReaderSettingsTest {
         assertEquals(setOf("c_9"), other.updateSeriesSettings("s_1") { it.copy(direction = null) }.seriesSettings.keys)
 
         // What is stored reads back the same, null fields included.
-        val all = ReaderSettings(55, Fit.Height, SpreadSetting.Single, zoomWide = false, invertRtlControls = false, other.seriesSettings, setOf("c_1"))
+        val all = ReaderSettings(55, 15, Fit.Height, SpreadSetting.Single, zoomWide = false, invertRtlControls = false, other.seriesSettings, setOf("c_1"))
         for (settings in listOf(ReaderSettings(), all)) assertEquals(settings, ReaderSettings.parse(settings.encode()))
         assertTrue(all.encode(), """"s_1":{"mode":null,"direction":"rtl"}""" in all.encode())
     }

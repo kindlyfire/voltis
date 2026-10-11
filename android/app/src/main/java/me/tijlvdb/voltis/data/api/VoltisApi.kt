@@ -81,6 +81,10 @@ interface VoltisApi {
     @GET("api/content")
     suspend fun content(@QueryMap params: Map<String, String>, @Tag account: ForAccount? = null): ContentPage
 
+    /** The query of [content]; `limit`, `offset` and `count` are ignored. */
+    @GET("api/content/buckets")
+    suspend fun contentBuckets(@QueryMap params: Map<String, String>): ContentBuckets
+
     @GET("api/content/continue-reading")
     suspend fun continueReading(
         @Query("limit") limit: Int,

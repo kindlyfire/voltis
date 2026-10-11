@@ -2,7 +2,6 @@ package me.tijlvdb.voltis.ui.settings
 
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -157,7 +156,7 @@ fun SessionsScreen(onBack: () -> Unit, vm: SessionsViewModel = hiltViewModel()) 
     Surface(Modifier.fillMaxSize()) {
         Column {
             VTopBar(stringResource(R.string.sessions_title), onBack)
-            Box(Modifier.readableWidth(pageGutter()).padding(horizontal = pageGutter())) { LoadStatus(vm.sessions == null, vm.error, vm::load) }
+            LoadStatus(vm.sessions == null, vm.error, modifier = Modifier.readableWidth(pageGutter()).padding(horizontal = pageGutter()), retry = vm::load)
             val sessions = vm.sessions ?: return@Column
             LazyColumn(contentPadding = PaddingValues(bottom = bottomSpace())) {
                 items(sessions, key = { it.id }) { session ->

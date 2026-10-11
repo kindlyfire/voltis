@@ -21,6 +21,8 @@ class PagedTurnTest {
             Case("a page turns", true, 1, null, true, PagedTurn.Go(2)),
             Case("settled on the end card opens the next volume", true, 3, null, true, PagedTurn.NextVolume),
             Case("heading for the end card stops there", true, 3, 3, false, PagedTurn.Go(3)),
+            Case("a quick tap once settled on the aimed end card opens the next volume", true, 3, 3, true, PagedTurn.NextVolume),
+            Case("a quick tap once settled on the aimed first page opens the previous volume", false, 0, 0, true, PagedTurn.PreviousVolume),
             Case("an aimed page counts", true, 2, 3, false, PagedTurn.Go(3)),
             Case("a tap past an aimed end card stops", true, 2, 3, false, PagedTurn.Go(3)),
             Case("scrolling into the end card is not settled", true, 3, null, false, PagedTurn.Go(3)),

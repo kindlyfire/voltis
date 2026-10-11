@@ -11,6 +11,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -159,7 +161,7 @@ fun DownloadSettingsScreen(onBack: () -> Unit, vm: DownloadSettingsViewModel = h
         val ready = content
         val stored = ready?.stored
         if (ready == null) {
-            VSpinner()
+            Box(Modifier.fillMaxWidth(), Alignment.Center) { VSpinner() }
         } else if (stored == null) {
             QueryError(UiText.Res(R.string.error_offline_data))
         } else {

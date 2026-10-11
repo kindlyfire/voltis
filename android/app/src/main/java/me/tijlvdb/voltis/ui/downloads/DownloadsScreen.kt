@@ -77,7 +77,7 @@ import me.tijlvdb.voltis.ui.kit.VIconButton
 import me.tijlvdb.voltis.ui.kit.VIcons
 import me.tijlvdb.voltis.ui.kit.VOverflowMenu
 import me.tijlvdb.voltis.ui.kit.VProgressBar
-import me.tijlvdb.voltis.ui.kit.VSpinner
+import me.tijlvdb.voltis.ui.LoadStatus
 import me.tijlvdb.voltis.ui.kit.VTopBar
 import me.tijlvdb.voltis.ui.pageGutter
 import me.tijlvdb.voltis.ui.pageGutterBeforeIcon
@@ -171,7 +171,7 @@ fun DownloadsScreen(
                     when {
                         // Nothing is known without the database: no list, no empty state.
                         failed != null -> Unit
-                        current == null -> item(key = "loading") { Column(Modifier.readableWidth(pageGutter()).padding(horizontal = pageGutter(), vertical = 16.dp)) { VSpinner() } }
+                        current == null -> item(key = "loading") { LoadStatus(true, null, Modifier.readableWidth(pageGutter()).padding(horizontal = pageGutter())) {} }
                         current.queue.isEmpty() && current.groups.isEmpty() -> item(key = "empty") {
                             Text(
                                 stringResource(R.string.downloads_empty),

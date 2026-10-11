@@ -287,6 +287,14 @@ data class ContinueEntry(
 @Serializable
 data class ContentIds(val ids: List<String>)
 
+/** `GET /content/buckets`: the list's [total], and its sort's runs of rows in list order. No buckets for a sort without a key. */
+@Serializable
+data class ContentBuckets(val total: Int, val buckets: List<Bucket> = emptyList()) {
+    /** A run of rows with the same sort key: null for rows without one. */
+    @Serializable
+    data class Bucket(val key: String? = null, val count: Int)
+}
+
 /** What reading an item or a series continues with. Without a [target], [reason] says why. */
 @Serializable
 data class ContinueTarget(

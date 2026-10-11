@@ -65,6 +65,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
@@ -81,6 +82,7 @@ import kotlinx.coroutines.flow.flowOf
 import coil3.compose.AsyncImage
 import java.util.Locale
 import kotlinx.serialization.json.JsonNull
+import me.saket.telephoto.zoomable.coil3.ZoomableAsyncImage
 import me.tijlvdb.voltis.R
 import me.tijlvdb.voltis.data.api.Content
 import me.tijlvdb.voltis.data.api.ContentType
@@ -543,15 +545,15 @@ private fun Cover(content: Content, url: String?, openState: MutableState<Boolea
         val title = stringResource(R.string.content_cover, content.title)
         val close = stringResource(R.string.content_close_cover)
         Dialog({ open = false }, DialogProperties(usePlatformDefaultWidth = false)) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .semantics { paneTitle = title }
-                    .clickable(interactionSource = null, indication = null, onClickLabel = close) { open = false }
-                    .padding(16.dp),
-                Alignment.Center,
-            ) {
-                AsyncImage(rememberCoverRequest(url, sized = false), contentDescription = title, Modifier.fillMaxWidth().clip(VoltisShapes.cover), contentScale = ContentScale.Fit)
+            // The image takes the whole window: a tap anywhere closes it, a double tap zooms (a parent's click would fire on the first tap).
+            Box(Modifier.fillMaxSize().semantics { paneTitle = title }) {
+                ZoomableAsyncImage(
+                    rememberCoverRequest(url, sized = false),
+                    contentDescription = title,
+                    Modifier.fillMaxSize().semantics { onClick(close) { open = false; true } },
+                    onClick = { open = false },
+                    contentScale = ContentScale.Fit,
+                )
             }
         }
     }

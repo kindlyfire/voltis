@@ -182,7 +182,7 @@ fun ContentScreen(
                 content == null -> {
                     Spacer(Modifier.height(top))
                     if (vm.error != null) {
-                        Box(Modifier.fillMaxSize().padding(horizontal = pageGutter(), vertical = 16.dp), Alignment.TopCenter) { LoadStatus(true, vm.error, vm::refresh) }
+                        LoadStatus(true, vm.error, modifier = Modifier.padding(horizontal = pageGutter()), retry = vm::refresh)
                     } else {
                         // Nothing is known of the page yet: the header's shape, where it will be.
                         HeaderSkeleton(coverWidth, Modifier.padding(horizontal = pageGutter()))

@@ -61,6 +61,9 @@ fun ReaderDefaultsScreen(onBack: () -> Unit, vm: ReaderDefaultsViewModel = hiltV
         WidthSlider(settings.longstripWidth, stringResource(R.string.defaults_longstrip_width)) { width ->
             vm.change { it.copy(longstripWidth = width) }
         }
+        WidthSlider(settings.longstripTapScroll, stringResource(R.string.reader_tap_scroll)) { amount ->
+            vm.change { it.copy(longstripTapScroll = amount) }
+        }
         val reset = stringResource(R.string.defaults_tutorial_reset)
         VButton(
             stringResource(R.string.defaults_show_tutorial),

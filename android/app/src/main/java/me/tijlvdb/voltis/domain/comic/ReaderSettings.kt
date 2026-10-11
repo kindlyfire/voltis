@@ -21,6 +21,8 @@ data class SeriesSettings(val mode: ReaderMode? = null, val direction: ReadingDi
 data class ReaderSettings(
     /** Percent of the viewport, 10 to 100. */
     val longstripWidth: Int = 100,
+    /** Percent of the viewport a longstrip zone tap scrolls, 10 to 100. Not on the web. */
+    val longstripTapScroll: Int = 70,
     val fit: Fit = Fit.Screen,
     val spread: SpreadSetting = SpreadSetting.Auto,
     val zoomWide: Boolean = true,
@@ -40,6 +42,7 @@ data class ReaderSettings(
     /** The JSON that [parse] reads. */
     fun encode(): String = buildJsonObject {
         put("longstripWidth", longstripWidth)
+        put("longstripTapScroll", longstripTapScroll)
         put("fit", fit.name.lowercase())
         put("spread", spread.name.lowercase())
         put("zoomWide", zoomWide)
@@ -63,6 +66,7 @@ data class ReaderSettings(
             val defaults = ReaderSettings()
             return ReaderSettings(
                 longstripWidth = stored["longstripWidth"].numberOrNull()?.takeIf { it in 10.0..100.0 }?.toInt() ?: defaults.longstripWidth,
+                longstripTapScroll = stored["longstripTapScroll"].numberOrNull()?.takeIf { it in 10.0..100.0 }?.toInt() ?: defaults.longstripTapScroll,
                 fit = stored["fit"].enum<Fit>() ?: defaults.fit,
                 spread = stored["spread"].enum<SpreadSetting>() ?: defaults.spread,
                 zoomWide = stored["zoomWide"].boolean() ?: defaults.zoomWide,

@@ -3,6 +3,7 @@ package me.tijlvdb.voltis.data.content
 import javax.inject.Inject
 import javax.inject.Singleton
 import me.tijlvdb.voltis.data.api.Content
+import me.tijlvdb.voltis.data.api.ContentBuckets
 import me.tijlvdb.voltis.data.api.ContentPage
 import me.tijlvdb.voltis.data.api.ContinueEntry
 import me.tijlvdb.voltis.data.api.ContinueTarget
@@ -94,6 +95,9 @@ class ContentRepository internal constructor(
         val asked = owner()
         return ingesting({ it.data }) { api.content(params.toQuery(), it) }.also { memo.putList(asked, params, it.data) }
     }
+
+    /** The list's total and its sort's buckets. No rows, so nothing to ingest. */
+    suspend fun buckets(params: ContentListParams): ContentBuckets = api.contentBuckets(params.toQuery())
 
     /** A series' volumes in its order. Without a limit the server returns every one. */
     suspend fun volumes(seriesId: String): List<Content> =

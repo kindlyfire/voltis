@@ -20,13 +20,17 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.dropShadow
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.platform.LocalDensity
@@ -53,6 +57,7 @@ import me.tijlvdb.voltis.domain.catalog.GridOptions
 import me.tijlvdb.voltis.domain.catalog.cardText
 import me.tijlvdb.voltis.domain.catalog.contentProgress
 import me.tijlvdb.voltis.domain.downloads.DownloadBadge
+import me.tijlvdb.voltis.ui.animationsEnabled
 import me.tijlvdb.voltis.ui.cardLabels
 import me.tijlvdb.voltis.ui.downloads.DownloadBadgeIcon
 import me.tijlvdb.voltis.ui.downloads.downloadBadgeLabel
@@ -61,6 +66,7 @@ import me.tijlvdb.voltis.ui.kit.VCover
 import me.tijlvdb.voltis.ui.nav.HeroKey
 import me.tijlvdb.voltis.ui.nav.LocalHeroOrigin
 import me.tijlvdb.voltis.ui.nav.LocalHeroTaps
+import me.tijlvdb.voltis.ui.nav.flying
 import me.tijlvdb.voltis.ui.kit.VIconButton
 import me.tijlvdb.voltis.ui.kit.VIconButtonStyle
 import me.tijlvdb.voltis.ui.kit.VIcons
@@ -135,9 +141,13 @@ fun ContentCard(
     // The cover grows into the page of the very item it shows; a read card with a series opens the series' page instead.
     val hero = if (detailsId == content.id) HeroKey(content.id, LocalHeroOrigin.current + "/" + origin) else null
     val taps = LocalHeroTaps.current
+    val flies = animationsEnabled() && (
+        text.newLabel != null || (!options.hideItemCount && text.count != null) || download != null ||
+            (!options.hideStatus && content.userData?.status in StatusIcons)
+    )
     // One way into the page for the info button and TalkBack's action: it records the hero first.
     val openDetails = {
-        hero?.let(taps::tap)
+        hero?.let { taps.tap(it, flies) }
         onOpen(detailsId)
     }
     val details = stringResource(R.string.card_details, (series ?: content).title)
@@ -163,7 +173,7 @@ fun ContentCard(
             if (read) {
                 onRead(content.id)
             } else {
-                hero?.let(taps::tap)
+                hero?.let { taps.tap(it, flies) }
                 onOpen(content.id)
             }
         }
@@ -192,18 +202,20 @@ fun ContentCard(
         VCover(coverUrl(content), (if (glow) Modifier.readingGlow() else Modifier).then(chosen), hero.takeIf { !selectMode }) {
             // The card's description names all of these: none is read again.
             val statusIcon = statusIcon(status)
+            val badgeAlpha by animateFloatAsState(if (taps.flying(hero)) 0f else 1f, tween(150), label = "badges")
+            val badges = Modifier.graphicsLayer { alpha = badgeAlpha }
             if (selectMode) {
                 if (selected) Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.25f)))
                 CheckCircle(selected, Modifier.align(Alignment.TopStart).padding(8.dp))
             } else if (statusIcon != null && !options.hideStatus) {
-                VBadge(statusIcon, Modifier.align(Alignment.TopStart).padding(8.dp))
+                VBadge(statusIcon, Modifier.align(Alignment.TopStart).padding(8.dp).then(badges))
             }
-            Row(Modifier.align(Alignment.TopEnd).padding(8.dp).clearAndSetSemantics {}, Arrangement.spacedBy(4.dp)) {
+            Row(Modifier.align(Alignment.TopEnd).padding(8.dp).then(badges).clearAndSetSemantics {}, Arrangement.spacedBy(4.dp)) {
                 text.newLabel?.let { VBadge(it) }
                 if (!options.hideItemCount) text.count?.let { VBadge(it.toString()) }
             }
             // Above the progress bar, clear of the details button.
-            if (download != null) DownloadBadgeIcon(download, Modifier.align(Alignment.BottomStart).padding(start = 8.dp, bottom = 10.dp))
+            if (download != null) DownloadBadgeIcon(download, Modifier.align(Alignment.BottomStart).padding(start = 8.dp, bottom = 10.dp).then(badges))
             if (progress != null && !options.hideProgress) {
                 VProgressBar(
                     progress.fraction,
@@ -257,6 +269,8 @@ private fun Modifier.readingGlow(): Modifier {
     return dropShadow(VoltisShapes.cover, Shadow(radius = outer.blur, color = outer.color, spread = outer.spread))
         .dropShadow(VoltisShapes.cover, Shadow(radius = inner.blur, color = inner.color, spread = inner.spread))
 }
+
+private val StatusIcons = setOf(ReadingStatus.READING, ReadingStatus.COMPLETED, ReadingStatus.ON_HOLD, ReadingStatus.DROPPED, ReadingStatus.PLAN_TO_READ)
 
 @Composable
 private fun statusIcon(status: String?): Painter? = when (status) {

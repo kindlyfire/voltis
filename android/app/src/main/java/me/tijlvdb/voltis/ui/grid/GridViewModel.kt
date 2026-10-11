@@ -6,11 +6,6 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.paging.Pager
-import androidx.paging.PagingConfig
-import androidx.paging.PagingData
-import androidx.paging.PagingSource
-import androidx.paging.cachedIn
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
@@ -19,12 +14,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlin.random.Random
@@ -44,14 +37,12 @@ import me.tijlvdb.voltis.data.auth.SessionStore
 import me.tijlvdb.voltis.data.content.CatalogChange
 import me.tijlvdb.voltis.data.content.CatalogEvents
 import me.tijlvdb.voltis.data.content.ContentListParams
-import me.tijlvdb.voltis.data.content.ContentPagingSource
 import me.tijlvdb.voltis.data.content.ContentRepository
 import me.tijlvdb.voltis.data.content.ContentSort
+import me.tijlvdb.voltis.data.content.ContentWindow
 import me.tijlvdb.voltis.data.content.DownloadedCatalog
 import me.tijlvdb.voltis.data.net.isUnreachable
 import me.tijlvdb.voltis.data.content.GridFilters
-import me.tijlvdb.voltis.data.content.PagedContent
-import me.tijlvdb.voltis.data.content.PagingReach
 import me.tijlvdb.voltis.data.downloads.DownloadRepository
 import me.tijlvdb.voltis.data.reading.BulkRunner
 import me.tijlvdb.voltis.data.reading.BulkState
@@ -64,6 +55,7 @@ import me.tijlvdb.voltis.domain.catalog.downloadPlan
 import me.tijlvdb.voltis.domain.catalog.FacetKind
 import me.tijlvdb.voltis.domain.catalog.GridOptions
 import me.tijlvdb.voltis.domain.catalog.Selection
+import me.tijlvdb.voltis.domain.catalog.segmentsOf
 import me.tijlvdb.voltis.domain.catalog.clearPlan
 import me.tijlvdb.voltis.domain.catalog.statusPlan
 import me.tijlvdb.voltis.domain.comic.ReaderData
@@ -180,7 +172,7 @@ class GridViewModel @AssistedInject constructor(
     /** Null until the stored options are read: the grid waits for its column count. */
     val options: StateFlow<GridOptions?> = settings.gridOptions.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    /** From the first page; null until it has answered. */
+    /** From the buckets; null until they have answered. */
     var total by mutableStateOf<Int?>(null)
         private set
 
@@ -218,9 +210,8 @@ class GridViewModel @AssistedInject constructor(
 
     private var listJob: Job? = null
 
-    private var paging: PagingSource<Int, PagedContent>? = null
+    private var windowScope: CoroutineScope? = null
 
-    private var pagerScope: CoroutineScope? = null
 
     /** Not in saved state: after process death the grid isn't selecting. */
     var selection by mutableStateOf(Selection())
@@ -261,16 +252,20 @@ class GridViewModel @AssistedInject constructor(
         selecting(false)
     }
 
-    /**
-     * A new Pager and a new flow per filter change, so the screen starts each over, loading. One
-     * flow fed by successive pagers would keep the old filter's cards until the new first page.
-     */
-    var pages by mutableStateOf(pagesFor(filters))
+    /** The first card in view, in saved state: where the grid opens again after process death. Cleared by a new filter. */
+    var restoreIndex by mutableStateOf(saved.get<Int>(ANCHOR))
         private set
 
     /**
-     * A series' contents reload quietly: only the pull gesture shows their indicator. The paged
-     * sources show it on every reload, as Paging reports a refresh.
+     * A new window per filter change, so the screen starts each over on skeletons. Null for a series'
+     * contents, which are a plain list.
+     */
+    var window by mutableStateOf(windowFor(filters, restoreIndex ?: 0))
+        private set
+
+    /**
+     * A series' contents reload quietly: only the pull gesture shows their indicator. The window
+     * shows it on every reload.
      */
     val refresher = Refresher(viewModelScope, events, matches = source::follows, refresh = ::reload)
 
@@ -312,7 +307,9 @@ class GridViewModel @AssistedInject constructor(
         this.filters = filters
         saved[FILTERS] = AppJson.encodeToString(filters)
         selection = selection.cleared()
-        pages = pagesFor(filters)
+        restoreIndex = null
+        saved.remove<Int>(ANCHOR)
+        window = windowFor(filters, 0)
     }
 
     fun applyFacetScope(scope: FacetScope) {
@@ -320,38 +317,65 @@ class GridViewModel @AssistedInject constructor(
         facetScope = scope
         saved[FACET_SCOPE] = AppJson.encodeToString(scope)
         selection = selection.cleared()
-        pages = pagesFor(filters)
+        restoreIndex = null
+        saved.remove<Int>(ANCHOR)
+        window = windowFor(filters, 0)
     }
 
-    private fun pagesFor(filters: GridFilters): Flow<PagingData<PagedContent>> {
+    private fun windowFor(filters: GridFilters, start: Int): ContentWindow? {
         if (source is GridSource.Contents) {
             // The list as an earlier visit or fetch left it shows until the fetch answers.
             fetched = content.knownList(generation, filters.toParams(source.base(filters, facetScope)).copy(count = false))
             total = fetched?.size
             show()
             loadList()
-            return emptyFlow()
+            return null
         }
-        pagerScope?.cancel()
-        val scope = CoroutineScope(viewModelScope.coroutineContext + Job(viewModelScope.coroutineContext[Job])).also { pagerScope = it }
+        windowScope?.cancel()
+        val scope = CoroutineScope(viewModelScope.coroutineContext + Job(viewModelScope.coroutineContext[Job])).also { windowScope = it }
         total = null
         val params = filters.toParams(source.base(filters, facetScope))
-        // One per Pager: a refresh's new source learns from it how far the list was loaded.
-        val reach = PagingReach()
-        // The default prefetch distance (a page) fetched the second page at once. The source ignores the load size.
-        val config = PagingConfig(
-            ContentPagingSource.PAGE_SIZE,
-            prefetchDistance = ContentPagingSource.PAGE_SIZE / 3,
-            enablePlaceholders = false,
-            // A long browse doesn't keep every page for as long as the grid is on the back stack; the ones scrolled away from load again.
-            maxSize = ContentPagingSource.MAX_LOADED,
+        return ContentWindow(scope, content, params, connectivity::settled, start) {
+            total = it
+            loadLibraryName()
+        }
+    }
+
+    /** The first card in view; null near the top. The screen reports it as it scrolls. */
+    fun anchor(index: Int?) {
+        // Until the screen has scrolled there, the top it shows says nothing.
+        if (restoreIndex != null) return
+        if (index == null) saved.remove<Int>(ANCHOR) else saved[ANCHOR] = index
+    }
+
+    /** The screen has scrolled to [restoreIndex]. */
+    fun restored() {
+        restoreIndex = null
+    }
+
+    /** The window as a grid's items, with its rail. Not for a series' contents. */
+    fun windowItems(): GridItems {
+        val window = checkNotNull(window)
+        val total = window.buckets
+        return GridItems(
+            count = total?.total ?: 0,
+            get = window::itemAt,
+            key = { "row:$it" },
+            loading = total == null && window.error == null,
+            refreshing = window.refreshing && total != null,
+            error = window.error.takeIf { total == null }?.toUiText(),
+            retry = ::refresh,
+            windowing = Windowing(
+                segments = total?.let(::segmentsOf).orEmpty(),
+                nullLabel = if (filters.sort == ContentSort.LAST_READ_AT) R.string.rail_never else R.string.rail_unknown,
+                onRange = window::setRange,
+                onDrag = window::pause,
+                onAnchor = ::anchor,
+                restoreIndex = restoreIndex,
+                onRestored = ::restored,
+                failure = window.failure,
+            ),
         )
-        return Pager(config) {
-            ContentPagingSource(content, params, reach, connectivity::settled) {
-                total = it
-                loadLibraryName()
-            }.also { paging = it }
-        }.flow.cachedIn(scope)
     }
 
     /** Pull-to-refresh and Retry. */
@@ -362,7 +386,7 @@ class GridViewModel @AssistedInject constructor(
 
     /** Reloads the list as far as it was scrolled. Offline the paged grids show the offline state, and wait for [CatalogChange.OnlineChanged]. */
     private fun reload() {
-        if (source is GridSource.Contents) loadList() else if (connectivity.online.value) paging?.invalidate()
+        if (source is GridSource.Contents) loadList() else if (connectivity.online.value) window?.refresh()
     }
 
     /** Every volume at once, as the reader loads its siblings. A failed reload keeps the cards. Offline, or unreachable, what is stored. */
@@ -510,6 +534,7 @@ class GridViewModel @AssistedInject constructor(
     private companion object {
         const val FILTERS = "filters"
         const val FACET_SCOPE = "facet_scope"
+        const val ANCHOR = "anchor"
         val BROWSE_SORTS = listOf(ContentSort.CONTINUE, ContentSort.RECENTLY_UPDATED, ContentSort.HISTORY)
         val LIBRARY_SORTS = listOf(
             ContentSort.TITLE,

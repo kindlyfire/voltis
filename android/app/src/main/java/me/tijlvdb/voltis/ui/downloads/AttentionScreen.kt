@@ -62,7 +62,7 @@ import me.tijlvdb.voltis.ui.kit.VButton
 import me.tijlvdb.voltis.ui.kit.VButtonStyle
 import me.tijlvdb.voltis.ui.kit.VDialog
 import me.tijlvdb.voltis.ui.kit.VDisabled
-import me.tijlvdb.voltis.ui.kit.VSpinner
+import me.tijlvdb.voltis.ui.LoadStatus
 import me.tijlvdb.voltis.ui.kit.VTopBar
 import me.tijlvdb.voltis.ui.pageGutter
 import me.tijlvdb.voltis.ui.readableWidth
@@ -134,7 +134,7 @@ fun AttentionScreen(onBack: () -> Unit, vm: AttentionViewModel = hiltViewModel()
                 }
                 val current = items
                 when {
-                    current == null -> item(key = "loading") { Column(Modifier.readableWidth(pageGutter()).padding(horizontal = pageGutter(), vertical = 16.dp)) { VSpinner() } }
+                    current == null -> item(key = "loading") { LoadStatus(true, null, Modifier.readableWidth(pageGutter()).padding(horizontal = pageGutter())) {} }
                     current.isEmpty() -> item(key = "empty") {
                         Text(stringResource(R.string.attention_empty), Modifier.readableWidth(pageGutter()).padding(horizontal = pageGutter(), vertical = 16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }

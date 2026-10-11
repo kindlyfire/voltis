@@ -1,7 +1,6 @@
 package me.tijlvdb.voltis.ui.discover
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,7 +16,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -25,7 +28,6 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
-import androidx.paging.compose.collectAsLazyPagingItems
 import me.tijlvdb.voltis.R
 import me.tijlvdb.voltis.data.api.FacetEntry
 import me.tijlvdb.voltis.domain.catalog.FacetKind
@@ -41,7 +43,7 @@ import me.tijlvdb.voltis.ui.grid.ContentGrid
 import me.tijlvdb.voltis.ui.grid.GridSource
 import me.tijlvdb.voltis.ui.grid.GridViewModel
 import me.tijlvdb.voltis.ui.grid.SelectionTopBar
-import me.tijlvdb.voltis.ui.grid.asGridItems
+import me.tijlvdb.voltis.ui.grid.headerScroll
 import me.tijlvdb.voltis.ui.isShort
 import me.tijlvdb.voltis.ui.isWide
 import me.tijlvdb.voltis.ui.kit.PageHeader
@@ -72,7 +74,9 @@ fun FacetScreen(
     val entry = vm.entry
     val title = entry?.let { facetLabel(kind, it.name) }.orEmpty()
     val state = rememberLazyGridState()
-    val scrolled by remember { derivedStateOf { state.firstVisibleItemIndex > 0 } }
+    // The bar takes the title once the page's own has scrolled away: by how far the grid has scrolled into its header.
+    var titleEnd by remember { mutableIntStateOf(0) }
+    val scrolled by remember { derivedStateOf { val s = state.headerScroll(); s == null || titleEnd > 0 && s >= titleEnd } }
     // A phone on its side has no height for the page's title: the bar has it from the start.
     val short = isShort()
     BulkSelectionHost(grid)
@@ -83,10 +87,10 @@ fun FacetScreen(
             when {
                 !online -> ServerOffline()
                 vm.notFound -> NotFound(onBack)
-                entry == null -> Box(Modifier.fillMaxSize().padding(horizontal = pageGutter(), vertical = 16.dp), Alignment.TopCenter) { LoadStatus(true, vm.error, vm::reload) }
+                entry == null -> LoadStatus(true, vm.error, modifier = Modifier.padding(horizontal = pageGutter()), retry = vm::reload)
                 else -> ContentGrid(
                     grid,
-                    grid.pages.collectAsLazyPagingItems().asGridItems(),
+                    grid.windowItems(),
                     openContent,
                     openReader,
                     state = state,
@@ -94,11 +98,10 @@ fun FacetScreen(
                         vm.reload()
                         grid.refresh()
                     },
-                ) {
-                    item(span = { GridItemSpan(maxLineSpan) }, contentType = "header") {
+                    top = {
                         Column(Modifier.padding(bottom = 8.dp), Arrangement.spacedBy(12.dp)) {
                             QueryError(vm.error, retry = vm::reload)
-                            if (!short) PageHeader(title)
+                            if (!short) PageHeader(title, Modifier.onPlaced { titleEnd = it.positionInParent().y.toInt() + it.size.height })
                             // Under the title, as the web's header toolbar: full width on a phone, `sm:w-56` wider.
                             VSelect(
                                 stringResource(R.string.library),
@@ -113,13 +116,11 @@ fun FacetScreen(
                             )
                             QueryError(vm.librariesError, retry = vm::loadLibraries)
                         }
-                    }
-                    if (kind == FacetKind.PEOPLE && (entry.roles.isNotEmpty() || scope.role != null)) {
-                        item(span = { GridItemSpan(maxLineSpan) }, contentType = "roles") {
+                        if (kind == FacetKind.PEOPLE && (entry.roles.isNotEmpty() || scope.role != null)) {
                             RoleChips(entry, scope.role) { grid.applyFacetScope(scope.copy(role = it)) }
                         }
-                    }
-                }
+                    },
+                )
             }
         }
     }

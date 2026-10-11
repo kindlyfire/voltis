@@ -83,8 +83,6 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
     implementation(libs.coil.network.cache.control)
-    implementation(libs.paging.runtime)
-    implementation(libs.paging.compose)
     implementation(libs.telephoto.zoomable)
     implementation(libs.telephoto.zoomable.image.coil3)
     implementation(libs.okhttp)
@@ -95,7 +93,6 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.okhttp.mockwebserver)
-    testImplementation(libs.paging.testing)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)

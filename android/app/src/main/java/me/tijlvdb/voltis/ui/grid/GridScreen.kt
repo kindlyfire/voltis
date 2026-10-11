@@ -9,12 +9,15 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
-import androidx.paging.compose.collectAsLazyPagingItems
 import me.tijlvdb.voltis.R
 import me.tijlvdb.voltis.ui.OnlineOnly
 import me.tijlvdb.voltis.ui.RefreshOnResume
@@ -40,7 +43,8 @@ fun GridScreen(
     }
     val state = rememberLazyGridState()
     // The bar takes the title once the page's own has scrolled away.
-    val scrolled by remember { derivedStateOf { state.firstVisibleItemIndex > 0 } }
+    var titleEnd by remember { mutableIntStateOf(0) }
+    val scrolled by remember { derivedStateOf { val s = state.headerScroll(); s == null || titleEnd > 0 && s >= titleEnd } }
     // A phone on its side has no height for the page's title: the bar has it from the start.
     val short = isShort()
     BulkSelectionHost(vm)
@@ -49,9 +53,9 @@ fun GridScreen(
             val online = isOnline()
             if (vm.selection.active) SelectionTopBar(vm.selection.items.size) { vm.selecting(false) } else VTopBar(if (scrolled || short || !online) title else "", onBack)
             OnlineOnly {
-                ContentGrid(vm, vm.pages.collectAsLazyPagingItems().asGridItems(), openContent, openReader, state = state) {
-                    if (!short) item(span = { GridItemSpan(maxLineSpan) }, contentType = "title") { PageHeader(title, Modifier.padding(bottom = 4.dp)) }
-                }
+                ContentGrid(vm, vm.windowItems(), openContent, openReader, state = state, top = {
+                    if (!short) PageHeader(title, Modifier.padding(bottom = 4.dp).onPlaced { titleEnd = it.positionInParent().y.toInt() + it.size.height })
+                })
             }
         }
     }
