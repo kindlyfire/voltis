@@ -6,6 +6,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import me.tijlvdb.voltis.data.api.Content
+import me.tijlvdb.voltis.data.api.ContinueTarget
 import me.tijlvdb.voltis.data.api.ForAccount
 import me.tijlvdb.voltis.data.content.ContentRepository
 import me.tijlvdb.voltis.data.content.pageUrl
@@ -47,7 +48,7 @@ class NetworkReaderData @Inject constructor(
 
     override suspend fun volumes(seriesId: String): List<Content> = content.volumes(seriesId)
 
-    override suspend fun earlierUnread(seriesId: String): String? = content.continueTarget(seriesId).earlierUnreadId
+    override suspend fun continueTarget(seriesId: String): ContinueTarget = content.continueTarget(seriesId)
 
     override suspend fun readable(contentId: String) = true
 

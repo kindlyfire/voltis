@@ -14,7 +14,7 @@ class SourcePinTest {
     private val pins = mapOf(
         "pages/read/ComicDisplay/pagedLayout.ts" to "26ebcf5e85686a060c7b0c453bce774f8e7632d120558f0422fc14d87496de6a",
         "pages/read/ComicDisplay/direction.ts" to "11a5d9d2cf9f8c5d8ba71dbd28e357c00db77497d8dbb4217f8d2d72d1cdb8bd",
-        "pages/read/readingSync.ts" to "dc9d8d6f04dd59f654ce08ee820142f180dfb6a49b7c6cc2766d20735be50b1d",
+        "pages/read/readingSync.ts" to "2190285d6cfe7291852162f48c57bb17fbdc1ea87f74045404ca934830a2b348",
     )
 
     @Test

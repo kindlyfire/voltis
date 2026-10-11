@@ -77,7 +77,7 @@ class EngineReviewTest : EngineTest() {
     ) {
         val go = review("g")
         assertEquals(SyncPrompt.Conflict(ConflictKind.MOVED, PositionLabel.Page(6), PositionLabel.Page(9)), go.prompt.value)
-        go.answer(PromptChoice.GO)
+        go.answer(PromptChoice.FOLLOW)
         settle()
         assertEquals(page(8), store.lane("g")?.here)
         go.detach()
@@ -128,7 +128,7 @@ class EngineReviewTest : EngineTest() {
     }
 
     @Test
-    fun `a review ends itself once resolved, failed, or its dialog slot is free, and a Clear it confirmed is queued without a caller`() = engineTest(
+    fun `a review ends itself once resolved, failed or answered`() = engineTest(
         before = {
             readOffline("r", here = 5, elsewhere = 2, status = "on_hold")
             readOffline("f", here = 5, elsewhere = 8)
@@ -148,23 +148,13 @@ class EngineReviewTest : EngineTest() {
         assertEquals(listOf(ReviewOutcome.FAILED, true), listOf(failed.outcome.value, failed.ended.value))
         assertEquals(true, needsReview("f"))
 
-        // Reset asks to confirm: the review lasts until that closes too.
+        // A finish elsewhere: Follow uses the saved state, and the review ends at once.
         val asked = review("c")
         assertEquals(ReviewOutcome.ASKED, asked.outcome.value)
-        asked.answer(PromptChoice.RESET)
+        assertEquals(ConflictKind.FINISHED, (asked.prompt.value as SyncPrompt.Conflict).kind)
+        asked.answer(PromptChoice.FOLLOW)
         settle()
-        assertEquals(listOf(SyncPrompt.ConfirmClear, false), listOf(asked.prompt.value, asked.ended.value))
-        // Confirmed: nobody waits for the clear, so another device's write since drops it with a notice.
-        server.holding = true
-        asked.answer(PromptChoice.CONFIRM)
-        settle()
-        assertEquals(true, asked.ended.value)
-        server.set("c") { copy(progress = page(9)) }
-        server.release()
-        settle()
-        assertEquals(listOf("completed", page(9)), server.stateOf("c").let { listOf(it.status, it.progress) })
-        val notice = store.notices.single()
-        assertEquals(listOf("c", NoticeKind.CHANGED_ELSEWHERE, "clear", false), listOf(notice.contentId, notice.kind, notice.detail.command, notice.detail.uncertain))
+        assertEquals(listOf(null, true, false), listOf(asked.prompt.value, asked.ended.value, needsReview("c")))
         assertNull(prompt())
 
         // Parked, its read wouldn't go: it fails at once.
@@ -219,9 +209,9 @@ class EngineReviewTest : EngineTest() {
         assertEquals(DrainResult.BUSY, engine.drain())
         answer(PromptChoice.STAY)
         advance(1000)
-        assertEquals(page(23), server.stateOf("c").progress)
+        assertEquals(page(79), server.stateOf("c").progress)
 
-        // Reviewed from elsewhere while the reader is open: Go there moves the reader once the lane is back.
+        // Reviewed from elsewhere while the reader is open: Follow moves the reader once the lane is back.
         server.set("c") { copy(progress = page(40)) }
         sync.moved(page(24))
         settle()
@@ -229,7 +219,7 @@ class EngineReviewTest : EngineTest() {
         settle()
         val reviewer = review("c")
         assertEquals(ConflictKind.MOVED, (reviewer.prompt.value as SyncPrompt.Conflict).kind)
-        reviewer.answer(PromptChoice.GO)
+        reviewer.answer(PromptChoice.FOLLOW)
         settle()
         assertEquals(true, reviewer.ended.value)
         assertEquals(page(40), placements.last())

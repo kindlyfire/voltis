@@ -107,7 +107,7 @@ class EngineLifecycleTest : EngineTest() {
         second.sync.answer(PromptChoice.STAY)
         advance(1000)
         assertEquals(page(5), second.loading.await())
-        assertEquals(page(5), server.stateOf("c").progress)
+        assertEquals(page(79), server.stateOf("c").progress)
     }
 
     @Test

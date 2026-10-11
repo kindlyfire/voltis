@@ -15,6 +15,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import me.tijlvdb.voltis.R
 import me.tijlvdb.voltis.domain.reading.LaneView
 import me.tijlvdb.voltis.domain.reading.SeriesInfo
@@ -28,6 +29,8 @@ import kotlinx.coroutines.test.setMain
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import me.tijlvdb.voltis.data.api.ContentType
+import me.tijlvdb.voltis.data.api.ContinueReason
+import me.tijlvdb.voltis.data.api.ContinueTarget
 import me.tijlvdb.voltis.data.api.UserData
 import me.tijlvdb.voltis.data.auth.testStore
 import me.tijlvdb.voltis.data.reading.EngineTest
@@ -37,9 +40,11 @@ import me.tijlvdb.voltis.domain.comic.PageDimensions
 import me.tijlvdb.voltis.domain.comic.ReaderMode
 import me.tijlvdb.voltis.domain.comic.Siblings
 import me.tijlvdb.voltis.domain.comic.volume
+import me.tijlvdb.voltis.domain.reading.ConflictKind
 import me.tijlvdb.voltis.domain.reading.FakeReadingSync
 import me.tijlvdb.voltis.domain.reading.PositionLabel
 import me.tijlvdb.voltis.domain.reading.ReadingFailure
+import me.tijlvdb.voltis.domain.reading.ReadingState
 import me.tijlvdb.voltis.domain.reading.position
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -425,5 +430,70 @@ class ReaderViewModelTest {
         vm.runStatus(StatusAction.COMPLETE)
         assertFalse(vm.statusBusy)
         assertEquals(listOf(UiText.Format(R.string.reader_update_failed, listOf(UiText.Res(R.string.error_needs_connection)))), messages)
+    }
+
+    @Test
+    fun aFinishedConflictLeadsToTheNextVolumeOrBackToTheSeries() = runBlocking {
+        val back = ReaderExit.Back("s_1", series = true)
+        val cases = listOf<Pair<() -> Unit, ReaderExit>>(
+            { data.continues["s_1"] = ContinueTarget(target = volume("c_2", "s_1")) } to ReaderExit.Next("c_2", "c_2"),
+            { data.continues["s_1"] = ContinueTarget(target = volume("c_2", "s_1"), reason = ContinueReason.EARLIER_UNREAD) } to back,
+            { data.continues["s_1"] = ContinueTarget(target = volume("c_1", "s_1")) } to back,
+            { data.continues["s_1"] = ContinueTarget(target = volume("c_2", "s_1")); data.offline.value = setOf("c_2") } to back,
+            { data.continues["s_1"] = ContinueTarget(target = null, reason = ContinueReason.CAUGHT_UP) } to back,
+            { data.failContinue = true } to back,
+            // A conflict met while loading: the sync's load waits for it, before the comic is shown.
+            { data.continues["s_1"] = ContinueTarget(target = volume("c_2", "s_1")); sync.loadGate = CompletableDeferred() } to ReaderExit.Next("c_2", "c_2"),
+        )
+        for ((setup, exit) in cases) {
+            data.continues.clear()
+            data.offline.value = emptySet()
+            data.failContinue = false
+            sync.loadGate = null
+            setup()
+            assertEquals(exit, reader("c_1").exitFor(ConflictKind.FINISHED))
+        }
+        // Only a finished item looks for a next volume; without a series the comic itself is the way back.
+        data.continues["s_1"] = ContinueTarget(target = volume("c_2", "s_1"))
+        assertEquals(back, reader("c_1").exitFor(ConflictKind.SERIES))
+        data.comics["solo"] = volume("solo")
+        assertEquals(ReaderExit.Back("solo", series = false), reader("solo").exitFor(ConflictKind.FINISHED))
+    }
+
+    @Test
+    fun followingChecksAgainWhereItGoesAndWhetherItIsStillWanted() = runBlocking {
+        data.continues["s_1"] = ContinueTarget(target = volume("c_2", "s_1"))
+        val vm = reader("c_1")
+        val exits = mutableListOf<ReaderExit>()
+        vm.viewModelScope.launch { vm.exits.collect { exits += it } }
+        val next = vm.exitFor(ConflictKind.FINISHED)
+        val back = ReaderExit.Back("s_1", series = true)
+        var afterFollow = {}
+        val gate = CompletableDeferred<Unit>()
+        fun at(seq: Long) {
+            (vm.sync as FakeReadingSync.FakeSession).view.value = LaneView(acked = ReadingState(seq = seq))
+        }
+        // Readable, a connection that dropped since, a check that throws, a later state adopted, and a view not yet published.
+        val cases = listOf<Triple<() -> Unit, Long?, List<ReaderExit>>>(
+            Triple({}, null, listOf(next)),
+            Triple({ data.offline.value = setOf("c_2") }, null, listOf(back)),
+            Triple({ data.failReadable = true }, null, listOf(back)),
+            Triple({ at(6) }, 5, emptyList()),
+            Triple({ at(4) }, 5, listOf(next)),
+            // A later state adopted while the readability check is out.
+            Triple({ at(4); data.readableGate = gate; afterFollow = { at(6); gate.complete(Unit) } }, 5, emptyList()),
+        )
+        for ((setup, seq, expected) in cases) {
+            data.offline.value = emptySet()
+            data.failReadable = false
+            data.readableGate = null
+            afterFollow = {}
+            at(0)
+            setup()
+            vm.follow(next, seq)
+            afterFollow()
+            assertEquals(expected, exits.toList())
+            exits.clear()
+        }
     }
 }

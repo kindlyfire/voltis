@@ -13,6 +13,7 @@ import me.tijlvdb.voltis.domain.catalog.VolumeReading
 import me.tijlvdb.voltis.domain.catalog.offlineContinue
 import me.tijlvdb.voltis.domain.reading.Change
 import me.tijlvdb.voltis.domain.reading.CommandOutcome
+import me.tijlvdb.voltis.domain.reading.ConflictKind
 import me.tijlvdb.voltis.domain.reading.EmptyProgress
 import me.tijlvdb.voltis.domain.reading.Lane
 import me.tijlvdb.voltis.domain.reading.Op
@@ -26,6 +27,7 @@ import me.tijlvdb.voltis.domain.reading.SeriesAction
 import me.tijlvdb.voltis.domain.reading.SyncAction
 import me.tijlvdb.voltis.domain.reading.SyncNotice
 import me.tijlvdb.voltis.domain.reading.SyncPrompt
+import me.tijlvdb.voltis.domain.reading.Undoable
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -83,6 +85,132 @@ class EngineSeriesTest : EngineTest() {
         assertEquals("completed", sync.view.value.series?.status)
         assertNull(prompt())
         assertEquals(SyncNotice.Done(SyncAction.MARK_SERIES_COMPLETED), notices.last().notice)
+        // This reader completed the series.
+        assertTrue(notices.none { it.notice is SyncNotice.SeriesCompletedElsewhere })
+    }
+
+    private fun Harness.completedElsewhere(volume: String = "c") {
+        server.set("s") { copy(status = "completed") }
+        if (volume.isNotEmpty()) server.set(volume) { copy(status = "completed") }
+    }
+
+    private fun Harness.count(type: Class<out SyncNotice>) = notices.count { type.isInstance(it.notice) }
+
+    @Test
+    fun `sees a series completed elsewhere, as a notice, once, or as its reopening`() =
+        eachCase(listOf("own save", "hidden", "reopened", "reopened hidden")) { seriesCompleted(it) }
+
+    private fun seriesCompleted(case: String) = engineTest {
+        server.series("s", "c", "d")
+        server.set("s") { copy(status = "reading") }
+        if (!case.startsWith("reopened")) server.set("c") { copy(status = "reading", progress = page(2)) }
+        val (sync) = open("c")
+        when (case) {
+            "own save" -> {
+                completedElsewhere(volume = "")
+                read(sync, 3)
+                assertEquals(1, count(SyncNotice.SeriesCompletedElsewhere::class.java))
+                assertEquals(page(3), server.stateOf("c").progress)
+            }
+            "hidden" -> {
+                sync.setVisible(false)
+                completedElsewhere(volume = "")
+                sync.check()
+                settle()
+                assertEquals(true, sync.view.value.stale)
+                assertEquals(0, count(SyncNotice.SeriesCompletedElsewhere::class.java))
+                sync.setVisible(true)
+                settle()
+                assertEquals(1, count(SyncNotice.SeriesCompletedElsewhere::class.java))
+                sync.check()
+                settle()
+                assertEquals(1, count(SyncNotice.SeriesCompletedElsewhere::class.java))
+            }
+            "reopened" -> {
+                server.set("s") { copy(status = "completed", statusUpdatedAt = "then") }
+                read(sync, 1)
+                assertEquals(1, count(SyncNotice.SeriesReopened::class.java))
+                assertTrue(notices.none { (it.notice as? SyncNotice.UndoOffer)?.what == Undoable.SERIES_MOVED_TO_READING })
+                notice<SyncNotice.SeriesReopened>().action!!()
+                settle()
+                assertEquals("completed" to "then", server.stateOf("s").let { it.status to it.statusUpdatedAt })
+            }
+            "reopened hidden" -> {
+                // Held while hidden; the silent adopt of a drain consumes it, so reopening the reader doesn't show it late.
+                server.set("s") { copy(status = "completed", statusUpdatedAt = "then") }
+                sync.setVisible(false)
+                read(sync, 1)
+                assertEquals(true, sync.view.value.stale)
+                sync.detach()
+                settle()
+                engine.drain()
+                settle()
+                val again = open("c")
+                again.sync.check()
+                settle()
+                assertEquals(0, count(SyncNotice.SeriesReopened::class.java))
+                assertEquals(false, again.sync.view.value.stale)
+            }
+        }
+    }
+
+    /** Completed elsewhere, as the item (with unsaved reading, and idle) and as the series. Unsaved reading asks; nothing unsaved only says so. */
+    @Test
+    fun `sees a completion elsewhere, asking only about unsaved reading`() =
+        eachCase(listOf(Triple(false, true, PromptChoice.FOLLOW), Triple(false, false, null), Triple(true, true, PromptChoice.STAY))) { (series, unsaved, choice) ->
+            completedElsewhereUnsaved(series, unsaved, choice)
+        }
+
+    private fun completedElsewhereUnsaved(series: Boolean, unsaved: Boolean, choice: PromptChoice?) = engineTest {
+        if (series) {
+            server.series("s", "c", "d")
+            server.set("s") { copy(status = "reading") }
+        }
+        server.set("c") { copy(status = "reading", progress = page(2)) }
+        val (sync) = open("c")
+        if (unsaved) {
+            server.holding = true
+            read(sync, 22)
+        }
+        if (series) completedElsewhere() else server.set("c") { copy(status = "completed") }
+        if (unsaved) {
+            server.release()
+            settle()
+            sync.moved(page(23))
+            assertEquals(if (series) ConflictKind.SERIES else ConflictKind.FINISHED, (prompt() as SyncPrompt.Conflict).kind)
+            answer(checkNotNull(choice))
+            advance(1000)
+            // Nothing of the stale reading was sent.
+            assertEquals(page(2), server.stateOf("c").progress)
+            if (series) assertEquals("completed", sync.view.value.series?.status)
+        } else {
+            sync.check()
+            settle()
+            assertNull(prompt())
+            assertEquals(server.stateOf("c").seq, (notice<SyncNotice.FinishedElsewhere>().notice as SyncNotice.FinishedElsewhere).seq)
+        }
+    }
+
+    @Test
+    fun `re-checks a change held by a dialog while a retained load was out`() = engineTest {
+        server.series("s", "c")
+        server.set("s") { copy(status = "on_hold") }
+        server.set("c") { copy(status = "reading", progress = page(2)) }
+        val first = open("c")
+        read(first.sync, 1)
+        assertEquals(SyncPrompt.SeriesHeld("on_hold", null), prompt())
+        first.sync.moved(page(5))
+        completedElsewhere()
+        // Its load retains the unsent reading and waits for the dialog, which holds the change.
+        val second = attach("c")
+        settle()
+        answer(PromptChoice.KEEP)
+        settle()
+        assertEquals(ConflictKind.SERIES, (prompt() as SyncPrompt.Conflict).kind)
+        answer(PromptChoice.STAY)
+        settle()
+        assertEquals(false, second.sync.view.value.stale)
+        assertNull(prompt())
     }
 
     private fun EngineTest.Harness.failTwice(sync: ReadingSession) {

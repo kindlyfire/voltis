@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.intOrNull
 import me.tijlvdb.voltis.data.api.Content
+import me.tijlvdb.voltis.data.api.ContinueTarget
 import me.tijlvdb.voltis.data.api.FileData
 
 /** A width or height of 0 means the size is unknown. */
@@ -72,7 +73,10 @@ interface ReaderData {
     suspend fun volumes(seriesId: String): List<Content>
 
     /** The series' earliest unread volume before where its reading stands (`GET /content/:id/continue`); null offline. */
-    suspend fun earlierUnread(seriesId: String): String?
+    suspend fun earlierUnread(seriesId: String): String? = continueTarget(seriesId)?.earlierUnreadId
+
+    /** What the series continues with (`GET /content/:id/continue`); null offline. */
+    suspend fun continueTarget(seriesId: String): ContinueTarget?
 
     /** Whether [contentId] can be opened now: online, or downloaded. */
     suspend fun readable(contentId: String): Boolean

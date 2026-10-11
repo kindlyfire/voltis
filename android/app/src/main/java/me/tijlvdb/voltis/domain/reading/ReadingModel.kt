@@ -62,6 +62,9 @@ data class SeriesInfo(
     @SerialName("progress_updated_at") val progressUpdatedAt: String? = null,
     @SerialName("last_read_at") val lastReadAt: String? = null,
     @SerialName("reading_seq") @Serializable(ReadingSeqSerializer::class) val seq: Long = 0,
+
+    /** The reader that wrote the series row, if one did. */
+    val writer: String? = null,
 ) {
     val state get() = ReadingState(revision, status, statusUpdatedAt, progress, progressUpdatedAt, lastReadAt, seq)
 }
@@ -182,6 +185,15 @@ sealed interface SyncNotice {
 
     /** A command the disk was too full to store ([CommandOutcome.UNSAVED]): kept in memory, so no Retry. */
     data object NotSaved : SyncNotice
+
+    data object ClearedElsewhere : SyncNotice
+
+    /** [seq] is the adopted state's, so the UI can drop the notice once a later adopt made it obsolete. */
+    data class FinishedElsewhere(val seq: Long) : SyncNotice
+
+    data object SeriesCompletedElsewhere : SyncNotice
+
+    data object SeriesReopened : SyncNotice
 
     /** Stored in `sync_notice` (as `NoticeKind`'s kinds) when nobody was there to see it. */
     sealed interface Lasting : SyncNotice {

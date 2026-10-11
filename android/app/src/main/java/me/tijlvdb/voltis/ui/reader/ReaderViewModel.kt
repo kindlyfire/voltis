@@ -28,11 +28,13 @@ import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import me.tijlvdb.voltis.R
 import me.tijlvdb.voltis.data.api.Content
 import me.tijlvdb.voltis.data.api.ContentType
+import me.tijlvdb.voltis.data.api.ContinueReason
 import me.tijlvdb.voltis.data.api.ReadingStatus
 import me.tijlvdb.voltis.data.api.attempt
 import me.tijlvdb.voltis.data.api.attemptResult
@@ -56,6 +58,7 @@ import me.tijlvdb.voltis.domain.comic.preloadQuietly
 import me.tijlvdb.voltis.domain.net.Connectivity
 import me.tijlvdb.voltis.domain.reading.CommandOutcome
 import me.tijlvdb.voltis.domain.reading.ComicAdapter
+import me.tijlvdb.voltis.domain.reading.ConflictKind
 import me.tijlvdb.voltis.domain.reading.EmptyProgress
 import me.tijlvdb.voltis.domain.reading.ReadingFailure
 import me.tijlvdb.voltis.domain.reading.ReadingSession
@@ -66,6 +69,15 @@ import me.tijlvdb.voltis.ui.UiText
 
 private const val PRELOAD_COUNT = 10
 private const val PRELOAD_CONCURRENCY = 3
+private const val CONTINUE_TIMEOUT_MS = 3_000L
+
+/** Where a conflict or notice takes the reader. */
+sealed interface ReaderExit {
+    data class Next(val id: String, val title: String) : ReaderExit
+
+    /** The series page, or the comic's own without a series. */
+    data class Back(val contentId: String, val series: Boolean) : ReaderExit
+}
 
 /**
  * One comic in the reader. Its session of the reading sync places it where it opens; settled pages
@@ -137,6 +149,10 @@ class ReaderViewModel @AssistedInject constructor(
 
     /** Snackbars: why a status row action failed. */
     val messages = _messages.receiveAsFlow()
+
+    /** Navigation requests for the screen; here, so a rotation doesn't lose one. */
+    private val _exits = Channel<ReaderExit>(Channel.BUFFERED)
+    val exits = _exits.receiveAsFlow()
 
     val readablePrev: Content? get() = siblings.prev?.takeIf { it.id !in unreadable }
     val readableNext: Content? get() = siblings.next?.takeIf { it.id !in unreadable }
@@ -471,6 +487,41 @@ class ReaderViewModel @AssistedInject constructor(
     /** Goes to the previous or next volume if it can be opened now; asked again at the moment it is chosen. */
     fun openVolume(id: String, open: (String) -> Unit) {
         viewModelScope.launch { if (attemptResult { data.readable(id) }.getOrDefault(false)) open(id) }
+    }
+
+    // `opened` rather than `comic`: a conflict during the initial load is asked before `comic` is set.
+    private fun back() = opened?.content?.parentId.let { ReaderExit.Back(it ?: contentId, series = it != null) }
+
+    /** Where a conflict's follow button takes the reader: the next volume, or back to the series (or the comic without one). */
+    suspend fun exitFor(kind: ConflictKind): ReaderExit {
+        val back = back()
+        val parentId = opened?.content?.parentId
+        if (kind != ConflictKind.FINISHED || parentId == null) return back
+        return attemptResult {
+            val found = withTimeoutOrNull(CONTINUE_TIMEOUT_MS) { data.continueTarget(parentId) }
+            val target = found?.target
+            if (target != null && target.id != contentId && found.reason != ContinueReason.EARLIER_UNREAD && data.readable(target.id)) {
+                ReaderExit.Next(target.id, target.title)
+            } else {
+                back
+            }
+        }.getOrDefault(back)
+    }
+
+    /** A later state was adopted than the one a notice is about; a view not yet published is never ahead. */
+    fun obsolete(seq: Long) = (sync.view.value.acked?.seq ?: 0) > seq
+
+    /**
+     * Takes [exit], checked now: nothing happens once the reader has left, or when a later state made
+     * the notice ([seq]) obsolete. A next volume that has become unreadable becomes the series.
+     */
+    fun follow(exit: ReaderExit, seq: Long? = null) {
+        viewModelScope.launch {
+            // Readability first (it suspends); then whether a later state made the notice obsolete.
+            val target = if (exit is ReaderExit.Next && !attemptResult { data.readable(exit.id) }.getOrDefault(false)) back() else exit
+            if (seq != null && obsolete(seq)) return@launch
+            _exits.send(target)
+        }
     }
 
     /** Keeps the pages around the current one coming, a few at a time, and drops distant ones. */

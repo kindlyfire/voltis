@@ -66,12 +66,23 @@ fun ReaderScreen(
         vm.setVisible(true)
         onPauseOrDispose { if (activity?.isChangingConfigurations != true) vm.setVisible(false) }
     }
-    SyncSnackbars(vm.sync)
+    SyncSnackbars(vm.sync, vm::exitFor, vm::obsolete, vm::follow)
     val snackbars = LocalSnackbars.current
     val resources = LocalContext.current
     LaunchedEffect(vm) { vm.messages.collect { snackbars.show(it.string(resources)) } }
     // Opening can ask too: the reader opens where the answer leaves it.
-    SyncPromptDialog(vm.sync, vm.title, vm.comic?.content?.type)
+    SyncPromptDialog(vm.sync, vm.title, vm.comic?.content?.type, vm::exitFor, vm::follow)
+    // Navigation asked by a dialog or snackbar; after a rotation the new composition takes what was sent meanwhile.
+    val volume by rememberUpdatedState(onVolume)
+    val close by rememberUpdatedState(onClose)
+    LaunchedEffect(vm) {
+        vm.exits.collect {
+            when (it) {
+                is ReaderExit.Next -> volume(it.id)
+                is ReaderExit.Back -> close(it.contentId)
+            }
+        }
+    }
     var sheet by rememberSaveable { mutableStateOf(false) }
     val large = isLarge()
     // What the reader has to draw on: Auto spread resolves on it.

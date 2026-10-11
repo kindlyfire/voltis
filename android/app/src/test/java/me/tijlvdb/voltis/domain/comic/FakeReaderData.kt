@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import me.tijlvdb.voltis.data.api.Content
+import me.tijlvdb.voltis.data.api.ContinueTarget
 import me.tijlvdb.voltis.data.api.ContentType
 
 fun volume(id: String, parentId: String? = null, type: String = ContentType.COMIC) = Content(id, id, type, parentId = parentId)
@@ -91,7 +92,26 @@ class FakeReaderData : ReaderData {
 
     override suspend fun earlierUnread(seriesId: String): String? = earlier[seriesId]
 
-    override suspend fun readable(contentId: String) = contentId !in offline.value
+    /** What `continueTarget` answers, by series; [failContinue] makes it throw. */
+    val continues = mutableMapOf<String, ContinueTarget>()
+    var failContinue = false
+
+    override suspend fun continueTarget(seriesId: String): ContinueTarget? {
+        if (failContinue) throw IOException("down")
+        return continues[seriesId]
+    }
+
+    /** Makes `readable` throw, as a failing Room read does. */
+    var failReadable = false
+
+    /** When set, `readable` waits for it, as a Room read does. */
+    var readableGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+
+    override suspend fun readable(contentId: String): Boolean {
+        readableGate?.await()
+        if (failReadable) throw IOException("room")
+        return contentId !in offline.value
+    }
 
     override fun unreadable(ids: Set<String>, unreachable: Boolean): Flow<Set<String>> = offline.map { ids intersect it }
 }

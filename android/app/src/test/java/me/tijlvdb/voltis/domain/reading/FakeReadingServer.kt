@@ -108,6 +108,7 @@ class FakeReadingServer(private val last: Int) : ReadingTransport {
                 childrenCount = statuses.size,
                 completedChildrenCount = statuses.count { it == ReadingStatus.COMPLETED },
                 droppedChildrenCount = statuses.count { it == ReadingStatus.DROPPED },
+                writer = writerOf(own.revision),
             )
         }
         // Keys sorted, as Go encodes a map: the order may differ from the client's for equal progress.

@@ -25,6 +25,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import me.tijlvdb.voltis.data.api.AccountChangedException
 import me.tijlvdb.voltis.data.api.AppJson
 import me.tijlvdb.voltis.data.api.Content
+import me.tijlvdb.voltis.data.api.ContinueTarget
 import me.tijlvdb.voltis.data.api.FileData
 import me.tijlvdb.voltis.data.api.ForAccount
 import me.tijlvdb.voltis.data.api.UserData
@@ -165,7 +166,7 @@ class OfflineFirstReaderData internal constructor(
 
     override suspend fun volumes(seriesId: String): List<Content> = fallback({ network.volumes(seriesId) }) { cachedVolumes(seriesId) }
 
-    override suspend fun earlierUnread(seriesId: String): String? = if (connectivity.online.value) network.earlierUnread(seriesId) else null
+    override suspend fun continueTarget(seriesId: String): ContinueTarget? = if (connectivity.online.value) network.continueTarget(seriesId) else null
 
     override suspend fun readable(contentId: String): Boolean =
         connectivity.online.value || withContext(Dispatchers.IO) { downloads.value?.accountStore?.db?.downloads()?.get(contentId)?.copyId != null }

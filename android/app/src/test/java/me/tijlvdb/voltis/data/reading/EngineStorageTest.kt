@@ -115,7 +115,7 @@ class EngineStorageTest : EngineTest() {
         assertEquals(ConflictKind.MOVED, (prompt() as SyncPrompt.Conflict).kind)
         answer(PromptChoice.STAY)
         advance(1000)
-        assertEquals(page(5), server.stateOf("c3").progress)
+        assertEquals(page(79), server.stateOf("c3").progress)
     }
 
     @Test
@@ -476,7 +476,7 @@ class EngineStorageTest : EngineTest() {
         read(open("h").sync, 2)
         val review = review("g")
         assertEquals(ConflictKind.MOVED, (review.prompt.value as SyncPrompt.Conflict).kind)
-        review.answer(PromptChoice.GO)
+        review.answer(PromptChoice.FOLLOW)
         settle()
         assertNull(review.prompt.value)
         assertEquals(true, review.ended.value)

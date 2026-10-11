@@ -37,19 +37,23 @@ class EngineChecksTest : EngineTest() {
         assertNull(prompt())
     }
 
+    /** Moved, and cleared. */
     @Test
-    fun `follows another device when idle, with an Undo that writes nothing`() = engineTest {
+    fun `follows another device when idle, with an Undo that writes nothing`() = eachCase(listOf(false, true)) { followsIdle(cleared = it) }
+
+    private fun followsIdle(cleared: Boolean) = engineTest {
         server.set("c") { copy(status = "reading", progress = page(2)) }
         val (sync, placements) = open("c")
-        server.set("c") { copy(progress = page(53)) }
+        if (cleared) server.clear("c") else server.set("c") { copy(progress = page(53)) }
         sync.check()
         settle()
-        assertEquals(listOf(page(53)), placements)
-        val followed = notice<SyncNotice.Followed>()
-        assertEquals(PositionLabel.Page(54), (followed.notice as SyncNotice.Followed).label)
+        val remote = if (cleared) EmptyProgress else page(53)
+        assertEquals(listOf(remote), placements)
+        val followed = if (cleared) notice<SyncNotice.ClearedElsewhere>() else notice<SyncNotice.Followed>()
+        if (!cleared) assertEquals(PositionLabel.Page(54), (followed.notice as SyncNotice.Followed).label)
         followed.action!!()
         settle()
-        assertEquals(listOf(page(53), page(2)), placements)
+        assertEquals(listOf(remote, page(2)), placements)
         advance(5000)
         assertEquals(emptyList<Any>(), writes())
     }
@@ -81,9 +85,10 @@ class EngineChecksTest : EngineTest() {
     }
 
     @Test
-    fun `asks when both moved`() = eachCase(listOf(PromptChoice.STAY to 23, PromptChoice.GO to 79)) { (choice, saved) -> bothMoved(choice, saved) }
+    fun `asks when both moved`() = eachCase(listOf(PromptChoice.STAY, PromptChoice.FOLLOW)) { bothMoved(it) }
 
-    private fun bothMoved(choice: PromptChoice, saved: Int) = engineTest {
+    /** Neither choice sends the unsent positions: Stay drops them, and the next page turn saves here. */
+    private fun bothMoved(choice: PromptChoice) = engineTest {
         server.set("c") { copy(status = "reading", progress = page(2)) }
         val (sync, placements) = open("c")
         server.holding = true
@@ -95,8 +100,11 @@ class EngineChecksTest : EngineTest() {
         assertEquals(SyncPrompt.Conflict(ConflictKind.MOVED, PositionLabel.Page(23), PositionLabel.Page(80)), prompt())
         answer(choice)
         advance(1000)
-        assertEquals(page(saved), server.stateOf("c").progress)
-        assertEquals(if (choice == PromptChoice.GO) listOf(page(79)) else emptyList(), placements)
+        assertEquals(page(79), server.stateOf("c").progress)
+        assertEquals(if (choice == PromptChoice.FOLLOW) listOf(page(79)) else emptyList(), placements)
+        read(sync, 24)
+        assertEquals(page(24), server.stateOf("c").progress)
+        assertTrue(sync.view.value.tracking)
     }
 
     /** A conflict about a moved item, dismissed: the lane stays held, with its reading retained. */
@@ -149,10 +157,10 @@ class EngineChecksTest : EngineTest() {
 
     @Test
     fun `a conflict answer whose series lookup fails still applies the choice`() =
-        eachCase(listOf(PromptChoice.STAY to 23, PromptChoice.GO to 79)) { (choice, saved) -> failingSeriesLookup(choice, saved) }
+        eachCase(listOf(PromptChoice.STAY, PromptChoice.FOLLOW)) { failingSeriesLookup(it) }
 
-    /** STAY sends the retained reading; GO drops it, and a reopen doesn't replay it over the remote position. */
-    private fun failingSeriesLookup(choice: PromptChoice, saved: Int) = engineTest {
+    /** Both drop the retained reading, and a reopen doesn't replay it over the remote position. */
+    private fun failingSeriesLookup(choice: PromptChoice) = engineTest {
         server.series("s", "c")
         server.set("c") { copy(status = "reading", progress = page(2)) }
         val (sync) = open("c")
@@ -177,7 +185,7 @@ class EngineChecksTest : EngineTest() {
         settle()
         open("c")
         advance(1000)
-        assertEquals(page(saved), server.stateOf("c").progress)
+        assertEquals(page(79), server.stateOf("c").progress)
         assertEquals(emptyList<AttentionItem.Held>(), engine.held.first())
     }
 
@@ -241,7 +249,7 @@ class EngineChecksTest : EngineTest() {
         server.set("c") { copy(progress = page(79)) }
         sync.check()
         settle()
-        answer(PromptChoice.GO)
+        answer(PromptChoice.FOLLOW)
         sync.retry()
         advance(5000)
         assertEquals(page(79), server.stateOf("c").progress)
@@ -262,7 +270,7 @@ class EngineChecksTest : EngineTest() {
         answer(PromptChoice.STAY)
         settle()
         assertEquals(false, sync.view.value.stale)
-        assertEquals(page(5), server.stateOf("c").progress)
+        assertEquals(page(79), server.stateOf("c").progress)
         assertNull(prompt())
     }
 
@@ -284,7 +292,7 @@ class EngineChecksTest : EngineTest() {
         answer(PromptChoice.STAY)
         settle()
         assertNull(prompt())
-        assertEquals(page(2), server.stateOf("c").progress)
+        assertEquals(page(60), server.stateOf("c").progress)
         assertEquals("dropped", server.stateOf("s").status)
     }
 
@@ -299,9 +307,9 @@ class EngineChecksTest : EngineTest() {
         settle()
         assertEquals(SyncPrompt.SeriesHeld("on_hold", null), prompt())
         answer(PromptChoice.KEEP)
-        assertEquals(ConflictKind.RESET, (prompt() as SyncPrompt.Conflict).kind)
-        answer(PromptChoice.START)
+        assertNull(prompt())
         assertEquals(listOf(EmptyProgress), placements)
+        notice<SyncNotice.ClearedElsewhere>()
     }
 
     @Test
@@ -319,7 +327,7 @@ class EngineChecksTest : EngineTest() {
         val command = testScope.async { sync.seriesCommand("reading") }
         settle()
         assertEquals(PositionLabel.Page(61), (prompt() as SyncPrompt.Conflict).saved)
-        answer(PromptChoice.GO)
+        answer(PromptChoice.FOLLOW)
         command.await()
         advance(1000)
         assertEquals(page(60), server.stateOf("c").progress)

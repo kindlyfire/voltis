@@ -276,6 +276,12 @@ class ReadingEngine(
          * reader's next move. In memory only: a new engine starts with the rebase still stored.
          */
         var rebaseFailed = false
+
+        /** A reopen of a series completed elsewhere, held until the lane can show it. */
+        var reopened: SeriesPrevious? = null
+
+        /** Held because a dialog was open: read again once the dialog and the read are done. */
+        var recheck = false
     }
 
     private class Receipt(val lane: LaneState, val previous: Snapshot, val series: SeriesPrevious?)
@@ -331,8 +337,7 @@ class ReadingEngine(
     }
 
     /** The one dialog slot. [review] is the lane a conflict asks about, kept `needs_review` while it is open. */
-    private class Dialog(val session: Session, var review: LaneState?, var onAnswer: suspend (PromptChoice?) -> Unit) {
-        var asked = 0
+    private class Dialog(val session: Session, val review: LaneState?, val onAnswer: suspend (PromptChoice?) -> Unit) {
         val closed = CompletableDeferred<Unit>()
     }
 
@@ -840,6 +845,7 @@ class ReadingEngine(
 
     private fun next() {
         current = null
+        if (dialog == null) for (lane in lanes.values.toList()) if (lane.recheck && lane.adapter != null && !lane.dismissed) check(lane)
         pump()
     }
 
@@ -868,14 +874,16 @@ class ReadingEngine(
         pump()
     }
 
-    private fun dropReading(lane: LaneState) {
+    /** With [keepFinish], only positions go: a finish is not a stale place. */
+    private fun dropReading(lane: LaneState, keepFinish: Boolean = false) {
+        fun drops(task: Write) = task.lane === lane && if (keepFinish) task.op.kind == OpKind.POSITION else task.reading
         for (task in queue.toList()) {
-            if (task is Write && task.lane === lane && task.reading) {
+            if (task is Write && drops(task)) {
                 queue.remove(task)
                 remove(task)
             }
         }
-        (current as? Write)?.takeIf { it.lane === lane && it.reading }?.let {
+        (current as? Write)?.takeIf(::drops)?.let {
             it.superseded = true
             remove(it)
         }
@@ -904,6 +912,8 @@ class ReadingEngine(
         learn(lane, env)
         val foreign = lane.row.acked && env.state.revision != lane.row.state.revision && !isOurs(env.writer)
         lane.set { copy(acked = true, state = env.state, series = env.series, foreignEpoch = if (foreign) foreignEpoch + 1 else foreignEpoch) }
+        // The baseline is replaced, and a held reopen with it.
+        lane.reopened = null
         // Propagation, not the choice: the series' own lane follows when it can, and a lookup that fails must not interrupt the lane's.
         env.series?.let {
             try {
@@ -925,11 +935,26 @@ class ReadingEngine(
         lane.set { copy(state = series.state, foreignEpoch = if (foreign) foreignEpoch + 1 else foreignEpoch) }
     }
 
+    private enum class SeriesChange { COMPLETED, REOPENED }
+
+    /** What the series did that this reader didn't, against the baseline it last adopted. */
+    private fun seriesChange(lane: LaneState, env: Envelope, previous: SeriesPrevious?): SeriesChange? {
+        val was = lane.row.series
+        val now = env.series
+        if (!lane.row.acked || was == null || now == null || now.id != was.id || was.status == ReadingStatus.COMPLETED) return null
+        if (now.status == ReadingStatus.COMPLETED && !isOurs(now.writer)) return SeriesChange.COMPLETED
+        if ((previous ?: lane.reopened)?.status == ReadingStatus.COMPLETED) return SeriesChange.REOPENED
+        return null
+    }
+
     /** Every response's way in: the expected state is adopted, anything else compared. */
-    private suspend fun receive(lane: LaneState, env: Envelope) {
+    private suspend fun receive(lane: LaneState, env: Envelope, seriesPrevious: SeriesPrevious? = null) {
         learn(lane, env)
-        lane.set { copy(series = env.series) }
-        if (!lane.row.acked || env.state.revision == lane.row.state.revision || isOurs(env.writer)) return adopt(lane, env)
+        val series = seriesChange(lane, env, seriesPrevious)
+        // The reopen is announced with the completion, not as a plain "Series moved to Reading".
+        if (series == SeriesChange.REOPENED) offered += "reopen:${env.series!!.id}"
+        val own = !lane.row.acked || env.state.revision == lane.row.state.revision || isOurs(env.writer)
+        if (own && series == null) return adopt(lane, env)
         if (lane.adapter == null) {
             if (!hasReading(lane)) {
                 // Nobody to ask and no reading to lose: the other device's state is taken, whatever the lane is (P2 decision 5).
@@ -940,7 +965,7 @@ class ReadingEngine(
                 lane.dismissed = false
                 return
             }
-            if (samePosition(lane, env.state)) {
+            if (own || samePosition(lane, env.state)) {
                 // What the web adopts without asking: the reading goes on top of it.
                 adopt(lane, env)
                 lane.stale = false
@@ -952,11 +977,17 @@ class ReadingEngine(
             return
         }
         if (dialog != null || lane.session?.onScreen != true) {
+            // The baseline stays, so the series change is still seen when it can be shown.
+            if (own) lane.set { copy(acked = true, state = env.state) }
+            if (dialog != null) lane.recheck = true
+            if (series == SeriesChange.REOPENED) lane.reopened = seriesPrevious ?: lane.reopened
             lane.stale = true
             lane.held = true
             return
         }
-        compare(lane, env)
+        val reopened = seriesPrevious ?: lane.reopened
+        lane.reopened = null
+        if (series != null) seriesCompleted(lane, env, series, own, reopened) else compare(lane, env)
     }
 
     /**
@@ -1210,7 +1241,7 @@ class ReadingEngine(
                 if (task.reading) lane.set { copy(failures = 0, failed = false) }
                 if (env != null) {
                     if (series) lane.unchecked = false
-                    receive(lane, env)
+                    receive(lane, env, res?.seriesPrevious)
                 }
                 if (task.op.kind == OpKind.UNDO) task.receipt?.let(receipts::remove)
                 // The bulk caller still waits: these effects are its batch's. Answered QUEUED (done = null) or
@@ -1285,7 +1316,9 @@ class ReadingEngine(
         }
         if (conflict != null && isOurs(conflict.current.writer)) {
             // Our own write, whose acknowledgement was lost: this one goes again on top of it.
-            adopt(lane, conflict.current)
+            // The series is compared on the answer to that one.
+            learn(lane, conflict.current)
+            lane.set { copy(acked = true, state = conflict.current.state) }
             queue.addFirst(task)
             return
         }
@@ -1882,19 +1915,11 @@ class ReadingEngine(
         }
     }
 
-    /**
-     * A reviewer's Clear: nobody is there for its outcome, so it is queued without a caller and a
-     * failure leaves a notice, or waits for the next drain. A reader the lane goes back to opens at the start.
-     */
-    private suspend fun clearUnwatched(lane: LaneState) {
-        // Storage full: nothing happens, and the lane stays in Needs attention.
-        if (queueCommand(lane, CLEAR, null)) place(lane, EmptyProgress)
-    }
-
     /** Goes next, holding the item's unsent reading until it is answered. Repeats collapse. */
     private fun check(lane: LaneState) {
         fun reading(task: Task?) = task is Read && task.lane === lane
         if (frozen || !lane.row.acked || reading(current) || queue.any(::reading)) return
+        lane.recheck = false
         lane.held = true
         queue.addFirst(Read(lane))
         pump()
@@ -1909,19 +1934,9 @@ class ReadingEngine(
         effect(durable = false) { session.prompt.value = prompt }
     }
 
-    /** A follow-up question in the open dialog. */
-    private fun ask(prompt: SyncPrompt, onAnswer: suspend (PromptChoice?) -> Unit) {
-        val open = checkNotNull(dialog)
-        open.asked++
-        open.review = null
-        open.onAnswer = onAnswer
-        effect(durable = false) { open.session.prompt.value = prompt }
-    }
-
     /** A null [choice] is a dismissal: "ask again later" (P2 decision 33). */
     private suspend fun promptAnswered(session: Session, choice: PromptChoice?) {
         val open = dialog?.takeIf { it.session === session } ?: return
-        val asked = open.asked
         effect(durable = false) { session.prompt.value = null }
         try {
             open.onAnswer(choice)
@@ -1931,12 +1946,9 @@ class ReadingEngine(
             onError(e)
         } finally {
             // Also when the answer failed: the one slot holds the pump and every drain.
-            if (open.asked == asked) {
-                dialog = null
-                open.closed.complete(Unit)
-            }
+            dialog = null
+            open.closed.complete(Unit)
         }
-        if (open.asked != asked) return
         // The slot is free: a review that asked ends.
         if (open.session.reviewer) open.session.leave()
         for (lane in lanes.values.toList()) if (lane.stale && lane.adapter != null && !lane.dismissed) check(lane)
@@ -1959,26 +1971,46 @@ class ReadingEngine(
         }
     }
 
+    private suspend fun seriesCompleted(lane: LaneState, remote: Envelope, change: SeriesChange, own: Boolean, reopened: SeriesPrevious?) {
+        val acked = lane.row.state
+        val here = lane.row.here ?: acked.progress
+        if (change == SeriesChange.REOPENED) {
+            lane.notify(ReaderNotice(SyncNotice.SeriesReopened) { post { restoreSeries(lane, checkNotNull(reopened)) } })
+            return if (own) adopt(lane, remote) else compare(lane, remote)
+        }
+        // Completed elsewhere along with the series. This reader's own finish never counts.
+        val turned = !own && acked.status != ReadingStatus.COMPLETED && remote.state.status == ReadingStatus.COMPLETED
+        if (turned && hasReading(lane)) return resolve(lane, ConflictKind.SERIES, remote, here)
+        lane.set { copy(series = remote.series) }
+        lane.notify(ReaderNotice(SyncNotice.SeriesCompletedElsewhere))
+        if (own || turned) adopt(lane, remote) else compare(lane, remote)
+    }
+
     private suspend fun compare(lane: LaneState, remote: Envelope) {
         val adapter = checkNotNull(lane.adapter)
         val acked = lane.row.state
         val next = remote.state
         val here = lane.row.here ?: acked.progress
-        if (isCleared(next) && !isCleared(acked)) return resolve(lane, ConflictKind.RESET, remote, here)
+        val cleared = isCleared(next) && !isCleared(acked)
         if (next.status == ReadingStatus.COMPLETED && acked.status != ReadingStatus.COMPLETED) {
-            return resolve(lane, ConflictKind.COMPLETED, remote, here)
+            if (hasReading(lane)) return resolve(lane, ConflictKind.FINISHED, remote, here)
+            adopt(lane, remote)
+            lane.notify(ReaderNotice(SyncNotice.FinishedElsewhere(next.seq)))
+            return
         }
-        if (adapter.samePosition(next.progress, acked.progress)) {
+        if (!cleared && adapter.samePosition(next.progress, acked.progress)) {
             adopt(lane, remote)
             if (next.status != acked.status) lane.notify(ReaderNotice(SyncNotice.StatusElsewhere(next.status)))
             return
         }
-        if (hasReading(lane)) return resolve(lane, ConflictKind.MOVED, remote, here)
+        if (hasReading(lane)) return resolve(lane, if (cleared) ConflictKind.CLEARED else ConflictKind.MOVED, remote, here)
         adopt(lane, remote)
-        place(lane, next.progress)
-        lane.notify(ReaderNotice(SyncNotice.Followed(adapter.describe(next.progress))) { post { if (lane.adapter === adapter) place(lane, here) } })
+        place(lane, if (cleared) EmptyProgress else next.progress)
+        val notice = if (cleared) SyncNotice.ClearedElsewhere else SyncNotice.Followed(adapter.describe(next.progress))
+        lane.notify(ReaderNotice(notice) { post { if (lane.adapter === adapter) place(lane, here) } })
     }
 
+    /** The dialog's choices are Stay and Follow; a null one is "ask again later". */
     private fun resolve(lane: LaneState, kind: ConflictKind, remote: Envelope, here: JsonObject) {
         val adapter = checkNotNull(lane.adapter)
         val session = checkNotNull(lane.session)
@@ -1992,18 +2024,19 @@ class ReadingEngine(
                 queue.removeAll { it is Read && it.lane === lane && it.done == null && !it.rebase && it.reviewer == null }
                 return@openDialog
             }
-            // Stay, Keep reading and Continue here send what's retained on top of it.
             val base = lane.row
             try {
                 adopt(lane, remote)
                 lane.held = false
-                when (choice) {
-                    PromptChoice.GO, PromptChoice.START -> {
-                        dropReading(lane)
-                        place(lane, if (choice == PromptChoice.GO) remote.state.progress else EmptyProgress)
+                // Stay: the next page turn saves here, and a finish is kept. A review has no page turn, so it sends what it has.
+                if (choice == PromptChoice.FOLLOW || !session.reviewer) dropReading(lane, keepFinish = choice != PromptChoice.FOLLOW)
+                if (choice == PromptChoice.FOLLOW) {
+                    when (kind) {
+                        ConflictKind.MOVED -> place(lane, remote.state.progress)
+                        ConflictKind.CLEARED -> place(lane, EmptyProgress)
+                        // The UI navigates.
+                        ConflictKind.FINISHED, ConflictKind.SERIES -> Unit
                     }
-                    PromptChoice.RESET -> ask(SyncPrompt.ConfirmClear) { if (it == PromptChoice.CONFIRM) if (session.reviewer) clearUnwatched(lane) else clear(lane) }
-                    else -> Unit
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -2021,10 +2054,8 @@ class ReadingEngine(
     private fun LaneState.notify(notice: ReaderNotice) {
         val session = session ?: return
         // What reports the server or a failure announces nothing stored; a Done and an Undo offer do.
-        val stored = when (notice.notice) {
-            is SyncNotice.Followed, is SyncNotice.StatusElsewhere, is SyncNotice.Failed, is SyncNotice.NotSaved -> false
-            else -> true
-        }
+        val n = notice.notice
+        val stored = n is SyncNotice.Done || n is SyncNotice.UndoOffer || n is SyncNotice.Lasting
         effect(stored) { session.noticeChannel.trySend(notice) }
     }
 

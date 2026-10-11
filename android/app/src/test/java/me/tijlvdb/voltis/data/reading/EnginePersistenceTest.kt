@@ -104,7 +104,7 @@ class EnginePersistenceTest : EngineTest() {
         assertEquals(SyncPrompt.Conflict(ConflictKind.MOVED, PositionLabel.Page(6), PositionLabel.Page(80)), prompt())
         answer(PromptChoice.STAY)
         again.loading.await()
-        assertEquals(page(5), server.stateOf("c").progress)
+        assertEquals(page(79), server.stateOf("c").progress)
     }
 
     @Test

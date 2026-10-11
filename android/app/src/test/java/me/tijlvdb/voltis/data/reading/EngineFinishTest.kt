@@ -4,9 +4,11 @@ import kotlinx.serialization.json.JsonPrimitive
 import me.tijlvdb.voltis.domain.reading.ConflictKind
 import me.tijlvdb.voltis.domain.reading.EmptyProgress
 import me.tijlvdb.voltis.domain.reading.PromptChoice
+import me.tijlvdb.voltis.domain.reading.SyncNotice
 import me.tijlvdb.voltis.domain.reading.SyncPrompt
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 /** readingSync.test.ts, `finish`. */
@@ -117,8 +119,8 @@ class EngineFinishTest : EngineTest() {
             server.clear("c")
             sync.check()
             settle()
-            assertEquals(ConflictKind.RESET, (prompt() as SyncPrompt.Conflict).kind)
-            answer(PromptChoice.START)
+            assertNull(prompt())
+            notice<SyncNotice.ClearedElsewhere>()
         }
         assertEquals(listOf(EmptyProgress), placements)
         sync.finish(END)

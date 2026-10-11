@@ -26,6 +26,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -35,6 +36,7 @@ import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import me.tijlvdb.voltis.R
 import me.tijlvdb.voltis.data.api.ContentType
 import me.tijlvdb.voltis.data.api.toUiText
@@ -95,16 +97,33 @@ fun SaveBanner(view: LaneView, chrome: Boolean, onReview: () -> Unit, onRetry: (
 }
 
 /**
- * The session's open question, as a dialog. Dismissing a conflict chooses nothing: it asks again
- * later (P2 decision 33). [title] names the item; [type] is its type, which gives the series' items
- * their noun, as on the web.
+ * The session's open question, as a dialog. Dismissing a conflict is Stay; the other prompts ask
+ * again later (P2 decision 33). [title] names the item; [type] is its type, which gives the series'
+ * items their noun, as on the web. A reader gives [exitFor], where a finished item or series sends
+ * it, and [onExit] takes it after Follow; a review has none, and Follow only uses the saved state.
  */
 @Composable
-fun SyncPromptDialog(sync: ReadingSession, title: String, type: String?) {
+fun SyncPromptDialog(
+    sync: ReadingSession,
+    title: String,
+    type: String?,
+    exitFor: (suspend (ConflictKind) -> ReaderExit)? = null,
+    onExit: (ReaderExit) -> Unit = {},
+) {
     val prompt by sync.prompt.collectAsState()
     when (val open = prompt) {
         null -> {}
-        is SyncPrompt.Conflict -> ConflictDialog(open, sync::answer, sync::dismissPrompt)
+        is SyncPrompt.Conflict -> {
+            val leaves = exitFor != null && (open.kind == ConflictKind.FINISHED || open.kind == ConflictKind.SERIES)
+            // The dialog shows once the lookup is back.
+            val exit by produceState<ReaderExit?>(null, open) { if (exitFor != null && leaves) value = exitFor(open.kind) }
+            if (!leaves || exit != null) {
+                ConflictDialog(open, exit) {
+                    sync.answer(it)
+                    if (it == PromptChoice.FOLLOW) exit?.let(onExit)
+                }
+            }
+        }
         SyncPrompt.ConfirmClear -> VDialog(
             stringResource(R.string.content_clear),
             stringResource(R.string.clear_confirm),
@@ -157,28 +176,47 @@ private fun CompleteSeriesDialog(unread: Int, volumes: Boolean, onChoice: (Promp
     }
 }
 
-/** `ReadingConflictModal.vue`, also for "Needs attention". The first button keeps what this device has. */
+/** `ReadingConflictModal.vue`, also for "Needs attention". Back or an outside tap is Stay; the follow button is the main one. */
 @Composable
-fun ConflictDialog(prompt: SyncPrompt.Conflict, onChoice: (PromptChoice) -> Unit, onDismiss: () -> Unit) {
-    val (titleId, keep, other) = when (prompt.kind) {
-        ConflictKind.MOVED -> Triple(R.string.sync_moved_title, R.string.sync_stay to PromptChoice.STAY, R.string.sync_go to PromptChoice.GO)
-        ConflictKind.COMPLETED -> Triple(R.string.sync_completed_title, R.string.sync_keep_reading to PromptChoice.KEEP, R.string.sync_reset to PromptChoice.RESET)
-        ConflictKind.RESET -> Triple(R.string.sync_reset_title, R.string.sync_continue to PromptChoice.CONTINUE, R.string.sync_start to PromptChoice.START)
+fun ConflictDialog(prompt: SyncPrompt.Conflict, exit: ReaderExit?, onChoice: (PromptChoice) -> Unit) {
+    val title = when (prompt.kind) {
+        ConflictKind.MOVED -> R.string.sync_moved_title
+        ConflictKind.CLEARED -> R.string.sync_cleared_title
+        ConflictKind.FINISHED -> R.string.sync_finished_title
+        ConflictKind.SERIES -> R.string.sync_series_title
+    }
+    val follow = when (prompt.kind) {
+        ConflictKind.MOVED -> R.string.sync_follow_move
+        ConflictKind.CLEARED -> R.string.sync_start
+        ConflictKind.FINISHED, ConflictKind.SERIES -> exit.label() ?: R.string.sync_use_saved
     }
     val text = when (prompt.kind) {
         ConflictKind.MOVED -> stringResource(R.string.sync_here_saved, prompt.here.text(), prompt.saved.text())
-        ConflictKind.COMPLETED -> stringResource(R.string.sync_completed_text)
-        ConflictKind.RESET -> stringResource(R.string.sync_reset_text)
+        ConflictKind.CLEARED -> stringResource(R.string.sync_cleared_text)
+        ConflictKind.FINISHED -> (exit as? ReaderExit.Next)?.let { stringResource(R.string.sync_continue_with, it.title) }.orEmpty()
+        ConflictKind.SERIES -> stringResource(R.string.sync_series_text)
     }
-    VChoiceDialog(stringResource(titleId), text, onDismiss) { main ->
-        VButton(stringResource(other.first), { onChoice(other.second) }, style = VButtonStyle.Text)
-        VButton(stringResource(keep.first), { onChoice(keep.second) }, main)
+    VChoiceDialog(stringResource(title), text, { onChoice(PromptChoice.STAY) }) { main ->
+        VButton(stringResource(R.string.sync_stay), { onChoice(PromptChoice.STAY) }, style = VButtonStyle.Text)
+        VButton(stringResource(follow), { onChoice(PromptChoice.FOLLOW) }, main)
     }
 }
 
-/** The session's notices as snackbars, with their Undo or Retry. Undo offers queue: one answer can bring two. */
+/** The follow button's label, or null without an exit (a review). */
+@StringRes
+private fun ReaderExit?.label() = when (this) {
+    null -> null
+    is ReaderExit.Next -> R.string.home_continue
+    is ReaderExit.Back -> if (series) R.string.reader_back_series else R.string.reader_back_comic
+}
+
+/**
+ * The session's notices as snackbars, with their Undo or Retry. Undo offers queue: one answer can bring two.
+ * A finish or series completed elsewhere offers where to go ([exitFor]); its action only calls [onExit], which
+ * outlives a rotation, and skips a finish that [obsolete] says a later state replaced.
+ */
 @Composable
-fun SyncSnackbars(sync: ReadingSession) {
+fun SyncSnackbars(sync: ReadingSession, exitFor: suspend (ConflictKind) -> ReaderExit, obsolete: (Long) -> Boolean, onExit: (ReaderExit, Long?) -> Unit) {
     val snackbars = LocalSnackbars.current
     val context = LocalContext.current
     val statuses = statusLabels().toMap()
@@ -187,6 +225,22 @@ fun SyncSnackbars(sync: ReadingSession) {
     DisposableEffect(sync) { onDispose { if (activity?.isChangingConfigurations != true) snackbars.cancelRetained() } }
     LaunchedEffect(sync) {
         sync.notices.collect { notice ->
+            val n = notice.notice
+            if (n is SyncNotice.SeriesCompletedElsewhere) {
+                // Inline: no lookup, so a notice that follows stays behind it.
+                val exit = exitFor(ConflictKind.SERIES)
+                snackbars.show(context.getString(R.string.sync_series_elsewhere), exit.label()?.let(context::getString), retained = true) { onExit(exit, null) }
+                return@collect
+            }
+            if (n is SyncNotice.FinishedElsewhere) {
+                // The lookup may take a while: the notices after it needn't wait.
+                launch {
+                    val exit = exitFor(ConflictKind.FINISHED)
+                    if (obsolete(n.seq)) return@launch
+                    snackbars.show(context.getString(R.string.sync_finished_title), exit.label()?.let(context::getString), retained = true) { onExit(exit, n.seq) }
+                }
+                return@collect
+            }
             val (text, action) = notice.describe(context, statuses) ?: return@collect
             val label = action?.takeIf { notice.action != null }?.let(context::getString)
             snackbars.show(text, label, retained = true) { notice.action?.invoke() }
@@ -208,6 +262,8 @@ private fun ReaderNotice.describe(context: Context, statuses: Map<String, String
             Undoable.SERIES_MOVED_TO_READING -> R.string.sync_series_moved
         },
     ) to R.string.undo
+    is SyncNotice.ClearedElsewhere -> context.getString(R.string.sync_cleared_title) to R.string.undo
+    is SyncNotice.SeriesReopened -> context.getString(R.string.sync_series_reopened) to R.string.undo
     is SyncNotice.NotSaved -> context.getString(R.string.error_not_saved_storage_full) to null
     is SyncNotice.Done -> when (n.what) {
         SyncAction.CLEAR -> context.getString(R.string.msg_cleared) to null

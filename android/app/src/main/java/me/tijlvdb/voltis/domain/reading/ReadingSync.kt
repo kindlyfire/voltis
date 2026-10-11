@@ -148,7 +148,10 @@ interface ReadingSession {
 
     fun answer(choice: PromptChoice)
 
-    /** "Ask again later": never a choice (P2 decision 33). */
+    /**
+     * "Ask again later": never a choice (P2 decision 33). A conflict's UI answers [PromptChoice.STAY]
+     * on dismissal; this is what the app going to the background does.
+     */
     fun dismissPrompt()
 }
 
@@ -186,14 +189,14 @@ sealed interface SyncPrompt {
     data class ConfirmCompleteSeries(val unread: Int) : SyncPrompt
 }
 
-enum class ConflictKind { MOVED, COMPLETED, RESET }
+enum class ConflictKind { MOVED, CLEARED, FINISHED, SERIES }
 
 /**
- * A prompt's buttons. A conflict's: [STAY] and [GO] (moved), [KEEP] and [RESET] (completed), [CONTINUE] and [START] (reset).
+ * A prompt's buttons. A conflict's: [STAY] and [FOLLOW].
  * The held series': [MOVE], [KEEP], [UNDO]. A confirmation's: [CONFIRM], and for completing a
  * series with its unread volumes, [CONFIRM_WITH_UNREAD].
  */
-enum class PromptChoice { STAY, GO, KEEP, RESET, CONTINUE, START, MOVE, UNDO, CONFIRM, CONFIRM_WITH_UNREAD }
+enum class PromptChoice { STAY, FOLLOW, KEEP, MOVE, UNDO, CONFIRM, CONFIRM_WITH_UNREAD }
 
 /** A snackbar: [notice], with [action] for its Undo or Retry. */
 class ReaderNotice(val notice: SyncNotice, val action: (() -> Unit)? = null)
