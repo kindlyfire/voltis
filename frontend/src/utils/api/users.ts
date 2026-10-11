@@ -21,6 +21,17 @@ import type {
  * would otherwise restore the pre-POST user and stick (`refetchOnMount: false`). */
 const ME_SCOPE = { id: 'users-me' }
 
+/** The signed-in user's id, '' when signed out or not yet known. */
+export const currentUserId = () =>
+    queryClient.getQueryData<{ id: string } | null>(['users', 'me'])?.id ?? ''
+
+/** A request dropped because another account signed in since it was made. */
+export class AccountChangedError extends Error {
+    constructor() {
+        super('Signed in as someone else')
+    }
+}
+
 const revalidateMe = () => queryClient.invalidateQueries({ queryKey: ['users', 'me'] })
 
 ws.on('$open', revalidateMe)

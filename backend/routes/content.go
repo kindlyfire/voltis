@@ -54,6 +54,7 @@ type UserToContentDTO struct {
 	ProgressUpdatedAt *time.Time      `json:"progress_updated_at"`
 	Revision          *string         `json:"revision"`
 	LastReadAt        *time.Time      `json:"last_read_at"`
+	ReaderSettings    json.RawMessage `json:"reader_settings"`
 	// ReadingSeq orders this state against others of the same content; see models.ReadingSeq.
 	ReadingSeq models.ReadingSeq `json:"reading_seq"`
 }
@@ -76,6 +77,7 @@ func utcToDTO(u *models.UserToContent) *UserToContentDTO {
 		ProgressUpdatedAt: u.ProgressUpdatedAt,
 		Revision:          u.Revision,
 		LastReadAt:        u.LastReadAt,
+		ReaderSettings:    u.ReaderSettings,
 		ReadingSeq:        u.ReadingSeq,
 	}
 }
@@ -236,7 +238,8 @@ var contentRowColumns = models.ContentColumns("c") + `,
 	utc.status_updated_at AS utc_status_updated_at, utc.notes AS utc_notes,
 	utc.rating AS utc_rating, utc.progress AS utc_progress,
 	utc.progress_updated_at AS utc_progress_updated_at, utc.revision AS utc_revision,
-	utc.last_read_at AS utc_last_read_at, utc.reading_seq AS utc_reading_seq, c.data AS meta_data, c.meta_updated_at`
+	utc.last_read_at AS utc_last_read_at, utc.reading_seq AS utc_reading_seq,
+	utc.reader_settings AS utc_reader_settings, c.data AS meta_data, c.meta_updated_at`
 
 func selectContentRows(ctx context.Context, q db.Querier, userID string, ids []string) (map[string]contentListRow, error) {
 	if len(ids) == 0 { // ANY(NULL) fails pg_search's pushdown
@@ -1092,8 +1095,33 @@ type userToContentRequest struct {
 	Rating  *int    `json:"rating"  validate:"omitempty,min=1,max=10"`
 }
 
-// updateUserData sets the user's star, notes and rating. Status and progress go through the
-// reading endpoints.
+// readerSettingValues lists each reader setting's allowed values; null removes a setting.
+var readerSettingValues = map[string][]any{
+	"mode":      {"paged", "longstrip"},
+	"direction": {"ltr", "rtl"},
+	"shift":     {true},
+}
+
+// validateReaderSettings checks a reader settings patch.
+func validateReaderSettings(raw json.RawMessage) error {
+	var patch map[string]any
+	if json.Unmarshal(raw, &patch) != nil || patch == nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "reader_settings must be an object")
+	}
+	for key, val := range patch {
+		allowed, ok := readerSettingValues[key]
+		if !ok {
+			return echo.NewHTTPError(http.StatusBadRequest, "unknown reader setting: "+key)
+		}
+		if val != nil && !slices.Contains(allowed, val) {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid reader setting: "+key)
+		}
+	}
+	return nil
+}
+
+// updateUserData sets the user's star, notes, rating and reader settings. Status and progress go
+// through the reading endpoints.
 func (cr *ContentRoutes) updateUserData(c echo.Context) error {
 	user, err := requireUser(c)
 	if err != nil {
@@ -1146,6 +1174,16 @@ func (cr *ContentRoutes) updateUserData(c echo.Context) error {
 	}
 	if _, ok := rawBody["rating"]; ok {
 		set("rating", req.Rating)
+	}
+	if raw, ok := rawBody["reader_settings"]; ok {
+		if err := validateReaderSettings(raw); err != nil {
+			return err
+		}
+		// Merged into the stored settings; a null removes its key.
+		cols = append(cols, "reader_settings")
+		vals = append(vals, "jsonb_strip_nulls(@reader_settings::jsonb)")
+		sets = append(sets, "reader_settings = jsonb_strip_nulls(user_to_content.reader_settings || @reader_settings::jsonb)")
+		args["reader_settings"] = string(raw)
 	}
 
 	var utc models.UserToContent
@@ -1285,6 +1323,7 @@ type contentWithUTCRow struct {
 	UTCRevision          *string    `db:"utc_revision"`
 	UTCLastReadAt        *time.Time `db:"utc_last_read_at"`
 	UTCReadingSeq        *int64     `db:"utc_reading_seq"`
+	UTCReaderSettings    []byte     `db:"utc_reader_settings"`
 	MetaData             []byte     `db:"meta_data"`
 	MetaUpdatedAt        *time.Time `db:"meta_updated_at"`
 }
@@ -1308,6 +1347,7 @@ func (r *contentWithUTCRow) utc() *models.UserToContent {
 		Revision:          r.UTCRevision,
 		LastReadAt:        r.UTCLastReadAt,
 		ReadingSeq:        models.ReadingSeq(*r.UTCReadingSeq),
+		ReaderSettings:    r.UTCReaderSettings,
 	}
 }
 

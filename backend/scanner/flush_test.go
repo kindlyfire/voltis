@@ -508,9 +508,11 @@ func TestFlushRenameMergesNewerUserRow(t *testing.T) {
 	r.commit(false)
 	seedRefs(t, r, "comic/S/ch1")
 	exec(t, r.pool, `UPDATE user_to_content SET status = 'reading', last_read_at = now() - interval '1 day',
-		progress = '{"current_page": 3}' WHERE uri = 'comic/S/ch1'`)
-	exec(t, r.pool, `INSERT INTO user_to_content (id, user_id, library_id, uri, status, last_read_at, progress, starred)
-		VALUES ('dst', 'u1', $1, 'comic/S/ch2', 'completed', now(), '{"current_page": 9}', true)`, r.lib)
+		progress = '{"current_page": 3}', reader_settings = '{"mode": "paged", "shift": true}'
+		WHERE uri = 'comic/S/ch1'`)
+	exec(t, r.pool, `INSERT INTO user_to_content (id, user_id, library_id, uri, status, last_read_at, progress, starred,
+		reader_settings) VALUES ('dst', 'u1', $1, 'comic/S/ch2', 'completed', now(), '{"current_page": 9}', true,
+		'{"mode": "longstrip"}')`, r.lib)
 
 	r.reload()
 	r.place(comicResult("/lib/S/ch1.cbz", "ch2", "S", "/lib/S"))
@@ -518,9 +520,9 @@ func TestFlushRenameMergesNewerUserRow(t *testing.T) {
 
 	var got string
 	must(t, r.pool.QueryRow(context.Background(), `
-		SELECT string_agg(concat_ws(' ', id, uri, status, progress::text, starred, notes, revision LIKE 'srv:%'), ',')
+		SELECT string_agg(concat_ws(' ', id, uri, status, progress::text, reader_settings::text, starred, notes, revision LIKE 'srv:%'), ',')
 		FROM user_to_content WHERE library_id = $1`, r.lib).Scan(&got))
-	if want := `dst comic/S/ch2 completed {"current_page": 9} t comic/S/ch1 t`; got != want {
+	if want := `dst comic/S/ch2 completed {"current_page": 9} {"mode": "longstrip", "shift": true} t comic/S/ch1 t`; got != want {
 		t.Fatalf("rows = %s, want %s", got, want)
 	}
 }

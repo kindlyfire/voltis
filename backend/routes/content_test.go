@@ -98,6 +98,7 @@ func TestUserData(t *testing.T) {
 		res := post(t, id, map[string]any{}, 200)
 		assertEq(t, s(res["starred"]), "false")
 		assertEq(t, len(res["progress"].(map[string]any)), 0)
+		assertEq(t, len(res["reader_settings"].(map[string]any)), 0)
 		assertNil(t, "status", res["status"])
 		assertEq(t, utcCount(t, pool, id), 1)
 
@@ -130,6 +131,38 @@ func TestUserData(t *testing.T) {
 		assertEq(t, s(res["starred"]), "true")
 		assertEq(t, s(res["status_updated_at"]), s(first["status_updated_at"]))
 		assertEq(t, s(res["revision"]), s(first["revision"]))
+	})
+
+	t.Run("reader settings", func(t *testing.T) {
+		id := newTestContent(t, pool)
+		setStatus(t, c, id, "reading")
+		userData := func() map[string]any {
+			return c.Get("/api/content/"+id).Assert(t, 200).JSON()["user_data"].(map[string]any)
+		}
+		before := userData()
+		rs := func(v any) map[string]any { return map[string]any{"reader_settings": v} }
+
+		post(t, id, rs(map[string]any{"mode": "longstrip"}), 200)
+		res := post(t, id, rs(map[string]any{"direction": "rtl"}), 200)
+		assertEq(t, s(res["reader_settings"]), "map[direction:rtl mode:longstrip]")
+		assertEq(t, s(res["revision"]), s(before["revision"]))
+		assertEq(t, s(res["status_updated_at"]), s(before["status_updated_at"]))
+
+		post(t, id, rs(map[string]any{"mode": nil}), 200)
+		assertEq(t, s(userData()["reader_settings"]), "map[direction:rtl]")
+
+		for _, v := range []any{
+			map[string]any{"zoom": 1}, map[string]any{"mode": "sideways"}, map[string]any{"shift": false},
+			map[string]any{"direction": 1}, nil, []any{},
+		} {
+			post(t, id, rs(v), 400)
+		}
+		assertEq(t, s(userData()["reader_settings"]), "map[direction:rtl]")
+
+		// A new row; removing an absent key is a no-op.
+		other := newTestContent(t, pool)
+		res = post(t, other, rs(map[string]any{"shift": true, "mode": nil}), 200)
+		assertEq(t, s(res["reader_settings"]), "map[shift:true]")
 	})
 
 	t.Run("length", func(t *testing.T) {

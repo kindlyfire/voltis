@@ -20,6 +20,7 @@ import {
     type SeriesPrevious,
     type SeriesReadingInfo,
 } from '@/utils/api/types'
+import { AccountChangedError, currentUserId } from '@/utils/api/users'
 import { RequestError } from '@/utils/fetch'
 import { queryClient } from '@/utils/misc'
 import { Modals } from '@/utils/modals'
@@ -108,10 +109,7 @@ const isCleared = (s: ReadingState) =>
 const isReading = (job: Job) => job.kind === 'position' || job.kind === 'finish'
 const isHeld = (s: ReadingStatus | null): s is 'on_hold' | 'dropped' =>
     s === 'on_hold' || s === 'dropped'
-const signedOut = () => new Error('Signed in as someone else')
-
-const currentUserId = () =>
-    queryClient.getQueryData<{ id: string } | null>(['users', 'me'])?.id ?? ''
+const signedOut = () => new AccountChangedError()
 
 /**
  * The page's one link to the server's reading state, surviving reader navigation. Requests go out

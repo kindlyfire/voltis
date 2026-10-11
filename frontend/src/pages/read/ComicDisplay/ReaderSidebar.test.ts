@@ -43,10 +43,13 @@ function render(parentId: string | null, siblings: Partial<Siblings>) {
             invertRtlControls: true,
         },
         mode: 'paged',
+        autoMode: 'paged',
         direction: 'ltr',
         autoDirection: 'ltr',
         controlsFlipped: false,
         shifted: false,
+        canChooseSeries: true,
+        canShift: true,
     })
     const wrapper = mount(ReaderSidebar, {
         global: {

@@ -150,7 +150,8 @@ func ServerRevision() string { return "srv:" + strings.ToLower(rand.Text()) }
 // destinations in library $1, then deletes those sources; sources without a destination row stay.
 // $2/$3/$4 pair sources, destinations and which side's reading state to keep ('source', 'target',
 // or ” for the more recently touched, the source on a tie). Stars combine, notes and rating fall
-// back to the other side. $5 is the merged rows' revision; $6, when not NULL, limits to one user.
+// back to the other side; reader settings combine, the kept side's keys winning. $5 is the merged
+// rows' revision; $6, when not NULL, limits to one user.
 const MergeUserToContentSQL = `
 	WITH m AS (
 		SELECT s.id AS src_id, d.id AS dst_id,
@@ -166,7 +167,8 @@ const MergeUserToContentSQL = `
 		UPDATE user_to_content d SET status = k.status, status_updated_at = k.status_updated_at,
 			progress = k.progress, progress_updated_at = k.progress_updated_at, last_read_at = k.last_read_at,
 			starred = k.starred OR o.starred, notes = COALESCE(k.notes, o.notes),
-			rating = COALESCE(k.rating, o.rating), revision = $5
+			rating = COALESCE(k.rating, o.rating), reader_settings = o.reader_settings || k.reader_settings,
+			revision = $5
 		FROM m
 		JOIN user_to_content k ON k.id = CASE WHEN m.keep = 'source' THEN m.src_id ELSE m.dst_id END
 		JOIN user_to_content o ON o.id = CASE WHEN m.keep = 'source' THEN m.dst_id ELSE m.src_id END

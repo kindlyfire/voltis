@@ -4,7 +4,7 @@
         id="longstrip-container"
         class="reader-longstrip flex flex-col items-center"
     >
-        <template v-for="(loader, index) in reader.state?.loaders ?? []" :key="index">
+        <template v-for="(loader, index) in reader.ready ? reader.state!.loaders : []" :key="index">
             <div
                 class="reader-longstrip__page"
                 :id="`longstrip-page-${index}`"
@@ -33,7 +33,7 @@
         </template>
     </div>
 
-    <ComicEndCard v-if="reader.state && !reader.state.loading && !reader.siblings.next" />
+    <ComicEndCard v-if="reader.ready && !reader.siblings.next" />
     <div class="browser-ui-padding"></div>
 </template>
 

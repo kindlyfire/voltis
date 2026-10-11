@@ -232,7 +232,20 @@ export interface UserToContent extends ReadingState {
     starred: boolean
     notes: string | null
     rating: number | null
+    /** `{}` when unset. */
+    reader_settings: ReaderSettings
 }
+
+/** A series' (or parentless comic's) mode and direction, and a volume's shift; absent is Auto or
+ * not shifted. */
+export interface ReaderSettings {
+    mode?: 'paged' | 'longstrip'
+    direction?: 'ltr' | 'rtl'
+    shift?: true
+}
+
+/** Merged into the stored settings; null removes a key. */
+export type ReaderSettingsPatch = { [K in keyof ReaderSettings]?: ReaderSettings[K] | null }
 
 /** The reading part of a user's row, as the reading endpoints return it. */
 export interface ReadingState {
@@ -329,7 +342,7 @@ export interface ContinueTarget {
     earlier_unread_id: string | null
 }
 
-export interface BrokenUserToContent extends Omit<UserToContent, 'revision'> {
+export interface BrokenUserToContent extends Omit<UserToContent, 'revision' | 'reader_settings'> {
     id: string
     uri: string
     library_id: string | null
@@ -408,6 +421,7 @@ export interface UserToContentUpdate {
     starred?: boolean
     notes?: string | null
     rating?: number | null
+    reader_settings?: ReaderSettingsPatch
 }
 
 export interface ContentFileData {

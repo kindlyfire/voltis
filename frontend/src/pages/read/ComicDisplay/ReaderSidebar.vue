@@ -69,10 +69,11 @@
                     :options="MODE_OPTIONS"
                     label="Mode"
                     block
+                    :disabled="!reader.canChooseSeries"
                     @update:model-value="mode => reader.setMode(mode === 'auto' ? null : mode)"
                 />
                 <div v-if="reader.seriesSettings.mode == null" class="text-fg-muted mt-1 text-xs">
-                    Auto: {{ reader.mode === 'longstrip' ? 'Longstrip' : 'Paged' }}
+                    Auto: {{ reader.autoMode === 'longstrip' ? 'Longstrip' : 'Paged' }}
                 </div>
                 <ASlider
                     v-if="reader.mode === 'longstrip'"
@@ -93,12 +94,8 @@
                         :options="DIRECTION_OPTIONS"
                         label="Direction"
                         block
-                        @update:model-value="
-                            v => {
-                                reader.placement()
-                                reader.setDirection(v === 'auto' ? null : v)
-                            }
-                        "
+                        :disabled="!reader.canChooseSeries"
+                        @update:model-value="v => reader.setDirection(v === 'auto' ? null : v)"
                     />
                     <div
                         v-if="reader.seriesSettings.direction == null"
@@ -156,12 +153,8 @@
                         class="mt-4"
                         :model-value="reader.shifted"
                         label="Shift spreads"
-                        @update:model-value="
-                            () => {
-                                reader.placement()
-                                reader.toggleShift()
-                            }
-                        "
+                        :disabled="!reader.canShift"
+                        @update:model-value="reader.toggleShift"
                     />
                     <ASwitch
                         v-if="reader.settings.fit === 'screen'"
@@ -242,7 +235,10 @@ const SPREAD_OPTIONS = [
 ] as const satisfies readonly Option<SpreadSetting>[]
 
 const shortcuts = computed(() =>
-    comicShortcuts({ flipped: reader.controlsFlipped, paged: reader.mode === 'paged' })
+    comicShortcuts({
+        flipped: reader.controlsFlipped,
+        paged: reader.mode === 'paged',
+    })
 )
 
 const chapterOptions = computed(() =>

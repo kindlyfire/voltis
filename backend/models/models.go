@@ -199,7 +199,7 @@ func ContentColumns(alias string) string {
 	return alias + "." + strings.Join(contentColumns, ", "+alias+".")
 }
 
-// ReadingSeq orders the committed states of a user_to_content row (see migration 004). 0 is a row
+// ReadingSeq orders the committed states of a user_to_content row (see migration 006). 0 is a row
 // that doesn't exist. It serializes as a decimal string, so JavaScript clients can't lose precision.
 type ReadingSeq int64
 
@@ -224,6 +224,7 @@ type UserToContent struct {
 	Notes             *string    `db:"notes" json:"notes"`
 	Rating            *int       `db:"rating" json:"rating"`
 	Progress          JSONB      `db:"progress" json:"progress"`
+	ReaderSettings    JSONB      `db:"reader_settings" json:"reader_settings"`
 	ProgressUpdatedAt *time.Time `db:"progress_updated_at" json:"progress_updated_at"`
 	Revision          *string    `db:"revision" json:"revision"`
 	LastReadAt        *time.Time `db:"last_read_at" json:"last_read_at"`

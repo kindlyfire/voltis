@@ -20,11 +20,14 @@ import type {
     DownloadInfo,
     LibraryUrisResponse,
     Paginated,
+    ReaderSettings,
+    ReaderSettingsPatch,
     ReadingStatus,
     UncountedPage,
     UserToContent,
     UserToContentUpdate,
 } from './types'
+import { AccountChangedError, currentUserId } from './users'
 
 export function coverUrl(c: Cover): string | null {
     return c.cover_version ? `${API_URL}/files/cover/${c.id}?v=${c.cover_version}` : null
@@ -74,6 +77,71 @@ export function listSearchParams(p: ContentListParams): URLSearchParams {
     if (p.facet_role) searchParams.append('facet_role', p.facet_role)
     if (p.section) searchParams.append('section', p.section)
     return searchParams
+}
+
+/** `s` with `p` applied: null keys removed, the rest set. */
+function patchReaderSettings(s: ReaderSettings, p: ReaderSettingsPatch): ReaderSettings {
+    const next: Record<string, unknown> = { ...s }
+    for (const [k, v] of Object.entries(p)) {
+        if (v === null) delete next[k]
+        else if (v !== undefined) next[k] = v
+    }
+    return next
+}
+
+function sameSettings(a: ReaderSettings | undefined, b: ReaderSettings) {
+    if (!a) return false
+    const keys = Object.keys(a) as (keyof ReaderSettings)[]
+    return keys.length === Object.keys(b).length && keys.every(k => a[k] === b[k])
+}
+
+/** A new row's user data, as the server creates it. */
+export const EMPTY_USER_DATA: UserToContent = {
+    starred: false,
+    notes: null,
+    rating: null,
+    revision: null,
+    status: null,
+    status_updated_at: null,
+    progress: {},
+    progress_updated_at: null,
+    last_read_at: null,
+    reader_settings: {},
+}
+
+/** Reader settings of the cached content, undefined when it isn't cached. */
+function cachedSettings(id: string): ReaderSettings | undefined {
+    const c = queryClient.getQueryData<Content>(['content', id])
+    return c && (c.user_data?.reader_settings ?? {})
+}
+
+function showSettings(id: string, rs: ReaderSettings) {
+    queryClient.setQueryData<Content>(
+        ['content', id],
+        c => c && { ...c, user_data: { ...(c.user_data ?? EMPTY_USER_DATA), reader_settings: rs } }
+    )
+}
+
+interface SaveQueue {
+    tail: Promise<unknown>
+    pending: number
+    /** The last value known to be on the server. */
+    confirmed: ReaderSettings
+    /** The last optimistic value. */
+    written: ReaderSettings
+}
+
+/** Reader settings saves in flight, by account and content id. */
+const saveQueues = new Map<string, SaveQueue>()
+
+function saveQueue(key: string, contentId: string): SaveQueue {
+    let q = saveQueues.get(key)
+    if (!q) {
+        const start = cachedSettings(contentId) ?? {}
+        q = { tail: Promise.resolve(), pending: 0, confirmed: start, written: start }
+        saveQueues.set(key, q)
+    }
+    return q
 }
 
 const listQuery = <T>(params: MaybeRefOrGetter<ContentListParams | undefined>) => ({
@@ -221,6 +289,54 @@ export const contentApi = {
             body: JSON.stringify(data),
             ...init,
         })
+    },
+
+    /** Applies `patch` to the cached content at once, and saves it. Saves of one content go out
+     * in call order; once the last settles, a cache entry still showing our write gets the
+     * server's value, or after a failure the last confirmed one. */
+    saveReaderSettings: (contentId: string, patch: ReaderSettingsPatch): Promise<UserToContent> => {
+        const filters = { queryKey: ['content', contentId], exact: true }
+        // Cancelling reverts synchronously, so the writes below land after it, and in call order.
+        void queryClient.cancelQueries(filters)
+
+        const owner = currentUserId()
+        const key = `${owner}/${contentId}`
+        const q = saveQueue(key, contentId)
+        q.pending++
+        q.written = patchReaderSettings(q.written, patch)
+        if (cachedSettings(contentId)) showSettings(contentId, q.written)
+
+        // A save queued under another account is dropped, and its result shown nowhere.
+        const run = q.tail.then(() =>
+            currentUserId() === owner
+                ? contentApi.updateUserData(contentId, { reader_settings: patch })
+                : Promise.reject(new AccountChangedError())
+        )
+        q.tail = run.catch(() => {})
+
+        const settle = (ok: boolean) => {
+            if (--q.pending > 0) return
+            saveQueues.delete(key)
+            if (currentUserId() !== owner) return
+            // The last POST's row is the newest server state, even over a refetch that landed
+            // meanwhile; a rollback leaves a value someone else wrote.
+            if (ok || sameSettings(cachedSettings(contentId), q.written))
+                showSettings(contentId, q.confirmed)
+            // A cancelled refetch, or one that started during the save, could have left
+            // pre-write data.
+            void queryClient.invalidateQueries(filters)
+        }
+        return run.then(
+            row => {
+                q.confirmed = row.reader_settings
+                settle(true)
+                return row
+            },
+            e => {
+                settle(false)
+                throw e
+            }
+        )
     },
 
     listLibraryUris: async (libraryId: string): Promise<LibraryUrisResponse> => {

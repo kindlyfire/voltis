@@ -1,10 +1,13 @@
 import { keepPreviousData } from '@tanstack/vue-query'
 import { useWindowSize } from '@vueuse/core'
 import { acceptHMRUpdate, defineStore } from 'pinia'
-import { ref, computed, shallowRef, type Ref } from 'vue'
+import { ref, computed, shallowRef, watch, type Ref } from 'vue'
 import { useRouter } from 'vue-router'
 import z from 'zod'
+import { useToast } from '@/ui/useToast'
 import { contentApi } from '@/utils/api/content'
+import type { ReaderSettingsPatch } from '@/utils/api/types'
+import { AccountChangedError } from '@/utils/api/users'
 import { useLocalStorage } from '@/utils/localStorage'
 import { getLayoutTop } from '@/utils/misc'
 import { useSiblings } from '../useSiblings'
@@ -13,13 +16,11 @@ import { detectDirection } from './direction'
 import { buildSpreads, sized, spreadOfPages } from './pagedLayout'
 import type { PageDimensions, PagedScroller, ReaderMode, ReadingDirection } from './types'
 
-const zSeriesSettings = z.object({
-    mode: z.enum(['paged', 'longstrip']).nullable().catch(null),
-    /** null = Auto */
-    direction: z.enum(['ltr', 'rtl']).nullable().catch(null),
-})
-type SeriesSettings = z.infer<typeof zSeriesSettings>
-const DEFAULT_SERIES_SETTINGS: SeriesSettings = { mode: null, direction: null }
+/** null = Auto */
+type SeriesSettings = {
+    mode: ReaderMode | null
+    direction: ReadingDirection | null
+}
 
 /** Per field, so one stale or out-of-range value can't discard the rest. Object fallbacks are
  * functions: a `.catch({})` value would be one object shared by every parse. */
@@ -30,9 +31,6 @@ const zComicSettings = z.object({
     zoomWide: z.boolean().catch(true),
     /** RTL also mirrors arrow keys, click zones and swipes. */
     invertRtlControls: z.boolean().catch(true),
-    seriesSettings: z.record(z.string(), zSeriesSettings).catch(() => ({})),
-    /** Content ids of books whose spreads are shifted by one page. */
-    shiftedBooks: z.record(z.string(), z.literal(true)).catch(() => ({})),
 })
 
 export interface ReaderContentOptions {
@@ -68,28 +66,6 @@ export const useReaderStore = defineStore('reader', () => {
     const state: Ref<ComicState | null> = ref(null)
     const content = computed(() => state.value?.content || null)
 
-    // Mode keeps its `parent_id || ''` key for stored data; direction gives a parentless comic
-    // its own entry.
-    const modeKey = computed(() => content.value && (content.value.parent_id || ''))
-    const directionKey = computed(
-        () => content.value && (content.value.parent_id || content.value.id)
-    )
-    const entry = (key: string | null) =>
-        (key !== null && settings.value.seriesSettings[key]) || DEFAULT_SERIES_SETTINGS
-    const seriesSettings = computed<SeriesSettings>(() => ({
-        mode: entry(modeKey.value).mode,
-        direction: entry(directionKey.value).direction,
-    }))
-    /** Merges into a series entry, dropping it once every field is back at its default. */
-    function updateSeriesSettings(key: string, patch: Partial<SeriesSettings>) {
-        const next = { ...entry(key), ...patch }
-        if (Object.values(next).every(v => v === null)) delete settings.value.seriesSettings[key]
-        else settings.value.seriesSettings[key] = next
-    }
-    const mode = computed<ReaderMode>(
-        () => seriesSettings.value.mode ?? detectMode(state.value?.pageDimensions || [])
-    )
-
     // Placeholder data can be the previous series.
     const qParent = contentApi.useGet(() => content.value?.parent_id, {
         placeholderData: keepPreviousData,
@@ -98,6 +74,36 @@ export const useReaderStore = defineStore('reader', () => {
         const data = qParent.data.value
         return data && data.id === content.value?.parent_id ? data : null
     })
+    // The volume's reader settings come from the cache entry that saves update (ReadPage holds
+    // it), not from the state's own copy. No placeholder: it is never another volume.
+    const qVolume = contentApi.useGet(() => state.value?.contentId)
+    const volume = computed(() => qVolume.data.value ?? null)
+    /** The pages, the volume and the series are in: the mode and direction won't change on their
+     * own. A disabled query (no parent) reads as pending, so a parentless comic settles by its id. */
+    const ready = computed(
+        () =>
+            !!state.value &&
+            !state.value.loading &&
+            !state.value.error &&
+            (!!volume.value || qVolume.isError.value) &&
+            (!content.value?.parent_id || !!parent.value || qParent.isError.value)
+    )
+    // A parentless comic keeps its mode and direction on its own row.
+    const seriesRow = computed(() => (content.value?.parent_id ? parent.value : volume.value))
+    // Without the row, a choice would be saved but not shown.
+    const canChooseSeries = computed(() => ready.value && !!seriesRow.value)
+    const canShift = computed(() => ready.value && !!volume.value)
+
+    const seriesSettings = computed<SeriesSettings>(() => ({
+        mode: seriesRow.value?.user_data?.reader_settings?.mode ?? null,
+        direction: seriesRow.value?.user_data?.reader_settings?.direction ?? null,
+    }))
+    const autoMode = computed<ReaderMode>(() =>
+        ['manhwa', 'manhua'].includes(parent.value?.meta?.kind ?? '')
+            ? 'longstrip'
+            : detectMode(state.value?.pageDimensions || [])
+    )
+    const mode = computed<ReaderMode>(() => seriesSettings.value.mode ?? autoMode.value)
     const autoDirection = computed(() => detectDirection(content.value?.meta, parent.value?.meta))
     const direction = computed<ReadingDirection>(
         () => seriesSettings.value.direction ?? autoDirection.value
@@ -108,14 +114,20 @@ export const useReaderStore = defineStore('reader', () => {
             mode.value === 'paged' && direction.value === 'rtl' && settings.value.invertRtlControls
     )
 
-    const shifted = computed(
-        () => !!content.value && !!settings.value.shiftedBooks[content.value.id]
-    )
+    const shifted = computed(() => !!volume.value?.user_data?.reader_settings?.shift)
+
+    function save(targetId: string, patch: ReaderSettingsPatch) {
+        contentApi.saveReaderSettings(targetId, patch).catch(e => {
+            if (!(e instanceof AccountChangedError))
+                useToast().show({
+                    message: "Couldn't save the reader setting",
+                    tone: 'danger',
+                })
+        })
+    }
+
     function toggleShift() {
-        const id = content.value?.id
-        if (!id) return
-        if (settings.value.shiftedBooks[id]) delete settings.value.shiftedBooks[id]
-        else settings.value.shiftedBooks[id] = true
+        if (canShift.value) save(volume.value!.id, { shift: shifted.value ? null : true })
     }
 
     const windowSize = useWindowSize()
@@ -124,11 +136,15 @@ export const useReaderStore = defineStore('reader', () => {
             settings.value.spread === 'double' ||
             (settings.value.spread === 'auto' && windowSize.width.value > windowSize.height.value)
     )
-    // Dimensions arrive before the loaders, so nothing is laid out until loading ends.
+    // Dimensions arrive before the loaders, and the series can still change the mode, so nothing
+    // is laid out until both are in.
     const spreads = computed(() => {
         const s = state.value
-        if (!s || s.loading) return []
-        return buildSpreads(s.pageDimensions, { double: spreadDouble.value, shift: shifted.value })
+        if (!s || !ready.value) return []
+        return buildSpreads(s.pageDimensions, {
+            double: spreadDouble.value,
+            shift: shifted.value,
+        })
     })
     const spreadOfPage = computed(() =>
         spreadOfPages(spreads.value, state.value?.pageDimensions.length ?? 0)
@@ -180,20 +196,22 @@ export const useReaderStore = defineStore('reader', () => {
 
     function dispose() {
         sidebarOpen.value = false
+        placeFor = null
         reset()
         state.value?.dispose()
         state.value = null
     }
 
+    const seriesTarget = () => (canChooseSeries.value ? seriesRow.value!.id : null)
+
     function setMode(mode: ReaderMode | null) {
-        if (modeKey.value === null) return
-        placement()
-        updateSeriesSettings(modeKey.value, { mode })
+        const target = seriesTarget()
+        if (target) save(target, { mode })
     }
 
     function setDirection(direction: ReadingDirection | null) {
-        if (directionKey.value === null) return
-        updateSeriesSettings(directionKey.value, { direction })
+        const target = seriesTarget()
+        if (target) save(target, { direction })
     }
 
     function setContent(options: ReaderContentOptions) {
@@ -205,19 +223,13 @@ export const useReaderStore = defineStore('reader', () => {
         const s = createComicState(options.contentId, options.initialPage)
         state.value = s
         reset()
+        placeFor = s
         s.setHandlers({
             onPlace: page => {
                 if (state.value === s) goToPage(page, 'instant')
             },
             onReady: () => {
                 if (state.value !== s) return
-
-                if (mode.value === 'longstrip') {
-                    requestAnimationFrame(() => {
-                        if (state.value === s) goToPage(s.page, 'instant')
-                    })
-                }
-
                 // This is to replace "last" or "resume" in the URL with the
                 // actual page number
                 const page = s.page
@@ -240,6 +252,11 @@ export const useReaderStore = defineStore('reader', () => {
         state.value?.sync.flush()
         armed.value = false
     }
+    // A layout change, ours or a refetched one, is a placement. Sync, so the reading so far goes
+    // out before the re-layout moves the page.
+    watch([mode, direction, shifted], () => ready.value && placement(), {
+        flush: 'sync',
+    })
 
     /** A placement (slider, restore, layout change), which writes nothing. */
     function goToPage(page: number | null = null, behavior: ScrollBehavior = 'instant') {
@@ -257,6 +274,23 @@ export const useReaderStore = defineStore('reader', () => {
 
     /** Scrolls the longstrip as a placement, until the scroll ends. */
     let endPlacement: (() => void) | null = null
+
+    // The first longstrip placement waits for the series, which can change the mode.
+    let placeFor: ComicState | null = null
+    watch(
+        ready,
+        r => {
+            const s = placeFor
+            if (!r || !s || state.value !== s) return
+            placeFor = null
+            if (mode.value === 'longstrip') {
+                requestAnimationFrame(() => {
+                    if (state.value === s) goToPage(s.page, 'instant')
+                })
+            }
+        },
+        { flush: 'post' }
+    )
     function placeScroll(top: number, behavior: ScrollBehavior) {
         endPlacement?.()
         restoring.value = true
@@ -294,7 +328,12 @@ export const useReaderStore = defineStore('reader', () => {
             if (status !== 'ready') return
             id = (target === 'next' ? next : prev)?.id
         }
-        if (id) router.push({ name: 'read-content', params: { id }, query: { page: 'resume' } })
+        if (id)
+            router.push({
+                name: 'read-content',
+                params: { id },
+                query: { page: 'resume' },
+            })
     }
 
     return {
@@ -302,6 +341,7 @@ export const useReaderStore = defineStore('reader', () => {
         sidebarOpen,
         settings,
         seriesSettings,
+        autoMode,
         mode,
         setMode,
         setDirection,
@@ -320,6 +360,9 @@ export const useReaderStore = defineStore('reader', () => {
 
         // Content state (readonly)
         state,
+        ready,
+        canChooseSeries,
+        canShift,
         siblings,
         progress,
         restoring,

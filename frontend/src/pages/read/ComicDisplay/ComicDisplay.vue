@@ -88,7 +88,7 @@ const controls = useReaderControls()
 // `setHandlers({ onReady })` either: that single slot belongs to the store.
 useReaderTutorial(
     'comic',
-    computed(() => !!reader.state && !reader.state.loading && !reader.state.error),
+    computed(() => reader.ready),
     undefined,
     () => reader.controlsFlipped
 )

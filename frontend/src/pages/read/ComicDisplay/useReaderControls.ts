@@ -33,8 +33,9 @@ export function useReaderControls() {
 
     function handleMove(direction: 'next' | 'prev') {
         const state = reader.state
-        // Before the saved page is placed, input would overwrite it.
-        if (!state || state.loading || state.error) return
+        // Before the saved page and the series are in, input would overwrite the page or turn
+        // the wrong way.
+        if (!state || !reader.ready) return
         if (reader.mode === 'longstrip') {
             // Key and click scrolls are reading, so they arm the strip before it moves.
             reader.armed = true
@@ -57,7 +58,7 @@ export function useReaderControls() {
     /** Paged: turns by spread, the one path for keys, clicks and swipes. */
     function turn(direction: 'next' | 'prev') {
         const state = reader.state
-        if (!state || state.loading || state.error) return
+        if (!state || !reader.ready) return
         if (reader.atEnd) {
             if (direction === 'prev') reader.atEnd = false
             // The next sibling may have arrived since.
