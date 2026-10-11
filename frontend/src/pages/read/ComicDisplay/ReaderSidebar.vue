@@ -75,18 +75,28 @@
                 <div v-if="reader.seriesSettings.mode == null" class="text-fg-muted mt-1 text-xs">
                     Auto: {{ reader.autoMode === 'longstrip' ? 'Longstrip' : 'Paged' }}
                 </div>
-                <ASlider
-                    v-if="reader.mode === 'longstrip'"
-                    class="mt-4"
-                    :model-value="reader.settings.longstripWidth"
-                    label="Width"
-                    show-value
-                    :format-value="width => `${width}%`"
-                    :min="10"
-                    :max="100"
-                    :step="5"
-                    @update:model-value="setLongstripWidth"
-                />
+                <template v-if="reader.mode === 'longstrip'">
+                    <ASlider
+                        class="mt-4"
+                        :model-value="reader.settings.longstripWidth"
+                        label="Width"
+                        show-value
+                        :format-value="width => `${width}%`"
+                        :min="10"
+                        :max="100"
+                        :step="5"
+                        @update:model-value="setLongstripWidth"
+                    />
+                    <ASlider
+                        class="mt-4"
+                        v-model="reader.settings.longstripTapScroll"
+                        label="Tap scroll"
+                        show-value
+                        :format-value="v => `${v}%`"
+                        :min="10"
+                        :step="5"
+                    />
+                </template>
                 <template v-if="reader.mode === 'paged'">
                     <div class="text-fg-muted mt-4 mb-2 text-sm" aria-hidden="true">Direction</div>
                     <ASegmented

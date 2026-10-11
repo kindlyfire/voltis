@@ -59,6 +59,7 @@ func registerStaticRoutes(e *echo.Echo, dir string) {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		} else {
 			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
 			if !exists {
 				r.URL.Path = "/" // SPA fallback: serve index.html
 			}

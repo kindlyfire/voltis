@@ -1,4 +1,4 @@
-import { toValue, watch, type MaybeRefOrGetter, type Ref } from 'vue'
+import { onScopeDispose, toValue, watch, type MaybeRefOrGetter, type Ref } from 'vue'
 import { usersApi } from '@/utils/api/users'
 import type { LayoutKind } from './BookDisplay/readingLayout'
 import { showReaderTutorial } from './ReaderTutorialModal.vue'
@@ -18,6 +18,9 @@ export function useReaderTutorial(
     const patch = usersApi.usePatchPreferences()
     const key = FLAG[kind]
     let shown = false
+    // Leaving the reader must not leave its tutorial open over the next page.
+    const controller = new AbortController()
+    onScopeDispose(() => controller.abort())
 
     watch(
         [ready, () => qMe.data.value],
@@ -26,9 +29,12 @@ export function useReaderTutorial(
             // Set before the await: the reader stays mounted across
             // sibling-entry navigation, which flips `ready` false→true again.
             shown = true
-            void showReaderTutorial(kind, toValue(bookMode), toValue(flipped)).then(() => {
-                patch.mutate({ tutorials: { [key]: true } })
-            })
+            void showReaderTutorial(kind, toValue(bookMode), toValue(flipped), {
+                signal: controller.signal,
+            }).then(
+                () => patch.mutate({ tutorials: { [key]: true } }),
+                () => {}
+            )
         },
         { immediate: true }
     )

@@ -219,6 +219,9 @@ func (lr *LibraryRoutes) upsert(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return err
 	}
+	if idOrNew == "new" && req.Type != models.LibraryTypeComics && req.Type != models.LibraryTypeBooks {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid type: "+req.Type)
+	}
 
 	// A scan of a library with no sources has no root to guard removals, so it would delete
 	// everything.

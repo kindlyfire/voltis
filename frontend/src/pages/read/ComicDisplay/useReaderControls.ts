@@ -40,7 +40,8 @@ export function useReaderControls() {
             // Key and click scrolls are reading, so they arm the strip before it moves.
             reader.armed = true
             if (direction === 'next' ? !isAtBottom() : !isAtTop()) {
-                scrollByViewport(direction === 'next' ? 0.85 : -0.85)
+                const factor = reader.settings.longstripTapScroll / 100
+                scrollByViewport(direction === 'next' ? factor : -factor)
             } else if (direction === 'prev') {
                 reader.goToSibling('prev')
             } else {

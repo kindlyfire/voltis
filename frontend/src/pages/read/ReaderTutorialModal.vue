@@ -145,15 +145,16 @@ const lines = computed(() => {
 </script>
 
 <script lang="ts">
-import { Modals } from '@/utils/modals'
+import { Modals, type ShowOptions } from '@/utils/modals'
 import Self from './ReaderTutorialModal.vue'
 
 export function showReaderTutorial(
     kind: ReaderKind,
     bookMode?: LayoutKind,
-    flipped?: boolean
+    flipped?: boolean,
+    options?: ShowOptions
 ): Promise<void> {
-    return Modals.show(Self, { kind, bookMode, flipped })
+    return Modals.show(Self, { kind, bookMode, flipped }, options)
 }
 </script>
 

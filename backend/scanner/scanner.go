@@ -231,9 +231,9 @@ func runScan(ctx context.Context, in ScanInput, tc *tasks.TaskContext, notify No
 
 func newFileScanner(in ScanInput) FileScanner {
 	switch in.LibraryType {
-	case "comics":
+	case models.LibraryTypeComics:
 		return &ComicsScanner{}
-	case "books":
+	case models.LibraryTypeBooks:
 		return &BooksScanner{Infer: in.Settings.BookSeriesInference != models.BookSeriesInferenceOff}
 	default:
 		return nil

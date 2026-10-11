@@ -72,6 +72,11 @@ type Library struct {
 }
 
 const (
+	LibraryTypeComics = "comics"
+	LibraryTypeBooks  = "books"
+)
+
+const (
 	BookSeriesInferenceOff          = "off"
 	BookSeriesInferenceConservative = "conservative"
 )

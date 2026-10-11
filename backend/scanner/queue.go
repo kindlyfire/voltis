@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"sync"
 
 	"voltis/db"
 	"voltis/lib/fp"
@@ -19,12 +20,16 @@ type Queue struct {
 	manager *tasks.Manager
 	pool    *pgxpool.Pool
 	def     *tasks.TaskDef
+
+	// mu guards libs. Each library's mutex serialises its pending check and push in Enqueue.
+	mu   sync.Mutex
+	libs map[string]*sync.Mutex
 }
 
 func NewQueue(manager *tasks.Manager, pool *pgxpool.Pool, notify Notifier, store *metadata.Store) *Queue {
 	def := NewScanTask(notify, store)
 	manager.Register(def)
-	return &Queue{manager: manager, pool: pool, def: def}
+	return &Queue{manager: manager, pool: pool, def: def, libs: map[string]*sync.Mutex{}}
 }
 
 // Scanning reports whether a scan of the library runs or waits.
@@ -35,7 +40,23 @@ func (q *Queue) Scanning(libraryID string) bool {
 	})
 }
 
+// libraryLock returns the library's mutex. Entries are never removed; there are few libraries.
+func (q *Queue) libraryLock(id string) *sync.Mutex {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	l, ok := q.libs[id]
+	if !ok {
+		l = &sync.Mutex{}
+		q.libs[id] = l
+	}
+	return l
+}
+
 func (q *Queue) Enqueue(libraryID string, force bool, filterPaths []string) (string, error) {
+	l := q.libraryLock(libraryID)
+	l.Lock()
+	defer l.Unlock()
+
 	if len(filterPaths) == 0 {
 		for _, p := range q.manager.Pending(TaskName) {
 			si, ok := p.Input.(ScanInput)

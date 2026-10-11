@@ -37,6 +37,7 @@ function render(parentId: string | null, siblings: Partial<Siblings>) {
         seriesSettings: {},
         settings: {
             longstripWidth: 100,
+            longstripTapScroll: 70,
             fit: 'screen',
             spread: 'auto',
             zoomWide: true,

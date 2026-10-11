@@ -21,7 +21,7 @@ data class SeriesSettings(val mode: ReaderMode? = null, val direction: ReadingDi
 data class ReaderSettings(
     /** Percent of the viewport, 10 to 100. */
     val longstripWidth: Int = 100,
-    /** Percent of the viewport a longstrip zone tap scrolls, 10 to 100. Not on the web. */
+    /** Percent of the viewport a longstrip zone tap scrolls, 10 to 100. */
     val longstripTapScroll: Int = 70,
     val fit: Fit = Fit.Screen,
     val spread: SpreadSetting = SpreadSetting.Auto,

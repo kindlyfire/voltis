@@ -16,6 +16,8 @@ import {
  * leave transition is done: focus goes back and the entry is removed.
  */
 export interface ModalEntryHooks {
+    /** The dialog content mounted. Before that there is no leave transition to end the entry. */
+    mounted(): void
     afterLeave(): void
 }
 
@@ -32,6 +34,8 @@ interface ModalEntry {
 export interface ShowOptions {
     /** Where focus goes on close when the element that opened the modal is gone. */
     focusFallback?: () => HTMLElement | null | undefined
+    /** Cancels the modal: it closes without resolving, and the promise rejects with the signal's reason. */
+    signal?: AbortSignal
 }
 
 const entries = shallowRef<ModalEntry[]>([])
@@ -59,12 +63,19 @@ export const Modals = {
         props: Record<string, unknown> = {},
         options: ShowOptions = {}
     ): Promise<T> {
-        return new Promise<T>(resolve => {
+        return new Promise<T>((resolve, reject) => {
+            const { signal } = options
+            if (signal?.aborted) return reject(signal.reason)
+
             const id = nextId++
             const open = ref(true)
             const opener = captureOpener()
 
+            let mounted = false
             const hooks: ModalEntryHooks = {
+                mounted() {
+                    mounted = true
+                },
                 afterLeave() {
                     const target = opener?.isConnected
                         ? opener
@@ -77,8 +88,17 @@ export const Modals = {
             const close = (data?: any) => {
                 if (!open.value) return
                 open.value = false
+                signal?.removeEventListener('abort', onAbort)
                 resolve(data)
             }
+
+            function onAbort() {
+                if (!open.value) return
+                open.value = false
+                if (!mounted) entries.value = entries.value.filter(e => e.id !== id)
+                reject(signal!.reason)
+            }
+            signal?.addEventListener('abort', onAbort, { once: true })
 
             entries.value = [
                 ...entries.value,

@@ -62,6 +62,12 @@ func TestLibraryValidation(t *testing.T) {
 		"sources": []map[string]any{{"path_uri": "/nonexistent/path"}},
 	}).Assert(t, 400)
 
+	bad := c.Post("/api/libraries/new", map[string]any{
+		"name": "test", "type": "book",
+		"sources": []map[string]any{{"path_uri": t.TempDir()}},
+	}).Assert(t, 400).JSON()
+	assertEq(t, s(bad["error"]), "Invalid type: book")
+
 	c.Delete("/api/libraries/nonexistent").Assert(t, 404)
 }
 

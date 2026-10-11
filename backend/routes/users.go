@@ -275,6 +275,7 @@ func (ur *UserRoutes) patchPreferences(c echo.Context) error {
 	return c.JSON(http.StatusOK, userToDTO(updated))
 }
 
+// Nil Permissions (omitted or null) mean none on create and unchanged on update.
 type upsertUserRequest struct {
 	Username    string   `json:"username"`
 	Email       *string  `json:"email"`
@@ -295,7 +296,7 @@ func (ur *UserRoutes) upsert(c echo.Context) error {
 		return err
 	}
 
-	if admin.ID == idOrNew && !slices.Contains(req.Permissions, "ADMIN") {
+	if admin.ID == idOrNew && req.Permissions != nil && !slices.Contains(req.Permissions, "ADMIN") {
 		return echo.NewHTTPError(http.StatusForbidden, "Cannot remove admin permission from yourself")
 	}
 
@@ -330,7 +331,7 @@ func (ur *UserRoutes) upsert(c echo.Context) error {
 			}
 			_, err := tx.Exec(ctx, `
 				INSERT INTO users (id, created_at, updated_at, username, email, password_hash, permissions)
-				VALUES ($1, $2, $3, $4, $5, $6, $7)
+				VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::text[], '{}'))
 			`, id, now, now, req.Username, email, newHash, req.Permissions)
 			return err
 		})
@@ -364,7 +365,7 @@ func (ur *UserRoutes) upsert(c echo.Context) error {
 			return err
 		}
 
-		if slices.Contains(existing.Permissions, "ADMIN") && !slices.Contains(req.Permissions, "ADMIN") {
+		if req.Permissions != nil && slices.Contains(existing.Permissions, "ADMIN") && !slices.Contains(req.Permissions, "ADMIN") {
 			otherAdmin, err := db.SelectScalar[bool](ctx, tx,
 				"SELECT EXISTS (SELECT 1 FROM users WHERE permissions @> ARRAY['ADMIN'] AND id <> $1)", idOrNew)
 			if err != nil {
@@ -383,7 +384,7 @@ func (ur *UserRoutes) upsert(c echo.Context) error {
 			UPDATE users SET
 				username = COALESCE($1::text, username),
 				password_hash = COALESCE($2::text, password_hash),
-				permissions = $3,
+				permissions = COALESCE($3::text[], permissions),
 				email = CASE WHEN $4 THEN $5::text ELSE email END,
 				updated_at = $6
 			WHERE id = $7

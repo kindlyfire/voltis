@@ -93,15 +93,20 @@ func (cr *CustomListRoutes) getListForUser(c echo.Context, user *models.User, re
 		return cl, err
 	}
 
-	if cl.UserID != user.ID {
+	return cl, listAccess(cl, user.ID, requireOwner)
+}
+
+// listAccess hides other users' private lists and, when requireOwner, refuses their other lists.
+func listAccess(cl models.CustomList, userID string, requireOwner bool) error {
+	if cl.UserID != userID {
 		if cl.Visibility == "private" {
-			return cl, echo.NewHTTPError(http.StatusNotFound, "List not found")
+			return echo.NewHTTPError(http.StatusNotFound, "List not found")
 		}
 		if requireOwner {
-			return cl, echo.NewHTTPError(http.StatusForbidden, "Not allowed")
+			return echo.NewHTTPError(http.StatusForbidden, "Not allowed")
 		}
 	}
-	return cl, nil
+	return nil
 }
 
 // Handlers
@@ -369,6 +374,30 @@ func lockLists(ctx context.Context, tx pgx.Tx, ids ...string) error {
 	return err
 }
 
+// lockOwnedLists locks the lists like lockLists, then fails with 404 for a missing or hidden
+// list and 403 for one the user doesn't own. 404 takes precedence over 403. ids must be unique.
+func lockOwnedLists(ctx context.Context, tx pgx.Tx, userID string, ids []string) error {
+	lists, err := db.Select[models.CustomList](ctx, tx,
+		"SELECT * FROM custom_lists WHERE id = ANY($1) ORDER BY id FOR UPDATE", ids)
+	if err != nil {
+		return err
+	}
+	if len(lists) != len(ids) {
+		return echo.NewHTTPError(http.StatusNotFound, "List not found")
+	}
+	for _, cl := range lists {
+		if err := listAccess(cl, userID, false); err != nil {
+			return err
+		}
+	}
+	for _, cl := range lists {
+		if err := listAccess(cl, userID, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // createEntryInner expects the caller to hold lockUserData for the content.
 func createEntryInner(ctx context.Context, tx pgx.Tx, listID string, contentID string, notes *string) error {
 	if err := lockLists(ctx, tx, listID); err != nil {
@@ -456,21 +485,13 @@ func (cr *CustomListRoutes) bulkCreateEntries(c echo.Context) error {
 
 	ctx := reqCtx(c)
 	listIDs, ids := fp.Dedup(req.ListIDs), fp.Dedup(req.IDs)
-	ownedCount, err := db.SelectScalar[int](ctx, cr.pool,
-		"SELECT COUNT(*) FROM custom_lists WHERE id = ANY($1) AND user_id = $2", listIDs, user.ID)
-	if err != nil {
-		return err
-	}
-	if ownedCount != len(listIDs) {
-		return echo.NewHTTPError(http.StatusForbidden, "Not allowed")
-	}
 
 	var count int64
 	err = db.WithTx(ctx, cr.pool, func(tx pgx.Tx) error {
 		if err := lockUserData(ctx, tx, user.ID, ids...); err != nil {
 			return err
 		}
-		if err := lockLists(ctx, tx, listIDs...); err != nil {
+		if err := lockOwnedLists(ctx, tx, user.ID, listIDs); err != nil {
 			return err
 		}
 		args := pgx.NamedArgs{"ids": ids, "now": time.Now().UTC(), "list_ids": listIDs}

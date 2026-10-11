@@ -7,6 +7,7 @@
                 class="a-dialog"
                 :class="[`a-dialog--${size}`, `a-dialog--${variant}`]"
                 v-bind="description ? {} : { 'aria-describedby': undefined }"
+                @vue:mounted="entry?.mounted()"
                 @open-auto-focus="onOpenAutoFocus"
                 @close-auto-focus="onCloseAutoFocus"
                 @interact-outside="!dismissible && $event.preventDefault()"

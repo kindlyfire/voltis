@@ -1,6 +1,6 @@
 type ClickZone = 'prev' | 'next' | 'menu'
 
-export const HEIGHT_ZONE = 0.2
+export const HEIGHT_ZONE = 0.3
 
 /** `flipped` swaps the left and right thirds; the top and bottom bands stay. */
 export function getClickZone(e: MouseEvent, o: { flipped?: boolean } = {}): ClickZone {

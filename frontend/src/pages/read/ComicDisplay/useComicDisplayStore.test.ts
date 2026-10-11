@@ -245,6 +245,7 @@ it('reads choices from the server and ignores stored browser ones', () => {
     localStorage.removeItem('reader:comics')
     expect(useReaderStore().settings).toEqual({
         longstripWidth: 100,
+        longstripTapScroll: 70,
         fit: 'screen',
         spread: 'auto',
         zoomWide: true,
@@ -256,13 +257,19 @@ it('reads choices from the server and ignores stored browser ones', () => {
         'reader:comics',
         JSON.stringify({
             longstripWidth: 50,
+            longstripTapScroll: 150,
             fit: 'sideways',
             seriesSettings: { s_1: { mode: 'paged' } },
         })
     )
     const reader = useReaderStore()
     localStorage.removeItem('reader:comics')
-    expect(reader.settings).toMatchObject({ longstripWidth: 50, fit: 'screen', spread: 'auto' })
+    expect(reader.settings).toMatchObject({
+        longstripWidth: 50,
+        longstripTapScroll: 70,
+        fit: 'screen',
+        spread: 'auto',
+    })
     reader.setContent({ contentId: 'c_1', initialPage: 'resume' })
     expect(reader.seriesSettings.mode).toBeNull()
 

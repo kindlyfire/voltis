@@ -1,5 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { nextTick } from 'vue'
 import { hasOpenModal, ModalContainer, Modals } from './modals'
 import { addOverlays, settle, TestDialog as Dialog } from './modalTesting'
 
@@ -40,6 +41,44 @@ describe('Modals', () => {
         expect(result).toHaveBeenCalledTimes(1)
         expect(result).toHaveBeenCalledWith('first')
         expect(hasOpenModal.value).toBe(false)
+        expect(wrapper.findAllComponents(Dialog)).toHaveLength(0)
+        wrapper.unmount()
+    })
+
+    it('rejects without resolving when its signal aborts, at any point', async () => {
+        const { wrapper, closeLast } = render()
+        const resolved = vi.fn()
+        const reason = new Error('left')
+
+        const open = new AbortController()
+        const rejected = expect(
+            Modals.show(Dialog, {}, { signal: open.signal }).then(resolved)
+        ).rejects.toBe(reason)
+        await settle()
+        const close = closeLast()
+        open.abort(reason)
+        await rejected
+        await settle()
+        close('late')
+        expect(resolved).not.toHaveBeenCalled()
+        expect(hasOpenModal.value).toBe(false)
+        expect(wrapper.findAllComponents(Dialog)).toHaveLength(0)
+
+        // Before the dialog content mounted there is no leave transition to remove the entry.
+        const early = new AbortController()
+        const earlyRejected = expect(
+            Modals.show(Dialog, {}, { signal: early.signal })
+        ).rejects.toBe(reason)
+        await nextTick()
+        early.abort(reason)
+        await earlyRejected
+        await settle()
+        expect(wrapper.findAllComponents(Dialog)).toHaveLength(0)
+
+        await expect(Modals.show(Dialog, {}, { signal: AbortSignal.abort(reason) })).rejects.toBe(
+            reason
+        )
+        await settle()
         expect(wrapper.findAllComponents(Dialog)).toHaveLength(0)
         wrapper.unmount()
     })

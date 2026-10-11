@@ -82,6 +82,9 @@ func TestCustomListVisibility(t *testing.T) {
 			},
 			func() *response { return other.Post(base+"/entries/ctc_dummy", map[string]any{"notes": "x"}) },
 			func() *response { return other.Delete(base + "/entries/ctc_dummy") },
+			func() *response {
+				return other.Post("/api/custom-lists/entries", map[string]any{"list_ids": []string{id}, "ids": []string{"ct_dummy"}})
+			},
 		} {
 			assertEq(t, s(do().Assert(t, want).JSON()["error"]), message)
 		}

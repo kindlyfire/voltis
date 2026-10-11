@@ -26,6 +26,8 @@ type SeriesSettings = {
  * functions: a `.catch({})` value would be one object shared by every parse. */
 const zComicSettings = z.object({
     longstripWidth: z.number().min(10).max(100).catch(100),
+    /** Percent of the viewport a zone or key scrolls in longstrip. */
+    longstripTapScroll: z.number().min(10).max(100).catch(70),
     fit: z.enum(['screen', 'width', 'height']).catch('screen'),
     spread: z.enum(['single', 'double', 'auto']).catch('auto'),
     zoomWide: z.boolean().catch(true),

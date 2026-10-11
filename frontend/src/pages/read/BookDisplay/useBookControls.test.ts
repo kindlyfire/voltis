@@ -112,10 +112,10 @@ describe('click zones', () => {
         } as unknown as MouseEvent)
     }
 
-    it('splits the viewport the way the comic reader does', () => {
+    it('splits the viewport the way the comic reader does, with 30% bands', () => {
         window.innerHeight = 800
-        expect(zone(450, 40)).toBe('prev')
-        expect(zone(450, 760)).toBe('next')
+        expect(zone(450, 200)).toBe('prev')
+        expect(zone(450, 600)).toBe('next')
         expect(zone(50, 400)).toBe('prev')
         expect(zone(850, 400)).toBe('next')
         expect(zone(450, 400)).toBe('menu')

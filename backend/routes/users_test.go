@@ -17,7 +17,7 @@ func TestUserCRUD(t *testing.T) {
 
 	// Create
 	user := c.Post("/api/users/new", map[string]any{
-		"username": "newuser", "password": "newpass123", "permissions": []string{"read"},
+		"username": "newuser", "password": "newpass123",
 	}).Assert(t, 200).JSON()
 
 	assertEq(t, s(user["username"]), "newuser")
@@ -25,6 +25,7 @@ func TestUserCRUD(t *testing.T) {
 	_, hasHash := user["password_hash"]
 	assertEq(t, hasPassword, false)
 	assertEq(t, hasHash, false)
+	assertEq(t, asJSON(t, user["permissions"]), "[]")
 	userID := s(user["id"])
 
 	// List again
@@ -37,6 +38,11 @@ func TestUserCRUD(t *testing.T) {
 	}).Assert(t, 200).JSON()
 
 	assertEq(t, s(updated["username"]), "updateduser")
+
+	// Omitted permissions leave them unchanged
+	kept := c.Post("/api/users/"+userID, map[string]any{"username": "keptuser"}).Assert(t, 200).JSON()
+	assertEq(t, s(kept["username"]), "keptuser")
+	assertEq(t, asJSON(t, kept["permissions"]), `["read","write"]`)
 
 	// Delete
 	c.Delete("/api/users/"+userID).Assert(t, 200)
@@ -133,6 +139,11 @@ func TestUserAdminDemotionGuards(t *testing.T) {
 		"username": "admin2", "permissions": []string{},
 	}).Assert(t, 403)
 
+	users = b.Get("/api/users").Assert(t, 200).JSONArray()
+	assertEq(t, countAdmins(t, users), 1)
+
+	// Omitted permissions leave the sole admin's untouched
+	b.Post("/api/users/"+adminBID, map[string]any{"username": "admin2"}).Assert(t, 200)
 	users = b.Get("/api/users").Assert(t, 200).JSONArray()
 	assertEq(t, countAdmins(t, users), 1)
 }
