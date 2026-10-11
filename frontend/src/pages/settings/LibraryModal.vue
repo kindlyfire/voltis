@@ -220,7 +220,7 @@
                 Delete
             </AButton>
             <p
-                v-if="!hasSources"
+                v-if="!hasSources && !isNext"
                 :id="warningId"
                 class="text-fg-muted flex items-center gap-1 text-sm"
             >
@@ -232,10 +232,10 @@
                 type="submit"
                 :form="formId"
                 :loading="form.mutation.isPending.value"
-                :disabled="!hasSources"
-                :aria-describedby="!hasSources ? warningId : undefined"
+                :disabled="!hasSources && !isNext"
+                :aria-describedby="!hasSources && !isNext ? warningId : undefined"
             >
-                {{ isNew ? 'Create and scan' : 'Save' }}
+                {{ isNext ? 'Next' : isNew ? 'Create and scan' : 'Save' }}
             </AButton>
         </template>
     </ADialog>
@@ -351,8 +351,19 @@ const inferenceHint = computed(() =>
         : undefined
 )
 
+// A new library without sources submits to the sources tab, once the general fields are valid.
+const isNext = computed(() => isNew.value && tab.value === 'general' && !hasSources.value)
+
 // A field that fails validation may sit in a hidden tab: show it, so the form can focus it.
-function onSubmit(e: Event) {
+async function onSubmit(e: Event) {
+    if (isNext.value) {
+        e.preventDefault()
+        if (!form.validateFields(['name', 'type'], e)) return
+        tab.value = 'sources'
+        await nextTick()
+        addSourceButton.value?.$el.focus()
+        return
+    }
     if (!hasSources.value) return e.preventDefault()
     form.onSubmit(e)
     const field = form.errors.value[0]?.path[0]

@@ -97,6 +97,7 @@ async function open(libraryId = 'l_1', close: (createdId?: string) => void = () 
     const wrapper = mount(LibraryModal, {
         props: { open: true, close, libraryId },
         global: { stubs, plugins: [VueQueryPlugin] },
+        attachTo: document.body, // so focus can be asserted
     })
     await flushPromises()
     const tab = (name: string) => wrapper.findAll('[role="tab"]').find(t => t.text() === name)!
@@ -163,14 +164,26 @@ describe('LibraryModal', () => {
         expect(button('Save').attributes('disabled')).toBeDefined()
     })
 
-    it('creates a library only with a source, and closes with its id', async () => {
+    it('leads a new library to its sources, creates it only with one, and closes with its id', async () => {
         const close = vi.fn()
-        const { wrapper, button, submit } = await open('new', close)
-        expect(wrapper.text()).toContain('No sources')
-        expect(button('Create and scan').attributes('disabled')).toBeDefined()
+        const { wrapper, tab, button, submit } = await open('new', close)
+        expect(wrapper.text()).not.toContain('No sources')
+        expect(button('Next').attributes('disabled')).toBeUndefined()
+
+        await submit()
+        expect(tab('General').attributes('aria-selected')).toBe('true')
+        expect(wrapper.text()).toContain('Name is required')
+        expect(upserted).toHaveLength(0)
 
         await wrapper.find('input').setValue('Comics')
         wrapper.findComponent(ASelect).vm.$emit('update:modelValue', 'comics')
+        await submit()
+        expect(tab('Sources').attributes('aria-selected')).toBe('true')
+        expect(document.activeElement?.textContent?.trim()).toBe('Browse folders…')
+        expect(upserted).toHaveLength(0)
+        expect(wrapper.text()).toContain('No sources')
+        expect(button('Create and scan').attributes('disabled')).toBeDefined()
+
         await button('Add path manually').trigger('click')
         await wrapper.find('input[placeholder="/path/to/folder"]').setValue('/comics')
         expect(wrapper.text()).not.toContain('No sources')

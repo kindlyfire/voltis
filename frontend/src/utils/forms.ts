@@ -68,6 +68,14 @@ export function useForm<TSchema extends z.ZodTypeAny, TMutationReturn>(
         }
     }
 
+    // Take the user to the first problem.
+    function focusFirstError(e?: Event) {
+        const form = e?.target instanceof HTMLFormElement ? e.target : null
+        if (form) {
+            void nextTick(() => form.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus())
+        }
+    }
+
     function onSubmit(e?: Event) {
         if (e) {
             e.preventDefault()
@@ -77,16 +85,23 @@ export function useForm<TSchema extends z.ZodTypeAny, TMutationReturn>(
         if (!result.success) {
             console.log('Form errors:', result.error.issues)
             state.errors = result.error.issues
-            // Take the user to the first problem.
-            const form = e?.target instanceof HTMLFormElement ? e.target : null
-            if (form) {
-                void nextTick(() =>
-                    form.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus()
-                )
-            }
+            focusFirstError(e)
             return
         }
         mutation.mutate(result.data)
+    }
+
+    /**
+     * Validates some top-level fields without submitting, as for a step of a multi-step form.
+     * Shows their errors, focuses the first, and returns whether they are valid.
+     */
+    function validateFields(names: (keyof z.input<TSchema> & string)[], e?: Event) {
+        const result = options.schema.safeParse(state.values)
+        const inNames = (issue: z.ZodIssue) => names.some(name => name === issue.path[0])
+        const issues = result.error?.issues.filter(inNames) ?? []
+        state.errors = state.errors.filter(issue => !inNames(issue)).concat(issues)
+        if (issues.length) focusFirstError(e)
+        return !issues.length
     }
 
     function setValues(values: z.input<TSchema>) {
@@ -146,6 +161,7 @@ export function useForm<TSchema extends z.ZodTypeAny, TMutationReturn>(
         setValue,
         field,
         onSubmit,
+        validateFields,
         reset,
         resetField,
         mutation,
