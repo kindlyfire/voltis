@@ -13,6 +13,7 @@ import (
 	"voltis/db"
 	"voltis/lib/tasks"
 	"voltis/models"
+	"voltis/scanner"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,12 +23,49 @@ import (
 type TaskRoutes struct {
 	pool    *pgxpool.Pool
 	manager *tasks.Manager
+	scans   *scanner.Queue
 }
 
 func (tr *TaskRoutes) Register(g *echo.Group) {
 	g.GET("", adminOnly(tr.list))
 	g.GET("/snapshot", adminOnly(tr.snapshot))
 	g.GET("/:id/logs", adminOnly(tr.logs))
+	g.POST("/:id/cancel", adminOnly(tr.cancel))
+	g.POST("/:id/retry", adminOnly(tr.retry))
+}
+
+func (tr *TaskRoutes) cancel(c echo.Context) error {
+	id := c.Param("id")
+	err := tr.manager.Cancel(id)
+	if !errors.Is(err, tasks.ErrNotFound) {
+		if err != nil {
+			return err
+		}
+		return okResponse(c)
+	}
+	exists, err := db.SelectScalar[bool](reqCtx(c), tr.pool, "SELECT EXISTS (SELECT 1 FROM tasks WHERE id = $1)", id)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return echo.NewHTTPError(http.StatusConflict, "Task already finished")
+	}
+	return echo.NewHTTPError(http.StatusNotFound, "Task not found")
+}
+
+func (tr *TaskRoutes) retry(c echo.Context) error {
+	id, err := tr.scans.Retry(reqCtx(c), c.Param("id"))
+	switch {
+	case errors.Is(err, scanner.ErrTaskNotFound):
+		return echo.NewHTTPError(http.StatusNotFound, "Task not found")
+	case errors.Is(err, scanner.ErrLibraryGone):
+		return echo.NewHTTPError(http.StatusNotFound, "Library not found")
+	case errors.Is(err, scanner.ErrNotFinished):
+		return echo.NewHTTPError(http.StatusConflict, "Task hasn't finished")
+	case err != nil:
+		return err
+	}
+	return c.JSON(http.StatusOK, map[string]string{"task_id": id})
 }
 
 type taskListQuery struct {

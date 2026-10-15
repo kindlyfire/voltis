@@ -16,6 +16,7 @@ import (
 	"voltis/db"
 	"voltis/lib/epub"
 	"voltis/lib/fp"
+	"voltis/lib/notify"
 	"voltis/metadata"
 	"voltis/models"
 
@@ -74,7 +75,8 @@ func TestFingerprintRelativePathsIndexAbsolutelyAndKeepTheirSpelling(t *testing.
 		t.Fatalf("series = %+v, want the stored spelling", refs)
 	}
 
-	w := newWriter(ScanInput{LibraryID: lib}, nil, nil, res, fps, refs)
+	w, err := newWriter(context.Background(), ScanInput{LibraryID: lib}, nil, nil, res, fps, refs)
+	must(t, err)
 	if id, ok := w.dirSeries(filepath.Join(cwd, "S")); !ok || id != "p1" {
 		t.Fatalf("dirSeries = %q, %v, want the series indexed by its absolute directory", id, ok)
 	}
@@ -592,7 +594,8 @@ func TestFlushNoOpFinalStillEmits(t *testing.T) {
 	pool := newTestPool(t)
 	lib := newTestLibrary(t, pool, "comics")
 	notify := &recorder{}
-	w := newWriter(ScanInput{LibraryID: lib}, nil, notify, newResolver(), nil, nil)
+	w, err := newWriter(context.Background(), ScanInput{LibraryID: lib}, nil, notify, newResolver(), nil, nil)
+	must(t, err)
 	rig := newRig(t, w)
 	go commitLoop(rig.ctx, pool, testStore, &ComicsScanner{}, lib, rig.flushes, rig.done)
 	rig.start()
@@ -1450,5 +1453,73 @@ func TestFlushRecentKeepsTheNewestEntries(t *testing.T) {
 	}
 	if !slices.Equal(got, want[:RecentCap]) {
 		t.Fatalf("recent = %v, want %v", got, want[:RecentCap])
+	}
+}
+
+func TestCommitNotifiesReadersOfNewContent(t *testing.T) {
+	ctx := context.Background()
+	r := newTestScan(t, "comics")
+	r.place(comicResult("/lib/E/ch1.cbz", "ch1", "E", "/lib/E"), comicResult("/lib/E/ch2.cbz", "ch2", "E", "/lib/E"))
+	r.commit(false)
+
+	// Who follows E: reading, completed and starred readers, and one with only a read chapter.
+	// Plan to read, dropped, and a read chapter that is no longer valid get nothing.
+	exec(t, r.pool, `INSERT INTO users (id, username, password_hash, permissions) VALUES
+		('admin', 'admin', 'x', ARRAY['ADMIN']), ('reader', 'reader', 'x', '{}'), ('finisher', 'finisher', 'x', '{}'),
+		('starrer', 'starrer', 'x', '{}'), ('planner', 'planner', 'x', '{}'), ('dropper', 'dropper', 'x', '{}'),
+		('sampler', 'sampler', 'x', '{}'), ('skimmer', 'skimmer', 'x', '{}')`)
+	exec(t, r.pool, `INSERT INTO content (id, library_id, parent_id, uri_part, uri, type, valid)
+		VALUES ('old', $1, $2, 'old', 'comic/E/old', 'comic', false)`, r.lib, contentIDByURI(t, r.pool, r.lib, "comic/E"))
+	exec(t, r.pool, `INSERT INTO user_to_content (id, user_id, library_id, uri, status, starred, last_read_at) VALUES
+		('a1', 'reader', $1, 'comic/E', 'reading', false, NULL),
+		('a2', 'finisher', $1, 'comic/E', 'completed', false, NULL),
+		('a3', 'starrer', $1, 'comic/E', 'on_hold', true, NULL),
+		('a4', 'planner', $1, 'comic/E', 'plan_to_read', false, NULL),
+		('a5', 'dropper', $1, 'comic/E', 'dropped', false, NULL),
+		('a6', 'sampler', $1, 'comic/E/ch1', NULL, false, now()),
+		('a7', 'skimmer', $1, 'comic/E/old', NULL, false, now()),
+		('a8', 'reader', $1, 'comic/N', 'reading', false, NULL)`, r.lib)
+	exec(t, r.pool, "INSERT INTO tasks (id, name, status) VALUES ('t_scan', 'scan_library', 1)")
+	_, err := notify.CreateScanItems(ctx, r.pool, "t_scan", notify.ScanData{LibraryID: r.lib, LibraryName: "Test"})
+	must(t, err)
+
+	r.reload()
+	r.w.start, r.w.task = time.Now(), "t_scan"
+	chapter := func(series, part, number string) Result {
+		return withMeta(comicResult("/lib/"+series+"/"+part+".cbz", part, series, "/lib/"+series),
+			metadata.Fields{Number: metadata.Val(number)})
+	}
+	checkpointed := func() {
+		t.Helper()
+		var data struct {
+			Saved  Counts `json:"saved"`
+			Failed int    `json:"failed"`
+		}
+		must(t, r.pool.QueryRow(ctx, "SELECT data FROM notifications WHERE task_id = 't_scan'").Scan(&data))
+		if data.Saved != r.w.prog.Saved || data.Failed != r.w.prog.Failed {
+			t.Fatalf("checkpoint = %+v, want %+v and %d failed", data, r.w.prog.Saved, r.w.prog.Failed)
+		}
+	}
+
+	// N is new in this scan, even from its second flush on. An existing chapter updated adds nothing.
+	r.place(chapter("E", "ch3", "3"), chapter("N", "ch1", "1"), comicResult("/lib/E/ch1.cbz", "ch1", "E", "/lib/E"))
+	r.commit(false)
+	checkpointed()
+	r.place(chapter("E", "ch4", "4"), chapter("N", "ch2", "2"))
+	r.commit(false)
+	checkpointed()
+	if saved := r.w.prog.Saved; saved.Added != 4 || saved.Updated != 1 {
+		t.Fatalf("saved = %+v", saved)
+	}
+
+	got, err := db.SelectScalars[string](ctx, r.pool, `SELECT user_id || ':' || (data->>'count') || ':' || (data->>'unit')
+		FROM notifications WHERE kind = 'new_content' ORDER BY user_id`)
+	must(t, err)
+	if want := []string{"finisher:2:chapter", "reader:2:chapter", "sampler:2:chapter", "starrer:2:chapter"}; !slices.Equal(got, want) {
+		t.Fatalf("items = %v, want %v", got, want)
+	}
+	users := slices.Compact(slices.Sorted(slices.Values(r.users)))
+	if want := []string{"finisher", "reader", "sampler", "starrer"}; !slices.Equal(users, want) {
+		t.Fatalf("notified = %v, want %v", users, want)
 	}
 }

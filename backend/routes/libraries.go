@@ -327,15 +327,40 @@ var autoMatching sync.WaitGroup
 func (lr *LibraryRoutes) delete(c echo.Context) error {
 	ctx := reqCtx(c)
 	id := c.Param("id")
-	result, err := lr.pool.Exec(ctx, "DELETE FROM libraries WHERE id = $1", id)
+	// Under the scan commits' lock, so no item lands between collecting recipients and the cascade.
+	var users []string
+	var deleted int64
+	err := db.WithTx(ctx, lr.pool, func(tx pgx.Tx) error {
+		if err := db.LockMetadata(ctx, tx, id); err != nil {
+			return err
+		}
+		// The delete cascades readers' new-content notifications away.
+		var err error
+		users, err = db.SelectScalars[string](ctx, tx, `
+			SELECT user_id FROM notifications
+			WHERE content_id IN (SELECT id FROM content WHERE library_id = $1)
+			   OR (kind = 'scan' AND data->>'library_id' = $1)
+			ORDER BY group_key NULLS FIRST, id FOR UPDATE`, id)
+		if err != nil {
+			return err
+		}
+		// Locked in Clear's order, so the cascade can't deadlock with it.
+		slices.Sort(users)
+		users = slices.Compact(users)
+		result, err := tx.Exec(ctx, "DELETE FROM libraries WHERE id = $1", id)
+		deleted = result.RowsAffected()
+		return err
+	})
 	if err != nil {
 		return err
 	}
-
-	if result.RowsAffected() == 0 {
+	if deleted == 0 {
 		return echo.NewHTTPError(http.StatusNotFound, "Library not found")
 	}
 	lr.hub.LibraryChanged(id)
+	if len(users) > 0 {
+		lr.hub.NotificationsChanged(users)
+	}
 	return okResponse(c)
 }
 

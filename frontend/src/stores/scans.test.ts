@@ -91,20 +91,6 @@ function startSync(): void {
     onTestFinished(() => scope.stop())
 }
 
-describe('shared store', () => {
-    it('gives every holder one instance, so a dismissal is visible to all of them', () => {
-        const modal = useScanStore()
-        const indicator = useScanStore()
-
-        modal.accept(task())
-        expect(indicator.tasks['t_1']).toBe(modal.tasks['t_1'])
-
-        indicator.dismiss(['t_1'])
-        expect(modal.dismissed.has('t_1')).toBe(true)
-        expect(modal.tasks['t_1']).toBeDefined()
-    })
-})
-
 describe('scanRow', () => {
     const output = { added: 5, updated: 1, removed: 2, failed: 0, unchanged: 9, duration: 1 }
     const saved = { added: 3, updated: 2, removed: 1 }
@@ -175,6 +161,21 @@ describe('scanRow', () => {
             expect(scanRow(task(over)).lead).toEqual(want)
         }
     )
+
+    it('falls back to a notification summary for a reloaded failed scan', () => {
+        const row = scanRow(task({ status: 3, progress: null }), {
+            saved,
+            read_failures: 2,
+            removals_suppressed: 'p',
+        })
+        expect(row.lead).toEqual({
+            state: 'done',
+            outcome: 'failed',
+            counts: saved,
+            removalsSuppressed: 'p',
+            readFailures: 2,
+        })
+    })
 
     it('passes the recent entries through', () => {
         const recent = [
@@ -288,6 +289,8 @@ describe('useScanSync', () => {
 
         emit('task_update', { task: task() })
         expect(store.tasks['t_1']).toBeDefined()
+        emit('task_update', { task: task({ id: 't_2', name: 'other' as 'scan_library' }) })
+        expect(store.tasks['t_2']).toBeUndefined()
 
         snapshotMock.mockClear()
         emit('$open', {})

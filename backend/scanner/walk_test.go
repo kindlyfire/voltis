@@ -338,7 +338,7 @@ func TestWalkAdapterFixtures(t *testing.T) {
 		t.Fatalf("comic files = %v", got)
 	}
 
-	item := comics.ParseFile(FSFile{Path: comicPath})
+	item := comics.ParseFile(context.Background(), FSFile{Path: comicPath})
 	if item == nil || item.URIPart != "ch1" || item.Series == nil || item.Series.URIPart != "Foo_2019" {
 		t.Fatalf("comic item = %+v", item)
 	}
@@ -348,7 +348,7 @@ func TestWalkAdapterFixtures(t *testing.T) {
 	if item.CoverSuffix == nil || *item.CoverSuffix != "001.jpg" {
 		t.Fatalf("cover = %+v", item.CoverSuffix)
 	}
-	if comics.ParseFile(FSFile{Path: broken}) != nil {
+	if comics.ParseFile(context.Background(), FSFile{Path: broken}) != nil {
 		t.Fatal("broken archive should not parse")
 	}
 
@@ -357,7 +357,7 @@ func TestWalkAdapterFixtures(t *testing.T) {
 	if got := eventPaths(events, Seen); !slices.Equal(got, []string{bookPath}) {
 		t.Fatalf("book files = %v", got)
 	}
-	book := books.ParseFile(FSFile{Path: bookPath})
+	book := books.ParseFile(context.Background(), FSFile{Path: bookPath})
 	if book == nil || book.URIPart != "Bar v1" || book.Series == nil || book.Series.URIPart != "Bar" {
 		t.Fatalf("book item = %+v", book)
 	}

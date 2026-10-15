@@ -8,14 +8,17 @@ import (
 	"sync"
 	"time"
 
+	"voltis/lib/notify"
 	"voltis/lib/tasks"
 	"voltis/metadata"
 	"voltis/models"
+
+	"github.com/jackc/pgx/v5"
 )
 
 type FileScanner interface {
 	FileEligible(path string) bool
-	ParseFile(file FSFile) *ParsedItem
+	ParseFile(ctx context.Context, file FSFile) *ParsedItem
 
 	SeriesCover(series SeriesRef, ordered []Child) (*string, *time.Time)
 }
@@ -64,6 +67,8 @@ type ScanResult struct {
 	Failed    int           `json:"failed"`
 	Unchanged int           `json:"unchanged"`
 	Duration  time.Duration `json:"duration"`
+	// Directories and files the walk couldn't read; what it lost counts as nothing removed.
+	ReadFailures int `json:"read_failures,omitempty"`
 	// Why nothing that went missing was removed; empty when removals ran.
 	RemovalsSuppressed string `json:"removals_suppressed,omitempty"`
 }
@@ -98,8 +103,10 @@ type Progress struct {
 	Processed int    `json:"processed"`
 	Unchanged int    `json:"unchanged"`
 	Failed    int    `json:"failed"`
-	Saved     Counts `json:"saved"`
-	CommitSeq int    `json:"commit_seq"`
+	// Walk errors, not counting parse failures.
+	ReadFailures int    `json:"read_failures,omitempty"`
+	Saved        Counts `json:"saved"`
+	CommitSeq    int    `json:"commit_seq"`
 	// Published as soon as the removal guard trips.
 	RemovalsSuppressed string `json:"removals_suppressed,omitempty"`
 	// Newest first; saved() replaces the slice, since publish shares it with the marshalling goroutine.
@@ -112,7 +119,10 @@ type CatalogChanged struct {
 	CommitSeq int    `json:"commit_seq"`
 }
 
-type Notifier interface{ CatalogChanged(CatalogChanged) }
+type Notifier interface {
+	CatalogChanged(CatalogChanged)
+	NotificationsChanged(userIDs []string)
+}
 
 func slog_scan(msg string, args ...any) {
 	slog.Info("[scanner] "+msg, args...)
@@ -134,14 +144,37 @@ func scanCompatible(self any, other tasks.RunningInfo) bool {
 	return ok && self.(ScanInput).LibraryID != otherInput.LibraryID
 }
 
-func NewScanTask(notify Notifier, store *metadata.Store) *tasks.TaskDef {
+func NewScanTask(notifier Notifier, store *metadata.Store) *tasks.TaskDef {
 	return &tasks.TaskDef{
 		Name: TaskName,
 		Process: func(input any, tc *tasks.TaskContext) (any, error) {
-			return runScan(tc.Context(), input.(ScanInput), tc, notify, store)
+			return runScan(tc.Context(), input.(ScanInput), tc, notifier, store)
 		},
 		UnmarshalInput:   unmarshalScanInput,
 		IsCompatibleWith: scanCompatible,
+		Finish: func(ctx context.Context, tx pgx.Tx, f tasks.Finished) (func(), error) {
+			sum := notify.ScanSummary{Outcome: map[int]string{
+				models.TaskStatusCompleted: "completed",
+				models.TaskStatusFailed:    "failed",
+				models.TaskStatusCancelled: "cancelled",
+			}[f.Status]}
+			if r, ok := f.Result.(ScanResult); ok {
+				sum.Totals = &notify.ScanTotals{
+					Saved:              notify.Counts(r.Counts),
+					Failed:             r.Failed,
+					ReadFailures:       r.ReadFailures,
+					RemovalsSuppressed: r.RemovalsSuppressed,
+				}
+				slog_scan("scan finished", "task", f.ID, "outcome", sum.Outcome, "err", f.Err,
+					"added", r.Added, "updated", r.Updated, "removed", r.Removed,
+					"failed", r.Failed, "unchanged", r.Unchanged, "duration", r.Duration)
+			}
+			users, err := notify.FinishScan(ctx, tx, f.ID, sum)
+			if err != nil {
+				return nil, err
+			}
+			return func() { notifier.NotificationsChanged(users) }, nil
+		},
 	}
 }
 
@@ -150,7 +183,11 @@ func parseWorker(ctx context.Context, s FileScanner, jobs <-chan FSFile, results
 		if ctx.Err() != nil {
 			return
 		}
-		item := s.ParseFile(f)
+		item := s.ParseFile(ctx, f)
+		// A parse cut short by the cancel must not count as a failed file.
+		if ctx.Err() != nil {
+			return
+		}
 		select {
 		case results <- Result{File: f, Item: item}:
 		case <-ctx.Done():
@@ -159,7 +196,7 @@ func parseWorker(ctx context.Context, s FileScanner, jobs <-chan FSFile, results
 	}
 }
 
-func runScan(ctx context.Context, in ScanInput, tc *tasks.TaskContext, notify Notifier, store *metadata.Store) (ScanResult, error) {
+func runScan(ctx context.Context, in ScanInput, tc *tasks.TaskContext, notifier Notifier, store *metadata.Store) (ScanResult, error) {
 	start := time.Now()
 	tc.Progress(Progress{Phase: "walking"})
 
@@ -202,14 +239,20 @@ func runScan(ctx context.Context, in ScanInput, tc *tasks.TaskContext, notify No
 	flushes := make(chan flush, 1)
 	done := make(chan committed, 1)
 
-	w := newWriter(in, tc, notify, res, fps, refs)
+	w, err := newWriter(ctx, in, tc, notifier, res, fps, refs)
+	if err != nil {
+		return ScanResult{}, err
+	}
+	w.start = start
 
-	var wg sync.WaitGroup
-	wg.Go(func() {
+	// Outside wg: a walker stuck in a directory read on a hung mount mustn't hold the cancel. It
+	// ends on its own and finds nobody listening.
+	go func() {
 		err := walk(ctx, roots, s.FileEligible, events)
 		close(events)
 		walkDone <- err
-	})
+	}()
+	var wg sync.WaitGroup
 	for range workers {
 		wg.Go(func() { parseWorker(ctx, s, jobs, results) })
 	}
@@ -218,6 +261,7 @@ func runScan(ctx context.Context, in ScanInput, tc *tasks.TaskContext, notify No
 	err = w.run(ctx, events, walkDone, jobs, results, flushes, done)
 	cancel()
 	wg.Wait()
+	w.drain(done)
 
 	return ScanResult{
 		Counts:    w.prog.Saved,
@@ -225,6 +269,7 @@ func runScan(ctx context.Context, in ScanInput, tc *tasks.TaskContext, notify No
 		Unchanged: w.prog.Unchanged,
 		Duration:  time.Since(start),
 
+		ReadFailures:       w.prog.ReadFailures,
 		RemovalsSuppressed: w.prog.RemovalsSuppressed,
 	}, err
 }

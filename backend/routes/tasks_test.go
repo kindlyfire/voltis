@@ -8,10 +8,12 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
 	"voltis/db"
+	"voltis/lib/notify"
 	"voltis/lib/tasks"
 	"voltis/models"
 	"voltis/scanner"
@@ -72,6 +74,8 @@ func awaitRetired(t *testing.T, c *testClient) {
 	})
 }
 
+// blockedScanLibrary locks content so that the scan's writes wait. The mode must allow ROW SHARE:
+// the scan's notification items reference content.
 func blockedScanLibrary(t *testing.T, pool *pgxpool.Pool, c *testClient, mode string) (string, func()) {
 	t.Helper()
 
@@ -108,7 +112,7 @@ func blockedScanLibrary(t *testing.T, pool *pgxpool.Pool, c *testClient, mode st
 func TestTaskSnapshotRoute(t *testing.T) {
 	pool := newTestPool(t)
 	c := newAdminClient(t, pool)
-	libID, release := blockedScanLibrary(t, pool, c, "ACCESS EXCLUSIVE")
+	libID, release := blockedScanLibrary(t, pool, c, "SHARE ROW EXCLUSIVE")
 	defer release()
 
 	scan := c.Post("/api/libraries/scan", map[string]any{"ids": []string{libID}}).Assert(t, 200).JSON()
@@ -171,7 +175,7 @@ func TestTaskSnapshotRoute(t *testing.T) {
 func TestTaskLogRoute(t *testing.T) {
 	pool := newTestPool(t)
 	c := newAdminClient(t, pool)
-	libID, release := blockedScanLibrary(t, pool, c, "EXCLUSIVE")
+	libID, release := blockedScanLibrary(t, pool, c, "SHARE ROW EXCLUSIVE")
 	defer release()
 
 	scan := c.Post("/api/libraries/scan", map[string]any{"ids": []string{libID}}).Assert(t, 200).JSON()
@@ -224,6 +228,8 @@ func TestTaskRoutesRequireAdmin(t *testing.T) {
 
 	plain.Get("/api/tasks/snapshot").Assert(t, 403)
 	plain.Get("/api/tasks/t_1/logs").Assert(t, 403)
+	plain.Post("/api/tasks/t_1/cancel", nil).Assert(t, 403)
+	plain.Post("/api/tasks/t_1/retry", nil).Assert(t, 403)
 	c.newSession(t).Get("/api/tasks/snapshot").Assert(t, 401)
 }
 
@@ -547,4 +553,146 @@ func TestScanLogsTheSeriesKeyItRejects(t *testing.T) {
 		t.Fatalf("scan = %d, %+v, want the rejected file counted as the only failure", status, out)
 	}
 	assertContentURIs(t, pool, libID, []string{"book/Foo_bar"})
+}
+
+// scanItem is the task's item in the user's feed, or nil.
+func scanItem(t *testing.T, c *testClient, taskID string) map[string]any {
+	t.Helper()
+	feed := feedOf(t, c, "?limit=100")
+	for _, section := range []string{"active", "needs_input", "data"} {
+		for _, it := range feedItems(feed, section) {
+			if it["task_id"] == taskID {
+				return it
+			}
+		}
+	}
+	return nil
+}
+
+func TestScanItemRetryAndRestart(t *testing.T) {
+	fastFlushes(t)
+	admin, member, _ := adminAndMember(t, []string{})
+	admin.Post("/api/users/new", map[string]any{
+		"username": "admin2", "password": "adminpass456", "permissions": []string{"ADMIN"},
+	}).Assert(t, 200)
+	admin2 := admin.newSession(t)
+	admin2.Post("/api/auth/login", map[string]any{"username": "admin2", "password": "adminpass456"}).Assert(t, 200)
+	pool := admin.pool()
+	ctx := context.Background()
+
+	scan := func(body map[string]any) string {
+		t.Helper()
+		ids := admin.Post("/api/libraries/scan", body).Assert(t, 200).JSON()["task_ids"].([]any)
+		return s(ids[0])
+	}
+	finished := func(id string) map[string]any {
+		t.Helper()
+		return awaitTask(t, admin, id, "the scan to end", func(m map[string]any) bool { return m["status"].(float64) >= 2 })
+	}
+
+	// A library whose source is gone fails at the walk, and every admin hears of it.
+	dir := t.TempDir()
+	libID := libraryAt(t, admin, "comics", dir)
+	noErr(t, os.Remove(dir))
+	failed := scan(map[string]any{"ids": []string{libID}})
+	assertEq(t, finished(failed)["status"].(float64), float64(models.TaskStatusFailed))
+	var itemID string
+	for i, c := range []*testClient{admin, admin2} {
+		it := scanItem(t, c, failed)
+		data := it["data"].(map[string]any)
+		assertEq(t, data["outcome"], "failed")
+		assertEq(t, it["unread"], true)
+		assertEq(t, data["saved"].(map[string]any)["added"].(float64), 0)
+		if i == 0 {
+			itemID = s(it["id"])
+		}
+	}
+	assertEq(t, feedOf(t, member, "")["unread"].(float64), 0)
+	assertLen(t, feedItems(feedOf(t, member, ""), "data"), 0)
+
+	// Retry moves the item to the new scan, which then completes quietly.
+	series := filepath.Join(dir, "Series")
+	noErr(t, os.MkdirAll(series, 0o755))
+	cbz := filepath.Join(series, "ch1.cbz")
+	writeCBZ(t, cbz, "")
+	retried := s(admin.Post("/api/tasks/"+failed+"/retry", nil).Assert(t, 200).JSON()["task_id"])
+	it := scanItem(t, admin, retried)
+	assertEq(t, s(it["id"]), itemID)
+	if scanItem(t, admin, failed) != nil {
+		t.Fatal("the failed task kept an item")
+	}
+	finished(retried)
+	it = scanItem(t, admin, retried)
+	assertEq(t, it["data"].(map[string]any)["outcome"], "completed")
+	assertEq(t, it["data"].(map[string]any)["saved"].(map[string]any)["added"].(float64), 1)
+	assertEq(t, it["unread"], false)
+
+	// The failed run stays listed. Retrying it again, whose item has moved, still gives every admin one.
+	awaitRetired(t, admin)
+	assertEq(t, slices.ContainsFunc(admin.Get("/api/tasks?limit=100").Assert(t, 200).JSON()["data"].([]any),
+		func(v any) bool { return v.(map[string]any)["id"] == failed }), true)
+	again := s(admin.Post("/api/tasks/"+failed+"/retry", nil).Assert(t, 200).JSON()["task_id"])
+	for _, c := range []*testClient{admin, admin2} {
+		assertEq(t, scanItem(t, c, again) != nil, true)
+	}
+	finished(again)
+	awaitRetired(t, admin)
+
+	// Cancel: a content rescan queued behind a held full scan ends cancelled and unread.
+	fifo := filepath.Join(series, "held.cbr")
+	noErr(t, syscall.Mkfifo(fifo, 0o600))
+	held := scan(map[string]any{"ids": []string{libID}})
+	var writer *os.File
+	t.Cleanup(func() {
+		if writer != nil {
+			_ = writer.Close()
+		}
+	})
+	waitUntil(t, "a parser to open the fifo", func() bool {
+		f, err := os.OpenFile(fifo, os.O_WRONLY|syscall.O_NONBLOCK, 0)
+		if err == nil {
+			writer = f
+		}
+		return err == nil
+	})
+	contentID, err := db.SelectScalar[string](ctx, pool,
+		"SELECT id FROM content WHERE library_id = $1 AND type = 'comic' LIMIT 1", libID)
+	noErr(t, err)
+	// A retry that dedupes onto the running scan gives every admin missing an item one.
+	mustExec(t, pool, `DELETE FROM notifications WHERE task_id = $1 AND user_id = (SELECT id FROM users WHERE username = 'admin2')`, held)
+	assertEq(t, s(admin.Post("/api/tasks/"+failed+"/retry", nil).Assert(t, 200).JSON()["task_id"]), held)
+	assertEq(t, scanItem(t, admin2, held) != nil, true)
+
+	queued := scan(map[string]any{"content_ids": []string{contentID}})
+	assertEq(t, snapshotOf(t, admin, queued)["status"].(float64), float64(models.TaskStatusPending))
+
+	admin.Post("/api/tasks/"+queued+"/cancel", nil).Assert(t, 200)
+	it = scanItem(t, admin, queued)
+	assertEq(t, it["data"].(map[string]any)["outcome"], "cancelled")
+	assertEq(t, it["unread"], true)
+	admin.Post("/api/tasks/"+queued+"/cancel", nil).Assert(t, 409)
+	admin.Post("/api/tasks/t_nope/cancel", nil).Assert(t, 404)
+
+	admin.Post("/api/tasks/"+held+"/cancel", nil).Assert(t, 200)
+	noErr(t, writer.Close())
+	assertEq(t, finished(held)["status"].(float64), float64(models.TaskStatusCancelled))
+	awaitRetired(t, admin)
+
+	// A restart cancels the scan it interrupted, keeping the counts of its last flush.
+	task := models.MakeTaskID()
+	mustExec(t, pool, `INSERT INTO tasks (id, name, status) VALUES ($1, 'scan_library', $2)`, task, models.TaskStatusInProgress)
+	_, err = notify.CreateScanItems(ctx, pool, task, notify.ScanData{LibraryID: libID, LibraryName: "Comics"})
+	noErr(t, err)
+	noErr(t, notify.CheckpointScan(ctx, pool, task, notify.Counts{Added: 2}, 1))
+	newClient(t, pool)
+	var outcome string
+	var added, failures int
+	var unread bool
+	noErr(t, pool.QueryRow(ctx, `SELECT data->>'outcome', (data->'saved'->>'added')::int, (data->>'failed')::int,
+		alerted_at IS NOT NULL AND seen_at IS NULL FROM notifications WHERE task_id = $1 LIMIT 1`, task).
+		Scan(&outcome, &added, &failures, &unread))
+	assertEq(t, outcome, "cancelled")
+	assertEq(t, added, 2)
+	assertEq(t, failures, 1)
+	assertEq(t, unread, true)
 }

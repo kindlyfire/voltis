@@ -34,6 +34,9 @@
                 Nothing removed
             </p>
         </ATooltip>
+        <p v-if="readFailures" class="text-warning text-xs leading-snug">
+            Some folders couldn't be read
+        </p>
     </div>
 </template>
 
@@ -69,6 +72,10 @@ const outcomes: Record<Done['outcome'], string> = {
 
 const suppressed = computed(() =>
     props.lead.state === 'done' ? props.lead.removalsSuppressed : undefined
+)
+
+const readFailures = computed(() =>
+    props.lead.state === 'done' ? (props.lead.readFailures ?? 0) > 0 : false
 )
 
 const caption = computed(() => {

@@ -30,7 +30,11 @@ func seriesRefOf(id, part, dir string) SeriesRef {
 }
 
 func testWriter(fps []Fingerprint, refs []SeriesRef) *writer {
-	return newWriter(ScanInput{LibraryID: "library"}, nil, nil, newResolver(), fps, refs)
+	w, err := newWriter(context.Background(), ScanInput{LibraryID: "library"}, nil, nil, newResolver(), fps, refs)
+	if err != nil {
+		panic(err)
+	}
+	return w
 }
 
 func listedEvent(t *testing.T, w *writer, dir string, names ...string) Event {
@@ -607,6 +611,13 @@ func TestWriterRunCancellationDuringFinalCommit(t *testing.T) {
 	}
 	if w.prog.Phase != "saving" {
 		t.Fatalf("phase = %q", w.prog.Phase)
+	}
+
+	// A commit that raced the cancel is still counted.
+	rig.done <- committed{seq: 1, counts: Counts{Added: 2}}
+	w.drain(rig.done)
+	if w.prog.Saved.Added != 2 {
+		t.Fatalf("saved = %+v, want the raced commit's counts", w.prog.Saved)
 	}
 }
 

@@ -676,6 +676,8 @@ export interface ScanProgress {
     failed: number
     saved: { added: number; updated: number; removed: number }
     commit_seq: number
+    /** Directories and files the walk couldn't read. */
+    read_failures?: number
     /** Why the scan removes nothing that went missing. */
     removals_suppressed?: string
     /** Newest first. */
@@ -700,6 +702,7 @@ export interface ScanResult {
     failed: number
     unchanged: number
     duration: number
+    read_failures?: number
     removals_suppressed?: string
 }
 
@@ -719,6 +722,47 @@ export interface TaskSnapshot {
     log_len: number
     created_at: string
     updated_at: string
+}
+
+interface NotificationBase {
+    id: string
+    created_at: string
+    updated_at: string
+    /** The version a seen mark must send back, as received. */
+    alerted_at: string | null
+    unread: boolean
+    task_id: string | null
+    content: { id: string; title: string; type: string } | null
+}
+
+export type NotificationUnit = 'chapter' | 'volume' | 'book' | 'item'
+
+export type Notification = NotificationBase &
+    (
+        | {
+              kind: 'scan'
+              data: {
+                  library_id: string
+                  library_name: string
+                  library_deleted?: boolean
+                  files?: number
+                  outcome?: 'completed' | 'failed' | 'cancelled'
+                  saved?: ScanProgress['saved']
+                  failed?: number
+                  read_failures?: number
+                  removals_suppressed?: string
+              }
+          }
+        | { kind: 'new_content'; data: { count: number; unit: NotificationUnit } }
+        | { kind: 'metadata_review'; data: { count: number } }
+    )
+
+export interface NotificationFeed {
+    active: Notification[]
+    needs_input: Notification[]
+    data: Notification[]
+    unread: number
+    next: string | null
 }
 
 export interface TaskLogs {

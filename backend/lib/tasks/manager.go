@@ -15,10 +15,13 @@ import (
 	"voltis/lib/fp"
 	"voltis/models"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var PublishInterval = 250 * time.Millisecond
+
+var ErrNotFound = errors.New("task not found")
 
 type RunningInfo struct {
 	Name  string
@@ -88,7 +91,9 @@ func newEntry(def *TaskDef, input any, task *models.Task) *entry {
 	return e
 }
 
-func (m *Manager) Push(def *TaskDef, input any) (*TaskHandle, error) {
+// Push stores and schedules a task. insert, if set, runs in the transaction that creates the row,
+// so whatever it writes exists before the task can run.
+func (m *Manager) Push(def *TaskDef, input any, insert func(ctx context.Context, tx pgx.Tx, id string) error) (*TaskHandle, error) {
 	inputJSON, err := json.Marshal(input)
 	if err != nil {
 		return nil, fmt.Errorf("marshal task input: %w", err)
@@ -104,8 +109,17 @@ func (m *Manager) Push(def *TaskDef, input any) (*TaskHandle, error) {
 		Input:     inputJSON,
 		Output:    json.RawMessage("{}"),
 	}
-	if err := db.TaskCreate(context.Background(), m.pool, task); err != nil {
-		return nil, fmt.Errorf("create task: %w", err)
+	err = db.WithTx(context.Background(), m.pool, func(tx pgx.Tx) error {
+		if err := db.TaskCreate(context.Background(), tx, task); err != nil {
+			return fmt.Errorf("create task: %w", err)
+		}
+		if insert == nil {
+			return nil
+		}
+		return insert(context.Background(), tx, task.ID)
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	e := newEntry(def, input, task)
@@ -119,10 +133,17 @@ func (m *Manager) Push(def *TaskDef, input any) (*TaskHandle, error) {
 }
 
 func (m *Manager) Load(ctx context.Context) error {
-	_, err := m.pool.Exec(ctx, "UPDATE tasks SET status = $1, updated_at = $2 WHERE status = $3",
-		models.TaskStatusCancelled, time.Now().UTC(), models.TaskStatusInProgress)
+	stale, err := db.Select[struct {
+		ID   string `db:"id"`
+		Name string `db:"name"`
+	}](ctx, m.pool, "SELECT id, name FROM tasks WHERE status = $1", models.TaskStatusInProgress)
 	if err != nil {
-		return fmt.Errorf("cancel stale tasks: %w", err)
+		return fmt.Errorf("find stale tasks: %w", err)
+	}
+	for _, t := range stale {
+		if err := m.cancelStale(ctx, t.ID, m.defs[t.Name]); err != nil {
+			return fmt.Errorf("cancel stale task: %w", err)
+		}
 	}
 
 	pending, err := db.Select[models.Task](ctx, m.pool,
@@ -159,6 +180,27 @@ func (m *Manager) Load(ctx context.Context) error {
 	m.scheduleUnlocked()
 
 	return nil
+}
+
+// cancelStale marks an interrupted task cancelled, and runs its Finish in the same transaction.
+// If that fails, the plain update still goes through.
+func (m *Manager) cancelStale(ctx context.Context, id string, def *TaskDef) error {
+	const q = "UPDATE tasks SET status = $1, updated_at = $2 WHERE id = $3"
+	if def != nil && def.Finish != nil {
+		err := db.WithTx(ctx, m.pool, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(ctx, q, models.TaskStatusCancelled, time.Now().UTC(), id); err != nil {
+				return err
+			}
+			_, err := def.Finish(ctx, tx, Finished{ID: id, Status: models.TaskStatusCancelled, Err: context.Canceled})
+			return err
+		})
+		if err == nil {
+			return nil
+		}
+		slog.Error("[tasks] failed to finish interrupted task", "id", id, "err", err)
+	}
+	_, err := m.pool.Exec(ctx, q, models.TaskStatusCancelled, time.Now().UTC(), id)
+	return err
 }
 
 func (m *Manager) Pending(name string) []Pending {
@@ -205,7 +247,7 @@ func (m *Manager) Cancel(id string) error {
 	m.mu.Unlock()
 
 	if e == nil {
-		return fmt.Errorf("task not found: %s", id)
+		return fmt.Errorf("%w: %s", ErrNotFound, id)
 	}
 
 	e.cancel()
@@ -292,7 +334,7 @@ func (m *Manager) finish(e *entry, status int, output, result any, err error) {
 	term.UpdatedAt = time.Now().UTC()
 	e.mu.Unlock()
 
-	persistErr := m.persist(context.Background(), e, term.Status, term.Output, term.UpdatedAt)
+	after, persistErr := m.persistTerminal(e, term, Finished{ID: term.ID, Status: status, Result: result, Err: err})
 
 	// Off the running list before publishing, so that whoever the terminal snapshot wakes no longer
 	// sees the task pending; still live, so that its snapshot and logs stay readable until then.
@@ -300,6 +342,10 @@ func (m *Manager) finish(e *entry, status int, output, result any, err error) {
 	m.running = fp.Remove(m.running, e)
 	m.scheduleUnlocked()
 	m.mu.Unlock()
+
+	if after != nil {
+		after()
+	}
 
 	if persistErr != nil {
 		err = errors.Join(err, fmt.Errorf("persist terminal task state: %w", persistErr))
@@ -356,6 +402,39 @@ func (m *Manager) publishLoop(ctx context.Context) {
 }
 
 func (m *Manager) persist(ctx context.Context, e *entry, status int, output json.RawMessage, updated time.Time) error {
+	writeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	err := m.write(writeCtx, m.pool, e, status, output, updated)
+	if err != nil {
+		slog.Error("[tasks] failed to persist task", "id", e.snap.ID, "err", err)
+	}
+	return err
+}
+
+// persistTerminal saves the terminal state and runs the def's Finish in one transaction. If that
+// fails, the state is still saved on its own, so it's never lost.
+func (m *Manager) persistTerminal(e *entry, term Snapshot, f Finished) (after func(), err error) {
+	if e.def.Finish == nil {
+		return nil, m.persist(context.Background(), e, term.Status, term.Output, term.UpdatedAt)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err = db.WithTx(ctx, m.pool, func(tx pgx.Tx) error {
+		if err := m.write(ctx, tx, e, term.Status, term.Output, term.UpdatedAt); err != nil {
+			return err
+		}
+		var err error
+		after, err = e.def.Finish(ctx, tx, f)
+		return err
+	})
+	if err != nil {
+		slog.Error("[tasks] failed to finish task", "id", f.ID, "err", err)
+		return nil, m.persist(context.Background(), e, term.Status, term.Output, term.UpdatedAt)
+	}
+	return after, nil
+}
+
+func (m *Manager) write(ctx context.Context, q db.Querier, e *entry, status int, output json.RawMessage, updated time.Time) error {
 	e.mu.Lock()
 	id, logs := e.snap.ID, e.logs.String()
 	e.mu.Unlock()
@@ -365,17 +444,12 @@ func (m *Manager) persist(ctx context.Context, e *entry, status int, output json
 		logsPtr = &logs
 	}
 
-	writeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	tag, err := m.pool.Exec(writeCtx, `
+	tag, err := q.Exec(ctx, `
 		UPDATE tasks SET status = $1, output = $2, logs = $3, updated_at = $4
 		WHERE id = $5
 	`, status, output, logsPtr, updated, id)
 	if err == nil && tag.RowsAffected() != 1 {
 		err = fmt.Errorf("persist task %s: %d rows affected", id, tag.RowsAffected())
-	}
-	if err != nil {
-		slog.Error("[tasks] failed to persist task", "id", id, "err", err)
 	}
 	return err
 }

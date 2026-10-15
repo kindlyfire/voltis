@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	_ "golang.org/x/image/webp"
 
@@ -188,11 +189,11 @@ var pdfSizeRe = regexp.MustCompile(`([\d.]+)\s*x\s*([\d.]+)`)
 
 // Scan reads pages and optional ComicInfo from a comic file. Supports PDF and
 // archive formats (CBZ, CBR, etc.).
-func Scan(path string) ([]PageInfo, *ComicInfo) {
+func Scan(ctx context.Context, path string) ([]PageInfo, *ComicInfo) {
 	if strings.ToLower(filepath.Ext(path)) == ".pdf" {
-		return scanPDFPages(path), nil
+		return scanPDFPages(ctx, path), nil
 	}
-	return scanArchivePages(path)
+	return scanArchivePages(ctx, path)
 }
 
 func isArchiveLocal(name string) bool {
@@ -202,8 +203,8 @@ func isArchiveLocal(name string) bool {
 	return path.Clean("/"+name) == "/"+name
 }
 
-func scanArchivePages(path string) ([]PageInfo, *ComicInfo) {
-	a, err := archive.Open(path)
+func scanArchivePages(ctx context.Context, path string) ([]PageInfo, *ComicInfo) {
+	a, err := archive.OpenContext(ctx, path)
 	if err != nil {
 		return nil, nil
 	}
@@ -270,8 +271,11 @@ func PageSizes(ctx context.Context, path string, names []string) ([]PageInfo, er
 	return pages, nil
 }
 
-func scanPDFPages(path string) []PageInfo {
-	result, err := exec.Command("pdfinfo", path).Output()
+func scanPDFPages(ctx context.Context, path string) []PageInfo {
+	cmd := exec.CommandContext(ctx, "pdfinfo", path)
+	// A pdfinfo that leaves a pipe open mustn't hold the cancel.
+	cmd.WaitDelay = 100 * time.Millisecond
+	result, err := cmd.Output()
 	if err != nil {
 		return nil
 	}

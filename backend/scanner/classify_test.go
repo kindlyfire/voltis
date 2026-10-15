@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"context"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -376,7 +377,7 @@ func TestClassifyCollisionFallsThroughToConflictHandling(t *testing.T) {
 func TestClassifySanitizedPartReachesTheWriter(t *testing.T) {
 	path := writeCBZ(t, filepath.Join(t.TempDir(), "Series", "Series ch1.cbz"),
 		`<?xml version="1.0"?><ComicInfo><Series>Foo/bar</Series><Number>1</Number></ComicInfo>`)
-	item := (&ComicsScanner{}).ParseFile(statFile(t, path))
+	item := (&ComicsScanner{}).ParseFile(context.Background(), statFile(t, path))
 	if item.Series.URIPart != "Foo_bar" {
 		t.Fatalf("parsed series = %+v", item.Series)
 	}
@@ -430,7 +431,7 @@ func TestParseBookCountsWords(t *testing.T) {
 		"OEBPS/text/ch1.xhtml": []byte(`<!DOCTYPE html><html><body><p>` + text + `</p></body></html>`),
 	})
 
-	item := (&BooksScanner{}).ParseFile(statFile(t, path))
+	item := (&BooksScanner{}).ParseFile(context.Background(), statFile(t, path))
 	want := fmt.Sprintf(`{"words":{"OEBPS/text/ch1.xhtml":%d}}`, len(strings.Fields(text)))
 	if got := string(item.FileData); got != want {
 		t.Errorf("file data = %s, want %s", got, want)

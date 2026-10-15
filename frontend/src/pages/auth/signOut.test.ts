@@ -14,6 +14,7 @@ vi.mock('@/utils/ws', () => ({
     ws: { connect: vi.fn(), send: vi.fn(), on: vi.fn(() => () => {}) },
 }))
 vi.mock('@/stores/scans', () => ({ useScanSync: vi.fn() }))
+vi.mock('@/stores/notifications', () => ({ useNotificationSync: vi.fn() }))
 vi.mock('@/pages/_layout/useLayoutStore', () => ({
     useLayoutStore: () => ({
         navbarHidden: { value: false },
@@ -32,7 +33,7 @@ const stubs = {
     AMenuItem: { template: '<button @click="$emit(\'select\')"><slot /></button>' },
     QueryError: { template: '<div />' },
     Libraries: true,
-    ScanIndicator: true,
+    NotificationCenter: true,
     SearchBox: true,
     ModalContainer: true,
 }

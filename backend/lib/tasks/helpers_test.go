@@ -46,7 +46,7 @@ func newManager(t *testing.T, publish func(Snapshot)) (*Manager, *pgxpool.Pool) 
 
 func pushTask(t *testing.T, m *Manager, def *TaskDef, input any) *TaskHandle {
 	t.Helper()
-	handle, err := m.Push(def, input)
+	handle, err := m.Push(def, input, nil)
 	if err != nil {
 		t.Fatalf("push %s: %v", def.Name, err)
 	}

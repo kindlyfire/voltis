@@ -12,12 +12,17 @@
         >
             <ASpinner v-if="loading" size="inherit" decorative />
             <AIcon v-else :icon="pressed && pressedIcon ? pressedIcon : icon" />
+            <!-- The label carries the count, so the badge adds nothing to the name. -->
+            <ABadge v-if="badge" size="sm" aria-hidden="true" class="a-icon-button-badge">
+                {{ badge }}
+            </ABadge>
         </component>
     </ATooltip>
 </template>
 
 <script setup lang="ts">
 import type { Component } from 'vue'
+import ABadge from './ABadge.vue'
 import AIcon from './AIcon.vue'
 import ASpinner from './ASpinner.vue'
 import ATooltip from './ATooltip.vue'
@@ -38,6 +43,8 @@ const props = withDefaults(
             pressed?: boolean
             pressedIcon?: Component
             tooltip?: boolean
+            /** A short count over the button's corner; put the meaning in `label`. */
+            badge?: string
         }
     >(),
     {
@@ -56,6 +63,7 @@ const { root, rootAttrs } = useButtonRoot(props)
 <style scoped>
 @layer ui {
     .a-icon-button {
+        position: relative;
         display: inline-grid;
         flex: none;
         place-items: center;
@@ -69,6 +77,13 @@ const { root, rootAttrs } = useButtonRoot(props)
         cursor: pointer;
         user-select: none;
         transition: background-color var(--duration-short) var(--ease-standard);
+    }
+
+    .a-icon-button-badge {
+        position: absolute;
+        top: -2px;
+        right: -2px;
+        pointer-events: none;
     }
 
     .size-sm {

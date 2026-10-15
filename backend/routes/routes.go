@@ -10,6 +10,7 @@ import (
 
 	"voltis/config"
 	"voltis/covers"
+	"voltis/lib/notify"
 	"voltis/lib/tasks"
 	"voltis/linking"
 	"voltis/metadata"
@@ -89,12 +90,16 @@ func Register(ctx context.Context, e *echo.Echo, pool *pgxpool.Pool, st *setting
 			links.Wake() // ended, however: matching waits for scans
 		}
 	})
+	hub.unread = func(ctx context.Context, ids []string) (map[string]int, error) {
+		return notify.Unread(ctx, pool, ids)
+	}
 	scanQueue := scanner.NewQueue(manager, pool, hub, deps.Metadata)
 	if err := manager.Load(ctx); err != nil {
 		slog.Error("failed to load pending tasks", "err", err)
 	}
 	go links.Run(ctx, func() bool { return st.Bool(settings.MetadataMatchingPaused) }, scanQueue.Scanning,
-		hub.MetadataStatus)
+		hub.MetadataStatus, hub.NotificationsChanged)
+	go notify.RunSweep(ctx, pool)
 
 	st.OnChange(func(keys []string) {
 		hub.DropSessionless(context.Background(), pool)
@@ -133,9 +138,10 @@ func Register(ctx context.Context, e *echo.Echo, pool *pgxpool.Pool, st *setting
 	fr.Register(api.Group("/files"))
 	(&ContentRefRoutes{pool: pool}).Register(api.Group("/content"))
 	(&CustomListRoutes{pool: pool}).Register(api.Group("/custom-lists"))
-	(&TaskRoutes{pool: pool, manager: manager}).Register(api.Group("/tasks"))
+	(&TaskRoutes{pool: pool, manager: manager, scans: scanQueue}).Register(api.Group("/tasks"))
 	(&MetadataRoutes{pool: pool, hub: hub, store: deps.Metadata, links: deps.Links, reg: deps.Providers}).
 		Register(api.Group("/metadata"))
+	(&NotificationRoutes{pool: pool, hub: hub}).Register(api.Group("/notifications"))
 	(&FsRoutes{}).Register(api.Group("/fs"))
 
 	e.GET("/api/ws", wsHandler(res))

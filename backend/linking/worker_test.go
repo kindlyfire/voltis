@@ -306,7 +306,7 @@ func TestRunWakesAndStops(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		e.svc.Run(ctx, nil, func(string) bool { return false }, func(st WorkerStatus) { statuses <- st })
+		e.svc.Run(ctx, nil, func(string) bool { return false }, func(st WorkerStatus) { statuses <- st }, func([]string) {})
 		close(done)
 	}()
 	// Each pass starts over, so a later one is told apart by its Started time, not a growing count.

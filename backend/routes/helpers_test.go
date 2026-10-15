@@ -301,3 +301,10 @@ func assertLen(t *testing.T, arr []map[string]any, n int) {
 }
 
 func s(v any) string { return fmt.Sprintf("%v", v) }
+
+func noErr(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+}

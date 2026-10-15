@@ -99,6 +99,12 @@ type flush struct {
 	gone  map[string]bool
 	final bool
 	keep  bool
+	// For the scan item's checkpoint and the new-content check. base and failed are the totals
+	// before this flush.
+	task   string
+	start  time.Time
+	base   Counts
+	failed int
 }
 
 type step struct {

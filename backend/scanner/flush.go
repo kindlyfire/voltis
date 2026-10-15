@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"voltis/covers"
 	"voltis/db"
 	"voltis/lib/fp"
+	"voltis/lib/notify"
 	"voltis/metadata"
 	"voltis/models"
 
@@ -43,11 +45,12 @@ func commitLoop(ctx context.Context, pool *pgxpool.Pool, store *metadata.Store, 
 	for f := range in {
 		var counts Counts
 		var recent []RecentEntry
+		var users []string
 		var err error
 		for range 3 {
-			err = db.WithTx(ctx, pool, func(tx pgx.Tx) error {
+			err = commitTx(ctx, pool, func(tx pgx.Tx) error {
 				var txErr error
-				counts, recent, txErr = commit(ctx, tx, store, s, libraryID, f, time.Now().UTC())
+				counts, recent, users, txErr = commit(ctx, tx, store, s, libraryID, f, time.Now().UTC())
 				return txErr
 			})
 			if err == nil || ctx.Err() != nil || !retryable(err) {
@@ -55,17 +58,37 @@ func commitLoop(ctx context.Context, pool *pgxpool.Pool, store *metadata.Store, 
 			}
 		}
 		if err != nil {
-			counts, recent = Counts{}, nil
+			counts, recent, users = Counts{}, nil, nil
 		}
-		select {
-		case out <- committed{seq: f.seq, counts: counts, recent: recent, err: err}:
-		case <-ctx.Done():
-			return
-		}
-		if err != nil {
+		// Even if cancelled: a flush that committed must be counted. Only one is ever in flight, so
+		// the channel has room.
+		out <- committed{seq: f.seq, counts: counts, recent: recent, users: users, err: err}
+		if err != nil || ctx.Err() != nil {
 			return
 		}
 	}
+}
+
+// commitTx runs fn in a transaction on ctx, but commits on a context that outlives a cancel, so
+// the outcome of a COMMIT is never in doubt.
+func commitTx(ctx context.Context, pool *pgxpool.Pool, fn func(pgx.Tx) error) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	err = fn(tx)
+	// Started after fn, so a long body can't use up its budget.
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if err != nil {
+		_ = tx.Rollback(cctx)
+		return err
+	}
+	if err := tx.Commit(cctx); err != nil {
+		_ = tx.Rollback(cctx)
+		return err
+	}
+	return nil
 }
 
 func retryable(err error) bool {
@@ -81,9 +104,17 @@ type recentTally struct {
 }
 
 func commit(ctx context.Context, tx pgx.Tx, store *metadata.Store, s FileScanner, libraryID string, f flush,
-	now time.Time) (Counts, []RecentEntry, error) {
+	now time.Time) (Counts, []RecentEntry, []string, error) {
 	if err := db.LockMetadata(ctx, tx, libraryID); err != nil {
-		return Counts{}, nil, err
+		return Counts{}, nil, nil, err
+	}
+	// Before any delete cascades to new-content items, so the lock order is scan rows first, as
+	// the seen and clear actions take it.
+	if f.task != "" {
+		_, err := tx.Exec(ctx, "SELECT id FROM notifications WHERE task_id = $1 AND kind = 'scan' ORDER BY id FOR UPDATE", f.task)
+		if err != nil {
+			return Counts{}, nil, nil, err
+		}
 	}
 
 	tallies := map[string]*recentTally{}
@@ -135,7 +166,7 @@ func commit(ctx context.Context, tx pgx.Tx, store *metadata.Store, s FileScanner
 			return nil
 		})
 	if err != nil {
-		return Counts{}, nil, err
+		return Counts{}, nil, nil, err
 	}
 	dropped := map[string]bool{}
 	maps.Copy(dropped, f.gone)
@@ -164,14 +195,20 @@ func commit(ctx context.Context, tx pgx.Tx, store *metadata.Store, s FileScanner
 				return nil
 			})
 		if err != nil {
-			return Counts{}, nil, err
+			return Counts{}, nil, nil, err
 		}
 	}
 
+	var cascaded []string
 	if len(deletes) > 0 {
+		var err error
+		cascaded, err = cascadeUsers(ctx, tx, `content_id = ANY($1::text[])`, deletes)
+		if err != nil {
+			return Counts{}, nil, nil, err
+		}
 		var id, part, title string
 		var parentID *string
-		err := query(ctx, tx, `
+		err = query(ctx, tx, `
 			DELETE FROM content WHERE library_id = $1 AND id = ANY($2::text[])
 			RETURNING id, parent_id, uri_part, COALESCE(NULLIF(data->>'title', ''), uri_part)
 		`, []any{libraryID, deletes}, []any{&id, &parentID, &part, &title}, func() error {
@@ -190,24 +227,25 @@ func commit(ctx context.Context, tx pgx.Tx, store *metadata.Store, s FileScanner
 			return nil
 		})
 		if err != nil {
-			return Counts{}, nil, err
+			return Counts{}, nil, nil, err
 		}
 	}
 
 	steps, err := orderSteps(f, key)
 	if err != nil {
-		return Counts{}, nil, err
+		return Counts{}, nil, nil, err
 	}
 
 	var touched []string
+	added := map[string]*addedItems{}
 	var leaves leafBatch
 	for _, st := range steps {
 		if st.write == nil {
 			if err := leaves.flush(ctx, tx); err != nil {
-				return Counts{}, nil, err
+				return Counts{}, nil, nil, err
 			}
 			if err := identityStep(ctx, tx, libraryID, st.set, now); err != nil {
-				return Counts{}, nil, err
+				return Counts{}, nil, nil, err
 			}
 			continue
 		}
@@ -229,13 +267,13 @@ func commit(ctx context.Context, tx pgx.Tx, store *metadata.Store, s FileScanner
 		// Leaves have no links, so their metadata is written with the row.
 		meta, changed, err := metadata.NewLeafDoc(docs[st.write.id], item.MetaRaw)
 		if err != nil {
-			return Counts{}, nil, err
+			return Counts{}, nil, nil, err
 		}
 		if changed {
 			touched = append(touched, st.write.id)
 		}
 		if err := leaves.add(ctx, tx, leafRow(st.write.id, libraryID, uri, *item, docs[st.write.id].Overrides, parentID, old, now), &meta); err != nil {
-			return Counts{}, nil, err
+			return Counts{}, nil, nil, err
 		}
 		// Only the row tells an add from a moved file reclaiming a deleted item's ID.
 		var t *recentTally
@@ -248,13 +286,23 @@ func commit(ctx context.Context, tx pgx.Tx, store *metadata.Store, s FileScanner
 			t.Updated++
 		} else {
 			t.Added++
+			// A series created in this scan notifies no one, however its first flush fell: it's
+			// absent from cur, or created after the scan began.
+			if parent, ok := cur[deref(parentID)]; ok && parent.CreatedAt.Before(f.start) {
+				a := added[parent.ID]
+				if a == nil {
+					a = &addedItems{unit: unitOf(item)}
+					added[parent.ID] = a
+				}
+				a.add(unitOf(item))
+			}
 		}
 	}
 	if err := leaves.flush(ctx, tx); err != nil {
-		return Counts{}, nil, err
+		return Counts{}, nil, nil, err
 	}
 	if err := applyRenames(ctx, tx, libraryID, moves); err != nil {
-		return Counts{}, nil, err
+		return Counts{}, nil, nil, err
 	}
 
 	for _, id := range setIDs {
@@ -269,7 +317,7 @@ func commit(ctx context.Context, tx pgx.Tx, store *metadata.Store, s FileScanner
 		_, err := tx.Exec(ctx, "UPDATE content SET uri_part = $2, file_uri = $3, updated_at = $4 WHERE id = $1",
 			id, set.Ref.URIPart, set.Ref.FileURI, now)
 		if err != nil {
-			return Counts{}, nil, err
+			return Counts{}, nil, nil, err
 		}
 	}
 
@@ -277,28 +325,29 @@ func commit(ctx context.Context, tx pgx.Tx, store *metadata.Store, s FileScanner
 		_, err := tx.Exec(ctx, "UPDATE content SET valid = false, updated_at = $2 WHERE library_id = $1 AND id = ANY($3::text[])",
 			libraryID, now, invalid)
 		if err != nil {
-			return Counts{}, nil, err
+			return Counts{}, nil, nil, err
 		}
 	}
 
 	if err := metadata.TouchLinks(ctx, tx, touched, now); err != nil {
-		return Counts{}, nil, err
+		return Counts{}, nil, nil, err
 	}
 
 	if err := commitSeries(ctx, tx, store, s, libraryID, now, f.sets, seriesIDs, dropped); err != nil {
-		return Counts{}, nil, err
+		return Counts{}, nil, nil, err
 	}
 
 	if f.final {
 		if !f.keep {
+			emptied, err := cascadeUsers(ctx, tx, `content_id IN (`+emptySeries+`)`, libraryID)
+			if err != nil {
+				return Counts{}, nil, nil, err
+			}
+			cascaded = append(cascaded, emptied...)
 			var id, title string
-			err := query(ctx, tx, `
+			err = query(ctx, tx, `
 				-- Materialized: find empty root series by index first, then touch only their heap rows.
-				WITH gone AS MATERIALIZED (
-					SELECT s.id FROM content s
-					WHERE s.library_id = $1 AND s.parent_id IS NULL AND s.type IN ('comic_series', 'book_series')
-					  AND NOT EXISTS (SELECT 1 FROM content c WHERE c.parent_id = s.id)
-				)
+				WITH gone AS MATERIALIZED (`+emptySeries+`)
 				DELETE FROM content p USING gone WHERE p.id = gone.id
 				RETURNING p.id, COALESCE(NULLIF(p.data->>'title', ''), p.uri_part)
 			`, []any{libraryID}, []any{&id, &title}, func() error {
@@ -308,15 +357,123 @@ func commit(ctx context.Context, tx pgx.Tx, store *metadata.Store, s FileScanner
 				return nil
 			})
 			if err != nil {
-				return Counts{}, nil, err
+				return Counts{}, nil, nil, err
 			}
 		}
 		if _, err := tx.Exec(ctx, "UPDATE libraries SET scanned_at = $1 WHERE id = $2", now, libraryID); err != nil {
-			return Counts{}, nil, err
+			return Counts{}, nil, nil, err
 		}
 	}
 
-	return recentEntries(ctx, tx, libraryID, tallies)
+	counts, recent, err := recentEntries(ctx, tx, libraryID, tallies)
+	if err != nil {
+		return Counts{}, nil, nil, err
+	}
+	if f.task != "" {
+		saved := f.base
+		saved.add(counts)
+		if err := notify.CheckpointScan(ctx, tx, f.task, notify.Counts(saved), f.failed); err != nil {
+			return Counts{}, nil, nil, err
+		}
+	}
+	users, err := notifyWrites(ctx, tx, libraryID, added, now)
+	return counts, recent, slices.Concat(users, cascaded), err
+}
+
+// emptySeries selects a library's ($1) root series without children.
+const emptySeries = `
+	SELECT s.id FROM content s
+	WHERE s.library_id = $1 AND s.parent_id IS NULL AND s.type IN ('comic_series', 'book_series')
+	  AND NOT EXISTS (SELECT 1 FROM content c WHERE c.parent_id = s.id)`
+
+// cascadeUsers returns who owns the new-content notifications a delete is about to cascade away.
+func cascadeUsers(ctx context.Context, tx pgx.Tx, where string, arg any) ([]string, error) {
+	// Locked in the order Clear and MarkSeen lock, so the cascade can't deadlock with them.
+	users, err := db.SelectScalars[string](ctx, tx,
+		`SELECT user_id FROM notifications WHERE kind = 'new_content' AND `+where+`
+		 ORDER BY group_key NULLS FIRST, id FOR UPDATE`, arg)
+	slices.Sort(users)
+	return slices.Compact(users), err
+}
+
+// addedItems is what a flush added to one series.
+type addedItems struct {
+	count int
+	unit  string
+}
+
+func (a *addedItems) add(unit string) {
+	a.count++
+	if a.unit != unit {
+		a.unit = "item"
+	}
+}
+
+func unitOf(item *ParsedItem) string {
+	switch {
+	case item.ContentType == "book":
+		return "book"
+	case !item.MetaRaw.Number.IsZero():
+		return "chapter"
+	case !item.MetaRaw.Volume.IsZero():
+		return "volume"
+	}
+	return "item"
+}
+
+// notifyWrites notifies readers of new content, under a savepoint: a failure is logged and leaves
+// the catalog commit alone. It returns the users to tell.
+func notifyWrites(ctx context.Context, tx pgx.Tx, libraryID string, added map[string]*addedItems,
+	now time.Time) ([]string, error) {
+	if len(added) == 0 {
+		return nil, nil
+	}
+	sp, err := tx.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	users, err := writeNotifications(ctx, sp, libraryID, added, now)
+	if err == nil {
+		err = sp.Commit(ctx)
+	}
+	if err != nil {
+		if rbErr := sp.Rollback(ctx); rbErr != nil {
+			return nil, rbErr
+		}
+		slog.Error("[scanner] notification writes failed", "library", libraryID, "err", err)
+		return nil, nil
+	}
+	return users, nil
+}
+
+func writeNotifications(ctx context.Context, sp pgx.Tx, libraryID string, added map[string]*addedItems,
+	now time.Time) ([]string, error) {
+	// After applyRenames, so moved URIs are current. A series' own reader row counts when its
+	// status says it's followed; a series without a status counts through a started valid child.
+	var seriesID, userID string
+	var rows []notify.Grouped
+	err := query(ctx, sp, `
+		WITH s AS (SELECT id, uri FROM content WHERE library_id = $1 AND id = ANY($2::text[]))
+		SELECT s.id, su.user_id FROM s
+		  JOIN user_to_content su ON su.library_id = $1 AND su.uri = s.uri
+		 WHERE su.status IN ('reading', 'completed') OR su.starred
+		UNION
+		SELECT s.id, ku.user_id FROM s
+		  JOIN content k ON k.parent_id = s.id AND k.valid
+		  JOIN user_to_content ku ON ku.library_id = $1 AND ku.uri = k.uri
+		  LEFT JOIN user_to_content su ON su.user_id = ku.user_id AND su.library_id = $1 AND su.uri = s.uri
+		 WHERE su.status IS NULL
+		   AND (ku.last_read_at IS NOT NULL OR ku.status IN ('reading', 'completed', 'on_hold', 'dropped'))
+	`, []any{libraryID, slices.Collect(maps.Keys(added))}, []any{&seriesID, &userID}, func() error {
+		a, id := added[seriesID], seriesID
+		rows = append(rows, notify.Grouped{UserID: userID, Kind: models.NotificationNewContent,
+			GroupKey: "new_content:" + id, ContentID: &id, Count: a.count, Unit: &a.unit})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return fp.Map(rows, func(r notify.Grouped) string { return r.UserID }), notify.UpsertGrouped(ctx, sp, rows, true, now)
 }
 
 // recentEntries sums every entry's counts and details the newest entries. Deleted entries carry
@@ -365,6 +522,9 @@ func commitSeries(ctx context.Context, tx pgx.Tx, store *metadata.Store, s FileS
 
 	var seriesMeta []metadata.FileLayer
 	for _, id := range seriesIDs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		kids := children[id]
 		if len(kids) == 0 {
 			continue

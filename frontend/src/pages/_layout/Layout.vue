@@ -51,7 +51,7 @@
                 @click="searchOpen = true"
             />
             <SearchBox v-else class="nav:max-w-[560px] flex-1" />
-            <ScanIndicator />
+            <NotificationCenter />
         </template>
     </header>
 
@@ -92,7 +92,7 @@ import { IconArrowLeft, IconMagnify, IconMenu } from '@/ui/icons'
 import { usersApi } from '@/utils/api/users'
 import { ModalContainer } from '@/utils/modals'
 import NotFoundPage from '../NotFoundPage.vue'
-import ScanIndicator from './ScanIndicator.vue'
+import NotificationCenter from './NotificationCenter.vue'
 import SearchBox from './SearchBox.vue'
 import SidebarNav from './SidebarNav.vue'
 import { useLayoutStore } from './useLayoutStore'
@@ -248,7 +248,7 @@ async function toggleSidebar() {
                 padding: 0 12px 0 4px;
             }
 
-            &:not(.is-compact) > :deep([data-scan-trigger]) {
+            &:not(.is-compact) > :deep([data-notifications-trigger]) {
                 margin-right: -8px;
             }
 

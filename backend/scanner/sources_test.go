@@ -130,7 +130,8 @@ func indexThenWalk(t *testing.T, sources []string, rows map[string]string, mutat
 		}
 		fps = append(fps, f)
 	}
-	w := newWriter(ScanInput{LibraryID: "library"}, nil, nil, res, fps, nil)
+	w, err := newWriter(context.Background(), ScanInput{LibraryID: "library"}, nil, nil, res, fps, nil)
+	must(t, err)
 
 	if mutate != nil {
 		mutate()

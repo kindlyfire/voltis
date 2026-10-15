@@ -2,6 +2,7 @@ package epub
 
 import (
 	"archive/zip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -312,7 +313,7 @@ func countingBook(t *testing.T, docs map[string]string) map[string]int {
 	entries["content.opf"] = `<?xml version="1.0"?><package><metadata/><manifest>` + manifest.String() +
 		`</manifest><spine>` + spine.String() + `</spine></package>`
 
-	counts, err := CountWords(writeEPUB(t, entries))
+	counts, err := CountWords(context.Background(), writeEPUB(t, entries))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +332,7 @@ func assertCounts(t *testing.T, got, want map[string]int) {
 func words(s string) int { return len(strings.Fields(s)) }
 
 func TestCountWords(t *testing.T) {
-	wc, err := CountWords(nestedBook(t))
+	wc, err := CountWords(context.Background(), nestedBook(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +357,7 @@ func TestCountWords(t *testing.T) {
 }
 
 func TestCountWordsFixedLayout(t *testing.T) {
-	wc, err := CountWords(writeEPUB(t, map[string]string{
+	wc, err := CountWords(context.Background(), writeEPUB(t, map[string]string{
 		"META-INF/container.xml": container("content.opf"),
 		"content.opf": `<?xml version="1.0"?><package><metadata>
 			<meta property="rendition:layout"> pre-paginated </meta></metadata>

@@ -298,3 +298,11 @@ func MakeTaskID() string              { return makeID("t") }
 func MakeIdentityID() string          { return makeID("ui") }
 func MakeAuthPendingID() string       { return makeID("ap") }
 func MakeAppKeyID() string            { return makeID("ok") }
+
+const (
+	NotificationScan           = "scan"
+	NotificationNewContent     = "new_content"
+	NotificationMetadataReview = "metadata_review"
+)
+
+func MakeNotificationID() string { return makeID("n") }

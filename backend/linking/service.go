@@ -36,6 +36,7 @@ type Service struct {
 
 	// The worker's own state.
 	scanning    func(libraryID string) bool
+	notifyUsers func([]string)
 	recomputed  bool                 // no stale row is left
 	cursors     map[[2]string]string // (library, provider) -> the last URI matched
 	lastLib     string               // the library matched last
@@ -46,7 +47,7 @@ func New(pool *pgxpool.Pool, store *metadata.Store, reg *providers.Registry, cov
 	notify func(libraryID string)) *Service {
 	return &Service{pool: pool, store: store, reg: reg, covers: cov, notify: notify, wake: make(chan struct{}, 1),
 		undos:  undos{m: map[linkKey]undo{}, now: time.Now},
-		status: WorkerStatus{Activity: Idle}, scanning: func(string) bool { return false }, cursors: map[[2]string]string{}}
+		status: WorkerStatus{Activity: Idle}, scanning: func(string) bool { return false }, notifyUsers: func([]string) {}, cursors: map[[2]string]string{}}
 }
 
 // ProviderError is a provider failing to answer.

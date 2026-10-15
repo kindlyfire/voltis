@@ -1,7 +1,7 @@
 <template>
     <span
         class="a-badge"
-        :class="{ dot: icon }"
+        :class="[`size-${size}`, { dot: icon }]"
         :role="label ? 'img' : undefined"
         :aria-label="label"
         :title="label"
@@ -17,9 +17,12 @@ import AIcon from './AIcon.vue'
 
 /**
  * An inverse pill over a cover: a count (default slot), or an icon dot that needs a `label`.
- * `label` replaces the visible content for assistive tech ("12 unread").
+ * `label` replaces the visible content for assistive tech ("12 unread"). `sm` is a compact count
+ * for sitting on another control.
  */
-defineProps<{ icon?: Component; label?: string }>()
+withDefaults(defineProps<{ icon?: Component; label?: string; size?: 'md' | 'sm' }>(), {
+    size: 'md',
+})
 </script>
 
 <style scoped>
@@ -39,10 +42,23 @@ defineProps<{ icon?: Component; label?: string }>()
         font-variant-numeric: tabular-nums;
     }
 
+    .size-sm {
+        min-width: 16px;
+        height: 16px;
+        padding: 0 4px;
+        font-size: 10px;
+    }
+
     .dot {
         width: 26px;
         padding: 0;
         font-size: 15px;
+    }
+
+    .dot.size-sm {
+        width: 16px;
+        padding: 0;
+        font-size: 11px;
     }
 }
 </style>

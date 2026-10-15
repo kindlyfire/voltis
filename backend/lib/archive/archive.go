@@ -3,6 +3,7 @@ package archive
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -59,13 +60,43 @@ func eachOpen(names []string, open func(name string) (io.ReadCloser, error), fn 
 	return nil
 }
 
-func Open(path string) (Archive, error) {
+type ctxReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (c ctxReader) Read(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.r.Read(p)
+}
+
+// Reader fails reads with the context's error once it ends.
+func Reader(ctx context.Context, r io.Reader) io.Reader {
+	if ctx.Done() == nil {
+		return r
+	}
+	return ctxReader{ctx, r}
+}
+
+func readCloser(ctx context.Context, rc io.ReadCloser) io.ReadCloser {
+	return struct {
+		io.Reader
+		io.Closer
+	}{Reader(ctx, rc), rc}
+}
+
+func Open(path string) (Archive, error) { return OpenContext(context.Background(), path) }
+
+// OpenContext opens an archive whose reads and traversals stop when ctx ends.
+func OpenContext(ctx context.Context, path string) (Archive, error) {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
 	case ".zip", ".cbz", ".epub":
-		return openZip(path)
+		return openZip(ctx, path)
 	case ".rar", ".cbr":
-		return openRar(path)
+		return openRar(ctx, path)
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedFormat, ext)
 	}
@@ -74,15 +105,16 @@ func Open(path string) (Archive, error) {
 // Zip
 
 type zipArchive struct {
-	r *zip.ReadCloser
+	ctx context.Context
+	r   *zip.ReadCloser
 }
 
-func openZip(path string) (*zipArchive, error) {
+func openZip(ctx context.Context, path string) (*zipArchive, error) {
 	r, err := zip.OpenReader(path)
 	if err != nil {
 		return nil, err
 	}
-	return &zipArchive{r: r}, nil
+	return &zipArchive{ctx: ctx, r: r}, nil
 }
 
 func (z *zipArchive) List() ([]Entry, error) {
@@ -111,7 +143,11 @@ func (z *zipArchive) ReadFile(name string) ([]byte, error) {
 func (z *zipArchive) OpenFile(name string) (io.ReadCloser, error) {
 	for _, f := range z.r.File {
 		if f.Name == name {
-			return f.Open()
+			rc, err := f.Open()
+			if err != nil {
+				return nil, err
+			}
+			return readCloser(z.ctx, rc), nil
 		}
 	}
 	return nil, fmt.Errorf("%w: %s", ErrFileNotFound, name)
@@ -128,12 +164,13 @@ func (z *zipArchive) Close() error {
 // Rar
 
 type rarArchive struct {
+	ctx    context.Context
 	path   string
 	files  []*rardecode.File
 	byName map[string]*rardecode.File
 }
 
-func openRar(path string) (*rarArchive, error) {
+func openRar(ctx context.Context, path string) (*rarArchive, error) {
 	files, err := rardecode.List(path)
 	if err != nil {
 		return nil, err
@@ -144,7 +181,7 @@ func openRar(path string) (*rarArchive, error) {
 			byName[f.Name] = f
 		}
 	}
-	return &rarArchive{path: path, files: files, byName: byName}, nil
+	return &rarArchive{ctx: ctx, path: path, files: files, byName: byName}, nil
 }
 
 func (r *rarArchive) List() ([]Entry, error) {
@@ -170,14 +207,6 @@ func (r *rarArchive) ReadFile(name string) ([]byte, error) {
 	return io.ReadAll(rc)
 }
 
-// rarFileReader wraps a rardecode.ReadCloser positioned at a specific entry.
-type rarFileReader struct {
-	archive *rardecode.ReadCloser
-}
-
-func (r *rarFileReader) Read(p []byte) (int, error) { return r.archive.Read(p) }
-func (r *rarFileReader) Close() error               { return r.archive.Close() }
-
 // OpenFile opens a non-solid entry directly; a solid one is only reachable by decoding the
 // entries before it.
 func (r *rarArchive) OpenFile(name string) (io.ReadCloser, error) {
@@ -186,7 +215,11 @@ func (r *rarArchive) OpenFile(name string) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("%w: %s", ErrFileNotFound, name)
 	}
 	if !f.Solid {
-		return f.Open()
+		rc, err := f.Open()
+		if err != nil {
+			return nil, err
+		}
+		return readCloser(r.ctx, rc), nil
 	}
 
 	rc, err := rardecode.OpenReader(r.path)
@@ -194,6 +227,11 @@ func (r *rarArchive) OpenFile(name string) (io.ReadCloser, error) {
 		return nil, err
 	}
 	for {
+		// Next decodes the rest of a skipped solid entry unchecked, so drain it through the context.
+		if _, err := io.Copy(io.Discard, Reader(r.ctx, rc)); err != nil {
+			_ = rc.Close()
+			return nil, err
+		}
 		header, err := rc.Next()
 		if err == io.EOF {
 			break
@@ -203,7 +241,7 @@ func (r *rarArchive) OpenFile(name string) (io.ReadCloser, error) {
 			return nil, err
 		}
 		if header.Name == name {
-			return &rarFileReader{archive: rc}, nil
+			return readCloser(r.ctx, rc), nil
 		}
 	}
 	_ = rc.Close()
@@ -235,6 +273,10 @@ func (r *rarArchive) Each(names []string, fn func(int, io.Reader) error) error {
 	}
 	defer func() { _ = rc.Close() }()
 	for len(want) > 0 {
+		// Next decodes the rest of a skipped solid entry unchecked, so drain it through the context.
+		if _, err := io.Copy(io.Discard, Reader(r.ctx, rc)); err != nil {
+			return firstUnseen(err)
+		}
 		header, err := rc.Next()
 		if err == io.EOF {
 			return firstUnseen(ErrFileNotFound)
@@ -250,13 +292,13 @@ func (r *rarArchive) Each(names []string, fn func(int, io.Reader) error) error {
 		// A name wanted more than once is buffered, as the entry can be decoded only once.
 		var data []byte
 		if len(idx) > 1 {
-			if data, err = io.ReadAll(rc); err != nil {
+			if data, err = io.ReadAll(Reader(r.ctx, rc)); err != nil {
 				return firstUnseen(err)
 			}
 		}
 		for _, i := range idx {
 			seen[i] = true
-			var entry io.Reader = rc
+			entry := Reader(r.ctx, rc)
 			if len(idx) > 1 {
 				entry = bytes.NewReader(data)
 			}

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -30,6 +31,19 @@ type TaskDef struct {
 	Process          func(any, *TaskContext) (any, error)
 	UnmarshalInput   func(json.RawMessage) (any, error)
 	IsCompatibleWith func(self any, other RunningInfo) bool
+	// Finish runs in the transaction that saves the task's terminal state. The returned after,
+	// if any, runs once the task has left the running list, before its terminal snapshot is
+	// published.
+	Finish func(ctx context.Context, tx pgx.Tx, f Finished) (after func(), err error)
+}
+
+// Finished is what Finish learns about a task. Result is nil when no run produced one (a queued
+// task cancelled, or an interrupted one found at startup).
+type Finished struct {
+	ID     string
+	Status int
+	Result any
+	Err    error
 }
 
 type Pending struct {

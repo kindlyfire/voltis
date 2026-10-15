@@ -241,6 +241,8 @@ type scanRun struct {
 	lib  string
 	fs   FileScanner
 	w    *writer
+	// users are the users the commits asked to notify.
+	users []string
 }
 
 func newTestScan(t *testing.T, libType string) *scanRun {
@@ -267,7 +269,8 @@ func (r *scanRun) reload() {
 	if err != nil {
 		r.t.Fatalf("load series: %v", err)
 	}
-	r.w = newWriter(ScanInput{LibraryID: r.lib}, nil, nil, res, fps, refs)
+	r.w, err = newWriter(ctx, ScanInput{LibraryID: r.lib}, nil, nil, res, fps, refs)
+	must(r.t, err)
 	r.w.seed()
 }
 
@@ -298,11 +301,16 @@ func (r *scanRun) recordCommit(final bool) (*recordingTx, Counts, []RecentEntry,
 	rec := &recordingTx{}
 	var counts Counts
 	var recent []RecentEntry
+	var users []string
 	err := db.WithTx(context.Background(), r.pool, func(tx pgx.Tx) error {
 		rec.Tx = tx
 		var txErr error
-		counts, recent, txErr = commit(context.Background(), rec, testStore, r.fs, r.lib, f, time.Now().UTC())
+		counts, recent, users, txErr = commit(context.Background(), rec, testStore, r.fs, r.lib, f, time.Now().UTC())
 		return txErr
 	})
+	if err == nil {
+		r.users = append(r.users, users...)
+		r.w.prog.Saved.add(counts)
+	}
 	return rec, counts, recent, err
 }

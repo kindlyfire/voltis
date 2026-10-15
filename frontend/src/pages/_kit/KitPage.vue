@@ -151,6 +151,18 @@
                         <AIconButton :icon="IconTune" label="Display options" />
                         <AIconButton size="lg" :icon="IconTune" label="Display options" />
                     </KitDemo>
+                    <KitDemo label="badge">
+                        <AIconButton
+                            :icon="IconNotifications"
+                            label="Notifications, 3 unread"
+                            badge="3"
+                        />
+                        <AIconButton
+                            :icon="IconNotifications"
+                            label="Notifications, 12 unread"
+                            badge="9+"
+                        />
+                    </KitDemo>
                     <KitDemo label="toggle (pressed / unpressed)">
                         <AIconButton
                             :icon="IconStar"
@@ -699,6 +711,11 @@
                         <ABadge>12</ABadge>
                         <ABadge label="3 unread">3</ABadge>
                         <ABadge :icon="IconBookOpenFilled" label="Reading" />
+                    </KitDemo>
+                    <KitDemo label="size sm">
+                        <ABadge size="sm">3</ABadge>
+                        <ABadge size="sm">9+</ABadge>
+                        <ABadge size="sm" :icon="IconBookOpenFilled" label="Reading" />
                     </KitDemo>
                     <KitDemo label="avatar 34 / 48">
                         <AAvatar name="tijl" />
@@ -1255,6 +1272,7 @@ import AToastRegion from '@/ui/AToastRegion.vue'
 import ATooltip from '@/ui/ATooltip.vue'
 import * as icons from '@/ui/icons'
 import {
+    IconNotifications,
     IconAlert,
     IconBookOpen,
     IconBookOpenFilled,

@@ -77,7 +77,7 @@ func TestMatchBackfill(t *testing.T) {
 	e.notified = nil
 
 	from := time.Now()
-	if res := e.match(); res != (MatchResult{Linked: 1, Review: 1, Unmatched: 1}) {
+	if res := e.match(); res != (MatchResult{Linked: 1, Review: 1, Unmatched: 1, Entered: 1}) {
 		t.Fatalf("result = %+v", res)
 	}
 	if l := e.link("a"); l.State != StateLinked || *l.ExternalID != "1" || *l.Origin != OriginAuto {
@@ -102,6 +102,12 @@ func TestMatchBackfill(t *testing.T) {
 	page, err := e.svc.Review(ctx, ReviewQuery{Tab: "auto", Limit: 10})
 	if err != nil || page.Total != 1 || page.Items[0].Content.ID != "a" || page.Items[0].Link.Entry.Title != "Remote One" {
 		t.Fatalf("auto-linked = %+v (%v)", page, err)
+	}
+
+	// A review made due again is tried once more, but isn't new review work.
+	e.exec("UPDATE metadata_links SET retry_at = now() WHERE content_id = 'b'")
+	if res := e.match(); res != (MatchResult{Review: 1}) {
+		t.Fatalf("review tried again = %+v", res)
 	}
 
 	// Nothing is due: review waits for an admin, and l2 does not match automatically.

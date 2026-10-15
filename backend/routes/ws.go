@@ -75,6 +75,8 @@ type WebSocketHub struct {
 	conns map[*userConn]struct{}
 	seq   uint64
 	gens  map[string]uint64
+	// unread counts users' unread notifications; set once at wiring, before anything is sent.
+	unread func(context.Context, []string) (map[string]int, error)
 }
 
 type userConn struct {
@@ -210,6 +212,10 @@ func toAdmins(c *userConn) bool { return c.admin }
 
 func toEveryone(*userConn) bool { return true }
 
+func toUser(id string) func(*userConn) bool {
+	return func(c *userConn) bool { return c.user == id }
+}
+
 func (h *WebSocketHub) Drop(user string) {
 	var drop []*userConn
 	h.mu.Lock()
@@ -287,6 +293,31 @@ func (h *WebSocketHub) LibraryChanged(libraryID string) {
 // MetadataStatus tells admins what matching and refreshing with metadata providers is doing.
 func (h *WebSocketHub) MetadataStatus(st linking.WorkerStatus) {
 	h.broadcast(toAdmins, map[string]any{"type": "metadata_status", "status": st})
+}
+
+// NotificationsChanged tells the users their feed changed, with their unread count. It returns at
+// once: the counts are read in the background, so the scan writer and the task manager never wait.
+func (h *WebSocketHub) NotificationsChanged(users []string) {
+	users = slices.Compact(slices.Sorted(slices.Values(users)))
+	if len(users) == 0 || h.unread == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		counts, err := h.unread(ctx, users)
+		if err != nil {
+			slog.Error("[ws] failed to count unread notifications", "err", err)
+			return
+		}
+		for _, u := range users {
+			h.pushUnread(u, counts[u])
+		}
+	}()
+}
+
+func (h *WebSocketHub) pushUnread(user string, n int) {
+	h.broadcast(toUser(user), map[string]any{"type": "notifications_changed", "unread": n})
 }
 
 func wsHandler(r *resolver) echo.HandlerFunc {

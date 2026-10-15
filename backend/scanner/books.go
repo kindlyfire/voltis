@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"time"
@@ -17,14 +18,14 @@ func (bs *BooksScanner) FileEligible(path string) bool {
 	return strings.ToLower(filepath.Ext(path)) == ".epub"
 }
 
-func (bs *BooksScanner) ParseFile(file FSFile) *ParsedItem {
-	meta, err := epub.ReadMetadata(file.Path)
+func (bs *BooksScanner) ParseFile(ctx context.Context, file FSFile) *ParsedItem {
+	meta, err := epub.ReadMetadata(ctx, file.Path)
 	if err != nil {
 		slog_scan("failed to read epub metadata", "path", file.Path, "err", err)
 		return nil
 	}
 
-	words, err := epub.CountWords(file.Path)
+	words, err := epub.CountWords(ctx, file.Path)
 	if err != nil {
 		slog_scan("failed to count epub text", "path", file.Path, "err", err)
 	}

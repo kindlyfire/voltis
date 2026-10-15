@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"time"
@@ -17,8 +18,8 @@ func (cs *ComicsScanner) FileEligible(path string) bool {
 	return isComicFile(path)
 }
 
-func (cs *ComicsScanner) ParseFile(file FSFile) *ParsedItem {
-	pages, comicInfo := comic.Scan(file.Path)
+func (cs *ComicsScanner) ParseFile(ctx context.Context, file FSFile) *ParsedItem {
+	pages, comicInfo := comic.Scan(ctx, file.Path)
 
 	if len(pages) == 0 {
 		return nil

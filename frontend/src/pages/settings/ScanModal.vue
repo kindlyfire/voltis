@@ -62,9 +62,20 @@
                 </AButton>
                 <AButton :loading="phase === 'starting'" @click="startScan">Start scan</AButton>
             </template>
-            <AButton v-else ref="closeButton" variant="text" tone="neutral" @click="close(true)">
-                Close
-            </AButton>
+            <template v-else>
+                <AButton
+                    v-if="cancellable.length"
+                    variant="text"
+                    tone="danger"
+                    :disabled="cancelling"
+                    @click="cancelScan"
+                >
+                    Cancel scan
+                </AButton>
+                <AButton ref="closeButton" variant="text" tone="neutral" @click="close(true)">
+                    Close
+                </AButton>
+            </template>
         </template>
     </ADialog>
 </template>
@@ -72,13 +83,17 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import QueryError from '@/components/QueryError.vue'
-import { scanRow, useScanStore } from '@/stores/scans'
+import { useNotificationStore } from '@/stores/notifications'
+import { isTerminal, scanRow, useScanStore } from '@/stores/scans'
 import AButton from '@/ui/AButton.vue'
 import ACheckbox from '@/ui/ACheckbox.vue'
 import ADialog from '@/ui/ADialog.vue'
 import ASpinner from '@/ui/ASpinner.vue'
+import { useToast } from '@/ui/useToast'
 import { librariesApi } from '@/utils/api/libraries'
+import { tasksApi } from '@/utils/api/tasks'
 import { usersApi } from '@/utils/api/users'
+import { RequestError } from '@/utils/fetch'
 import ScanStrip from './ScanStrip.vue'
 
 const props = defineProps<{
@@ -91,6 +106,8 @@ const props = defineProps<{
 }>()
 
 const store = useScanStore()
+const notifications = useNotificationStore()
+const toast = useToast()
 const qLibraries = librariesApi.useList()
 const mScan = librariesApi.useScan()
 const qMe = usersApi.useMe()
@@ -105,12 +122,45 @@ const log = useTemplateRef<HTMLElement>('log')
 
 const isContentScan = computed(() => !!props.contentIds?.length)
 
+// The notification keeps the counts of a scan that was loaded after it ended.
 const rows = computed(() =>
     ids.value.flatMap(id => {
         const task = store.tasks[id]
-        return task ? [scanRow(task)] : []
+        const item = notifications.byTask(id)
+        return task ? [scanRow(task, item?.kind === 'scan' ? item.data : undefined)] : []
     })
 )
+
+// What the user sees here doesn't raise the badge when it ends.
+watch(
+    [() => props.open, phase, ids],
+    ([open, current, list], _, onCleanup) => {
+        if (open && current === 'scanning') onCleanup(notifications.watch(list))
+    },
+    { immediate: true }
+)
+
+const cancellable = computed(() =>
+    ids.value.filter(id => store.tasks[id] && !isTerminal(store.tasks[id]))
+)
+const cancelling = ref(false)
+
+async function cancelScan() {
+    cancelling.value = true
+    await Promise.all(
+        cancellable.value.map(id =>
+            tasksApi.cancel(id).catch(err => {
+                // Already ended.
+                if (err instanceof RequestError && err.response?.status === 409) return
+                toast.show({
+                    message: `Couldn't cancel: ${RequestError.getMessage(err)}`,
+                    tone: 'danger',
+                })
+            })
+        )
+    )
+    cancelling.value = false
+}
 
 const logs = computed(() =>
     ids.value.flatMap(id => {

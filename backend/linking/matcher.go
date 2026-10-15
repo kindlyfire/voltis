@@ -23,14 +23,16 @@ type MatchResult struct {
 	Unmatched int `json:"unmatched"`
 	Failed    int `json:"failed"`  // the provider failed; tried again with backoff
 	Skipped   int `json:"skipped"` // changed during the lookup
+	// Series that entered review, not those already there that were tried again.
+	Entered int `json:"-"`
 }
 
 func (r MatchResult) plus(o MatchResult) MatchResult {
 	return MatchResult{r.Linked + o.Linked, r.Review + o.Review, r.Unmatched + o.Unmatched, r.Failed + o.Failed,
-		r.Skipped + o.Skipped}
+		r.Skipped + o.Skipped, r.Entered + o.Entered}
 }
 
-func (r *MatchResult) add(a attempt) {
+func (r *MatchResult) add(a attempt, was State) {
 	switch {
 	case a.err != nil:
 		r.Failed++
@@ -38,6 +40,9 @@ func (r *MatchResult) add(a attempt) {
 		r.Linked++
 	case len(a.decision.Candidates) > 0:
 		r.Review++
+		if was != StateReview {
+			r.Entered++
+		}
 	default:
 		r.Unmatched++
 	}
@@ -295,7 +300,7 @@ func (s *Service) matchSeries(ctx context.Context, c changes, p providers.Provid
 			return out, i + 1, err
 		}
 		if dryRun != nil {
-			out.add(a)
+			out.add(a, l.State)
 			dryRun(t, a.query, a.decision, a.err)
 			continue
 		}
@@ -316,7 +321,7 @@ func (s *Service) matchSeries(ctx context.Context, c changes, p providers.Provid
 		case err != nil:
 			return out, i + 1, err
 		default:
-			out.add(a)
+			out.add(a, l.State)
 		}
 	}
 	return out, len(page), nil

@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -256,6 +257,14 @@ func TestTaskAudienceIsAdminOnly(t *testing.T) {
 	h.broadcast(func(c *userConn) bool { return c.user == "u2" },
 		map[string]any{"type": "ping", "id": "still-live"})
 	expectMessage(t, plain, `"still-live"`)
+	expectNoMessage(t, admin)
+
+	// A user's unread count goes to that user alone.
+	h.unread = func(_ context.Context, ids []string) (map[string]int, error) {
+		return map[string]int{ids[0]: 3}, nil
+	}
+	h.NotificationsChanged([]string{"u2", "u2"})
+	expectMessage(t, plain, `"notifications_changed"`, `"unread":3`)
 	expectNoMessage(t, admin)
 }
 

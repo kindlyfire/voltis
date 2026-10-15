@@ -475,7 +475,7 @@ func TestTerminalSnapshotFollowsLeavingThePendingList(t *testing.T) {
 			pendingAtEnd <- len(m.Pending("quick"))
 		}
 	})
-	if _, err := m.Push(compatibleDef("quick", func(any, *TaskContext) (any, error) { return nil, nil }), nil); err != nil {
+	if _, err := m.Push(compatibleDef("quick", func(any, *TaskContext) (any, error) { return nil, nil }), nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if n := <-pendingAtEnd; n != 0 {

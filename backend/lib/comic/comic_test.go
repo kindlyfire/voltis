@@ -56,7 +56,7 @@ func writeCBZ(t *testing.T, entries map[string][]byte) string {
 
 func assertPages(t *testing.T, path string, want ...string) {
 	t.Helper()
-	pages, _ := Scan(path)
+	pages, _ := Scan(context.Background(), path)
 	got := make([]string, len(pages))
 	for i, p := range pages {
 		got[i] = p.Name
@@ -153,7 +153,7 @@ func TestParseComicInfoDropsPlaceholders(t *testing.T) {
 
 func TestScanArchiveIsUnsized(t *testing.T) {
 	img := jpegBytes(t)
-	pages, ci := Scan(writeCBZ(t, map[string][]byte{
+	pages, ci := Scan(context.Background(), writeCBZ(t, map[string][]byte{
 		"002.jpg":       img,
 		"001.jpg":       img,
 		"notes.txt":     []byte("x"),
@@ -180,7 +180,7 @@ func TestScanPDFIsSized(t *testing.T) {
 	if err := os.WriteFile(path, []byte(pdf), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	pages, _ := Scan(path)
+	pages, _ := Scan(context.Background(), path)
 	want := []PageInfo{{Name: "p1", Width: 250, Height: 500, Sized: true}}
 	if !reflect.DeepEqual(pages, want) {
 		t.Errorf("pages = %+v, want %+v", pages, want)

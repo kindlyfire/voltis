@@ -32,4 +32,10 @@ export const tasksApi = {
 
     logs: async (id: string, offset: number) =>
         apiFetch<TaskLogs>(`/tasks/${encodeURIComponent(id)}/logs?offset=${offset}`),
+
+    cancel: async (id: string) =>
+        apiFetch<{ ok: boolean }>(`/tasks/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
+
+    retry: async (id: string) =>
+        apiFetch<{ task_id: string }>(`/tasks/${encodeURIComponent(id)}/retry`, { method: 'POST' }),
 }

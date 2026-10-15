@@ -289,7 +289,10 @@ func (s *Store) load(ctx context.Context, q db.Querier, docs map[string]Doc) (ma
 		out[id] = &Layers{File: d.File, Overrides: d.Overrides, OverridesRev: d.Rev}
 	}
 	var changed []linkError
-	for _, r := range links {
+	for i, r := range links {
+		if i%256 == 0 && ctx.Err() != nil {
+			return nil, nil, ctx.Err()
+		}
 		l := out[r.ContentID]
 		f, err := s.dec.Layer(EntryKey{r.Provider, r.ExternalID}, r.Raw)
 		var msg string

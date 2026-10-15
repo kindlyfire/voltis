@@ -4,9 +4,12 @@ import (
 	"archive/zip"
 	"bytes"
 	"cmp"
+	"context"
 	"slices"
 	"strings"
 	"unicode"
+
+	"voltis/lib/archive"
 
 	"github.com/rivo/uniseg"
 	"golang.org/x/net/html"
@@ -46,7 +49,7 @@ type WordCounts struct {
 }
 
 // CountWords counts the body-text words of every spine document.
-func CountWords(filePath string) (*WordCounts, error) {
+func CountWords(ctx context.Context, filePath string) (*WordCounts, error) {
 	zr, err := zip.OpenReader(filePath)
 	if err != nil {
 		return nil, err
@@ -81,11 +84,18 @@ func CountWords(filePath string) (*WordCounts, error) {
 		if _, done := wc.Docs[target.Href]; done {
 			continue
 		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		data, err := readZipFile(zr, target.Href)
 		if err != nil {
 			continue
 		}
-		wc.Docs[target.Href] = countWords(normalizedText(data))
+		n, err := countWords(ctx, normalizedText(ctx, data))
+		if err != nil {
+			return nil, err
+		}
+		wc.Docs[target.Href] = n
 	}
 	for href, n := range wc.Docs {
 		if linear[href] {
@@ -99,22 +109,25 @@ func CountWords(filePath string) (*WordCounts, error) {
 // countWords counts UAX #29 word tokens holding at least one letter or digit.
 // Han ideographs segment one per token and kana in runs, which is what a
 // language-aware reading speed wants.
-func countWords(text string) int {
+func countWords(ctx context.Context, text string) (int, error) {
 	count, state := 0, -1
-	for rest := text; rest != ""; {
+	for tokens, rest := 0, text; rest != ""; tokens++ {
+		if tokens%4096 == 0 && ctx.Err() != nil {
+			return 0, ctx.Err()
+		}
 		var word string
 		word, rest, state = uniseg.FirstWordInString(rest, state)
 		if strings.ContainsFunc(word, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }) {
 			count++
 		}
 	}
-	return count
+	return count, nil
 }
 
 // normalizedText flattens body text, separating block elements but keeping text
 // continuous across inline ones.
-func normalizedText(data []byte) string {
-	doc, err := html.Parse(bytes.NewReader(data))
+func normalizedText(ctx context.Context, data []byte) string {
+	doc, err := html.Parse(archive.Reader(ctx, bytes.NewReader(data)))
 	if err != nil {
 		return ""
 	}

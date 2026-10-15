@@ -27,6 +27,7 @@ import { TooltipProvider } from 'reka-ui'
 import { computed, watch } from 'vue'
 import { RouterView, START_LOCATION, useRouter } from 'vue-router'
 import { useLayoutStore } from './pages/_layout/useLayoutStore'
+import { useNotificationSync } from './stores/notifications'
 import { useScanSync } from './stores/scans'
 import AAlert from './ui/AAlert.vue'
 import AButton from './ui/AButton.vue'
@@ -47,6 +48,7 @@ const qInfo = miscApi.useInfo()
 const failed = computed(() => [qMe, qInfo].find(q => q.isError.value && q.data.value === undefined))
 
 useScanSync()
+useNotificationSync()
 useSubmitShortcut()
 
 watch(

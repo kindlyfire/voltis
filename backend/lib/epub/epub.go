@@ -2,6 +2,7 @@ package epub
 
 import (
 	"archive/zip"
+	"context"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -23,7 +24,7 @@ type Metadata struct {
 }
 
 // ReadMetadata extracts metadata from an EPUB file.
-func ReadMetadata(filePath string) (*Metadata, error) {
+func ReadMetadata(ctx context.Context, filePath string) (*Metadata, error) {
 	zr, err := zip.OpenReader(filePath)
 	if err != nil {
 		return nil, err
@@ -32,6 +33,9 @@ func ReadMetadata(filePath string) (*Metadata, error) {
 
 	m := &Metadata{}
 	opfPath, opfData, err := readOPF(zr)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil {
 		return m, nil
 	}

@@ -26,6 +26,7 @@ type committed struct {
 	seq    int
 	counts Counts
 	recent []RecentEntry
+	users  []string // whose notifications changed
 	err    error
 }
 
@@ -73,13 +74,15 @@ type writer struct {
 	inflight int
 	sets     map[string]*SeriesChanges
 	prog     Progress
+	start    time.Time // when the scan began; series created before it are old ones
+	task     string
 	seq      int
 	tick     int
 	last     time.Time
 }
 
-func newWriter(in ScanInput, tc *tasks.TaskContext, notify Notifier, res *resolver,
-	fps []Fingerprint, refs []SeriesRef) *writer {
+func newWriter(ctx context.Context, in ScanInput, tc *tasks.TaskContext, notify Notifier, res *resolver,
+	fps []Fingerprint, refs []SeriesRef) (*writer, error) {
 	w := &writer{
 		in:      in,
 		tc:      tc,
@@ -105,6 +108,9 @@ func newWriter(in ScanInput, tc *tasks.TaskContext, notify Notifier, res *resolv
 		sets:    map[string]*SeriesChanges{},
 		prog:    Progress{Phase: "walking"},
 	}
+	if tc != nil {
+		w.task = tc.ID()
+	}
 	// File roots can neither list empty nor lose most of their items, and would draw a content
 	// scan's children away from the series directory. Without the guard, no root is tallied.
 	paths := in.Sources
@@ -124,7 +130,10 @@ func newWriter(in ScanInput, tc *tasks.TaskContext, notify Notifier, res *resolv
 		}
 	}
 	slices.SortFunc(w.roots, func(a, b string) int { return cmp.Compare(len(b), len(a)) })
-	for _, f := range fps {
+	for i, f := range fps {
+		if i%1024 == 0 && ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		w.byID[f.ID] = f
 		w.keys[Key{deref(f.ParentID), f.URIPart}] = f.ID
 		key, ok := res.file(f.Path)
@@ -150,7 +159,7 @@ func newWriter(in ScanInput, tc *tasks.TaskContext, notify Notifier, res *resolv
 			w.addDir(*ref.FileURI, ref.ID)
 		}
 	}
-	return w
+	return w, nil
 }
 
 func (w *writer) run(ctx context.Context, events <-chan Event, walkDone <-chan error, jobs chan<- FSFile,
@@ -160,12 +169,26 @@ func (w *writer) run(ctx context.Context, events <-chan Event, walkDone <-chan e
 	defer closeJobs()
 	defer closeFlushes()
 
-	for ev := range events {
-		w.event(ev)
-		w.publish()
+walking:
+	for {
+		select {
+		case ev, ok := <-events:
+			if !ok {
+				break walking
+			}
+			w.event(ev)
+			w.publish()
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
-	if err := <-walkDone; err != nil {
-		return err
+	select {
+	case err := <-walkDone:
+		if err != nil {
+			return err
+		}
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 	// Before seed, which would drop gone leaves from the series' directory picks.
 	if w.trust && !w.in.Settings.AlwaysRemoveMissing {
@@ -182,6 +205,10 @@ func (w *writer) run(ctx context.Context, events <-chan Event, walkDone <-chan e
 	defer tick.Stop()
 	busy := false
 	for w.inflight > 0 || len(w.queue) > 0 || busy {
+		// A cancel beats a ready result.
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		var send chan<- FSFile
 		var next FSFile
 		if len(w.queue) > 0 {
@@ -288,6 +315,7 @@ func (w *writer) event(ev Event) {
 			w.prog.Unchanged++
 		}
 	case Failed:
+		w.prog.ReadFailures++
 		if t := w.tallyOf(ev.Path); t != nil {
 			t.failed = true
 		}
@@ -343,6 +371,8 @@ func (w *writer) distrust(reason, path string) {
 		return
 	}
 	w.trust = false
+	w.prog.RemovalsSuppressed = cmp.Or(w.prog.RemovalsSuppressed, "the filesystem changed under the scan ("+reason+")")
+	w.publish()
 	clear(w.gone)
 	slog.Warn("[scanner] the filesystem changed under the scan, removals suppressed",
 		"reason", reason, "path", path, "library", w.in.LibraryID)
@@ -724,7 +754,8 @@ func (w *writer) take(final bool) flush {
 
 	w.seq++
 	w.last = time.Now()
-	f := flush{seq: w.seq, at: w.last, sets: w.sets, final: final, keep: !w.trust}
+	f := flush{seq: w.seq, at: w.last, sets: w.sets, final: final, keep: !w.trust,
+		task: w.task, start: w.start, base: w.prog.Saved, failed: w.prog.Failed}
 	if final {
 		w.gone = nil
 	} else {
@@ -734,12 +765,27 @@ func (w *writer) take(final bool) flush {
 	return f
 }
 
+// drain takes in a commit that landed as the scan was cancelled, so its counts aren't lost.
+func (w *writer) drain(done <-chan committed) {
+	select {
+	case c := <-done:
+		if c.err == nil {
+			w.saved(c)
+			w.publish()
+		}
+	default:
+	}
+}
+
 func (w *writer) saved(c committed) {
 	w.prog.Saved.add(c.counts)
 	w.prog.Recent = mergeRecent(c.recent, w.prog.Recent)
 	w.prog.CommitSeq = c.seq
 	if w.notify != nil {
-		w.notify.CatalogChanged(CatalogChanged{LibraryID: w.in.LibraryID, TaskID: w.taskID(), CommitSeq: c.seq})
+		w.notify.CatalogChanged(CatalogChanged{LibraryID: w.in.LibraryID, TaskID: w.task, CommitSeq: c.seq})
+		if len(c.users) > 0 {
+			w.notify.NotificationsChanged(c.users)
+		}
 	}
 }
 
@@ -768,11 +814,4 @@ func (w *writer) logf(format string, args ...any) {
 	if w.tc != nil {
 		w.tc.Log(format, args...)
 	}
-}
-
-func (w *writer) taskID() string {
-	if w.tc == nil {
-		return ""
-	}
-	return w.tc.ID()
 }

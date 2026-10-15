@@ -2,11 +2,13 @@ package scanner
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -14,6 +16,7 @@ import (
 
 	"voltis/db"
 	"voltis/db/dbtest"
+	"voltis/lib/epub"
 	"voltis/lib/tasks"
 	"voltis/metadata"
 	"voltis/models"
@@ -31,6 +34,8 @@ func (r *recorder) CatalogChanged(ev CatalogChanged) {
 	defer r.mu.Unlock()
 	r.events = append(r.events, ev)
 }
+
+func (r *recorder) NotificationsChanged([]string) {}
 
 func (r *recorder) seqs() []int {
 	r.mu.Lock()
@@ -79,7 +84,7 @@ func (p *pipeline) scan(in ScanInput) (ScanResult, error) {
 	if in.LibraryType == "" {
 		in.LibraryType = "comics"
 	}
-	handle, err := p.manager.Push(p.def, in)
+	handle, err := p.manager.Push(p.def, in, nil)
 	if err != nil {
 		p.t.Fatalf("push: %v", err)
 	}
@@ -179,8 +184,8 @@ func TestScanPipelineRetainsRowsUnderUnreadableDirectories(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(series, 0o755) })
 
 	result := p.mustScan(ScanInput{})
-	if result.Removed != 0 {
-		t.Fatalf("scan = %+v, want nothing removed", result)
+	if result.Removed != 0 || result.ReadFailures != 1 {
+		t.Fatalf("scan = %+v, want nothing removed and one unreadable directory", result)
 	}
 	assertCatalog(t, p.pool, p.lib, before)
 }
@@ -352,7 +357,7 @@ func TestScanPipelineRerunAfterAnInterruptedScanConverges(t *testing.T) {
 
 	saved := statFile(t, filepath.Join(series, "Foo ch1.cbz"))
 	run := newScanRun(t, p.pool, p.lib, &ComicsScanner{})
-	run.place(Result{File: saved, Item: (&ComicsScanner{}).ParseFile(saved)})
+	run.place(Result{File: saved, Item: (&ComicsScanner{}).ParseFile(context.Background(), saved)})
 	run.commit(false)
 	batch := contentIDByURI(t, p.pool, p.lib, "comic/Foo_2019/ch1")
 
@@ -431,7 +436,7 @@ func TestScanConcurrencyCancellation(t *testing.T) {
 	}
 
 	handle, err := p.manager.Push(p.def, ScanInput{LibraryID: p.lib, LibraryType: "comics",
-		Sources: []string{p.root}, Concurrency: 1})
+		Sources: []string{p.root}, Concurrency: 1}, nil)
 	must(t, err)
 
 	deadline := time.Now().Add(30 * time.Second)
@@ -848,4 +853,72 @@ func TestScanInfersBookSeriesAndRescansWithoutChurn(t *testing.T) {
 	p.mustScan(ScanInput{LibraryType: "books", Force: true})
 	inferred()
 	followsV01()
+}
+
+// bigEPUB writes a book of n spine documents of the same text.
+func bigEPUB(t *testing.T, path string, n int, text string) {
+	t.Helper()
+	var manifest, spine strings.Builder
+	entries := map[string][]byte{
+		"META-INF/container.xml": []byte(`<?xml version="1.0"?><container><rootfiles><rootfile full-path="content.opf"/></rootfiles></container>`),
+	}
+	doc := []byte("<html><body><p>" + text + "</p></body></html>")
+	for i := range n {
+		name := fmt.Sprintf("d%d.xhtml", i)
+		entries[name] = doc
+		fmt.Fprintf(&manifest, `<item id="d%d" href="%s" media-type="application/xhtml+xml"/>`, i, name)
+		fmt.Fprintf(&spine, `<itemref idref="d%d"/>`, i)
+	}
+	entries["content.opf"] = []byte(`<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+		<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Big Book</dc:title></metadata>
+		<manifest>` + manifest.String() + `</manifest><spine>` + spine.String() + `</spine></package>`)
+	writeZip(t, path, entries)
+}
+
+func TestScanCancelStopsMidParse(t *testing.T) {
+	const bound = 2 * time.Second
+	p := newPipeline(t, "books")
+	text := strings.Repeat("The quick brown fox jumps over the lazy dog. ", 4500) // ~200 KB
+
+	// The size of the book follows from how fast this machine counts words, so that an uncancelled
+	// parse takes three times the bound.
+	calibration := filepath.Join(t.TempDir(), "calibration.epub")
+	bigEPUB(t, calibration, 20, text)
+	begin := time.Now()
+	_, err := epub.CountWords(context.Background(), calibration)
+	must(t, err)
+	perDoc := time.Since(begin) / 20
+	docs := min(2000, max(20, int(3*bound/perDoc)))
+	t.Logf("%v per document, %d documents, about %v uncancelled", perDoc, docs, time.Duration(docs)*perDoc)
+	bigEPUB(t, filepath.Join(p.root, "Big Book.epub"), docs, text)
+
+	handle, err := p.manager.Push(p.def, ScanInput{LibraryID: p.lib, LibraryType: "books",
+		Sources: []string{p.root}, Concurrency: 1}, nil)
+	must(t, err)
+	deadline := time.Now().Add(30 * time.Second)
+	for parsing := false; !parsing; time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for the parsing phase")
+		}
+		for _, snap := range p.manager.Live() {
+			var progress Progress
+			if snap.ID == handle.ID() && json.Unmarshal(snap.Progress, &progress) == nil {
+				parsing = progress.Phase == "parsing"
+			}
+		}
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	cancelled := time.Now()
+	must(t, p.manager.Cancel(handle.ID()))
+	result, _ := handle.Wait()
+	latency := time.Since(cancelled)
+	t.Logf("cancelled in %v", latency)
+	if latency > bound {
+		t.Fatalf("cancel took %v, want at most %v", latency, bound)
+	}
+	if failed := result.(ScanResult).Failed; failed != 0 {
+		t.Fatalf("failed = %d, want a cut-short parse not counted", failed)
+	}
+	assertCatalog(t, p.pool, p.lib, nil)
 }

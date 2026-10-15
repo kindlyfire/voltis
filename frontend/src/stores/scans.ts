@@ -31,6 +31,7 @@ export type ScanLead =
           outcome: 'completed' | 'failed' | 'cancelled'
           counts: ScanCounts
           removalsSuppressed?: string
+          readFailures?: number
       }
 
 export interface ScanRow {
@@ -42,13 +43,25 @@ export interface ScanRow {
 
 const noCounts: ScanCounts = { added: 0, updated: 0, removed: 0 }
 
-function scanLead(task: TaskSnapshot): ScanLead {
+/** What a notification kept of a finished scan, for a task loaded without progress or output. */
+export interface ScanSummary {
+    saved?: ScanCounts
+    failed?: number
+    read_failures?: number
+    removals_suppressed?: string
+}
+
+function scanLead(task: TaskSnapshot, fallback?: ScanSummary): ScanLead {
     const progress = task.progress
     // A failed or cancelled scan still keeps what its earlier flushes committed.
-    const saved = progress?.saved ?? noCounts
+    const saved = progress?.saved ?? fallback?.saved ?? noCounts
     // Failed and cancelled scans have no output, but published the reason with their progress.
     const output = hasOutput(task.output) ? task.output : undefined
-    const removalsSuppressed = output?.removals_suppressed ?? progress?.removals_suppressed
+    const removalsSuppressed =
+        output?.removals_suppressed ??
+        progress?.removals_suppressed ??
+        fallback?.removals_suppressed
+    const readFailures = output?.read_failures ?? progress?.read_failures ?? fallback?.read_failures
     if (isTerminal(task)) {
         if (task.status === TaskStatus.COMPLETED) {
             return {
@@ -56,10 +69,11 @@ function scanLead(task: TaskSnapshot): ScanLead {
                 outcome: 'completed',
                 counts: output ?? saved,
                 removalsSuppressed,
+                readFailures,
             }
         }
         const outcome = task.status === TaskStatus.CANCELLED ? 'cancelled' : 'failed'
-        return { state: 'done', outcome, counts: saved, removalsSuppressed }
+        return { state: 'done', outcome, counts: saved, removalsSuppressed, readFailures }
     }
     if (task.status === TaskStatus.PENDING || !progress) return { state: 'queued' }
     switch (progress.phase) {
@@ -70,15 +84,21 @@ function scanLead(task: TaskSnapshot): ScanLead {
         case 'saving':
             return { state: 'saving' }
         case 'done':
-            return { state: 'done', outcome: 'completed', counts: saved, removalsSuppressed }
+            return {
+                state: 'done',
+                outcome: 'completed',
+                counts: saved,
+                removalsSuppressed,
+                readFailures,
+            }
     }
 }
 
-export function scanRow(task: TaskSnapshot): ScanRow {
+export function scanRow(task: TaskSnapshot, fallback?: ScanSummary): ScanRow {
     return {
         id: task.id,
         libraryId: task.input?.library_id ?? '',
-        lead: scanLead(task),
+        lead: scanLead(task, fallback),
         recent: task.progress?.recent ?? [],
     }
 }
@@ -101,7 +121,6 @@ function isOlder(a: string, b: string): boolean {
 export const useScanStore = defineStore('scans', () => {
     const tasks = ref<Record<string, TaskSnapshot>>({})
     const logs = ref<Record<string, { text: string; len: number }>>({})
-    const dismissed = ref(new Set<string>())
     const inFlight = new Map<string, object>()
     let generation = 0
 
@@ -138,19 +157,14 @@ export const useScanStore = defineStore('scans', () => {
         }
     }
 
-    function dismiss(ids: string[]): void {
-        for (const id of ids) dismissed.value.add(id)
-    }
-
     function reset(): void {
         generation++
         tasks.value = {}
         logs.value = {}
-        dismissed.value.clear()
         inFlight.clear()
     }
 
-    return { tasks, logs, dismissed, accept, reconcile, fetchLogs, dismiss, reset }
+    return { tasks, logs, accept, reconcile, fetchLogs, reset }
 })
 
 export function useScanSync(): void {
@@ -166,7 +180,9 @@ export function useScanSync(): void {
                 return
             }
             const unsubs = [
-                ws.on('task_update', (msg: { task: TaskSnapshot }) => store.accept(msg.task)),
+                ws.on('task_update', (msg: { task: TaskSnapshot }) => {
+                    if (msg.task.name === 'scan_library') store.accept(msg.task)
+                }),
                 ws.on('$open', () => {
                     void store
                         .reconcile(

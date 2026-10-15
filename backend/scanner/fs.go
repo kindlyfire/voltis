@@ -218,6 +218,10 @@ func walk(ctx context.Context, roots []string, eligible func(string) bool, out c
 }
 
 func (w walker) emit(ev Event) error {
+	// select picks at random when both are ready.
+	if err := w.ctx.Err(); err != nil {
+		return err
+	}
 	select {
 	case w.out <- ev:
 		return nil
@@ -257,6 +261,9 @@ func (w walker) identity(f *os.File, path string) string {
 }
 
 func (w walker) dir(path string) error {
+	if err := w.ctx.Err(); err != nil {
+		return err
+	}
 	entries, id, err := w.list(path)
 	if err != nil {
 		return w.emit(Event{Kind: Failed, Path: path, Err: err})

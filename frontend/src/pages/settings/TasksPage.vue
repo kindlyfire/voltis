@@ -83,9 +83,7 @@
                                         class="flex min-w-0 flex-col gap-1 lg:col-span-2"
                                     >
                                         <h2 class="text-fg-muted text-xs font-semibold">Logs</h2>
-                                        <pre
-                                            class="bg-surface-3 rounded-field max-h-100 overflow-auto p-3 text-xs leading-snug wrap-break-word whitespace-pre-wrap"
-                                            >{{ task.logs }}</pre>
+                                        <TaskLog :text="task.logs" />
                                     </section>
                                 </div>
                             </td>
@@ -140,6 +138,7 @@ import ATable from '@/ui/ATable.vue'
 import { IconChevronDown, IconChevronRight } from '@/ui/icons'
 import { tasksApi } from '@/utils/api/tasks'
 import { TaskStatus } from '@/utils/api/types'
+import TaskLog from './TaskLog.vue'
 
 useHead({ title: 'Tasks' })
 
