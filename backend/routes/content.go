@@ -17,6 +17,7 @@ import (
 	"voltis/lib/fp"
 	"voltis/metadata"
 	"voltis/models"
+	"voltis/scrobble"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -26,7 +27,8 @@ import (
 )
 
 type ContentRoutes struct {
-	pool *pgxpool.Pool
+	pool      *pgxpool.Pool
+	scrobbles *scrobble.Service
 }
 
 func (cr *ContentRoutes) Register(g *echo.Group) {
@@ -1240,7 +1242,7 @@ func (cr *ContentRoutes) bulkUserData(c echo.Context) error {
 	args := pgx.NamedArgs{"user_id": user.ID, "ids": ids, "status": req.Status, "now": now, "rev": rev}
 	completing := req.Action == "set_status" && req.Status != nil && *req.Status == "completed"
 
-	ctx := reqCtx(c)
+	ctx, touches := scrobble.WithTouches(reqCtx(c))
 	var count int
 	err = db.WithTx(ctx, cr.pool, func(tx pgx.Tx) error {
 		if err := lockUserData(ctx, tx, user.ID, ids...); err != nil {
@@ -1255,7 +1257,10 @@ func (cr *ContentRoutes) bulkUserData(c echo.Context) error {
 
 		switch {
 		case req.Action == "reset":
-			return clearContent(ctx, tx, user.ID, ids, rev)
+			if err := clearContent(ctx, tx, user.ID, ids, rev); err != nil {
+				return err
+			}
+			return scrobble.Flush(ctx, tx, now)
 		case completing:
 			if req.IncludeChildren {
 				children, err := db.Select[completionRow](ctx, tx, unfinishedChildRows, args)
@@ -1269,8 +1274,21 @@ func (cr *ContentRoutes) bulkUserData(c echo.Context) error {
 				return err
 			}
 		default:
+			// Completion changes on items that were completed, and the status on series.
+			args["series_types"] = metadata.SeriesTypes
+			changed, err := db.SelectScalars[string](ctx, tx, `
+				SELECT c.id FROM content c`+utcJoin+`
+				WHERE c.id = ANY(@ids) AND CASE WHEN c.type = ANY(@series_types)
+					THEN utc.status IS DISTINCT FROM @status ELSE utc.status = 'completed' END
+			`, args)
+			if err != nil {
+				return err
+			}
+			if err := scrobble.Touch(ctx, user.ID, changed...); err != nil {
+				return err
+			}
 			args["utc_ids"] = fp.Map(ids, func(string) string { return models.MakeUserToContentID() })
-			_, err := tx.Exec(ctx, `
+			_, err = tx.Exec(ctx, `
 				INSERT INTO user_to_content AS utc (id, user_id, library_id, uri, status, status_updated_at, revision)
 				SELECT r.id, @user_id, c.library_id, c.uri, @status, @now, @rev
 				FROM unnest(@utc_ids::text[], @ids::text[]) r(id, cid)
@@ -1284,7 +1302,7 @@ func (cr *ContentRoutes) bulkUserData(c echo.Context) error {
 				return err
 			}
 			if req.Status == nil || *req.Status != "reading" {
-				return nil
+				return scrobble.Flush(ctx, tx, now)
 			}
 		}
 		// Reading or completed volumes start their series, after any series status set above.
@@ -1298,11 +1316,12 @@ func (cr *ContentRoutes) bulkUserData(c echo.Context) error {
 				return err
 			}
 		}
-		return nil
+		return scrobble.Flush(ctx, tx, now)
 	})
 	if err != nil {
 		return err
 	}
+	cr.scrobbles.Changed(touches.Users())
 
 	return c.JSON(http.StatusOK, map[string]int{"count": count})
 }

@@ -14,6 +14,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   follows the numbered items. Run a forced scan to mark existing series' specials
 - Editing an item's Volume, Number or Series index moves it in its series, and
   Special can be set to Yes or No. Run a forced scan before editing positions
+- Scrobbling to MangaBaka: connect a token in Settings → Scrobbling, and finished
+  chapters, volumes and reading status of linked series are sent to your
+  MangaBaka library. Admins can turn it off per library
 
 ## [1.0.0-beta.2] - 2026-10-04
 

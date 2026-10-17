@@ -316,6 +316,13 @@ func (h *WebSocketHub) NotificationsChanged(users []string) {
 	}()
 }
 
+// ScrobblesChanged tells the users their scrobble queue changed.
+func (h *WebSocketHub) ScrobblesChanged(users []string) {
+	for _, u := range slices.Compact(slices.Sorted(slices.Values(users))) {
+		h.broadcast(toUser(u), map[string]any{"type": "scrobbles_changed"})
+	}
+}
+
 func (h *WebSocketHub) pushUnread(user string, n int) {
 	h.broadcast(toUser(user), map[string]any{"type": "notifications_changed", "unread": n})
 }

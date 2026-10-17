@@ -1,5 +1,6 @@
 <template>
     <ADialog :open="open" title="Notifications" size="lg" @update:open="v => !v && close()">
+        <ScrobbleQueue full @navigate="close()" />
         <NotificationList full @navigate="close()" />
         <div v-if="store.next" class="mt-2 flex justify-center">
             <AButton variant="text" size="sm" :loading="loadingMore" @click="more">
@@ -29,6 +30,7 @@ import AButton from '@/ui/AButton.vue'
 import ADialog from '@/ui/ADialog.vue'
 import NotificationList from './NotificationList.vue'
 import ScanAllButton from './ScanAllButton.vue'
+import ScrobbleQueue from './ScrobbleQueue.vue'
 
 defineProps<{ open: boolean; close: () => void }>()
 

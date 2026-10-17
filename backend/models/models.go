@@ -85,6 +85,7 @@ type LibrarySettings struct {
 	BookSeriesInference string   `json:"book_series_inference"`
 	AutoMatch           Switches `json:"auto_match"`            // match series with each provider unattended; a missing one is off
 	AlwaysRemoveMissing bool     `json:"always_remove_missing"` // turns off the scanner's removal guard
+	Scrobbling          bool     `json:"scrobbling"`            // users may send their progress to trackers
 }
 
 // SourceSettings overlay a library's settings for the files under a source: a missing key inherits.
@@ -156,7 +157,8 @@ func ParseLibrarySources(raw JSONB) []LibrarySource {
 }
 
 func DefaultLibrarySettings() LibrarySettings {
-	return LibrarySettings{BookSeriesInference: BookSeriesInferenceConservative, AutoMatch: Switches{}}
+	return LibrarySettings{BookSeriesInference: BookSeriesInferenceConservative, AutoMatch: Switches{},
+		Scrobbling: true}
 }
 
 // ParseLibrarySettings fills in defaults for keys the stored settings lack.
@@ -303,6 +305,7 @@ const (
 	NotificationScan           = "scan"
 	NotificationNewContent     = "new_content"
 	NotificationMetadataReview = "metadata_review"
+	NotificationScrobbleAuth   = "scrobble_auth"
 )
 
 func MakeNotificationID() string { return makeID("n") }

@@ -27,6 +27,9 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
+// devCommands are added to the hidden dev group by files built with the devtools tag.
+var devCommands []*cli.Command
+
 func main() {
 	slog.SetDefault(slog.New(tint.NewHandler(os.Stderr, nil)))
 
@@ -228,7 +231,7 @@ func main() {
 			{
 				Name:   "dev",
 				Hidden: true,
-				Commands: []*cli.Command{
+				Commands: append([]*cli.Command{
 					{
 						Name:  "search-eval",
 						Usage: "Rank a relevance fixture's searches against a restored database",
@@ -250,7 +253,7 @@ func main() {
 							})
 						},
 					},
-				},
+				}, devCommands...),
 			},
 		},
 	}
@@ -304,8 +307,9 @@ func runServer(ctx context.Context) error {
 	meta := metadata.NewStore(reg)
 	cov := covers.New(cfg.CacheDir)
 	links := linking.New(pool, meta, reg, cov, hub.LibraryChanged)
-	routes.Register(ctx, e, pool, store, cfg.ProxyAuth,
-		routes.Deps{Hub: hub, Providers: reg, Metadata: meta, Links: links, Covers: cov, StaticDir: cfg.StaticDir})
+	lib := mangabaka.NewLibrary(cfg.MangaBakaLibraryURL, nil, nil)
+	routes.Register(ctx, e, pool, store, cfg.ProxyAuth, routes.Deps{Hub: hub, Providers: reg, Metadata: meta,
+		Links: links, Covers: cov, Library: lib, StaticDir: cfg.StaticDir})
 
 	slog.Info("starting server", "url", "http://"+net.JoinHostPort(cmp.Or(cfg.Host, "localhost"), cfg.Port))
 	return e.Start(net.JoinHostPort(cfg.Host, cfg.Port))

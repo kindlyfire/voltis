@@ -73,6 +73,7 @@ function library(name: string): Library {
             book_series_inference: 'conservative',
             auto_match: { mangabaka: true, gone: true },
             always_remove_missing: false,
+            scrobbling: true,
         },
     }
 }
@@ -244,6 +245,7 @@ describe('LibraryModal', () => {
                     book_series_inference: 'conservative',
                     auto_match: { mangabaka: true, gone: true },
                     always_remove_missing: false,
+                    scrobbling: true,
                 },
             },
         ])

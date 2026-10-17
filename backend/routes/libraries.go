@@ -19,6 +19,7 @@ import (
 	"voltis/models"
 	"voltis/providers"
 	"voltis/scanner"
+	"voltis/scrobble"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -32,6 +33,7 @@ type LibraryRoutes struct {
 	reg       *providers.Registry
 	hub       *WebSocketHub
 	ctx       context.Context // the server's
+	scrobbles *scrobble.Service
 }
 
 func (lr *LibraryRoutes) Register(g *echo.Group) {
@@ -298,6 +300,24 @@ func (lr *LibraryRoutes) upsert(c echo.Context) error {
 	lib, err := getLibrary(ctx, lr.pool, id)
 	if err != nil {
 		return err
+	}
+	if models.ParseLibrarySettings(before.Settings).Scrobbling && !models.ParseLibrarySettings(lib.Settings).Scrobbling {
+		var users []string
+		err := db.WithTx(ctx, lr.pool, func(tx pgx.Tx) error {
+			// Queue runs under the library's shared lock, so this waits for every queue that read the
+			// switch on.
+			if err := db.LockMetadata(ctx, tx, id); err != nil {
+				return err
+			}
+			var err error
+			users, err = lr.scrobbles.DropPending(ctx, tx,
+				"content_id IN (SELECT id FROM content WHERE library_id = $1)", id)
+			return err
+		})
+		if err != nil {
+			return err
+		}
+		lr.scrobbles.Changed(users)
 	}
 	// Series newly covered are due already if never matched, but those unmatched are not. Coverage
 	// that only shrank leaves links alone.

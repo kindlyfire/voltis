@@ -20,6 +20,8 @@ import (
 	"voltis/linking"
 	"voltis/metadata"
 	"voltis/providers"
+	"voltis/providers/mangabaka"
+	"voltis/providers/mangabaka/mbtest"
 	"voltis/providers/providertest"
 	"voltis/settings"
 
@@ -41,6 +43,7 @@ type testClient struct {
 	st      *settings.Store
 	db      *pgxpool.Pool
 	fake    *providertest.Provider
+	mb      *mbtest.Server
 	headers map[string]string
 	extra   http.Header
 }
@@ -78,8 +81,10 @@ func newServerClient(t *testing.T, pool *pgxpool.Pool, proxy config.ProxyAuth, s
 	store := metadata.NewStore(reg)
 	cov := covers.New(t.TempDir())
 	links := linking.New(pool, store, reg, cov, hub.LibraryChanged)
+	// No scrobble worker: routes tests assert the queue as the requests leave it.
+	mb := mbtest.New(t)
 	manager := Register(t.Context(), e, pool, st, proxy, Deps{Hub: hub, Providers: reg, Metadata: store, Links: links,
-		Covers: cov, StaticDir: staticDir})
+		Covers: cov, Library: mangabaka.NewLibrary(mb.URL, mb.Client(), mb.Limiter()), StaticDir: staticDir, NoScrobbleWorker: true})
 	t.Cleanup(manager.Close)
 	t.Cleanup(autoMatching.Wait) // before the database goes; t.Context() has cancelled them
 
@@ -92,7 +97,7 @@ func newServerClient(t *testing.T, pool *pgxpool.Pool, proxy config.ProxyAuth, s
 	}))
 	server.Start()
 
-	return &testClient{t: t, server: server, http: newHTTPClient(), hub: hub, st: st, db: pool, fake: fake}
+	return &testClient{t: t, server: server, http: newHTTPClient(), hub: hub, st: st, db: pool, fake: fake, mb: mb}
 }
 
 func newHTTPClient() *http.Client {

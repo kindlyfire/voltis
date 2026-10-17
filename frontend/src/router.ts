@@ -22,6 +22,7 @@ import SettingsInterfacePage from './pages/settings/InterfacePage.vue'
 import SettingsLibrariesPage from './pages/settings/LibrariesPage.vue'
 import SettingsMetadataPage from './pages/settings/MetadataPage.vue'
 import SettingsOpdsPage from './pages/settings/OpdsPage.vue'
+import SettingsScrobblingPage from './pages/settings/ScrobblingPage.vue'
 import SettingsTasksPage from './pages/settings/TasksPage.vue'
 import SettingsUsersPage from './pages/settings/UsersPage.vue'
 import { savedTop, trackSavedScroll } from './utils/savedScroll'
@@ -118,6 +119,11 @@ const router = createRouter({
                     path: '/settings/opds',
                     name: 'settings-opds',
                     component: SettingsOpdsPage,
+                },
+                {
+                    path: '/settings/scrobbling',
+                    name: 'settings-scrobbling',
+                    component: SettingsScrobblingPage,
                 },
                 {
                     path: '/settings/general',

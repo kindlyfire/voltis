@@ -8,6 +8,7 @@ import { showProviderSearchModal } from './components/ProviderSearchModal.vue'
 import InfoHeader from './InfoHeader.vue'
 
 vi.mock('./components/ProviderSearchModal.vue', () => ({ showProviderSearchModal: vi.fn() }))
+vi.mock('@/stores/scrobbles', () => ({ useScrobbleStore: () => ({ isHeld: () => false }) }))
 
 const content = { id: 'c_1', type: 'comic_series', title: 'Local', meta: {} } as unknown as Content
 

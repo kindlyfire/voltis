@@ -15,6 +15,7 @@ import (
 	"voltis/lib/fp"
 	"voltis/metadata"
 	"voltis/models"
+	"voltis/scrobble"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
@@ -246,6 +247,8 @@ type readingOp struct {
 	Snapshot *readingSnapshot
 }
 
+func isCompleted(status *string) bool { return status != nil && *status == "completed" }
+
 func isHeld(status *string) bool {
 	return status != nil && (*status == "plan_to_read" || *status == "on_hold" || *status == "dropped")
 }
@@ -441,6 +444,12 @@ func writeReading(ctx context.Context, tx pgx.Tx, userID string, t readingTarget
 	if err != nil {
 		return state, err
 	}
+	// Only completion and a series' status reach MangaBaka.
+	if !fp.PtrEq(next.Status, t.Status) && (t.isSeries() || isCompleted(t.Status) != isCompleted(next.Status)) {
+		if err := scrobble.Touch(ctx, userID, t.ID); err != nil {
+			return state, err
+		}
+	}
 	if t.ParentID == nil {
 		return state, nil
 	}
@@ -457,14 +466,17 @@ func writeReading(ctx context.Context, tx pgx.Tx, userID string, t readingTarget
 // revertSeries undoes a start of the series, status time included, so the volumes added since it
 // was completed count as new again. Only while nothing has written the series since.
 func revertSeries(ctx context.Context, tx pgx.Tx, userID, seriesID string, prev seriesPrev, rev string) error {
-	_, err := tx.Exec(ctx, `
+	tag, err := tx.Exec(ctx, `
 		UPDATE user_to_content utc SET status = @status, status_updated_at = @status_at, revision = @rev
 		FROM content s
 		WHERE s.id = @series_id AND utc.user_id = @user_id AND utc.library_id = s.library_id
 			AND utc.uri = s.uri AND utc.revision IS NOT DISTINCT FROM @expected
 	`, pgx.NamedArgs{"status": prev.Status, "status_at": prev.StatusUpdatedAt, "rev": rev,
 		"series_id": seriesID, "user_id": userID, "expected": prev.Revision})
-	return err
+	if err != nil || tag.RowsAffected() == 0 {
+		return err
+	}
+	return scrobble.Touch(ctx, userID, seriesID)
 }
 
 // envelope reads the item's series with its state, in the same transaction.
@@ -504,8 +516,11 @@ func startSeries(ctx context.Context, tx pgx.Tx, userID, seriesID, revision stri
 			status_updated_at = EXCLUDED.status_updated_at, revision = EXCLUDED.revision
 	`, pgx.NamedArgs{"utc_id": models.MakeUserToContentID(), "user_id": userID, "id": seriesID, "now": now,
 		"rev": revision})
+	if err != nil {
+		return nil, err
+	}
 	prev.Revision = &revision
-	return &prev, err
+	return &prev, scrobble.Touch(ctx, userID, seriesID)
 }
 
 // clearContent resets the user's status, position and last read time on the content and on the
@@ -518,7 +533,17 @@ func clearContent(ctx context.Context, tx pgx.Tx, userID string, ids []string, r
 	if err != nil {
 		return err
 	}
-	args["targets"] = targets
+	args["targets"], args["series_types"] = targets, metadata.SeriesTypes
+	changed, err := db.SelectScalars[string](ctx, tx, `
+		SELECT c.id FROM content c`+utcJoin+`
+		WHERE c.id = ANY(@targets) AND (utc.status = 'completed' OR c.type = ANY(@series_types) AND utc.status IS NOT NULL)
+	`, args)
+	if err != nil {
+		return err
+	}
+	if err := scrobble.Touch(ctx, userID, changed...); err != nil {
+		return err
+	}
 	args["utc_ids"] = fp.Map(targets, func(string) string { return models.MakeUserToContentID() })
 	_, err = tx.Exec(ctx, `
 		INSERT INTO user_to_content (id, user_id, library_id, uri, revision)
@@ -549,7 +574,18 @@ func markCompleted(ctx context.Context, tx pgx.Tx, userID string, rows []complet
 		utcIDs[i], ids[i] = models.MakeUserToContentID(), r.ID
 		progress[i] = string(endProgress(r.Type, r.Pages, nil))
 	}
-	_, err := tx.Exec(ctx, `
+	args := pgx.NamedArgs{"user_id": userID, "now": now, "utc_ids": utcIDs, "ids": ids, "progress": progress,
+		"rev": revision}
+	changed, err := db.SelectScalars[string](ctx, tx, `
+		SELECT c.id FROM content c`+utcJoin+` WHERE c.id = ANY(@ids) AND utc.status IS DISTINCT FROM 'completed'
+	`, args)
+	if err != nil {
+		return err
+	}
+	if err := scrobble.Touch(ctx, userID, changed...); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `
 		INSERT INTO user_to_content AS utc (id, user_id, library_id, uri, status, status_updated_at, progress,
 			progress_updated_at, revision)
 		SELECT r.id, @user_id, c.library_id, c.uri, 'completed', @now, r.progress::jsonb,
@@ -561,8 +597,7 @@ func markCompleted(ctx context.Context, tx pgx.Tx, userID string, rows []complet
 				THEN EXCLUDED.status_updated_at ELSE utc.status_updated_at END,
 			progress = EXCLUDED.progress, progress_updated_at = EXCLUDED.progress_updated_at,
 			revision = EXCLUDED.revision
-	`, pgx.NamedArgs{"user_id": userID, "now": now, "utc_ids": utcIDs, "ids": ids, "progress": progress,
-		"rev": revision})
+	`, args)
 	return err
 }
 
@@ -625,11 +660,14 @@ func (cr *ContentRoutes) readingPost(c echo.Context) error {
 	}
 	req.revision = db.ServerRevision()
 
-	ctx := reqCtx(c)
+	ctx, touches := scrobble.WithTouches(reqCtx(c))
 	var res readingResponse
 	err = db.WithTx(ctx, cr.pool, func(tx pgx.Tx) error {
-		res, err = applyReading(ctx, tx, user.ID, c.Param("content_id"), req, time.Now().UTC())
-		return err
+		now := time.Now().UTC()
+		if res, err = applyReading(ctx, tx, user.ID, c.Param("content_id"), req, now); err != nil {
+			return err
+		}
+		return scrobble.Flush(ctx, tx, now)
 	})
 	if conflict, ok := errors.AsType[errReadingConflict](err); ok {
 		return c.JSON(http.StatusConflict, struct {
@@ -640,6 +678,7 @@ func (cr *ContentRoutes) readingPost(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	cr.scrobbles.Changed(touches.Users())
 	return c.JSON(http.StatusOK, res)
 }
 
@@ -670,7 +709,7 @@ func (cr *ContentRoutes) seriesReading(c echo.Context) error {
 		return err
 	}
 
-	ctx := reqCtx(c)
+	ctx, touches := scrobble.WithTouches(reqCtx(c))
 	seriesID := c.Param("content_id")
 	if (req.WriterID == "") != (req.Seq == 0) || req.WriterID != "" && !writerIDPattern.MatchString(req.WriterID) {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid writer_id or seq")
@@ -732,11 +771,12 @@ func (cr *ContentRoutes) seriesReading(c echo.Context) error {
 				res.Items = append(res.Items, it)
 			}
 		}
-		return nil
+		return scrobble.Flush(ctx, tx, now)
 	})
 	if err != nil {
 		return err
 	}
+	cr.scrobbles.Changed(touches.Users())
 	return c.JSON(http.StatusOK, res)
 }
 

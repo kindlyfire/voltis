@@ -15,6 +15,7 @@ vi.mock('@/utils/ws', () => ({
 }))
 vi.mock('@/stores/scans', () => ({ useScanSync: vi.fn() }))
 vi.mock('@/stores/notifications', () => ({ useNotificationSync: vi.fn() }))
+vi.mock('@/stores/scrobbles', () => ({ useScrobbleSync: vi.fn() }))
 vi.mock('@/pages/_layout/useLayoutStore', () => ({
     useLayoutStore: () => ({
         navbarHidden: { value: false },

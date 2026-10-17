@@ -71,9 +71,12 @@ const feedSelect = `
 	LEFT JOIN content c ON c.id = n.content_id
 	LEFT JOIN tasks t ON t.id = n.task_id
 	LEFT JOIN libraries l ON l.id = n.data->>'library_id'
-	WHERE n.user_id = $1 AND (n.kind = 'new_content' OR $2::bool) AND `
+	WHERE n.user_id = $1 AND (n.kind IN ('new_content', 'scrobble_auth') OR $2::bool) AND `
 
 const activeScan = `n.kind = 'scan' AND COALESCE(t.status IN (0, 1), false)`
+
+// needsInput items stay on top of the feed while unresolved.
+const needsInput = `n.kind IN ('metadata_review', 'scrobble_auth')`
 
 // Feed reads a user's items. Admin-only kinds are hidden from non-admins here, so a demotion needs
 // no cleanup. Active and needs-input items come with the first page only, and never in history.
@@ -85,11 +88,11 @@ func Feed(ctx context.Context, q db.Querier, userID string, admin bool, cur *Cur
 			return p, err
 		}
 		if p.NeedsInput, err = db.Select[Item](ctx, q,
-			feedSelect+"n.kind = 'metadata_review' ORDER BY n.updated_at DESC, n.id DESC", userID, admin); err != nil {
+			feedSelect+needsInput+" ORDER BY n.updated_at DESC, n.id DESC", userID, admin); err != nil {
 			return p, err
 		}
 	}
-	history := feedSelect + "n.kind <> 'metadata_review' AND NOT (" + activeScan + ")"
+	history := feedSelect + "NOT (" + needsInput + ") AND NOT (" + activeScan + ")"
 	args := []any{userID, admin, limit + 1}
 	if cur != nil {
 		history += " AND (n.updated_at, n.id) < ($4, $5)"
@@ -114,7 +117,7 @@ func ForTask(ctx context.Context, q db.Querier, userID string, admin bool, taskI
 // Unread counts each user's unread items, 0 included, by their own permissions.
 func Unread(ctx context.Context, q db.Querier, userIDs []string) (map[string]int, error) {
 	rows, err := q.Query(ctx, `
-		SELECT u.id, count(n.id) FILTER (WHERE `+unread+` AND (n.kind = 'new_content' OR 'ADMIN' = ANY(u.permissions)))
+		SELECT u.id, count(n.id) FILTER (WHERE `+unread+` AND (n.kind IN ('new_content', 'scrobble_auth') OR 'ADMIN' = ANY(u.permissions)))
 		FROM users u LEFT JOIN notifications n ON n.user_id = u.id
 		WHERE u.id = ANY($1::text[]) GROUP BY u.id
 	`, userIDs)
@@ -135,4 +138,15 @@ func Unread(ctx context.Context, q db.Querier, userIDs []string) (map[string]int
 		out[id] = n
 	}
 	return out, rows.Err()
+}
+
+// ClearScrobbleAuth deletes the user's rejected-token item, locking in Clear's order. It reports
+// whether there was one.
+func ClearScrobbleAuth(ctx context.Context, q db.Querier, userID string) (bool, error) {
+	tag, err := q.Exec(ctx, `
+		WITH l AS (SELECT id FROM notifications WHERE user_id = $1 AND group_key = 'scrobble_auth'
+		            ORDER BY group_key NULLS FIRST, id FOR UPDATE)
+		DELETE FROM notifications n USING l WHERE n.id = l.id
+	`, userID)
+	return tag.RowsAffected() > 0, err
 }

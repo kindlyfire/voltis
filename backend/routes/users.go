@@ -12,6 +12,7 @@ import (
 
 	"voltis/db"
 	"voltis/models"
+	"voltis/scrobble"
 	"voltis/settings"
 
 	"github.com/jackc/pgx/v5"
@@ -22,9 +23,10 @@ import (
 )
 
 type UserRoutes struct {
-	pool *pgxpool.Pool
-	hub  *WebSocketHub
-	st   *settings.Store
+	pool      *pgxpool.Pool
+	hub       *WebSocketHub
+	st        *settings.Store
+	scrobbles *scrobble.Service
 
 	proxyEnabled bool
 }
@@ -247,9 +249,11 @@ func (ur *UserRoutes) patchPreferences(c echo.Context) error {
 
 	ctx := reqCtx(c)
 	var updated models.User
+	var dropped []string
 	err = db.WithTx(ctx, ur.pool, func(tx pgx.Tx) error {
+		// NO KEY: a scrobbles insert's foreign key check takes KEY SHARE on the row.
 		raw, err := db.SelectScalar[json.RawMessage](ctx, tx,
-			"SELECT preferences FROM users WHERE id = $1 FOR UPDATE", user.ID)
+			"SELECT preferences FROM users WHERE id = $1 FOR NO KEY UPDATE", user.ID)
 		if err != nil {
 			return err
 		}
@@ -263,16 +267,46 @@ func (ur *UserRoutes) patchPreferences(c echo.Context) error {
 			return err
 		}
 
+		before := scrobbleOff(current) // mergePatch changes current
+		next := mergePatch(current, patch)
 		updated, err = db.SelectOne[models.User](ctx, tx, `
 			UPDATE users SET preferences = $1, updated_at = $2
 			WHERE id = $3 RETURNING *
-		`, mergePatch(current, patch), time.Now().UTC(), user.ID)
+		`, next, time.Now().UTC(), user.ID)
+		if err != nil {
+			return err
+		}
+		off := slices.DeleteFunc(scrobbleOff(next), func(id string) bool { return slices.Contains(before, id) })
+		if len(off) == 0 {
+			return nil
+		}
+		// Conflicts with Queue's KEY SHARE: a queue that read the switch on commits before the drop.
+		if _, err := tx.Exec(ctx, `SELECT 1 FROM scrobble_accounts WHERE user_id = $1 AND provider = 'mangabaka'
+			FOR UPDATE`, user.ID); err != nil {
+			return err
+		}
+		dropped, err = ur.scrobbles.DropPending(ctx, tx,
+			"user_id = $1 AND content_id IN (SELECT id FROM content WHERE library_id = ANY($2))", user.ID, off)
 		return err
 	})
 	if err != nil {
 		return err
 	}
+	ur.scrobbles.Changed(dropped)
 	return c.JSON(http.StatusOK, userToDTO(updated))
+}
+
+// scrobbleOff lists the libraries whose preferences turn scrobbling off.
+func scrobbleOff(prefs any) []string {
+	m, _ := prefs.(map[string]any)
+	libs, _ := m["libraries"].(map[string]any)
+	var off []string
+	for id, p := range libs {
+		if p, ok := p.(map[string]any); ok && p["scrobble"] == false {
+			off = append(off, id)
+		}
+	}
+	return off
 }
 
 // Nil Permissions (omitted or null) mean none on create and unchanged on update.

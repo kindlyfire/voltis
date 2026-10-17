@@ -16,6 +16,7 @@
                 label="Account"
             />
             <ANavItem to="/settings/opds" :icon="IconRss" label="OPDS" />
+            <ANavItem to="/settings/scrobbling" :icon="IconSync" label="Scrobbling" />
             <ANavItem
                 v-if="hasBrokenRefs || route.path === '/settings/broken-refs'"
                 to="/settings/broken-refs"
@@ -153,6 +154,7 @@ import {
     IconMonitorFilled,
     IconOpenInNew,
     IconRss,
+    IconSync,
     IconTune,
     IconWeatherNight,
     IconWeatherSunny,

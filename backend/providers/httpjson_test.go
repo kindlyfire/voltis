@@ -93,6 +93,15 @@ func TestGetJSONGivesUp(t *testing.T) {
 	}
 }
 
+func TestDoJSONDoesNotRetryAWrite(t *testing.T) {
+	srv, hits := serve(t, 500)
+	l, _ := newTestLimiter(600, 1)
+	err := DoJSON(context.Background(), srv.Client(), l, Request{Method: http.MethodPost, URL: srv.URL, Body: map[string]int{"a": 1}}, nil)
+	if he, ok := errors.AsType[*HTTPError](err); !ok || he.Status != 500 || hits.Load() != 1 {
+		t.Fatalf("err = %v after %d attempts", err, hits.Load())
+	}
+}
+
 func TestGetJSONDoesNotPauseAfterTheLastAttempt(t *testing.T) {
 	srv, hits := serve(t, 500, 500, 500)
 	l, clk := newTestLimiter(600, 1)

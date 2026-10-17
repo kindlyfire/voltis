@@ -50,6 +50,9 @@
                             Publication: {{ capitalize(meta.status) }}
                         </AChip>
                         <AChip v-if="language" size="sm">{{ language }}</AChip>
+                        <AChip v-if="scrobbles.isHeld(content.id)" size="sm">
+                            Scrobbling on hold
+                        </AChip>
                     </div>
                     <p
                         v-for="link in noticeLinks"
@@ -188,6 +191,7 @@
 import { useResizeObserver } from '@vueuse/core'
 import { capitalize, computed, ref, useId, useTemplateRef, watch } from 'vue'
 import { RouterLink, type RouteLocationRaw } from 'vue-router'
+import { useScrobbleStore } from '@/stores/scrobbles'
 import AButton from '@/ui/AButton.vue'
 import AChip from '@/ui/AChip.vue'
 import ACover from '@/ui/ACover.vue'
@@ -234,6 +238,7 @@ const eyebrow = computed(() => {
 const mUpdateUserData = contentApi.useUpdateUserData()
 const isStarred = computed(() => props.content.user_data?.starred ?? false)
 const toast = useToast()
+const scrobbles = useScrobbleStore()
 
 const showCover = ref(false)
 

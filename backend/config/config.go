@@ -14,14 +14,17 @@ import (
 var AppVersion = "dev"
 
 type Config struct {
-	DatabaseURL  string
-	Host         string
-	Port         string
-	CacheDir     string
-	CORS         string
-	StaticDir    string
-	ProxyAuth    ProxyAuth
-	ProxyAuthErr error
+	DatabaseURL string
+	Host        string
+	Port        string
+	CacheDir    string
+	CORS        string
+	StaticDir   string
+	// MangaBakaLibraryURL replaces https://api.mangabaka.org for the /v1/my/* calls only, to test
+	// scrobbling against a fake server; metadata keeps using the real API.
+	MangaBakaLibraryURL string
+	ProxyAuth           ProxyAuth
+	ProxyAuthErr        error
 }
 
 // ProxyAuth stays in env: a wrong CIDR lets anyone take over any account.
@@ -53,6 +56,8 @@ func Load() Config {
 		CacheDir:    envOr("APP_CACHE_DIR", "/tmp/voltis_cache"),
 		CORS:        envOr("APP_CORS", ""),
 		StaticDir:   envOr("APP_STATIC_DIR", ""),
+
+		MangaBakaLibraryURL: envOr("APP_MANGABAKA_LIBRARY_URL", ""),
 	}
 	c.ProxyAuth, c.ProxyAuthErr = loadProxyAuth()
 	cached = &c

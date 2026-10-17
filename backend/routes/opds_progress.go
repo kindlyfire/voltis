@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"voltis/db"
+	"voltis/scrobble"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -30,8 +31,10 @@ type servedPage struct {
 // delete locks users and then cascades, and a revoke locks only the key row, so neither can
 // deadlock with this. The key is re-checked because appKeyAuth ran before the image was served.
 func recordComicPage(
-	ctx context.Context, pool *pgxpool.Pool, userID, keyID, contentID string, page int, served servedPage,
+	ctx context.Context, pool *pgxpool.Pool, scrobbles *scrobble.Service, userID, keyID, contentID string, page int,
+	served servedPage,
 ) (recorded bool, err error) {
+	ctx, touches := scrobble.WithTouches(ctx)
 	err = db.WithTx(ctx, pool, func(tx pgx.Tx) error {
 		if err := lockUserData(ctx, tx, userID, contentID); err != nil {
 			return err
@@ -60,7 +63,7 @@ func recordComicPage(
 		sameMtime := (mtime == nil) == (served.FileMtime == nil) && (mtime == nil || mtime.Equal(*served.FileMtime))
 		if !sameMtime || pages != served.Pages || page >= pages || (page == 0 && pages > 1) ||
 			current != nil && *current >= float64(page) {
-			return nil
+			return scrobble.Flush(ctx, tx, time.Now().UTC())
 		}
 
 		req := readingRequest{Op: "finish", revision: "opds-" + keyID + ":" + strings.ToLower(rand.Text())}
@@ -71,12 +74,19 @@ func recordComicPage(
 				"progress_percent": pagePercent(page, pages),
 			})
 		}
-		res, err := applyReading(ctx, tx, userID, contentID, req, time.Now().UTC())
+		now := time.Now().UTC()
+		res, err := applyReading(ctx, tx, userID, contentID, req, now)
+		if err != nil {
+			return err
+		}
 		recorded = res.Outcome != "none"
-		return err
+		return scrobble.Flush(ctx, tx, now)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil // user, key or content gone
+	}
+	if err == nil {
+		scrobbles.Changed(touches.Users())
 	}
 	return recorded, err
 }

@@ -2,6 +2,8 @@ import type { DisplayMetadata } from './metadata'
 
 export interface LibraryPreference {
     visibility?: 'show' | 'hide' | 'overflow'
+    /** Off when false; a missing key is on. */
+    scrobble?: boolean
 }
 
 export interface UserPreferences {
@@ -13,7 +15,10 @@ export interface UserPreferences {
 
 /** RFC 7396 merge patch over `UserPreferences`: `null` deletes a member. */
 export interface PreferencesPatch {
-    libraries?: Record<string, { visibility?: LibraryPreference['visibility'] | null } | null>
+    libraries?: Record<
+        string,
+        { visibility?: LibraryPreference['visibility'] | null; scrobble?: boolean | null } | null
+    >
     tutorials?: { comicReader?: boolean | null; bookReader?: boolean | null }
     home?: { ignoreSeriesStatus?: boolean | null } | null
     reading?: { wordsPerMinute?: number | null; secondsPerPage?: number | null } | null
@@ -141,6 +146,8 @@ export interface LibrarySettings {
     auto_match: Record<string, boolean>
     /** Turns off the scanner's guard against removing a missing mount's items. */
     always_remove_missing: boolean
+    /** Lets users who connected MangaBaka scrobble from this library. */
+    scrobbling: boolean
 }
 
 export interface Library {
@@ -755,6 +762,7 @@ export type Notification = NotificationBase &
           }
         | { kind: 'new_content'; data: { count: number; unit: NotificationUnit } }
         | { kind: 'metadata_review'; data: { count: number } }
+        | { kind: 'scrobble_auth'; data: { count: number } }
     )
 
 export interface NotificationFeed {
@@ -763,6 +771,64 @@ export interface NotificationFeed {
     data: Notification[]
     unread: number
     next: string | null
+}
+
+export interface ScrobbleAccount {
+    connected: boolean
+    remote_name: string | null
+    /** MangaBaka refused the token: sending is paused until reconnecting. */
+    rejected: boolean
+    private_new: boolean
+}
+
+/** MangaBaka states, which Voltis maps series statuses to. */
+export type ScrobbleState =
+    | 'reading'
+    | 'completed'
+    | 'paused'
+    | 'dropped'
+    | 'plan_to_read'
+    | 'rereading'
+    | 'considering'
+
+export interface ScrobbleValues {
+    chapter?: number
+    volume?: number
+    state?: ScrobbleState
+}
+
+export interface ScrobbleRow {
+    content_id: string
+    title: string
+    state: 'pending' | 'failed' | 'held'
+    due_at: string | null
+    values: ScrobbleValues
+    error: string | null
+}
+
+export interface RecentScrobble {
+    content_id: string
+    title: string
+    sent_at: string
+    cover_version: string | null
+}
+
+export interface ContentScrobble {
+    available: 'ok' | 'not_connected' | 'library_off' | 'not_linked'
+    held: boolean
+    state?: ScrobbleRow['state']
+    due_at?: string
+    sent_at?: string
+    error?: string
+    /** What is sent for the MangaBaka entry: this series merged with the others linked to it. */
+    ours: ScrobbleValues
+    /** The fields MangaBaka is ahead on, which only forcing lowers. */
+    ahead: (keyof ScrobbleValues)[]
+    /** The user's other series linked to the same entry. */
+    linked: { content_id: string; title: string; held: boolean }[]
+    /** null: no entry on MangaBaka, or it couldn't be read (`remote_error`). */
+    remote: ScrobbleValues | null
+    remote_error?: string
 }
 
 export interface TaskLogs {

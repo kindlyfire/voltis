@@ -16,7 +16,9 @@ import (
 	"voltis/metadata"
 	"voltis/models"
 	"voltis/providers"
+	"voltis/providers/mangabaka"
 	"voltis/scanner"
+	"voltis/scrobble"
 	"voltis/settings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -47,7 +49,10 @@ type Deps struct {
 	Metadata  *metadata.Store
 	Links     *linking.Service
 	Covers    *covers.Cache
+	Library   *mangabaka.Library
 	StaticDir string
+	// NoScrobbleWorker leaves the scrobble worker stopped, for tests that drive it themselves.
+	NoScrobbleWorker bool
 }
 
 // handleError answers an error as JSON. A request its client gave up on is left unanswered: its
@@ -100,6 +105,10 @@ func Register(ctx context.Context, e *echo.Echo, pool *pgxpool.Pool, st *setting
 	go links.Run(ctx, func() bool { return st.Bool(settings.MetadataMatchingPaused) }, scanQueue.Scanning,
 		hub.MetadataStatus, hub.NotificationsChanged)
 	go notify.RunSweep(ctx, pool)
+	scrobbles := scrobble.New(pool, deps.Library, hub.ScrobblesChanged, hub.NotificationsChanged)
+	if !deps.NoScrobbleWorker {
+		go scrobbles.Run(ctx)
+	}
 
 	st.OnChange(func(keys []string) {
 		hub.DropSessionless(context.Background(), pool)
@@ -129,25 +138,30 @@ func Register(ctx context.Context, e *echo.Echo, pool *pgxpool.Pool, st *setting
 	(&AuthRoutes{pool: pool, hub: hub, st: st, proxyEnabled: proxy.Enabled()}).Register(api.Group("/auth"))
 	(&OIDCRoutes{res: res, oidc: newOIDCClient(st)}).Register(api.Group("/auth/oidc"))
 	(&SettingsRoutes{st: st, proxy: proxy}).Register(api.Group("/settings"))
-	(&LibraryRoutes{pool: pool, scanQueue: scanQueue, links: links, reg: deps.Providers, hub: hub, ctx: ctx}).Register(api.Group("/libraries"))
-	(&UserRoutes{pool: pool, hub: hub, st: st, proxyEnabled: proxy.Enabled()}).Register(api.Group("/users"))
+	(&LibraryRoutes{pool: pool, scanQueue: scanQueue, links: links, reg: deps.Providers, hub: hub, ctx: ctx,
+		scrobbles: scrobbles}).Register(api.Group("/libraries"))
+	(&UserRoutes{pool: pool, hub: hub, st: st, proxyEnabled: proxy.Enabled(), scrobbles: scrobbles}).
+		Register(api.Group("/users"))
 	(&AppKeyRoutes{pool: pool, st: st}).Register(api.Group("/users/me/app-keys"))
-	(&ContentRoutes{pool: pool}).Register(api.Group("/content"))
+	(&ContentRoutes{pool: pool, scrobbles: scrobbles}).Register(api.Group("/content"))
 	(&FacetRoutes{pool: pool}).Register(api.Group("/facets"))
 	fr := &FileRoutes{pool: pool, covers: deps.Covers}
 	fr.Register(api.Group("/files"))
-	(&ContentRefRoutes{pool: pool}).Register(api.Group("/content"))
+	(&ContentRefRoutes{pool: pool, scrobbles: scrobbles}).Register(api.Group("/content"))
 	(&CustomListRoutes{pool: pool}).Register(api.Group("/custom-lists"))
 	(&TaskRoutes{pool: pool, manager: manager, scans: scanQueue}).Register(api.Group("/tasks"))
 	(&MetadataRoutes{pool: pool, hub: hub, store: deps.Metadata, links: deps.Links, reg: deps.Providers}).
 		Register(api.Group("/metadata"))
 	(&NotificationRoutes{pool: pool, hub: hub}).Register(api.Group("/notifications"))
+	(&ScrobbleRoutes{pool: pool, svc: scrobbles, lib: deps.Library, hub: hub}).
+		Register(api.Group("/users/me/scrobbling"), api.Group("/scrobbles"), api.Group("/content"))
 	(&FsRoutes{}).Register(api.Group("/fs"))
 
 	e.GET("/api/ws", wsHandler(res))
 
 	// Outside /api: keys, never the session cookie or forwarded auth, authenticate OPDS.
-	(&OPDSRoutes{pool: pool, st: st, files: fr}).Register(e.Group("/opds/:key", opdsCache, appKeyAuth(pool)))
+	(&OPDSRoutes{pool: pool, st: st, files: fr, scrobbles: scrobbles}).
+		Register(e.Group("/opds/:key", opdsCache, appKeyAuth(pool)))
 
 	registerStaticRoutes(e, deps.StaticDir)
 	return manager

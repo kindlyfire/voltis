@@ -23,6 +23,13 @@
         >
             Clear status and position
         </AMenuItem>
+        <AMenuItem
+            v-if="canScrobble"
+            :leading-icon="IconSync"
+            @select="showScrobbleModal(props.contentId)"
+        >
+            Scrobbling
+        </AMenuItem>
         <template v-if="isAdmin">
             <AMenuSeparator />
             <AMenuItem :leading-icon="IconPencil" @select="showEditMetadataModal(props.contentId)">
@@ -53,13 +60,16 @@ import {
     IconPencil,
     IconPlaylistAdd,
     IconRestart,
+    IconSync,
 } from '@/ui/icons'
 import { contentApi } from '@/utils/api/content'
+import { librariesApi } from '@/utils/api/libraries'
 import { usersApi } from '@/utils/api/users'
 import { showClearReadingModal } from './ClearReadingModal.vue'
 import { showDownloadModal } from './DownloadModal.vue'
 import { showEditMetadataModal } from './EditMetadataModal.vue'
 import { showListsModal } from './ListsModal.vue'
+import { showScrobbleModal } from './ScrobbleModal.vue'
 import { showUpdateProgressModal } from './UpdateProgressModal.vue'
 
 const props = defineProps<{
@@ -70,4 +80,11 @@ const qMe = usersApi.useMe()
 const isAdmin = computed(() => qMe.data.value?.permissions.includes('ADMIN'))
 const qContent = contentApi.useGet(() => props.contentId)
 const isSeries = computed(() => qContent.data.value?.type.includes('series'))
+const qLibraries = librariesApi.useList()
+const canScrobble = computed(
+    () =>
+        isSeries.value &&
+        qLibraries.data.value?.find(l => l.id === qContent.data.value?.library_id)?.settings
+            .scrobbling
+)
 </script>

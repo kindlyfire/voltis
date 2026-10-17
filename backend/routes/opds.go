@@ -9,6 +9,7 @@ import (
 
 	"voltis/covers"
 	"voltis/models"
+	"voltis/scrobble"
 	"voltis/settings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -16,9 +17,10 @@ import (
 )
 
 type OPDSRoutes struct {
-	pool  *pgxpool.Pool
-	st    *settings.Store
-	files *FileRoutes
+	pool      *pgxpool.Pool
+	st        *settings.Store
+	files     *FileRoutes
+	scrobbles *scrobble.Service
 }
 
 // Register mounts the feeds on g, which is /opds/:key behind opdsCache and appKeyAuth.
@@ -134,7 +136,7 @@ func (o *OPDSRoutes) pse(c echo.Context) error {
 
 	// The image is sent: a client hanging up must not cancel the write, and a failure is only logged.
 	served := servedPage{Pages: len(names), FileMtime: content.FileMtime}
-	recorded, err := recordComicPage(context.WithoutCancel(ctx), o.pool, user.ID,
+	recorded, err := recordComicPage(context.WithoutCancel(ctx), o.pool, o.scrobbles, user.ID,
 		c.Get(contextKeyAppKey).(*appKeyUser).KeyID, content.ID, idx, served)
 	if err != nil {
 		slog.Warn("opds pse progress", "content_id", content.ID, "err", err)

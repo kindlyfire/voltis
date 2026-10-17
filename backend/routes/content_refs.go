@@ -11,6 +11,7 @@ import (
 	"voltis/db"
 	"voltis/lib/fp"
 	"voltis/models"
+	"voltis/scrobble"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -18,7 +19,8 @@ import (
 )
 
 type ContentRefRoutes struct {
-	pool *pgxpool.Pool
+	pool      *pgxpool.Pool
+	scrobbles *scrobble.Service
 }
 
 func (cr *ContentRefRoutes) Register(g *echo.Group) {
@@ -467,6 +469,7 @@ func (cr *ContentRefRoutes) saveBrokenRefs(c echo.Context) error {
 		return conflict
 	}
 
+	ctx, touches := scrobble.WithTouches(ctx)
 	var res brokenRefsSaveResponse
 	err = db.WithTx(ctx, cr.pool, func(tx pgx.Tx) error {
 		// Scans move refs under the metadata lock, and every list entry insert takes this lock
@@ -474,9 +477,9 @@ func (cr *ContentRefRoutes) saveBrokenRefs(c echo.Context) error {
 		if err := db.LockUserData(ctx, tx, user.ID, libraryID); err != nil {
 			return err
 		}
-		rev := db.ServerRevision()
+		rev, now := db.ServerRevision(), time.Now().UTC()
 		args := pgx.NamedArgs{"user_id": user.ID, "library_id": libraryID, "srcs": srcs, "dsts": dsts,
-			"refs": refs, "entries": entries, "now": time.Now().UTC(), "rev": rev}
+			"refs": refs, "entries": entries, "now": now, "rev": rev}
 
 		// Entry updates and deletes don't take the user lock: lock the affected lists, then their
 		// entries, before checking them.
@@ -506,12 +509,12 @@ func (cr *ContentRefRoutes) saveBrokenRefs(c echo.Context) error {
 		if err != nil {
 			return err
 		}
-		live, err := db.SelectScalar[int](ctx, tx,
-			"SELECT COUNT(*) FROM content WHERE library_id = @library_id AND uri = ANY(@dsts)", args)
+		live, err := db.SelectScalars[string](ctx, tx,
+			"SELECT id FROM content WHERE library_id = @library_id AND uri = ANY(@dsts)", args)
 		if err != nil {
 			return err
 		}
-		if stale || live != len(dsts) {
+		if stale || len(live) != len(dsts) {
 			return conflict
 		}
 
@@ -524,6 +527,10 @@ func (cr *ContentRefRoutes) saveBrokenRefs(c echo.Context) error {
 			UPDATE user_to_content u SET uri = r.dst, revision = @rev
 			FROM unnest(@srcs::text[], @dsts::text[]) r(src, dst)
 			WHERE u.user_id = @user_id AND u.library_id = @library_id AND u.uri = r.src`, args); err != nil {
+			return err
+		}
+		// A merge can change a destination's completion.
+		if err := scrobble.Touch(ctx, user.ID, live...); err != nil {
 			return err
 		}
 
@@ -584,11 +591,12 @@ func (cr *ContentRefRoutes) saveBrokenRefs(c echo.Context) error {
 		res = brokenRefsSaveResponse{Moved: len(srcs),
 			Merged:  rowsMerged.RowsAffected() + entriesMerged.RowsAffected(),
 			Deleted: refsDeleted.RowsAffected() + entriesDeleted.RowsAffected()}
-		return nil
+		return scrobble.Flush(ctx, tx, now)
 	})
 	if err != nil {
 		return err
 	}
+	cr.scrobbles.Changed(touches.Users())
 
 	return c.JSON(http.StatusOK, res)
 }

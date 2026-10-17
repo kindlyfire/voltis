@@ -11,6 +11,7 @@
         </template>
         <!-- Only the list scrolls; the padding keeps the rows' hover background and focus rings unclipped. -->
         <div class="-mx-2.5 max-h-[min(28rem,60vh)] overflow-y-auto overscroll-contain px-2.5">
+            <ScrobbleQueue @navigate="open = false" />
             <NotificationList :history-limit="10" @navigate="open = false" />
         </div>
         <div class="border-outline-variant mt-1 -mb-1 flex justify-between border-t pt-1">
@@ -31,6 +32,7 @@ import { IconNotifications } from '@/ui/icons'
 import NotificationList from './NotificationList.vue'
 import { showNotificationsModal } from './NotificationsModal.vue'
 import ScanAllButton from './ScanAllButton.vue'
+import ScrobbleQueue from './ScrobbleQueue.vue'
 
 const store = useNotificationStore()
 const scanStore = useScanStore()

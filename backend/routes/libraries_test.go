@@ -85,13 +85,13 @@ func TestLibrarySettings(t *testing.T) {
 	settings := func(lib map[string]any) string { return asJSON(t, lib["settings"]) }
 
 	lib := c.Post("/api/libraries/new", body(nil)).Assert(t, 200).JSON()
-	assertEq(t, settings(lib), `{"always_remove_missing":false,"auto_match":{},"book_series_inference":"conservative"}`)
+	assertEq(t, settings(lib), `{"always_remove_missing":false,"auto_match":{},"book_series_inference":"conservative","scrobbling":true}`)
 	assertEq(t, asJSON(t, lib["sources"]), `[{"path_uri":"`+dir+`","settings":{}}]`)
 	id := s(lib["id"])
 
 	// Keys of providers not registered are kept.
 	off := map[string]any{"book_series_inference": "off", "auto_match": map[string]any{"fake": true, "gone": false}}
-	want := `{"always_remove_missing":false,"auto_match":{"fake":true,"gone":false},"book_series_inference":"off"}`
+	want := `{"always_remove_missing":false,"auto_match":{"fake":true,"gone":false},"book_series_inference":"off","scrobbling":true}`
 	assertEq(t, settings(c.Post("/api/libraries/"+id, body(off)).Assert(t, 200).JSON()), want)
 	assertEq(t, settings(c.Post("/api/libraries/"+id, body(nil)).Assert(t, 200).JSON()), want)
 	assertEq(t, settings(c.Get("/api/libraries").Assert(t, 200).JSONArray()[0]), want)
@@ -106,7 +106,7 @@ func TestLibrarySettings(t *testing.T) {
 		{"path_uri": dir}, {"path_uri": dir + "/"}}}).Assert(t, 400)
 	// Omitted keys take their defaults: matching is off unless asked for.
 	partial := c.Post("/api/libraries/"+id, body(map[string]any{"book_series_inference": "off"})).Assert(t, 200).JSON()
-	assertEq(t, settings(partial), `{"always_remove_missing":false,"auto_match":{},"book_series_inference":"off"}`)
+	assertEq(t, settings(partial), `{"always_remove_missing":false,"auto_match":{},"book_series_inference":"off","scrobbling":true}`)
 	for _, sources := range []any{nil, []any{}, []any{map[string]any{"path_uri": "  "}}} {
 		for _, path := range []string{"new", id} {
 			res := c.Post("/api/libraries/"+path, map[string]any{"name": "books", "type": "books", "sources": sources})

@@ -8,12 +8,18 @@
             @navigate="emit('navigate')"
         />
     </ul>
-    <p v-else-if="store.loaded" class="text-fg-muted py-4 text-center text-sm">Nothing here yet.</p>
+    <p
+        v-else-if="store.loaded && !scrobbles.visible"
+        class="text-fg-muted py-4 text-center text-sm"
+    >
+        Nothing here yet.
+    </p>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useNotificationStore } from '@/stores/notifications'
+import { useScrobbleStore } from '@/stores/scrobbles'
 import NotificationItem from './NotificationItem.vue'
 
 const props = defineProps<{
@@ -24,6 +30,7 @@ const props = defineProps<{
 const emit = defineEmits<{ navigate: [] }>()
 
 const store = useNotificationStore()
+const scrobbles = useScrobbleStore()
 
 const shown = computed(() => {
     const head = [...store.active, ...store.needsInput]

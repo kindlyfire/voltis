@@ -139,6 +139,7 @@ const to = computed(() => {
     if (i.kind === 'new_content' && i.content)
         return { name: 'info-page', params: { id: i.content.id } }
     if (i.kind === 'metadata_review') return { name: 'settings-metadata', query: { tab: 'review' } }
+    if (i.kind === 'scrobble_auth') return { name: 'settings-scrobbling' }
     return null
 })
 
@@ -153,6 +154,8 @@ const title = computed(() => {
         }
         case 'metadata_review':
             return `${i.data.count} series need review`
+        case 'scrobble_auth':
+            return 'MangaBaka rejected your token'
     }
 })
 
@@ -172,6 +175,7 @@ const since = computed(() => formatRelative(props.item.updated_at))
 const subtitle = computed(() => {
     const i = props.item
     if (i.kind === 'metadata_review') return 'Metadata'
+    if (i.kind === 'scrobble_auth') return 'Reconnect to resume scrobbling'
     if (i.kind === 'new_content') return ''
     const l = lead.value
     if (l) return progressText(l)
@@ -204,6 +208,8 @@ const look = computed<{
     if (i.kind === 'new_content') return { icon: IconAutoStories, tone: 'new' }
     if (i.kind === 'metadata_review')
         return { icon: IconMagnifyScan, tone: 'input', chip: 'Review', chipTone: 'warning' }
+    if (i.kind === 'scrobble_auth')
+        return { icon: IconAlertCircle, tone: 'input', chip: 'Reconnect', chipTone: 'warning' }
     if (lead.value) {
         const queued = lead.value.state === 'queued'
         return {
