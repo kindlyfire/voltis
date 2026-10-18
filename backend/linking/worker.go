@@ -14,6 +14,8 @@ import (
 	"voltis/metadata"
 	"voltis/models"
 	"voltis/providers"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // The worker recomputes metadata derived by an older DataVersion, matches series, and refreshes
@@ -53,10 +55,9 @@ type counter[T any] interface {
 }
 
 // advancePass adds a round's counts to the selected pass, starting one if none runs. A round
-// without any finishes it, whether or not it errored, and saves it outside the status lock. It
-// returns the pass it finished, if any.
+// without any finishes it, whether or not it errored, and saves it outside the status lock.
 func advancePass[T counter[T]](ctx context.Context, s *Service, kind string, pass func(*WorkerStatus) *Pass[T],
-	counts T, start, end time.Time) *Pass[T] {
+	counts T, start, end time.Time) {
 	var finished *Pass[T]
 	s.update(func(st *WorkerStatus) {
 		p := pass(st)
@@ -74,7 +75,7 @@ func advancePass[T counter[T]](ctx context.Context, s *Service, kind string, pas
 		p.Counts, p.Ended, p.Running = p.Counts.plus(counts), &end, true
 	})
 	if finished == nil {
-		return nil
+		return
 	}
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO metadata_passes (kind, started_at, ended_at, counts) VALUES ($1, $2, $3, $4)
@@ -84,7 +85,6 @@ func advancePass[T counter[T]](ctx context.Context, s *Service, kind string, pas
 	if err != nil && ctx.Err() == nil {
 		slog.Error("[linking] save pass", "kind", kind, "err", err)
 	}
-	return finished
 }
 
 // loadPass decodes a saved pass's counts into p.
@@ -160,12 +160,12 @@ func (s *Service) Wake() {
 
 // Run is the worker, until ctx ends. paused stops matching; scanning tells whether a scan of a
 // library runs or waits, which defers matching it; onStatus receives the status as it changes;
-// notifyUsers receives the users whose notifications a match pass changed.
+// notifyUsers receives the users whose review item changed.
 func (s *Service) Run(ctx context.Context, paused func() bool, scanning func(libraryID string) bool,
 	onStatus func(WorkerStatus), notifyUsers func([]string)) {
-	s.scanning, s.notifyUsers = scanning, notifyUsers
+	s.scanning = scanning
 	s.mu.Lock()
-	s.onStatus = onStatus
+	s.onStatus, s.notifyUsers = onStatus, notifyUsers
 	s.mu.Unlock()
 	if err := s.loadPasses(ctx); err != nil {
 		slog.Error("[linking] load passes", "err", err)
@@ -196,6 +196,19 @@ func (s *Service) step(ctx context.Context, paused bool) (time.Duration, error) 
 	c := changes{}
 	defer s.notifyAll(c)
 	s.update(func(st *WorkerStatus) { st.Paused = paused })
+	// A quiet hourly recount heals writers outside this package. Zero reviewSyncedAt also runs it at boot.
+	if time.Since(s.reviewSyncedAt) >= time.Hour {
+		s.reviewSyncedAt = time.Now()
+		var users []string
+		err := db.WithTx(ctx, s.pool, func(tx pgx.Tx) (err error) {
+			users, err = s.syncReview(ctx, tx, false)
+			return err
+		})
+		if err != nil && ctx.Err() == nil {
+			slog.Error("[linking] review notification", "err", err)
+		}
+		s.pushUsers(users)
+	}
 	if did, err := s.recomputeStale(ctx, c); did || err != nil {
 		return 0, err
 	}
@@ -209,12 +222,8 @@ func (s *Service) step(ctx context.Context, paused bool) (time.Duration, error) 
 		}
 	}
 	if ctx.Err() == nil {
-		fin := advancePass(ctx, s, "match", func(st *WorkerStatus) *Pass[MatchResult] { return &st.MatchPass },
+		advancePass(ctx, s, "match", func(st *WorkerStatus) *Pass[MatchResult] { return &st.MatchPass },
 			matched, matchStart, time.Now())
-		// Pausing ends a pass too, but says nothing about the review work.
-		if fin != nil && !paused && ctx.Err() == nil {
-			s.notifyReview(ctx, fin.Counts.Entered)
-		}
 	}
 
 	// A match failing again and again must not hold refreshes back.
@@ -241,25 +250,33 @@ func (s *Service) step(ctx context.Context, paused bool) (time.Duration, error) 
 		}
 	}
 	s.update(func(st *WorkerStatus) { st.Activity, st.LibraryID = Idle, "" })
-	return s.nextDue(ctx, libs)
+	wait, err := s.nextDue(ctx, libs)
+	return min(wait, max(time.Until(s.reviewSyncedAt.Add(time.Hour)), 0)), err
 }
 
-// notifyReview syncs the admins' review item to the series waiting in review.
-func (s *Service) notifyReview(ctx context.Context, entered int) {
-	count, err := db.SelectScalar[int](ctx, s.pool,
+// syncReview syncs the admins' review item to the series waiting in review, in tx. The lock
+// serialises recount and write, and is taken last so it orders after the provider and metadata locks.
+func (s *Service) syncReview(ctx context.Context, tx pgx.Tx, entered bool) ([]string, error) {
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtext('metadata_review'))"); err != nil {
+		return nil, err
+	}
+	count, err := db.SelectScalar[int](ctx, tx,
 		"SELECT count(DISTINCT content_id) FROM metadata_links WHERE state = 'review' AND provider = ANY($1)",
 		s.providerNames())
-	var users []string
-	if err == nil {
-		users, err = notify.MetadataReview(ctx, s.pool, count, entered)
-	}
 	if err != nil {
-		if ctx.Err() == nil {
-			slog.Error("[linking] review notification", "err", err)
-		}
-		return
+		return nil, err
 	}
-	s.notifyUsers(users)
+	return notify.MetadataReview(ctx, tx, count, entered)
+}
+
+// pushUsers tells the users whose review item changed, if anyone listens.
+func (s *Service) pushUsers(users []string) {
+	s.mu.Lock()
+	push := s.notifyUsers
+	s.mu.Unlock()
+	if push != nil && len(users) > 0 {
+		push(users)
+	}
 }
 
 // recomputeStale recomputes a batch of rows an older DataVersion derived, and reports whether

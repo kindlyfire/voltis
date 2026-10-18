@@ -105,6 +105,8 @@ type op struct {
 	dirty   map[string]map[string]bool // library -> content ids
 	changed changes
 	decided map[linkKey]undo // kept for Undo once committed
+	link    bool             // a link row was written
+	entered bool             // a link moved into review
 }
 
 func newOp(tx pgx.Tx) *op {
@@ -119,10 +121,11 @@ func (o *op) touch(libraryID, contentID string) {
 	o.dirty[libraryID][contentID] = true
 }
 
-// wrote marks a row whose links or layers were written, which changes its library.
+// wrote marks a row whose link was written, which changes its library.
 func (o *op) wrote(libraryID, contentID string) {
 	o.touch(libraryID, contentID)
 	o.changed[libraryID] = true
+	o.link = true
 }
 
 // changes collects the libraries whose metadata commits changed, to notify each once.
@@ -146,6 +149,7 @@ func (s *Service) run(ctx context.Context, fn func(o *op) error) error {
 // changed to c.
 func (s *Service) commit(ctx context.Context, c changes, fn func(o *op) error) error {
 	o := newOp(nil)
+	var users []string
 	err := db.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
 		o.tx = tx
 		if err := fn(o); err != nil {
@@ -160,11 +164,17 @@ func (s *Service) commit(ctx context.Context, c changes, fn func(o *op) error) e
 				o.changed[lib] = true
 			}
 		}
+		if o.link {
+			var err error
+			users, err = s.syncReview(ctx, tx, o.entered)
+			return err
+		}
 		return nil
 	})
 	if err == nil {
 		maps.Copy(c, o.changed)
 		s.undos.put(o.decided)
+		s.pushUsers(users)
 	}
 	return err
 }
@@ -189,6 +199,7 @@ func (s *Service) write(ctx context.Context, o *op, t metadata.Target, provider 
 			return metadata.ErrConflict
 		}
 	}
+	was := l.State
 	if err := change(&l); err != nil {
 		return err
 	}
@@ -196,6 +207,7 @@ func (s *Service) write(ctx context.Context, o *op, t metadata.Target, provider 
 		return err
 	}
 	o.wrote(t.LibraryID, t.ContentID)
+	o.entered = o.entered || l.State == StateReview && was != StateReview
 	return nil
 }
 

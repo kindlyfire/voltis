@@ -69,7 +69,7 @@ func TestNotificationFeed(t *testing.T) {
 	assertEq(t, item["data"].(map[string]any)["count"].(float64), 1)
 	assertEq(t, item["unread"], true)
 
-	// Review: only a pass that adds review work creates the item, and an empty review removes it.
+	// Review: only work entering review creates the item, and an empty review removes it.
 	must := func(users []string, err error) []string {
 		t.Helper()
 		if err != nil {
@@ -77,13 +77,13 @@ func TestNotificationFeed(t *testing.T) {
 		}
 		return users
 	}
-	must(notify.MetadataReview(ctx, pool, 3, 0))
+	must(notify.MetadataReview(ctx, pool, 3, false))
 	assertLen(t, feedItems(feedOf(t, member, ""), "needs_input"), 0)
-	assertEq(t, len(must(notify.MetadataReview(ctx, pool, 3, 2))), 2)
+	assertEq(t, len(must(notify.MetadataReview(ctx, pool, 3, true))), 2)
 	review := feedItems(feedOf(t, member, ""), "needs_input")
 	assertLen(t, review, 1)
 	assertEq(t, review[0]["data"].(map[string]any)["count"].(float64), 3)
-	must(notify.MetadataReview(ctx, pool, 0, 0))
+	must(notify.MetadataReview(ctx, pool, 0, false))
 	assertLen(t, feedItems(feedOf(t, member, ""), "needs_input"), 0)
 
 	// A failed scan alerts every admin.
@@ -122,22 +122,23 @@ func TestNotificationFeed(t *testing.T) {
 	assertEq(t, member.Delete("/api/notifications").Assert(t, 200).JSON()["unread"].(float64), 0)
 	assertLen(t, feedItems(feedOf(t, member, ""), "data"), 0)
 
-	// The sweep keeps unread items.
+	// The sweep keeps unread items and needs-input items, even seen.
 	other := "new_content:other"
 	for _, key := range []string{row.GroupKey, other} {
 		row.GroupKey = key
 		upsert(now)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE notifications SET updated_at = now() - interval '31 days',
-		seen_at = CASE WHEN group_key = $1 THEN alerted_at END WHERE user_id = $2 AND group_key IS NOT NULL`,
-		"new_content:c_series", memberID); err != nil {
-		t.Fatal(err)
-	}
+	must(notify.MetadataReview(ctx, pool, 1, true))
+	mustExec(t, pool, `UPDATE notifications SET updated_at = now() - interval '31 days',
+		seen_at = CASE WHEN group_key IN ($1, 'metadata_review') THEN alerted_at END
+		WHERE (user_id = $2 OR kind = 'metadata_review') AND group_key IS NOT NULL`,
+		"new_content:c_series", memberID)
 	if n, err := notify.Sweep(ctx, pool); err != nil || n != 1 {
 		t.Fatalf("sweep = %d, %v, want the seen item only", n, err)
 	}
-	left, err := db.SelectScalars[string](ctx, pool, "SELECT group_key FROM notifications WHERE user_id = $1", memberID)
-	if err != nil || !slices.Equal(left, []string{other}) {
+	left, err := db.SelectScalars[string](ctx, pool,
+		"SELECT group_key FROM notifications WHERE user_id = $1 OR kind = 'metadata_review' ORDER BY group_key", memberID)
+	if err != nil || !slices.Equal(left, []string{"metadata_review", other}) {
 		t.Fatalf("left = %v, %v", left, err)
 	}
 }

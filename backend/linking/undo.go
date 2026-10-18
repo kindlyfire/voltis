@@ -135,6 +135,7 @@ func (s *Service) Undo(ctx context.Context, contentID, provider string, rev int6
 			p.RetryAt = l.RetryAt
 		}
 		p.Rev = l.Rev
+		o.entered = d.prior.State == StateReview && l.State != StateReview
 		return save(ctx, o.tx, p)
 	})
 	if err == nil {

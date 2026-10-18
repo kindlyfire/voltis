@@ -49,11 +49,12 @@ func Clear(ctx context.Context, q db.Querier, userID string) error {
 	return err
 }
 
-// Sweep deletes items seen and untouched for 30 days. Unread items and active scans stay.
+// Sweep deletes items seen and untouched for 30 days. Unread items and active scans stay, and
+// needs-input items go when resolved or dismissed.
 func Sweep(ctx context.Context, q db.Querier) (int64, error) {
 	tag, err := q.Exec(ctx, `
 		DELETE FROM notifications n
-		WHERE n.updated_at < now() - interval '30 days' AND NOT (`+unread+`)
+		WHERE n.updated_at < now() - interval '30 days' AND NOT (`+unread+`) AND NOT (`+needsInput+`)
 		  AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id = n.task_id AND t.status IN (0, 1))
 	`)
 	return tag.RowsAffected(), err

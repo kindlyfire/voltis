@@ -8,9 +8,6 @@ import (
 
 	"voltis/db"
 	"voltis/models"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Grouped is a user's single item for a group key. ContentID and Unit may be nil.
@@ -59,34 +56,28 @@ func UpsertGrouped(ctx context.Context, tx db.Querier, rows []Grouped, add bool,
 	return err
 }
 
-// MetadataReview syncs the admins' review item to count, the number of series waiting in review.
-// entered is the number that entered review in the pass that just ended: only then is the item
-// (re)created and alerted. Otherwise it only follows the count, quietly.
-func MetadataReview(ctx context.Context, pool *pgxpool.Pool, count, entered int) (users []string, err error) {
-	err = db.WithTx(ctx, pool, func(tx pgx.Tx) error {
-		switch {
-		case count == 0:
-			users, err = db.SelectScalars[string](ctx, tx,
-				"DELETE FROM notifications WHERE kind = 'metadata_review' RETURNING user_id")
-		case entered > 0:
-			users, err = db.SelectScalars[string](ctx, tx,
-				"SELECT id FROM users WHERE permissions @> ARRAY['ADMIN'] ORDER BY id")
-			if err != nil {
-				return err
-			}
-			rows := make([]Grouped, len(users))
-			for i, u := range users {
-				rows[i] = Grouped{UserID: u, Kind: models.NotificationMetadataReview, GroupKey: "metadata_review", Count: count}
-			}
-			err = UpsertGrouped(ctx, tx, rows, false, time.Now().UTC())
-		default:
-			users, err = db.SelectScalars[string](ctx, tx, `
-				UPDATE notifications SET data = jsonb_set(data, '{count}', to_jsonb($1::int))
-				WHERE kind = 'metadata_review' AND (data->>'count')::int <> $1::int
-				RETURNING user_id
-			`, count)
+// MetadataReview syncs the admins' review item to count, the number of series waiting in review,
+// in the caller's transaction. entered means a series entered review: missing items are created
+// and the rest alerted again. Otherwise it only follows the count, quietly.
+func MetadataReview(ctx context.Context, tx db.Querier, count int, entered bool) ([]string, error) {
+	switch {
+	case count == 0:
+		return db.SelectScalars[string](ctx, tx,
+			"DELETE FROM notifications WHERE kind = 'metadata_review' RETURNING user_id")
+	case entered:
+		users, err := db.SelectScalars[string](ctx, tx, "SELECT id FROM users WHERE permissions @> ARRAY['ADMIN']")
+		if err != nil {
+			return nil, err
 		}
-		return err
-	})
-	return users, err
+		rows := make([]Grouped, len(users))
+		for i, u := range users {
+			rows[i] = Grouped{UserID: u, Kind: models.NotificationMetadataReview, GroupKey: "metadata_review", Count: count}
+		}
+		return users, UpsertGrouped(ctx, tx, rows, false, time.Now().UTC())
+	}
+	return db.SelectScalars[string](ctx, tx, `
+		UPDATE notifications SET data = jsonb_set(data, '{count}', to_jsonb($1::int))
+		WHERE kind = 'metadata_review' AND (data->>'count')::int <> $1::int
+		RETURNING user_id
+	`, count)
 }

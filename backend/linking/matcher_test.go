@@ -77,7 +77,7 @@ func TestMatchBackfill(t *testing.T) {
 	e.notified = nil
 
 	from := time.Now()
-	if res := e.match(); res != (MatchResult{Linked: 1, Review: 1, Unmatched: 1, Entered: 1}) {
+	if res := e.match(); res != (MatchResult{Linked: 1, Review: 1, Unmatched: 1}) {
 		t.Fatalf("result = %+v", res)
 	}
 	if l := e.link("a"); l.State != StateLinked || *l.ExternalID != "1" || *l.Origin != OriginAuto {

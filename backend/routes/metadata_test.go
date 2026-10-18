@@ -192,6 +192,10 @@ func TestMetadataReview(t *testing.T) {
 		worker := c.Get("/api/metadata/summary").Assert(t, 200).JSON()["worker"].(map[string]any)
 		return worker["match_pass"].(map[string]any)["counts"].(map[string]any)["review"] == 1.0
 	})
+	needsInput := feedItems(feedOf(t, c, ""), "needs_input")
+	assertLen(t, needsInput, 1)
+	assertEq(t, needsInput[0]["data"].(map[string]any)["count"].(float64), 1)
+	assertEq(t, needsInput[0]["unread"], true)
 
 	res := c.Post("/api/metadata/review/resolve", map[string]any{"items": []map[string]any{
 		{"content_id": id, "provider": "fake", "action": "link", "external_id": "1", "expect_rev": link["rev"]},
@@ -201,10 +205,19 @@ func TestMetadataReview(t *testing.T) {
 		t.Fatalf("results = %v", res)
 	}
 	assertEq(t, c.Get("/api/metadata/review?tab=review").Assert(t, 200).JSON()["total"], any(0.0))
+	assertLen(t, feedItems(feedOf(t, c, ""), "needs_input"), 0)
 
+	// Undo brings the item back; linking again removes it.
 	base := "/api/metadata/content/" + id
-	v := c.Get(base).Assert(t, 200).JSON()
+	v := c.Post(base+"/undo", map[string]any{"provider": "fake", "expect_rev": res[0].(map[string]any)["rev"]}).Assert(t, 200).JSON()
+	needsInput = feedItems(feedOf(t, c, ""), "needs_input")
+	assertLen(t, needsInput, 1)
+	assertEq(t, needsInput[0]["data"].(map[string]any)["count"].(float64), 1)
+	assertEq(t, needsInput[0]["unread"], true)
 	rev := v["links"].([]any)[0].(map[string]any)["rev"]
+	v = c.Post(base+"/link", map[string]any{"provider": "fake", "external_id": "1", "expect_rev": rev}).Assert(t, 200).JSON()
+	assertLen(t, feedItems(feedOf(t, c, ""), "needs_input"), 0)
+	rev = v["links"].([]any)[0].(map[string]any)["rev"]
 	c.Post(base+"/rematch", map[string]any{"provider": "fake", "expect_rev": rev}).Assert(t, 409)
 	v = c.Post(base+"/ignore", map[string]any{"provider": "fake", "expect_rev": rev}).Assert(t, 200).JSON()
 	rev = v["links"].([]any)[0].(map[string]any)["rev"]
