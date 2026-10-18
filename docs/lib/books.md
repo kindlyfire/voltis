@@ -27,3 +27,7 @@ We don't infer a series when:
 A standalone book whose file name matches a series name is added to that
 series. Changing the setting only regroups existing books on the next forced
 scan.
+
+Books with `SP`, `SPnn` or `Omake` in their title or file name, or a Calibre
+series index of 10000 or more, are marked special, as for
+[comics](/lib/comics#specials).

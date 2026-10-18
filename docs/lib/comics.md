@@ -20,9 +20,11 @@ comic. We detect chapter and volume numbers based on:
   number with the most digits in the file name as the chapter number. We
   remove the common prefix between the parent folder name and the file name
   before looking for a number, to help avoid picking up numbers from the series
-  name.
-- Should no chapter/volume be found still, we will attempt to take a four-digit
-  year between parentheses from the file name (for example `(2022)`).
+  name. This is skipped for files marked `SP` or `SPnn`.
+- Should no chapter/volume be found still, the comic is added without a
+  number, titled after what's left of its file name (`Series Artbook` becomes
+  `Artbook`). If nothing is left, as with `Series (2022)`, it takes the
+  four-digit year between parentheses from the file name.
 
 File names and series names are cleaned up prior to analysis: Groups of `[]` and
 `()`, with anything in between, are removed from the end of the name.
@@ -40,3 +42,14 @@ they are in different directories.
 A custom cover image can be set by placing a `cover.jpg`, `cover.jpeg`,
 `cover.png` or `cover.webp` file in the series directory. Otherwise the cover of
 the first chapter/volume is used.
+
+## Specials
+
+A comic is marked special when its file name has an `SP`, `SPnn` or `Omake`
+word, its `ComicInfo.xml` `Number` is `SP` (or `SP 2`), or its `Format` is
+`Special`. Unnumbered comics in a series that also has numbered ones are
+specials too.
+
+Specials get a Special badge. Unnumbered ones are listed in a Specials tab on
+the series page, ordered by SP number and then file name, and continue reading
+skips them. Admins can set Special to Yes or No with "Edit metadata".

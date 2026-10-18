@@ -76,6 +76,20 @@ search for another one, refresh it, or ignore MangaBaka for that series.
   <Screenshot name="metadata_edit_bottom" alt="Edit metadata, linked MangaBaka entry" />
 </div>
 
+## Scrobbling
+
+Each user can send their reading progress on linked series to their MangaBaka
+library. Connect a personal access token under Settings → Scrobbling.
+
+Voltis sends the highest finished chapter, the highest fully finished volume
+(the series index for books) and the reading status. MangaBaka is never lowered:
+if it is ahead, the "Scrobbling" entry in a series' options menu shows the
+difference and can overwrite it.
+
+From the same menu, a series can be put on hold so nothing is sent for it.
+Scrobbling can be turned off per library, by admins with "Allow scrobbling" in
+the library settings, and by each user under Settings → Scrobbling.
+
 ## From the command line
 
 [`metadata match`](/cli#metadata-match) matches every pending series of a

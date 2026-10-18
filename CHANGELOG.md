@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0-beta.3] - 2026-10-18
+
 - Comics without a volume or chapter number, such as SP booklets, artbooks and
   specials sharing a year, are no longer skipped or numbered from their file
   name. Run a forced scan to give existing ones their new keys
@@ -17,6 +19,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Scrobbling to MangaBaka: connect a token in Settings → Scrobbling, and finished
   chapters, volumes and reading status of linked series are sent to your
   MangaBaka library. Admins can turn it off per library
+- New notifications center that contains scan history, pending metadata review
+  notifications, and allows quickly scanning all libraries
+- Sync some reader settings between devices
 
 ## [1.0.0-beta.2] - 2026-10-04
 
