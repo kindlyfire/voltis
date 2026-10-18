@@ -23,6 +23,10 @@ export default defineConfig({
 				link: '/authentication',
 			},
 			{
+				text: 'Mobile app',
+				link: '/mobile',
+			},
+			{
 				text: 'OPDS',
 				link: '/opds',
 			},

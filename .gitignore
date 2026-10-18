@@ -10,9 +10,11 @@ android/.kotlin
 android/build
 android/app/build
 android/local.properties
+android/keystore.properties
 android/.idea
 android/captures
 android/app/release
+docs/public/*.apk
 *.iml
 *.jks
 *.keystore
