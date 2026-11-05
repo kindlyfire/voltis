@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0-beta.4] - 2026-11-05
+
 - Display only the most important metadata on the content info page, and show 
   everything in a new "Info" tab
 - Add a release script for server and Android releases
