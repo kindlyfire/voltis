@@ -112,7 +112,7 @@
                     class="-mt-3 -ml-1 self-center sm:self-start"
                 />
 
-                <div v-if="meta.description" class="flex max-w-[640px] flex-col items-start gap-1">
+                <div v-if="meta.description" class="flex max-w-[55rem] flex-col items-start gap-1">
                     <p
                         :id="descriptionId"
                         ref="descriptionEl"
@@ -133,43 +133,14 @@
                     </AButton>
                 </div>
 
-                <dl v-if="details.length" class="flex max-w-[640px] flex-col text-sm">
-                    <div
-                        v-for="row in details"
-                        :key="row.label"
-                        class="border-outline-variant grid grid-cols-[7rem_1fr] gap-4 border-t px-1 py-[11px]"
-                    >
-                        <dt>{{ row.label }}</dt>
-                        <dd class="text-fg-muted min-w-0 [overflow-wrap:anywhere]">
-                            <template v-if="row.links">
-                                <a
-                                    v-for="link in row.links"
-                                    :key="link.url"
-                                    :href="link.url"
-                                    target="_blank"
-                                    rel="noopener"
-                                    class="a-focus text-primary mr-3 inline-flex items-center gap-1 rounded-sm font-medium hover:underline"
-                                >
-                                    {{ link.label }}
-                                    <AIcon :icon="IconOpenInNew" />
-                                    <span class="sr-only">(opens in a new tab)</span>
-                                </a>
-                            </template>
-                            <template v-else-if="row.items">
-                                <template v-for="(item, i) in row.items" :key="i">
-                                    <template v-if="i">, </template>
-                                    <RouterLink
-                                        v-if="item.to"
-                                        :to="item.to"
-                                        class="a-focus text-primary rounded-sm font-medium hover:underline"
-                                    >
-                                        {{ item.text }}
-                                    </RouterLink>
-                                    <template v-else>{{ item.text }}</template>
-                                    <template v-if="item.suffix">{{ item.suffix }}</template>
-                                </template>
-                            </template>
-                            <template v-else>{{ row.value }}</template>
+                <dl
+                    v-if="summary.length"
+                    class="hidden max-w-[55rem] gap-x-8 gap-y-4 text-sm sm:grid sm:grid-cols-2 lg:grid-cols-3"
+                >
+                    <div v-for="row in summary" :key="row.key" class="min-w-0">
+                        <dt class="font-medium">{{ row.label }}</dt>
+                        <dd class="text-fg-muted flex">
+                            <DetailValue :row="row" :limit="3" @more="showInfo" />
                         </dd>
                     </div>
                 </dl>
@@ -189,8 +160,8 @@
 
 <script setup lang="ts">
 import { useResizeObserver } from '@vueuse/core'
-import { capitalize, computed, ref, useId, useTemplateRef, watch } from 'vue'
-import { RouterLink, type RouteLocationRaw } from 'vue-router'
+import { capitalize, computed, nextTick, ref, useId, useTemplateRef, watch } from 'vue'
+import { RouterLink, useRouter } from 'vue-router'
 import { useScrobbleStore } from '@/stores/scrobbles'
 import AButton from '@/ui/AButton.vue'
 import AChip from '@/ui/AChip.vue'
@@ -198,15 +169,13 @@ import ACover from '@/ui/ACover.vue'
 import ADialog from '@/ui/ADialog.vue'
 import AIcon from '@/ui/AIcon.vue'
 import AIconButton from '@/ui/AIconButton.vue'
-import { IconChevronLeft, IconOpenInNew, IconStar, IconStarFilled } from '@/ui/icons'
+import { IconChevronLeft, IconStar, IconStarFilled } from '@/ui/icons'
 import { useToast } from '@/ui/useToast'
 import { contentApi, coverUrl } from '@/utils/api/content'
-import { metadataApi, ownTitle, type MetadataLinkRef } from '@/utils/api/metadata'
-import type { Content, FacetKind } from '@/utils/api/types'
+import { metadataApi, ownTitle } from '@/utils/api/metadata'
+import type { Content } from '@/utils/api/types'
 import { usersApi } from '@/utils/api/users'
-import { facetRoute, slugLabel } from '@/utils/facets'
 import { displayContentType, plural } from '@/utils/misc'
-import { lengthSummary, readingSpeed } from '@/utils/readingTime'
 import { splitItemTitle } from '@/utils/seriesItem'
 import ContinueReadingButton from './components/ContinueReadingButton.vue'
 import CoverProgress from './components/CoverProgress.vue'
@@ -214,18 +183,12 @@ import OptionsButton from './components/OptionsButton.vue'
 import { showProviderSearchModal } from './components/ProviderSearchModal.vue'
 import RatingButton from './components/RatingButton.vue'
 import ReadingStatusButton from './components/ReadingStatusButton.vue'
+import DetailValue from './DetailValue.vue'
+import { CONTENT_TABS_ID, type DetailRow, useContentDetails } from './useContentDetails'
 
 const props = defineProps<{
     content: Content
 }>()
-
-type Item = { text: string; to?: RouteLocationRaw; suffix?: string }
-const FIELD_KINDS = {
-    staff: 'people',
-    genres: 'genres',
-    tags: 'tags',
-    publishers: 'publishers',
-} as const satisfies Record<keyof NonNullable<Content['facet_keys']>, FacetKind>
 
 const qParent = contentApi.useGet(() => props.content.parent_id || undefined)
 const parent = qParent.data
@@ -272,45 +235,21 @@ function measure() {
 useResizeObserver(descriptionEl, measure)
 watch(() => meta.value.description, measure, { flush: 'post' })
 
-const details = computed(() => {
-    const m = meta.value
-    const keys = props.content.facet_keys
-    // Links only where the server gave a key: valid top-level entries.
-    const items = (field: keyof typeof FIELD_KINDS, texts: string[]): Item[] =>
-        texts.map((text, i) => {
-            const key = keys?.[field][i]
-            return { text, to: key ? facetRoute(FIELD_KINDS[field], key) : undefined }
-        })
-    const rows: { label: string; value?: string; items?: Item[]; links?: MetadataLinkRef[] }[] = []
-    if (m.staff?.length) {
-        const staff = m.staff
-        rows.push({
-            label: 'Staff',
-            items: items(
-                'staff',
-                staff.map(s => s.name)
-            ).map((item, i) => ({ ...item, suffix: ` (${staff[i]!.role})` })),
-        })
-    }
-    if (m.publishers?.length) {
-        rows.push({ label: 'Publishers', items: items('publishers', m.publishers) })
-    }
-    if (m.publication_date) {
-        rows.push({ label: 'Published', value: formatDate(m.publication_date) })
-    }
-    if (props.content.length) {
-        rows.push({
-            label: 'Length',
-            value: lengthSummary(props.content.length, readingSpeed(qMe.data.value?.preferences)),
-        })
-    }
-    if (m.genres?.length) {
-        rows.push({ label: 'Genres', items: items('genres', m.genres.map(slugLabel)) })
-    }
-    if (m.tags?.length) rows.push({ label: 'Tags', items: items('tags', m.tags) })
-    if (m.links?.length) rows.push({ label: 'Links', links: m.links })
-    return rows
-})
+const SUMMARY: DetailRow['key'][] = ['length', 'published', 'staff', 'genres', 'links']
+const details = useContentDetails(() => props.content)
+const summary = computed(() => SUMMARY.flatMap(key => details.value.find(r => r.key === key) ?? []))
+
+const router = useRouter()
+async function showInfo() {
+    await router.replace({ query: { ...router.currentRoute.value.query, section: 'info' } })
+    if (router.currentRoute.value.query.section !== 'info') return
+    await nextTick()
+    const section = document.getElementById(CONTENT_TABS_ID)
+    section
+        ?.querySelector<HTMLElement>('[role="tab"][data-state="active"]')
+        ?.focus({ preventScroll: true })
+    section?.scrollIntoView()
+}
 
 const language = computed(() => {
     const code = meta.value.language
@@ -321,18 +260,6 @@ const language = computed(() => {
         return code
     }
 })
-
-/** A full date in words; a year or year-month stays as is (a day would be made up). */
-function formatDate(value: string) {
-    if (/^\d{4}(-\d{2})?$/.test(value)) return value
-    const date = new Date(value)
-    if (isNaN(date.getTime())) return value
-    // Date-only values parse as UTC midnight: format in UTC so the day doesn't shift.
-    return date.toLocaleDateString(undefined, {
-        dateStyle: 'long',
-        timeZone: 'UTC',
-    })
-}
 
 async function toggleStar() {
     const starred = !isStarred.value

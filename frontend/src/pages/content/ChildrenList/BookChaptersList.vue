@@ -1,6 +1,5 @@
 <template>
-    <section class="flex max-w-[780px] flex-col gap-3.5" aria-labelledby="contents-heading">
-        <h2 id="contents-heading" class="font-display text-[30px] font-semibold">Contents</h2>
+    <div class="flex max-w-[780px] flex-col gap-3.5">
         <ACard v-if="qStructure.data.value" padding="md">
             <BookContents :content-id="content.id" :structure="qStructure.data.value" />
         </ACard>
@@ -8,7 +7,7 @@
             <ASpinner />
         </div>
         <QueryError v-else-if="qStructure.error.value" :query="qStructure" />
-    </section>
+    </div>
 </template>
 
 <script setup lang="ts">
