@@ -26,19 +26,9 @@ lint:
 test *args='':
     cd backend && go test "$@" ./...
 
-docker-push-release:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    version=$(git describe --tags --abbrev=0)
-    version=${version#v}
-    image="ghcr.io/kindlyfire/voltis:$version"
-    echo "Image: $image"
-    if docker manifest inspect "$image" > /dev/null 2>&1; then
-        echo "Image $image already exists, skipping push"
-        exit 0
-    fi
-    docker build --build-arg APP_VERSION="$version" -t "$image" .
-    docker push "$image"
+# Publish a server or Android release. See scripts/release.sh
+release kind version:
+    scripts/release.sh {{ kind }} {{ version }}
 
 docker-push-dev:
     #!/usr/bin/env bash

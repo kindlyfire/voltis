@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- Display only the most important metadata on the content info page, and show 
+  everything in a new "Info" tab
+- Add a release script for server and Android releases
+
 ## [1.0.0-beta.3] - 2026-10-18
 
 - Comics without a volume or chapter number, such as SP booklets, artbooks and
