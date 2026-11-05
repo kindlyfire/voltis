@@ -6,6 +6,8 @@
  */
 @theme static {
     --color-primary: oklch(0.51 0.15 45);
+    /* The logo's rust; unlike primary, it stays the same in dark mode. */
+    --color-brand: oklch(0.51 0.15 45);
     --color-on-primary: oklch(0.985 0.01 45);
     --color-primary-container: oklch(0.92 0.0525 45);
     --color-on-primary-container: oklch(0.3 0.09 45);

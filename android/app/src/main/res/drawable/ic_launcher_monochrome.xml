@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Themed-icon glyph: only alpha is used. Generated from brand/; the icon's 100-unit box maps to the 72dp visible area. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M29.88,37.25L41.50,36.23L43.11,59.50L50.54,35.44L62.16,34.42L47.63,74.72L34.72,75.85ZM64.74,34.19L75.72,33.24L70.55,59.70L63.45,60.33ZM61.75,63.73L71.43,62.88L70.22,72.74L60.54,73.59Z" />
+</vector>

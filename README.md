@@ -1,3 +1,5 @@
+<img src="brand/icon.svg" alt="" width="96" height="96">
+
 # Voltis
 
 Voltis is a self-hosted media servers that supports comics/manga and ebooks. It

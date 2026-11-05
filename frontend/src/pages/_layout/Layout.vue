@@ -12,7 +12,9 @@
                 aria-controls="sidebar"
                 @click="toggleSidebar"
             />
-            <RouterLink to="/" class="wordmark a-focus rounded-md">Voltis</RouterLink>
+            <RouterLink to="/" class="wordmark a-focus rounded-md">
+                <VoltisWordmark class="h-6 w-auto" />
+            </RouterLink>
         </div>
         <SidebarNav />
     </aside>
@@ -39,7 +41,9 @@
                     :aria-expanded="store.sidebarOpen"
                     @click="toggleSidebar"
                 />
-                <RouterLink to="/" class="wordmark a-focus rounded-md">Voltis</RouterLink>
+                <RouterLink to="/" class="wordmark a-focus rounded-md">
+                    <VoltisWordmark class="h-6 w-auto" />
+                </RouterLink>
             </div>
             <AIconButton
                 v-if="compactSearch"
@@ -85,6 +89,7 @@
 import { useEventListener, useMediaQuery } from '@vueuse/core'
 import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import VoltisWordmark from '@/components/VoltisWordmark.vue'
 import ADrawer from '@/ui/ADrawer.vue'
 import AIconButton from '@/ui/AIconButton.vue'
 import AToastRegion from '@/ui/AToastRegion.vue'
@@ -197,10 +202,8 @@ async function toggleSidebar() {
 
     .wordmark {
         flex: none;
-        font-family: var(--font-display);
-        font-size: 23px;
-        font-weight: 600;
-        line-height: 1.2;
+        display: flex;
+        padding: 2px;
     }
 
     /* Scroll-hide slides it away but keeps `--layout-top`; the reader's temporary chrome sets
