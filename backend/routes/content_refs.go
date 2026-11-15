@@ -477,7 +477,7 @@ func (cr *ContentRefRoutes) saveBrokenRefs(c echo.Context) error {
 		if err := db.LockUserData(ctx, tx, user.ID, libraryID); err != nil {
 			return err
 		}
-		rev, now := db.ServerRevision(), time.Now().UTC()
+		rev, now := models.ServerRevision(), time.Now().UTC()
 		args := pgx.NamedArgs{"user_id": user.ID, "library_id": libraryID, "srcs": srcs, "dsts": dsts,
 			"refs": refs, "entries": entries, "now": now, "rev": rev}
 

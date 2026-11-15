@@ -1,6 +1,7 @@
 package models
 
 import (
+	cryptorand "crypto/rand"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -12,6 +13,12 @@ import (
 )
 
 type JSONB = json.RawMessage
+
+// IsJSONObject says whether raw is a JSON object, not null or another value.
+func IsJSONObject(raw json.RawMessage) bool {
+	var m map[string]json.RawMessage
+	return json.Unmarshal(raw, &m) == nil && m != nil
+}
 
 type User struct {
 	ID           string    `db:"id" json:"id"`
@@ -218,6 +225,49 @@ func (s *ReadingSeq) UnmarshalJSON(b []byte) error {
 	n, err := strconv.ParseInt(strings.Trim(string(b), `"`), 10, 64)
 	*s = ReadingSeq(n)
 	return err
+}
+
+// ReadingStatus is a user's status on content.
+type ReadingStatus string
+
+const (
+	StatusReading    ReadingStatus = "reading"
+	StatusCompleted  ReadingStatus = "completed"
+	StatusOnHold     ReadingStatus = "on_hold"
+	StatusDropped    ReadingStatus = "dropped"
+	StatusPlanToRead ReadingStatus = "plan_to_read"
+)
+
+var ReadingStatuses = []ReadingStatus{StatusReading, StatusCompleted, StatusOnHold, StatusDropped, StatusPlanToRead}
+
+// Revision is the token of the last write to a user_to_content row.
+type Revision string
+
+// ServerRevision is a fresh revision for a write outside the readers.
+func ServerRevision() Revision { return "srv:" + Revision(strings.ToLower(cryptorand.Text())) }
+
+// OPDSRevision is a fresh revision for a write through the app key.
+func OPDSRevision(keyID string) Revision {
+	return Revision("opds-" + keyID + ":" + strings.ToLower(cryptorand.Text()))
+}
+
+// ReaderRevision is the revision of a reader's write: its writer id and sequence number.
+func ReaderRevision(writer string, seq int64) Revision {
+	return Revision(writer + ":" + strconv.FormatInt(seq, 10))
+}
+
+// ParseRevision splits a token into its writer and, for a reader's token, its sequence number.
+// Server tokens have a random suffix, so they never hold a reader sequence.
+func ParseRevision(token *string) (writer string, seq int64, ok bool) {
+	if token == nil {
+		return "", 0, false
+	}
+	i := strings.LastIndexByte(*token, ':')
+	if i < 0 {
+		return "", 0, false
+	}
+	seq, err := strconv.ParseInt((*token)[i+1:], 10, 64)
+	return (*token)[:i], seq, err == nil
 }
 
 type UserToContent struct {

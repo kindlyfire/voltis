@@ -17,6 +17,7 @@ import (
 	"voltis/lib/fp"
 	"voltis/metadata"
 	"voltis/models"
+	"voltis/reading"
 	"voltis/scrobble"
 
 	"github.com/jackc/pgx/v5"
@@ -66,7 +67,7 @@ func utcToDTO(u *models.UserToContent) *UserToContentDTO {
 		return nil
 	}
 	progress := u.Progress
-	if !isJSONObject(progress) {
+	if !models.IsJSONObject(progress) {
 		progress = json.RawMessage("{}")
 	}
 	return &UserToContentDTO{
@@ -148,11 +149,11 @@ type contentDTOOpts struct {
 
 func contentToDTO(c models.Content, opts contentDTOOpts) ContentDTO {
 	meta := json.RawMessage("{}")
-	if opts.includeMeta && isJSONObject(opts.meta) {
+	if opts.includeMeta && models.IsJSONObject(opts.meta) {
 		meta = opts.meta
 	}
 	fileData := json.RawMessage("{}")
-	if opts.includeFileData && isJSONObject(c.FileData) {
+	if opts.includeFileData && models.IsJSONObject(c.FileData) {
 		fileData = c.FileData
 	}
 
@@ -214,22 +215,8 @@ func (r contentListRow) dto(includeFileData, includeMeta bool) ContentDTO {
 	return dto
 }
 
-// childCountsJoin counts the valid children of content c in cc, for @user_id, with utc joined.
-const childCountsJoin = `
-	LEFT JOIN LATERAL (
-		SELECT COUNT(*) AS children_count,
-			COUNT(*) FILTER (WHERE child_utc.status = 'completed') AS completed_children_count,
-			COUNT(*) FILTER (WHERE child_utc.status = 'dropped') AS dropped_children_count,
-			COUNT(*) FILTER (WHERE utc.status = 'completed' AND child.created_at > utc.status_updated_at
-				AND (child_utc.status IS NULL OR child_utc.status NOT IN ('completed', 'dropped'))) AS new_count
-		FROM content child
-		LEFT JOIN user_to_content child_utc ON child_utc.library_id = child.library_id
-			AND child_utc.uri = child.uri AND child_utc.user_id = @user_id
-		WHERE child.parent_id = c.id AND child.valid
-	) cc ON true`
-
 // contentRowColumns selects a contentListRow from content c, user_to_content utc (for @user_id)
-// and childCountsJoin.
+// and db.ChildCountsJoin.
 var contentRowColumns = models.ContentColumns("c") + `,
 	cc.children_count, cc.completed_children_count, cc.dropped_children_count,
 	cc.children_count - cc.completed_children_count - cc.dropped_children_count AS unread_children_count,
@@ -249,7 +236,7 @@ func selectContentRows(ctx context.Context, q db.Querier, userID string, ids []s
 	}
 	rows, err := db.Select[contentListRow](ctx, q, `
 		SELECT `+contentRowColumns+`
-		FROM content c`+utcJoin+childCountsJoin+`
+		FROM content c`+db.UTCJoin+db.ChildCountsJoin+`
 		WHERE c.id = ANY(@ids)
 	`, pgx.NamedArgs{"user_id": userID, "ids": ids})
 	if err != nil {
@@ -273,7 +260,7 @@ func (cr *ContentRoutes) get(c echo.Context) error {
 
 	r, err := db.SelectOne[contentListRow](ctx, cr.pool, `
 		SELECT `+contentRowColumns+`
-		FROM content c`+utcJoin+childCountsJoin+`
+		FROM content c`+db.UTCJoin+db.ChildCountsJoin+`
 		WHERE c.id = @id
 	`, pgx.NamedArgs{"user_id": user.ID, "id": contentID})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -481,7 +468,7 @@ type contentListQuery struct {
 	LibraryID     string   `query:"library_id"`
 	Type          []string `query:"type"`
 	Valid         string   `query:"valid"           validate:"omitempty,oneof=true false"`
-	ReadingStatus string   `query:"reading_status"  validate:"omitempty,oneof=reading completed on_hold dropped plan_to_read"`
+	ReadingStatus string   `query:"reading_status"  validate:"omitempty,reading_status"`
 	Starred       string   `query:"starred"         validate:"omitempty,oneof=true false"`
 	HasStatus     string   `query:"has_status"      validate:"omitempty,oneof=true false"`
 	HasRating     string   `query:"has_rating"      validate:"omitempty,oneof=true false"`
@@ -497,32 +484,50 @@ type contentListQuery struct {
 	FacetKind string `query:"facet_kind" validate:"required_with=Facet,omitempty,oneof=genres tags people publishers"`
 	Facet     string `query:"facet"      validate:"required_with=FacetKind,omitempty,max=1000"`
 	FacetRole string `query:"facet_role" validate:"omitempty,max=200,excluded_without=Facet"`
-	ListID    string // set by code only
-	// IgnoreSeriesStatus is the user's home preference, set by code for the continue sorts.
-	IgnoreSeriesStatus bool
 }
 
-// filter is the query's filter. The history, continue and recently_updated sorts also restrict
-// the rows; the last two list continue targets, wherever they sit, so they ignore parent_id.
-func (q contentListQuery) filter() contentFilter {
-	f := contentFilter{
-		ParentID:           q.ParentID,
-		LibraryID:          q.LibraryID,
-		Type:               q.Type,
-		Valid:              optBool(q.Valid),
-		ReadingStatus:      q.ReadingStatus,
-		Starred:            optBool(q.Starred),
-		HasStatus:          optBool(q.HasStatus),
-		HasRating:          optBool(q.HasRating),
-		Search:             strings.TrimSpace(q.Search),
-		ListID:             q.ListID,
-		IgnoreSeriesStatus: q.IgnoreSeriesStatus,
-		FacetKind:          facetKinds[q.FacetKind],
-		Facet:              q.Facet,
-		FacetRole:          q.FacetRole,
-		Section:            q.Section,
+// spec is the query as a listSpec. ignoreSeriesStatus is the user's home preference, for the
+// continue sorts.
+func (q contentListQuery) spec(ignoreSeriesStatus bool) listSpec {
+	return listSpec{
+		Filter: contentFilter{
+			ParentID:           q.ParentID,
+			LibraryID:          q.LibraryID,
+			Type:               q.Type,
+			Valid:              optBool(q.Valid),
+			ReadingStatus:      q.ReadingStatus,
+			Starred:            optBool(q.Starred),
+			HasStatus:          optBool(q.HasStatus),
+			HasRating:          optBool(q.HasRating),
+			Search:             q.Search,
+			IgnoreSeriesStatus: ignoreSeriesStatus,
+			FacetKind:          facetKinds[q.FacetKind],
+			Facet:              q.Facet,
+			FacetRole:          q.FacetRole,
+			Section:            q.Section,
+		},
+		Sort: q.Sort, SortOrder: q.SortOrder, Limit: q.Limit, Offset: q.Offset,
 	}
-	switch q.Sort {
+}
+
+// listSpec is a content list: a filter, a sort and a page. Sort and SortOrder are as requested;
+// resolve gives the effective ones.
+type listSpec struct {
+	Filter          contentFilter
+	Sort, SortOrder string
+	Limit           *int
+	Offset          int
+}
+
+// resolve returns the filter and the effective sort. The history, continue and recently_updated
+// sorts also restrict the rows; the last two list continue targets, wherever they sit, so they
+// ignore parent_id. The sort is an explicit one; else relevance for a search, list order in a
+// list, or title asc (sort_order defaults to desc, so it is ignored). progress_updated_at is the
+// old name of last_read_at, and history sorts by it.
+func (s listSpec) resolve() (f contentFilter, sort, dir string) {
+	f = s.Filter
+	f.Search = strings.TrimSpace(f.Search)
+	switch s.Sort {
 	case "history":
 		f.LastReadOnly = true
 	case "continue":
@@ -530,24 +535,17 @@ func (q contentListQuery) filter() contentFilter {
 	case "recently_updated":
 		f.RecentlyUpdated, f.ParentID = true, ""
 	}
-	return f
-}
-
-// order resolves the sort: an explicit one; else relevance for a search, list order in a list, or
-// title asc (sort_order defaults to desc, so it is ignored). progress_updated_at is the old name
-// of last_read_at, and history sorts by it.
-func (q contentListQuery) order() (sort, dir string) {
 	switch {
-	case q.Sort == "progress_updated_at" || q.Sort == "history":
-		return "last_read_at", q.SortOrder
-	case q.Sort != "" && q.Sort != "relevance":
-		return q.Sort, q.SortOrder
-	case strings.TrimSpace(q.Search) != "":
-		return "relevance", ""
-	case q.ListID != "":
-		return "list", "asc"
+	case s.Sort == "progress_updated_at" || s.Sort == "history":
+		return f, "last_read_at", s.SortOrder
+	case s.Sort != "" && s.Sort != "relevance":
+		return f, s.Sort, s.SortOrder
+	case f.Search != "":
+		return f, "relevance", ""
+	case f.ListID != "":
+		return f, "list", "asc"
 	}
-	return "title", "asc"
+	return f, "title", "asc"
 }
 
 // optBool parses a validated "true" or "false"; "" is nil.
@@ -595,9 +593,6 @@ func (j joins) or(o joins) joins {
 }
 
 const (
-	utcJoin = `
-		LEFT JOIN user_to_content utc
-			ON utc.library_id = c.library_id AND utc.uri = c.uri AND utc.user_id = @user_id`
 	listJoin = `
 		JOIN custom_list_to_content clc ON clc.custom_list_id = @list_id
 			AND clc.library_id = c.library_id AND clc.uri = c.uri`
@@ -723,7 +718,7 @@ func (f contentFilter) from(args pgx.NamedArgs, j joins) string {
 		from += listJoin
 	}
 	if j.utc {
-		from += utcJoin
+		from += db.UTCJoin
 	}
 	if j.unread {
 		lib := ""
@@ -746,7 +741,7 @@ func nullsOrder(dir string) string {
 	return "NULLS LAST"
 }
 
-// contentOrder returns the ORDER BY for a resolved sort (see contentListQuery.order), always
+// contentOrder returns the ORDER BY for a resolved sort (see listSpec.resolve), always
 // ending in c.id, and the joins it reads. The continue sorts read ct, which their filter joins.
 func contentOrder(sort, dir string) (clause string, j joins) {
 	col, nullable := "", true
@@ -840,9 +835,7 @@ type SearchEvalResult struct {
 // SearchEvalQuery runs a root-level content search, as the header (libraryID "") or a library's
 // grid runs it, for the relevance eval.
 func SearchEvalQuery(ctx context.Context, q db.Querier, search, libraryID string, limit int) (SearchEvalResult, error) {
-	lq := contentListQuery{Search: search, LibraryID: libraryID, ParentID: "null"}
-	f := lq.filter()
-	sort, dir := lq.order()
+	f, sort, dir := listSpec{Filter: contentFilter{Search: search, LibraryID: libraryID, ParentID: "null"}}.resolve()
 	start := time.Now()
 	ids, err := listContentIDs(ctx, q, "", f, sort, dir, &limit, 0)
 	if err != nil {
@@ -871,7 +864,7 @@ func (cr *ContentRoutes) list(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	q.IgnoreSeriesStatus = homePrefs(user.Preferences)
+	spec := q.spec(homePrefs(user.Preferences))
 
 	includes := map[string]bool{}
 	for part := range strings.SplitSeq(q.Include, ",") {
@@ -882,17 +875,18 @@ func (cr *ContentRoutes) list(c echo.Context) error {
 	}
 
 	g, ctx := errgroup.WithContext(reqCtx(c))
+	f, _, _ := spec.resolve()
 	var total *int
 	if q.Count != "false" {
 		g.Go(func() error {
-			n, err := countContent(ctx, cr.pool, user.ID, q.filter())
+			n, err := countContent(ctx, cr.pool, user.ID, f)
 			total = &n
 			return err
 		})
 	}
 	var rows []contentListRow
 	g.Go(func() (err error) {
-		rows, err = listContent(ctx, cr.pool, user.ID, q)
+		rows, err = listContent(ctx, cr.pool, user.ID, spec)
 		return err
 	})
 	if err := g.Wait(); err != nil {
@@ -921,10 +915,8 @@ func (cr *ContentRoutes) ids(c echo.Context) error {
 	if q.Limit == nil || *q.Limit > maxContentIDs {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("limit must be at most %d", maxContentIDs))
 	}
-	q.IgnoreSeriesStatus = homePrefs(user.Preferences)
-
-	sort, dir := q.order()
-	ids, err := listContentIDs(reqCtx(c), cr.pool, user.ID, q.filter(), sort, dir, q.Limit, q.Offset)
+	f, sort, dir := q.spec(homePrefs(user.Preferences)).resolve()
+	ids, err := listContentIDs(reqCtx(c), cr.pool, user.ID, f, sort, dir, q.Limit, q.Offset)
 	if err != nil {
 		return err
 	}
@@ -974,10 +966,7 @@ func (cr *ContentRoutes) buckets(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	q.IgnoreSeriesStatus = homePrefs(user.Preferences)
-
-	f := q.filter()
-	sort, dir := q.order()
+	f, sort, dir := q.spec(homePrefs(user.Preferences)).resolve()
 	key, j := bucketKey(sort)
 	res := contentBucketsResponse{Buckets: []contentBucket{}}
 	if key == "" {
@@ -1024,16 +1013,15 @@ func countContentKinds(ctx context.Context, pool *pgxpool.Pool, userID string, f
 	return k, err
 }
 
-// listContent runs one page of lq: the ids query sorts and pages, then only those rows hydrate.
+// listContent runs one page of spec: the ids query sorts and pages, then only those rows hydrate.
 // Rows of the continue sorts carry their continue info, with the series hydrated alongside.
-func listContent(ctx context.Context, q db.Querier, userID string, lq contentListQuery) ([]contentListRow, error) {
-	sort, dir := lq.order()
-	f := lq.filter()
+func listContent(ctx context.Context, q db.Querier, userID string, spec listSpec) ([]contentListRow, error) {
+	f, sort, dir := spec.resolve()
 	var cids []continueID
 	var ids []string
 	var err error
 	if f.Continue || f.RecentlyUpdated {
-		if cids, err = listContinueIDs(ctx, q, userID, f, sort, dir, lq.Limit, lq.Offset); err != nil {
+		if cids, err = listContinueIDs(ctx, q, userID, f, sort, dir, spec.Limit, spec.Offset); err != nil {
 			return nil, err
 		}
 		for _, r := range cids {
@@ -1042,7 +1030,7 @@ func listContent(ctx context.Context, q db.Querier, userID string, lq contentLis
 				ids = append(ids, *r.SeriesID)
 			}
 		}
-	} else if ids, err = listContentIDs(ctx, q, userID, f, sort, dir, lq.Limit, lq.Offset); err != nil {
+	} else if ids, err = listContentIDs(ctx, q, userID, f, sort, dir, spec.Limit, spec.Offset); err != nil {
 		return nil, err
 	}
 	byID, err := selectContentRows(ctx, q, userID, ids)
@@ -1077,17 +1065,18 @@ func listContent(ctx context.Context, q db.Querier, userID string, lq contentLis
 	return rows, nil
 }
 
-// queryContent runs one page of lq with its total. counts, when non-nil, holds countContentKinds
+// queryContent runs one page of spec with its total. counts, when non-nil, holds countContentKinds
 // for the same filter and saves the count query.
-func queryContent(ctx context.Context, pool *pgxpool.Pool, userID string, lq contentListQuery, counts *kindCounts) ([]contentListRow, int, error) {
+func queryContent(ctx context.Context, pool *pgxpool.Pool, userID string, spec listSpec, counts *kindCounts) ([]contentListRow, int, error) {
 	if counts == nil {
-		k, err := countContentKinds(ctx, pool, userID, lq.filter())
+		f, _, _ := spec.resolve()
+		k, err := countContentKinds(ctx, pool, userID, f)
 		if err != nil {
 			return nil, 0, err
 		}
 		counts = &k
 	}
-	rows, err := listContent(ctx, pool, userID, lq)
+	rows, err := listContent(ctx, pool, userID, spec)
 	return rows, counts.Series + counts.items(), err
 }
 
@@ -1190,7 +1179,7 @@ func (cr *ContentRoutes) updateUserData(c echo.Context) error {
 
 	var utc models.UserToContent
 	err = db.WithTx(ctx, cr.pool, func(tx pgx.Tx) error {
-		if err := lockUserData(ctx, tx, user.ID, contentID); err != nil {
+		if err := db.LockContentUserData(ctx, tx, user.ID, contentID); err != nil {
 			return err
 		}
 		libraryID, uri, err := contentURI(ctx, tx, contentID)
@@ -1214,10 +1203,10 @@ func (cr *ContentRoutes) updateUserData(c echo.Context) error {
 }
 
 type bulkUserDataRequest struct {
-	IDs             []string `json:"ids"              validate:"required,min=1"`
-	Action          string   `json:"action"           validate:"required,oneof=set_status reset"`
-	Status          *string  `json:"status"           validate:"omitempty,oneof=reading completed on_hold dropped plan_to_read"`
-	IncludeChildren bool     `json:"include_children"`
+	IDs             []string              `json:"ids"              validate:"required,min=1"`
+	Action          string                `json:"action"           validate:"required,oneof=set_status reset"`
+	Status          *models.ReadingStatus `json:"status"           validate:"omitempty,reading_status"`
+	IncludeChildren bool                  `json:"include_children"`
 }
 
 // bulkUserData sets or clears the user's status on the given content, as the reading commands
@@ -1237,86 +1226,13 @@ func (cr *ContentRoutes) bulkUserData(c echo.Context) error {
 		return err
 	}
 
-	ids := fp.Dedup(req.IDs)
-	rev, now := db.ServerRevision(), time.Now().UTC()
-	args := pgx.NamedArgs{"user_id": user.ID, "ids": ids, "status": req.Status, "now": now, "rev": rev}
-	completing := req.Action == "set_status" && req.Status != nil && *req.Status == "completed"
-
 	ctx, touches := scrobble.WithTouches(reqCtx(c))
 	var count int
 	err = db.WithTx(ctx, cr.pool, func(tx pgx.Tx) error {
-		if err := lockUserData(ctx, tx, user.ID, ids...); err != nil {
-			return err
-		}
-		rows, err := db.Select[completionRow](ctx, tx,
-			"SELECT "+completionColumns+" FROM content c WHERE c.id = ANY(@ids)", args)
-		if err != nil {
-			return err
-		}
-		count = len(rows)
-
-		switch {
-		case req.Action == "reset":
-			if err := clearContent(ctx, tx, user.ID, ids, rev); err != nil {
-				return err
-			}
-			return scrobble.Flush(ctx, tx, now)
-		case completing:
-			if req.IncludeChildren {
-				children, err := db.Select[completionRow](ctx, tx, unfinishedChildRows, args)
-				if err != nil {
-					return err
-				}
-				// A selected child is also a child of a selected series.
-				rows = fp.Dedup(append(rows, children...))
-			}
-			if err := markCompleted(ctx, tx, user.ID, rows, rev, now); err != nil {
-				return err
-			}
-		default:
-			// Completion changes on items that were completed, and the status on series.
-			args["series_types"] = metadata.SeriesTypes
-			changed, err := db.SelectScalars[string](ctx, tx, `
-				SELECT c.id FROM content c`+utcJoin+`
-				WHERE c.id = ANY(@ids) AND CASE WHEN c.type = ANY(@series_types)
-					THEN utc.status IS DISTINCT FROM @status ELSE utc.status = 'completed' END
-			`, args)
-			if err != nil {
-				return err
-			}
-			if err := scrobble.Touch(ctx, user.ID, changed...); err != nil {
-				return err
-			}
-			args["utc_ids"] = fp.Map(ids, func(string) string { return models.MakeUserToContentID() })
-			_, err = tx.Exec(ctx, `
-				INSERT INTO user_to_content AS utc (id, user_id, library_id, uri, status, status_updated_at, revision)
-				SELECT r.id, @user_id, c.library_id, c.uri, @status, @now, @rev
-				FROM unnest(@utc_ids::text[], @ids::text[]) r(id, cid)
-				JOIN content c ON c.id = r.cid
-				ON CONFLICT (user_id, library_id, uri) DO UPDATE SET status = EXCLUDED.status,
-					status_updated_at = CASE WHEN utc.status IS DISTINCT FROM EXCLUDED.status
-						THEN EXCLUDED.status_updated_at ELSE utc.status_updated_at END,
-					revision = EXCLUDED.revision
-			`, args)
-			if err != nil {
-				return err
-			}
-			if req.Status == nil || *req.Status != "reading" {
-				return scrobble.Flush(ctx, tx, now)
-			}
-		}
-		// Reading or completed volumes start their series, after any series status set above.
-		parents, err := db.SelectScalars[string](ctx, tx,
-			"SELECT DISTINCT parent_id FROM content WHERE id = ANY(@ids) AND parent_id IS NOT NULL", args)
-		if err != nil {
-			return err
-		}
-		for _, p := range parents {
-			if _, err := startSeries(ctx, tx, user.ID, p, rev, now, false); err != nil {
-				return err
-			}
-		}
-		return scrobble.Flush(ctx, tx, now)
+		count, err = reading.Bulk(ctx, tx, user.ID, reading.BulkRequest{IDs: req.IDs,
+			Reset: req.Action == "reset", Status: req.Status, IncludeChildren: req.IncludeChildren},
+			time.Now().UTC())
+		return err
 	})
 	if err != nil {
 		return err
@@ -1382,23 +1298,7 @@ type continueInfo struct {
 	Series *contentListRow
 }
 
-// lockUserData takes db.LockUserData for the libraries holding the content, in sorted order so
-// that concurrent batches cannot deadlock.
-func lockUserData(ctx context.Context, tx pgx.Tx, userID string, contentIDs ...string) error {
-	libs, err := db.SelectScalars[string](ctx, tx,
-		"SELECT DISTINCT library_id FROM content WHERE id = ANY($1) ORDER BY library_id", contentIDs)
-	if err != nil {
-		return err
-	}
-	for _, lib := range libs {
-		if err := db.LockUserData(ctx, tx, userID, lib); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// contentURI reads the content's current URI; under lockUserData, a ref written with it
+// contentURI reads the content's current URI; under db.LockContentUserData, a ref written with it
 // cannot land on a URI a scan has since moved away from.
 func contentURI(ctx context.Context, tx pgx.Tx, contentID string) (libraryID, uri string, err error) {
 	err = tx.QueryRow(ctx, "SELECT library_id, uri FROM content WHERE id = $1", contentID).Scan(&libraryID, &uri)

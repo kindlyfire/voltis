@@ -171,18 +171,18 @@ var itemTypes = []string{"comic", "book"}
 
 // applySort sets both Sort and SortOrder: the `default:"desc"` tag only applies to bound queries.
 // An empty sort keeps the query's own order (list order, or relevance for a search).
-func applySort(f *contentListQuery, sort string) {
+func applySort(f *listSpec, sort string) {
 	if s, ok := opdsSorts[sort]; ok {
 		f.Sort, f.SortOrder = s.sort, s.order
 	}
 }
 
-func applyStatus(f *contentListQuery, status string) {
+func applyStatus(f *listSpec, status string) {
 	switch status {
 	case "unread":
-		f.HasStatus = "false"
+		f.Filter.HasStatus = new(false)
 	case "reading", "completed":
-		f.ReadingStatus = status
+		f.Filter.ReadingStatus = status
 	}
 }
 
@@ -279,7 +279,7 @@ func (o *OPDSRoutes) library(c echo.Context, user *models.User, l opdsLinks) (op
 	}
 	id := c.Param("library_id")
 	sort := cmp.Or(q.Sort, "title")
-	return o.mixable(c, user, l, q, contentListQuery{LibraryID: id, ParentID: "null"}, itemFilters{q.Status, sort}, feedMeta{
+	return o.mixable(c, user, l, q, listSpec{Filter: contentFilter{LibraryID: id, ParentID: "null"}}, itemFilters{q.Status, sort}, feedMeta{
 		path: "/libraries/" + id, id: o.id("library", id), title: name, up: l.feed("/catalog", nil), seriesSort: "title",
 		facetSorts: sorts,
 	})
@@ -304,7 +304,7 @@ func (o *OPDSRoutes) series(c echo.Context, user *models.User, l opdsLinks) (opd
 	_ = json.Unmarshal(r.MetaData, &m)
 
 	sort := cmp.Or(q.Sort, "number")
-	f := contentListQuery{ParentID: r.ID}
+	f := listSpec{Filter: contentFilter{ParentID: r.ID}}
 	applyStatus(&f, q.Status)
 	applySort(&f, sort)
 	path := "/series/" + r.ID
@@ -336,7 +336,7 @@ func (o *OPDSRoutes) recent(c echo.Context, user *models.User, l opdsLinks) (opd
 	if err != nil {
 		return opdsFeed{}, err
 	}
-	f := contentListQuery{Type: itemTypes}
+	f := listSpec{Filter: contentFilter{Type: itemTypes}}
 	applySort(&f, "added")
 	feed := opdsFeed{ID: o.id("recent"), Title: "Recently added", Kind: kindAcquisition,
 		Self: l.feed("/recent", withPage(nil, q.Page)), Up: l.feed("/catalog", nil)}
@@ -349,7 +349,7 @@ func (o *OPDSRoutes) starred(c echo.Context, user *models.User, l opdsLinks) (op
 	if err != nil {
 		return opdsFeed{}, err
 	}
-	return o.mixable(c, user, l, q, contentListQuery{Starred: "true"}, itemFilters{"all", "title"}, feedMeta{
+	return o.mixable(c, user, l, q, listSpec{Filter: contentFilter{Starred: new(true)}}, itemFilters{"all", "title"}, feedMeta{
 		path: "/starred", id: o.id("user", user.ID, "starred"), title: "Starred", up: l.feed("/catalog", nil),
 		crossSeries: true, seriesSort: "title",
 	})
@@ -370,7 +370,7 @@ func (o *OPDSRoutes) list(c echo.Context, user *models.User, l opdsLinks) (opdsF
 	if err != nil {
 		return opdsFeed{}, err
 	}
-	return o.mixable(c, user, l, q, contentListQuery{ListID: id}, itemFilters{"all", ""}, feedMeta{
+	return o.mixable(c, user, l, q, listSpec{Filter: contentFilter{ListID: id}}, itemFilters{"all", ""}, feedMeta{
 		path: "/lists/" + id, id: o.id("user", user.ID, "list", id), title: name, up: l.feed("/catalog", nil),
 		crossSeries: true,
 	})
@@ -384,7 +384,7 @@ func (o *OPDSRoutes) search(c echo.Context, user *models.User, l opdsLinks) (opd
 	if strings.TrimSpace(q.Query) == "" {
 		return opdsFeed{}, echo.NewHTTPError(http.StatusBadRequest, "query is required")
 	}
-	return o.mixable(c, user, l, q, contentListQuery{Search: q.Query}, itemFilters{"all", ""}, feedMeta{
+	return o.mixable(c, user, l, q, listSpec{Filter: contentFilter{Search: q.Query}}, itemFilters{"all", ""}, feedMeta{
 		path: "/search", id: o.id("user", user.ID, "search", url.QueryEscape(q.Query)),
 		title: "Search: " + q.Query, up: l.feed("/catalog", nil), crossSeries: true,
 	})
@@ -406,7 +406,7 @@ type itemFilters struct{ Status, Sort string }
 // mixable renders a feed whose rows may be series, items or both; a mixed result without a
 // requested kind becomes a navigation feed linking to the two pure sub-feeds. Resolve kind before
 // applying item filters, so facets can't change the split.
-func (o *OPDSRoutes) mixable(c echo.Context, user *models.User, l opdsLinks, q opdsQuery, base contentListQuery, items itemFilters, meta feedMeta) (opdsFeed, error) {
+func (o *OPDSRoutes) mixable(c echo.Context, user *models.User, l opdsLinks, q opdsQuery, base listSpec, items itemFilters, meta feedMeta) (opdsFeed, error) {
 	ctx := reqCtx(c)
 	params := q.values()
 	self := l.feed(meta.path, withPage(params, q.Page))
@@ -414,7 +414,8 @@ func (o *OPDSRoutes) mixable(c echo.Context, user *models.User, l opdsLinks, q o
 	kind := q.Kind
 	var counts *kindCounts
 	if kind == "" {
-		k, err := countContentKinds(ctx, o.pool, user.ID, base.filter())
+		bf, _, _ := base.resolve()
+		k, err := countContentKinds(ctx, o.pool, user.ID, bf)
 		if err != nil {
 			return opdsFeed{}, err
 		}
@@ -441,12 +442,12 @@ func (o *OPDSRoutes) mixable(c echo.Context, user *models.User, l opdsLinks, q o
 	switch kind {
 	case "series":
 		feed.Kind = kindNavigation
-		f.Type = metadata.SeriesTypes
+		f.Filter.Type = metadata.SeriesTypes
 		applySort(&f, meta.seriesSort)
 		params.Del("status")
 		params.Del("sort")
 	case "items":
-		f.Type = itemTypes
+		f.Filter.Type = itemTypes
 		applyStatus(&f, items.Status)
 		applySort(&f, items.Sort)
 		if items.Status != "all" {
@@ -486,7 +487,7 @@ func splitFeed(l opdsLinks, meta feedMeta, params url.Values, self string, k kin
 // fillPage runs one page of f into feed, with paging links under path and params. A page past the
 // last is a 404, and an empty result renders as acquisition, so a navigation feed is never empty.
 func (o *OPDSRoutes) fillPage(ctx context.Context, userID string, l opdsLinks, feed *opdsFeed, path string,
-	params url.Values, page int, f contentListQuery, counts *kindCounts, crossSeries bool,
+	params url.Values, page int, f listSpec, counts *kindCounts, crossSeries bool,
 ) error {
 	size := opdsPageSize
 	f.Limit, f.Offset = &size, (page-1)*size

@@ -663,7 +663,7 @@ func applyRenames(ctx context.Context, tx pgx.Tx, libraryID string, pairs []rena
 	for i := range tmps {
 		tmps[i] = fmt.Sprintf("\x01rename/%d", i)
 	}
-	rev := db.ServerRevision()
+	rev := models.ServerRevision()
 	for _, t := range []struct{ table, owner string }{
 		{"user_to_content", "user_id"},
 		{"custom_list_to_content", "custom_list_id"},

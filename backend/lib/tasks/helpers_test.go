@@ -27,6 +27,25 @@ func waitUntil(t *testing.T, what string, fn func() bool) {
 	t.Fatalf("timed out waiting for %s", what)
 }
 
+// closeManager closes m, bounded so a stuck task can't hang the suite.
+func closeManager(m *Manager) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return m.Close(ctx)
+}
+
+// recv waits for a value on ch, failing the test instead of hanging.
+func recv[T any](t *testing.T, ch <-chan T, what string) T {
+	t.Helper()
+	select {
+	case v := <-ch:
+		return v
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for %s", what)
+		panic("unreachable")
+	}
+}
+
 func dbStatus(t *testing.T, pool *pgxpool.Pool, id string) int {
 	t.Helper()
 	var status int
@@ -39,9 +58,14 @@ func dbStatus(t *testing.T, pool *pgxpool.Pool, id string) int {
 func newManager(t *testing.T, publish func(Snapshot)) (*Manager, *pgxpool.Pool) {
 	t.Helper()
 	pool := newTestPool(t)
+	return newManagerOn(t, pool, publish), pool
+}
+
+func newManagerOn(t *testing.T, pool *pgxpool.Pool, publish func(Snapshot)) *Manager {
+	t.Helper()
 	m := NewManager(pool, publish)
-	t.Cleanup(m.Close)
-	return m, pool
+	t.Cleanup(func() { _ = closeManager(m) })
+	return m
 }
 
 func pushTask(t *testing.T, m *Manager, def *TaskDef, input any) *TaskHandle {

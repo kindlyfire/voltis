@@ -70,7 +70,11 @@ func newPipeline(t *testing.T, libType string) *pipeline {
 	manager := tasks.NewManager(pool, func(tasks.Snapshot) {})
 	def := NewScanTask(notify, testStore)
 	manager.Register(def)
-	t.Cleanup(manager.Close)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = manager.Close(ctx)
+	})
 
 	return &pipeline{t: t, pool: pool, lib: lib, root: root, manager: manager, def: def, notify: notify}
 }

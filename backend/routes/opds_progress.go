@@ -2,14 +2,14 @@ package routes
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"math"
-	"strings"
 	"time"
 
 	"voltis/db"
+	"voltis/models"
+	"voltis/reading"
 	"voltis/scrobble"
 
 	"github.com/jackc/pgx/v5"
@@ -36,7 +36,7 @@ func recordComicPage(
 ) (recorded bool, err error) {
 	ctx, touches := scrobble.WithTouches(ctx)
 	err = db.WithTx(ctx, pool, func(tx pgx.Tx) error {
-		if err := lockUserData(ctx, tx, userID, contentID); err != nil {
+		if err := db.LockContentUserData(ctx, tx, userID, contentID); err != nil {
 			return err
 		}
 		// FOR KEY SHARE conflicts with DELETE, so a revoke either commits first or waits for us.
@@ -55,7 +55,7 @@ func recordComicPage(
 			SELECT c.file_mtime, COALESCE(jsonb_array_length(c.file_data->'pages'), 0),
 				CASE WHEN jsonb_typeof(utc.progress->'current_page') = 'number'
 					THEN (utc.progress->>'current_page')::float8 END
-			FROM content c`+utcJoin+`
+			FROM content c`+db.UTCJoin+`
 			WHERE c.id = @id
 		`, pgx.NamedArgs{"id": contentID, "user_id": userID}).Scan(&mtime, &pages, &current); err != nil {
 			return err
@@ -63,26 +63,25 @@ func recordComicPage(
 		sameMtime := (mtime == nil) == (served.FileMtime == nil) && (mtime == nil || mtime.Equal(*served.FileMtime))
 		if !sameMtime || pages != served.Pages || page >= pages || (page == 0 && pages > 1) ||
 			current != nil && *current >= float64(page) {
-			return scrobble.Flush(ctx, tx, time.Now().UTC())
+			return nil
 		}
 
-		req := readingRequest{Op: "finish", revision: "opds-" + keyID + ":" + strings.ToLower(rand.Text())}
+		req := reading.Request{Op: reading.OpFinish, Revision: models.OPDSRevision(keyID)}
 		if page < pages-1 {
-			req.Op = "position"
+			req.Op = reading.OpPosition
 			req.Progress, _ = json.Marshal(map[string]any{
 				"current_page":     page,
 				"progress_percent": pagePercent(page, pages),
 			})
 		}
-		now := time.Now().UTC()
-		res, err := applyReading(ctx, tx, userID, contentID, req, now)
+		res, err := reading.Apply(ctx, tx, userID, contentID, req, time.Now().UTC())
 		if err != nil {
 			return err
 		}
-		recorded = res.Outcome != "none"
-		return scrobble.Flush(ctx, tx, now)
+		recorded = res.Outcome != reading.OutcomeNone
+		return nil
 	})
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, reading.ErrNotFound) {
 		return false, nil // user, key or content gone
 	}
 	if err == nil {

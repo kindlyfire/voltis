@@ -87,7 +87,7 @@ const switchesOn = `(l.settings->>'scrobbling') IS DISTINCT FROM 'false'
 // linked, are held, or are in a library with scrobbling off are left alone, as is everything
 // when the user isn't connected. It returns the queued series.
 //
-// Callers outside the reading writes take lockUserData for the series' libraries first.
+// Callers outside the reading writes take db.LockContentUserData for the series' libraries first.
 func Queue(ctx context.Context, tx pgx.Tx, userID string, contentIDs []string, now time.Time,
 	delay time.Duration) ([]string, error) {
 	// The account lock makes a concurrent disconnect wait, so its DropPending sees these rows.

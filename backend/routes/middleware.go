@@ -31,6 +31,9 @@ func newValidator() *validator.Validate {
 	_ = v.RegisterValidation("notblank", func(fl validator.FieldLevel) bool {
 		return strings.TrimSpace(fl.Field().String()) != ""
 	})
+	_ = v.RegisterValidation("reading_status", func(fl validator.FieldLevel) bool {
+		return slices.Contains(models.ReadingStatuses, models.ReadingStatus(fl.Field().String()))
+	})
 	return v
 }
 

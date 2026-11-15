@@ -12,6 +12,8 @@ import (
 
 	"voltis/db"
 	"voltis/models"
+
+	"github.com/jackc/pgx/v5"
 )
 
 type recorder struct {
@@ -184,7 +186,7 @@ func TestTerminalOrderIsPersistPublishRetire(t *testing.T) {
 		mu.Unlock()
 	})
 	mp.Store(m)
-	t.Cleanup(m.Close)
+	t.Cleanup(func() { closeManager(m) })
 
 	def := compatibleDef("terminal", func(_ any, _ *TaskContext) (any, error) {
 		return map[string]int{"added": 2}, nil
@@ -209,6 +211,66 @@ func TestTerminalOrderIsPersistPublishRetire(t *testing.T) {
 	if _, ok := m.Logs(handle.ID()); ok {
 		t.Fatal("logs still served from the live map after the task finished")
 	}
+}
+
+func TestCloseCancelsRunningKeepsQueued(t *testing.T) {
+	m, pool := newManager(t, nil)
+
+	started := make(chan struct{})
+	finished := make(chan Finished, 1)
+	queuedRan := make(chan struct{}, 1)
+	def := &TaskDef{
+		Name: "closable",
+		Process: func(input any, tc *TaskContext) (any, error) {
+			if input.(map[string]int)["n"] == 1 {
+				queuedRan <- struct{}{}
+				return nil, nil
+			}
+			close(started)
+			<-tc.ctx.Done()
+			return nil, tc.ctx.Err()
+		},
+		UnmarshalInput: func(data json.RawMessage) (any, error) {
+			var v map[string]int
+			return v, json.Unmarshal(data, &v)
+		},
+		IsCompatibleWith: func(any, RunningInfo) bool { return false },
+		Finish: func(_ context.Context, _ pgx.Tx, f Finished) (func(), error) {
+			finished <- f
+			return nil, nil
+		},
+	}
+	m.Register(def)
+
+	running := pushTask(t, m, def, map[string]int{"n": 0})
+	recv(t, started, "the task to start")
+	queued := pushTask(t, m, def, map[string]int{"n": 1})
+	if err := closeManager(m); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	if got := dbStatus(t, pool, running.ID()); got != models.TaskStatusCancelled {
+		t.Fatalf("running task status = %d, want cancelled", got)
+	}
+	if got := dbStatus(t, pool, queued.ID()); got != models.TaskStatusPending {
+		t.Fatalf("queued task status = %d, want pending", got)
+	}
+	if f := recv(t, finished, "Finish"); f.Status != models.TaskStatusCancelled {
+		t.Fatalf("Finish saw status %d, want cancelled", f.Status)
+	}
+	if len(queuedRan) != 0 {
+		t.Fatal("queued task ran during Close")
+	}
+	if _, err := m.Push(def, map[string]int{"n": 2}, nil); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Push after Close err = %v, want ErrClosed", err)
+	}
+
+	next := newManagerOn(t, pool, nil)
+	next.Register(def)
+	if err := next.Load(context.Background()); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	recv(t, queuedRan, "the next Load to run the queued task")
 }
 
 func TestQueuedCancelTakesTheTerminalPath(t *testing.T) {

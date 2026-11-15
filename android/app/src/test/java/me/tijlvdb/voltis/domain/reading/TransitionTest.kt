@@ -25,7 +25,7 @@ class TransitionTest {
 
     @Test
     fun sharedTable() {
-        val cases = AppJson.parseToJsonElement(File("../../backend/routes/testdata/reading_transitions.json").readText()).jsonArray
+        val cases = AppJson.parseToJsonElement(File("../../backend/reading/testdata/reading_transitions.json").readText()).jsonArray
         assertTrue(cases.isNotEmpty())
         for (case in cases.map { it.jsonObject }) {
             val name = case["name"].string()

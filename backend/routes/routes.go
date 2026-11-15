@@ -42,17 +42,59 @@ func adminOnly(next echo.HandlerFunc) echo.HandlerFunc {
 	}
 }
 
-// Deps are the services built before the routes, since the metadata upgrade needs them.
-type Deps struct {
+// Services are what the routes use. NewServices builds them; Run starts the workers.
+type Services struct {
 	Hub       *WebSocketHub
+	Manager   *tasks.Manager
+	Scans     *scanner.Queue
+	Scrobbles *scrobble.Service
+	Links     *linking.Service
 	Providers *providers.Registry
 	Metadata  *metadata.Store
-	Links     *linking.Service
 	Covers    *covers.Cache
 	Library   *mangabaka.Library
 	StaticDir string
-	// NoScrobbleWorker leaves the scrobble worker stopped, for tests that drive it themselves.
-	NoScrobbleWorker bool
+	Ctx       context.Context // the app's: work that outlives a request stops with it
+
+	pool *pgxpool.Pool
+	st   *settings.Store
+}
+
+// NewServices builds the services. ctx is the app's.
+func NewServices(ctx context.Context, pool *pgxpool.Pool, st *settings.Store, reg *providers.Registry, cov *covers.Cache,
+	lib *mangabaka.Library, staticDir string) Services {
+	hub := NewHub()
+	meta := metadata.NewStore(reg)
+	links := linking.New(pool, meta, reg, cov, hub.LibraryChanged)
+	manager := tasks.NewManager(pool, func(s tasks.Snapshot) {
+		hub.TaskUpdate(s)
+		if s.Name == scanner.TaskName && s.Status >= models.TaskStatusCompleted {
+			links.Wake() // ended, however: matching waits for scans
+		}
+	})
+	hub.unread = func(ctx context.Context, ids []string) (map[string]int, error) {
+		return notify.Unread(ctx, pool, ids)
+	}
+	st.OnChange(func(keys []string) {
+		hub.DropSessionless(context.Background(), pool)
+		if slices.Contains(keys, settings.MetadataMatchingPaused) {
+			links.Wake()
+		}
+	})
+	return Services{Hub: hub, Manager: manager, Scans: scanner.NewQueue(manager, pool, hub, meta),
+		Scrobbles: scrobble.New(pool, lib, hub.ScrobblesChanged, hub.NotificationsChanged), Links: links,
+		Providers: reg, Metadata: meta, Covers: cov, Library: lib, StaticDir: staticDir, Ctx: ctx,
+		pool: pool, st: st}
+}
+
+// Run loads the pending tasks and starts the workers that stop with Ctx, except the scrobble
+// worker. A load failure is returned, and the workers run regardless.
+func (s Services) Run() error {
+	err := s.Manager.Load(s.Ctx)
+	go s.Links.Run(s.Ctx, func() bool { return s.st.Bool(settings.MetadataMatchingPaused) }, s.Scans.Scanning,
+		s.Hub.MetadataStatus, s.Hub.NotificationsChanged)
+	go notify.RunSweep(s.Ctx, s.pool)
+	return err
 }
 
 // handleError answers an error as JSON. A request its client gave up on is left unanswered: its
@@ -83,39 +125,10 @@ func logPath(c echo.Context) string {
 	return c.Request().URL.String()
 }
 
-func Register(ctx context.Context, e *echo.Echo, pool *pgxpool.Pool, st *settings.Store, proxy config.ProxyAuth, deps Deps) *tasks.Manager {
+// Register mounts the routes.
+func Register(e *echo.Echo, pool *pgxpool.Pool, st *settings.Store, proxy config.ProxyAuth, svc Services) {
 	e.HTTPErrorHandler = handleError
-	hub := deps.Hub
-	res := &resolver{pool: pool, st: st, hub: hub, proxy: proxy}
-
-	links := deps.Links
-	manager := tasks.NewManager(pool, func(s tasks.Snapshot) {
-		hub.TaskUpdate(s)
-		if s.Name == scanner.TaskName && s.Status >= models.TaskStatusCompleted {
-			links.Wake() // ended, however: matching waits for scans
-		}
-	})
-	hub.unread = func(ctx context.Context, ids []string) (map[string]int, error) {
-		return notify.Unread(ctx, pool, ids)
-	}
-	scanQueue := scanner.NewQueue(manager, pool, hub, deps.Metadata)
-	if err := manager.Load(ctx); err != nil {
-		slog.Error("failed to load pending tasks", "err", err)
-	}
-	go links.Run(ctx, func() bool { return st.Bool(settings.MetadataMatchingPaused) }, scanQueue.Scanning,
-		hub.MetadataStatus, hub.NotificationsChanged)
-	go notify.RunSweep(ctx, pool)
-	scrobbles := scrobble.New(pool, deps.Library, hub.ScrobblesChanged, hub.NotificationsChanged)
-	if !deps.NoScrobbleWorker {
-		go scrobbles.Run(ctx)
-	}
-
-	st.OnChange(func(keys []string) {
-		hub.DropSessionless(context.Background(), pool)
-		if slices.Contains(keys, settings.MetadataMatchingPaused) {
-			links.Wake()
-		}
-	})
+	res := &resolver{pool: pool, st: st, hub: svc.Hub, proxy: proxy}
 
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOriginFunc:  func(origin string) (bool, error) { return isDevOrigin(origin), nil },
@@ -131,38 +144,37 @@ func Register(ctx context.Context, e *echo.Echo, pool *pgxpool.Pool, st *setting
 		},
 	}))
 
-	e.GET("/api/info", infoHandler(pool, st, staticBuildID(deps.StaticDir)))
+	e.GET("/api/info", infoHandler(pool, st, staticBuildID(svc.StaticDir)))
 
 	api := e.Group("/api", authMiddleware(res))
 
-	(&AuthRoutes{pool: pool, hub: hub, st: st, proxyEnabled: proxy.Enabled()}).Register(api.Group("/auth"))
+	(&AuthRoutes{pool: pool, hub: svc.Hub, st: st, proxyEnabled: proxy.Enabled()}).Register(api.Group("/auth"))
 	(&OIDCRoutes{res: res, oidc: newOIDCClient(st)}).Register(api.Group("/auth/oidc"))
 	(&SettingsRoutes{st: st, proxy: proxy}).Register(api.Group("/settings"))
-	(&LibraryRoutes{pool: pool, scanQueue: scanQueue, links: links, reg: deps.Providers, hub: hub, ctx: ctx,
-		scrobbles: scrobbles}).Register(api.Group("/libraries"))
-	(&UserRoutes{pool: pool, hub: hub, st: st, proxyEnabled: proxy.Enabled(), scrobbles: scrobbles}).
+	(&LibraryRoutes{pool: pool, scanQueue: svc.Scans, links: svc.Links, reg: svc.Providers, hub: svc.Hub, ctx: svc.Ctx,
+		scrobbles: svc.Scrobbles}).Register(api.Group("/libraries"))
+	(&UserRoutes{pool: pool, hub: svc.Hub, st: st, proxyEnabled: proxy.Enabled(), scrobbles: svc.Scrobbles}).
 		Register(api.Group("/users"))
 	(&AppKeyRoutes{pool: pool, st: st}).Register(api.Group("/users/me/app-keys"))
-	(&ContentRoutes{pool: pool, scrobbles: scrobbles}).Register(api.Group("/content"))
+	(&ContentRoutes{pool: pool, scrobbles: svc.Scrobbles}).Register(api.Group("/content"))
 	(&FacetRoutes{pool: pool}).Register(api.Group("/facets"))
-	fr := &FileRoutes{pool: pool, covers: deps.Covers}
+	fr := &FileRoutes{pool: pool, covers: svc.Covers}
 	fr.Register(api.Group("/files"))
-	(&ContentRefRoutes{pool: pool, scrobbles: scrobbles}).Register(api.Group("/content"))
+	(&ContentRefRoutes{pool: pool, scrobbles: svc.Scrobbles}).Register(api.Group("/content"))
 	(&CustomListRoutes{pool: pool}).Register(api.Group("/custom-lists"))
-	(&TaskRoutes{pool: pool, manager: manager, scans: scanQueue}).Register(api.Group("/tasks"))
-	(&MetadataRoutes{pool: pool, hub: hub, store: deps.Metadata, links: deps.Links, reg: deps.Providers}).
+	(&TaskRoutes{pool: pool, manager: svc.Manager, scans: svc.Scans}).Register(api.Group("/tasks"))
+	(&MetadataRoutes{pool: pool, hub: svc.Hub, store: svc.Metadata, links: svc.Links, reg: svc.Providers}).
 		Register(api.Group("/metadata"))
-	(&NotificationRoutes{pool: pool, hub: hub}).Register(api.Group("/notifications"))
-	(&ScrobbleRoutes{pool: pool, svc: scrobbles, lib: deps.Library, hub: hub}).
+	(&NotificationRoutes{pool: pool, hub: svc.Hub}).Register(api.Group("/notifications"))
+	(&ScrobbleRoutes{pool: pool, svc: svc.Scrobbles, lib: svc.Library, hub: svc.Hub}).
 		Register(api.Group("/users/me/scrobbling"), api.Group("/scrobbles"), api.Group("/content"))
 	(&FsRoutes{}).Register(api.Group("/fs"))
 
 	e.GET("/api/ws", wsHandler(res))
 
 	// Outside /api: keys, never the session cookie or forwarded auth, authenticate OPDS.
-	(&OPDSRoutes{pool: pool, st: st, files: fr, scrobbles: scrobbles}).
+	(&OPDSRoutes{pool: pool, st: st, files: fr, scrobbles: svc.Scrobbles}).
 		Register(e.Group("/opds/:key", opdsCache, appKeyAuth(pool)))
 
-	registerStaticRoutes(e, deps.StaticDir)
-	return manager
+	registerStaticRoutes(e, svc.StaticDir)
 }

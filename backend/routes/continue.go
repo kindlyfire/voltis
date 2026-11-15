@@ -8,6 +8,7 @@ import (
 	"voltis/db"
 	"voltis/lib/fp"
 	"voltis/models"
+	"voltis/reading"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -180,8 +181,9 @@ type readingPick struct {
 
 // continueReading lists the user's continue reading targets, most recent first.
 func continueReading(ctx context.Context, pool *pgxpool.Pool, user *models.User, limit int) ([]readingPick, error) {
-	rows, err := listContent(ctx, pool, user.ID, contentListQuery{
-		Sort: "continue", SortOrder: "desc", Limit: &limit, IgnoreSeriesStatus: homePrefs(user.Preferences),
+	rows, err := listContent(ctx, pool, user.ID, listSpec{
+		Filter: contentFilter{IgnoreSeriesStatus: homePrefs(user.Preferences)},
+		Sort:   "continue", SortOrder: "desc", Limit: &limit,
 	})
 	if err != nil {
 		return nil, err
@@ -241,13 +243,13 @@ type ContinueTargetDTO struct {
 // resolveContinue finds what reading content continues with: an item itself, or a series' next
 // volume. Without a target, the reason says why.
 func resolveContinue(ctx context.Context, q db.Querier, userID, contentID string) (ContinueTargetDTO, error) {
-	t, err := loadReadingTarget(ctx, q, userID, contentID)
+	t, err := reading.LoadTarget(ctx, q, userID, contentID)
 	if err != nil {
-		return ContinueTargetDTO{}, err
+		return ContinueTargetDTO{}, readingError(err)
 	}
 	var res ContinueTargetDTO
 	var targetID string
-	if !t.isSeries() {
+	if !t.IsSeries() {
 		var m map[string]any
 		_ = json.Unmarshal(t.Progress, &m)
 		atEnd := m["at_end"] == true
@@ -255,7 +257,7 @@ func resolveContinue(ctx context.Context, q db.Querier, userID, contentID string
 		hasPos := len(m) > 0
 		res.SeriesID = t.ParentID
 		switch {
-		case t.Status != nil && *t.Status == "completed" && (!hasPos || atEnd):
+		case t.Status != nil && *t.Status == models.StatusCompleted && (!hasPos || atEnd):
 			res.Reason = new("completed")
 			return res, nil
 		case hasPos:
@@ -323,7 +325,7 @@ func resolveContinue(ctx context.Context, q db.Querier, userID, contentID string
 	}
 	// A scan may have deleted, invalidated or reparented a series' target since it was picked.
 	row, ok := rows[targetID]
-	if !ok || t.isSeries() && (!row.Valid || !fp.PtrEq(row.ParentID, &contentID)) {
+	if !ok || t.IsSeries() && (!row.Valid || !fp.PtrEq(row.ParentID, &contentID)) {
 		res.Action = nil
 		return res, nil
 	}

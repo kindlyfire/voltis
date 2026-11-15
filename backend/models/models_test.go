@@ -53,3 +53,21 @@ func TestParseNormalisesNil(t *testing.T) {
 		}
 	}
 }
+
+func TestParseRevision(t *testing.T) {
+	for token, want := range map[string]struct {
+		writer string
+		seq    int64
+		ok     bool
+	}{
+		"tabcdefghijklmnop:10": {"tabcdefghijklmnop", 10, true},
+		"srv:abcdef":           {"srv", 0, false},
+		"opds-ok_1:abc":        {"opds-ok_1", 0, false},
+		"nocolon":              {"", 0, false},
+	} {
+		writer, seq, ok := ParseRevision(&token)
+		if writer != want.writer || seq != want.seq || ok != want.ok {
+			t.Errorf("%s: %s %d %v", token, writer, seq, ok)
+		}
+	}
+}

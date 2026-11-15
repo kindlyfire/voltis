@@ -70,7 +70,7 @@ func userToDTO(u models.User) UserDTO {
 		perms = []string{}
 	}
 	prefs := u.Preferences
-	if !isJSONObject(prefs) {
+	if !models.IsJSONObject(prefs) {
 		prefs = json.RawMessage("{}")
 	}
 	return UserDTO{

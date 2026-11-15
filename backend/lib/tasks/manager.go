@@ -21,7 +21,10 @@ import (
 
 var PublishInterval = 250 * time.Millisecond
 
-var ErrNotFound = errors.New("task not found")
+var (
+	ErrNotFound = errors.New("task not found")
+	ErrClosed   = errors.New("task manager closed")
+)
 
 type RunningInfo struct {
 	Name  string
@@ -34,6 +37,7 @@ type Manager struct {
 	mu      sync.Mutex
 	queue   []*entry
 	running []*entry
+	closed  bool
 	live    map[string]*entry
 	defs    map[string]*TaskDef
 	cancel  context.CancelFunc
@@ -53,9 +57,34 @@ func NewManager(pool *pgxpool.Pool, publish func(Snapshot)) *Manager {
 	return m
 }
 
-func (m *Manager) Close() {
+// Close stops scheduling, cancels the running tasks and waits for them until ctx ends. Queued
+// tasks stay Pending in the database, for the next Load. It is safe to call more than once.
+func (m *Manager) Close(ctx context.Context) error {
+	m.mu.Lock()
+	m.closed = true
+	running := slices.Clone(m.running)
+	m.mu.Unlock()
+
+	for _, e := range running {
+		e.cancel()
+	}
+	var left []string
+	for _, e := range running {
+		select {
+		case <-e.done:
+		case <-ctx.Done():
+			left = append(left, e.snap.ID)
+		}
+	}
+	var err error
+	if len(left) > 0 {
+		err = ctx.Err()
+		slog.Warn("[tasks] still running at shutdown", "ids", left)
+	}
+
 	m.cancel()
 	m.wg.Wait()
+	return err
 }
 
 func (m *Manager) Register(def *TaskDef) {
@@ -99,6 +128,13 @@ func (m *Manager) Push(def *TaskDef, input any, insert func(ctx context.Context,
 		return nil, fmt.Errorf("marshal task input: %w", err)
 	}
 
+	m.mu.Lock()
+	closed := m.closed
+	m.mu.Unlock()
+	if closed {
+		return nil, ErrClosed
+	}
+
 	now := time.Now().UTC()
 	task := &models.Task{
 		ID:        models.MakeTaskID(),
@@ -124,6 +160,11 @@ func (m *Manager) Push(def *TaskDef, input any, insert func(ctx context.Context,
 
 	e := newEntry(def, input, task)
 	m.mu.Lock()
+	if m.closed {
+		// Closed after the insert: the row stays Pending, and the next start runs it.
+		m.mu.Unlock()
+		return nil, ErrClosed
+	}
 	m.live[e.snap.ID] = e
 	m.queue = append(m.queue, e)
 	m.scheduleUnlocked()
@@ -258,6 +299,9 @@ func (m *Manager) Cancel(id string) error {
 }
 
 func (m *Manager) scheduleUnlocked() {
+	if m.closed {
+		return
+	}
 	var remaining []*entry
 	for _, e := range m.queue {
 		if m.canRunUnlocked(e) {

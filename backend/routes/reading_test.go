@@ -2,9 +2,6 @@ package routes
 
 import (
 	"context"
-	"encoding/json"
-	"os"
-	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -12,7 +9,6 @@ import (
 	"time"
 
 	"voltis/db"
-	"voltis/lib/fp"
 	"voltis/models"
 
 	"github.com/jackc/pgx/v5"
@@ -29,106 +25,6 @@ func setStatus(t *testing.T, c *testClient, id string, status any) map[string]an
 func readingOf(t *testing.T, c *testClient, id string) map[string]any {
 	t.Helper()
 	return c.Get("/api/content/"+id+"/reading").Assert(t, 200).JSON()["state"].(map[string]any)
-}
-
-// TestReadingTransition runs the transition table that the Android app's port runs too.
-func TestReadingTransition(t *testing.T) {
-	type state struct {
-		Status   *string         `json:"status"`
-		Progress json.RawMessage `json:"progress"`
-		LastRead *string         `json:"last_read"`
-	}
-	var cases []struct {
-		Name string `json:"name"`
-		Cur  state  `json:"cur"`
-		Op   struct {
-			Op       string          `json:"op"`
-			Status   *string         `json:"status"`
-			Progress json.RawMessage `json:"progress"`
-			Snapshot *state          `json:"snapshot"`
-		} `json:"op"`
-		End  json.RawMessage `json:"end"`
-		Want struct {
-			state
-			Outcome  string `json:"outcome"`
-			Previous bool   `json:"previous"`
-			Write    bool   `json:"write"`
-		} `json:"want"`
-	}
-	raw, err := os.ReadFile("testdata/reading_transitions.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(raw, &cases); err != nil || len(cases) == 0 {
-		t.Fatal("no cases", err)
-	}
-	now := time.Now()
-	earlier := now.Add(-time.Hour)
-	str := func(p *string) string {
-		if p == nil {
-			return ""
-		}
-		return *p
-	}
-	at := func(label *string) *time.Time {
-		switch str(label) {
-		case "now":
-			return &now
-		case "earlier":
-			return &earlier
-		}
-		return nil
-	}
-	snapshot := func(s state) readingSnapshot {
-		return readingSnapshot{Status: s.Status, Progress: s.Progress, LastReadAt: at(s.LastRead)}
-	}
-	sameJSON := func(a, b json.RawMessage) bool {
-		var x, y any
-		return json.Unmarshal(a, &x) == nil && json.Unmarshal(b, &y) == nil && reflect.DeepEqual(x, y)
-	}
-	for _, tc := range cases {
-		op := readingOp{Op: tc.Op.Op, Status: tc.Op.Status, Progress: tc.Op.Progress}
-		if tc.Op.Snapshot != nil {
-			op.Snapshot = new(snapshot(*tc.Op.Snapshot))
-		}
-		next, outcome, previous, write := transition(snapshot(tc.Cur), op, tc.End, now)
-		w := tc.Want
-		if !fp.PtrEq(next.Status, w.Status) || outcome != w.Outcome || (previous != nil) != w.Previous ||
-			write != w.Write || !sameJSON(next.Progress, w.Progress) {
-			t.Errorf("%s: got %v %s %v %v %s", tc.Name, str(next.Status), outcome, previous != nil, write,
-				next.Progress)
-		}
-		if wantAt := at(w.LastRead); (next.LastReadAt == nil) != (wantAt == nil) ||
-			wantAt != nil && !next.LastReadAt.Equal(*wantAt) {
-			t.Errorf("%s: last read %v", tc.Name, next.LastReadAt)
-		}
-		if previous != nil && !fp.PtrEq(previous.Status, tc.Cur.Status) {
-			t.Errorf("%s: previous %v", tc.Name, str(previous.Status))
-		}
-	}
-}
-
-func TestParseRevision(t *testing.T) {
-	for token, want := range map[string]struct {
-		writer string
-		seq    int64
-		ok     bool
-	}{
-		"tabcdefghijklmnop:10": {"tabcdefghijklmnop", 10, true},
-		"srv:abcdef":           {"srv", 0, false},
-		"opds-ok_1:abc":        {"opds-ok_1", 0, false},
-		"nocolon":              {"", 0, false},
-	} {
-		writer, seq, ok := parseRevision(&token)
-		if writer != want.writer || seq != want.seq || ok != want.ok {
-			t.Errorf("%s: %s %d %v", token, writer, seq, ok)
-		}
-	}
-	// Numeric, not lexical: 9 was delivered before 10.
-	apply, conflict := checkRevision(new("tabcdefghijklmnop:10"), readingRequest{WriterID: "tabcdefghijklmnop", Seq: 9})
-	if apply || conflict {
-		t.Fatal("seq 9 after 10 was not dropped")
-	}
 }
 
 func TestReading(t *testing.T) {

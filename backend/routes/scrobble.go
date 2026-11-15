@@ -203,7 +203,7 @@ func (sr *ScrobbleRoutes) syncAll(c echo.Context) error {
 	var queued []string
 	err = db.WithTx(ctx, sr.pool, func(tx pgx.Tx) error {
 		series, err := db.SelectScalars[string](ctx, tx, `
-			SELECT c.id FROM content c`+utcJoin+`
+			SELECT c.id FROM content c`+db.UTCJoin+`
 			WHERE c.type = ANY(@series_types)
 				AND EXISTS (SELECT 1 FROM metadata_links ml
 					WHERE ml.content_id = c.id AND ml.provider = 'mangabaka' AND ml.state = 'linked')
@@ -215,7 +215,7 @@ func (sr *ScrobbleRoutes) syncAll(c echo.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := lockUserData(ctx, tx, user.ID, series...); err != nil {
+		if err := db.LockContentUserData(ctx, tx, user.ID, series...); err != nil {
 			return err
 		}
 		connected, err := scrobble.LockAccount(ctx, tx, user.ID)
@@ -476,7 +476,7 @@ func (sr *ScrobbleRoutes) hold(c echo.Context) error {
 		if err := requireSeries(ctx, tx, id); err != nil {
 			return err
 		}
-		if err := lockUserData(ctx, tx, user.ID, id); err != nil {
+		if err := db.LockContentUserData(ctx, tx, user.ID, id); err != nil {
 			return err
 		}
 		if _, err := scrobble.LockAccount(ctx, tx, user.ID); err != nil {
@@ -524,7 +524,7 @@ func (sr *ScrobbleRoutes) sendSeries(c echo.Context) error {
 		if err := requireSeries(ctx, tx, id); err != nil {
 			return err
 		}
-		if err := lockUserData(ctx, tx, user.ID, id); err != nil {
+		if err := db.LockContentUserData(ctx, tx, user.ID, id); err != nil {
 			return err
 		}
 		connected, err := scrobble.LockAccount(ctx, tx, user.ID)

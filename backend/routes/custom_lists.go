@@ -398,7 +398,7 @@ func lockOwnedLists(ctx context.Context, tx pgx.Tx, userID string, ids []string)
 	return nil
 }
 
-// createEntryInner expects the caller to hold lockUserData for the content.
+// createEntryInner expects the caller to hold db.LockContentUserData for the content.
 func createEntryInner(ctx context.Context, tx pgx.Tx, listID string, contentID string, notes *string) error {
 	if err := lockLists(ctx, tx, listID); err != nil {
 		return err
@@ -451,7 +451,7 @@ func (cr *CustomListRoutes) createEntry(c echo.Context) error {
 
 	ctx := reqCtx(c)
 	err = db.WithTx(ctx, cr.pool, func(q pgx.Tx) error {
-		if err := lockUserData(ctx, q, user.ID, req.ContentID); err != nil {
+		if err := db.LockContentUserData(ctx, q, user.ID, req.ContentID); err != nil {
 			return err
 		}
 		return createEntryInner(ctx, q, cl.ID, req.ContentID, req.Notes)
@@ -488,7 +488,7 @@ func (cr *CustomListRoutes) bulkCreateEntries(c echo.Context) error {
 
 	var count int64
 	err = db.WithTx(ctx, cr.pool, func(tx pgx.Tx) error {
-		if err := lockUserData(ctx, tx, user.ID, ids...); err != nil {
+		if err := db.LockContentUserData(ctx, tx, user.ID, ids...); err != nil {
 			return err
 		}
 		if err := lockOwnedLists(ctx, tx, user.ID, listIDs); err != nil {

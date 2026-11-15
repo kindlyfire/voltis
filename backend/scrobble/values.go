@@ -4,6 +4,7 @@ package scrobble
 import (
 	"strconv"
 
+	"voltis/models"
 	"voltis/providers/mangabaka"
 )
 
@@ -22,10 +23,10 @@ func MapState(seriesStatus *string) *string {
 	if seriesStatus == nil {
 		return nil
 	}
-	switch *seriesStatus {
-	case "reading", "completed", "dropped", "plan_to_read":
+	switch models.ReadingStatus(*seriesStatus) {
+	case models.StatusReading, models.StatusCompleted, models.StatusDropped, models.StatusPlanToRead:
 		return new(*seriesStatus)
-	case "on_hold":
+	case models.StatusOnHold:
 		return new("paused")
 	}
 	return nil

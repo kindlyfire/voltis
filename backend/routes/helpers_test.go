@@ -13,12 +13,11 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"voltis/config"
 	"voltis/covers"
 	"voltis/db/dbtest"
-	"voltis/linking"
-	"voltis/metadata"
 	"voltis/providers"
 	"voltis/providers/mangabaka"
 	"voltis/providers/mangabaka/mbtest"
@@ -76,17 +75,10 @@ func newServerClient(t *testing.T, pool *pgxpool.Pool, proxy config.ProxyAuth, s
 	st := newStore(t, pool)
 
 	e := echo.New()
-	hub, fake := NewHub(), providertest.New()
-	reg := providers.NewRegistry(fake)
-	store := metadata.NewStore(reg)
-	cov := covers.New(t.TempDir())
-	links := linking.New(pool, store, reg, cov, hub.LibraryChanged)
-	// No scrobble worker: routes tests assert the queue as the requests leave it.
+	fake := providertest.New()
 	mb := mbtest.New(t)
-	manager := Register(t.Context(), e, pool, st, proxy, Deps{Hub: hub, Providers: reg, Metadata: store, Links: links,
-		Covers: cov, Library: mangabaka.NewLibrary(mb.URL, mb.Client(), mb.Limiter()), StaticDir: staticDir, NoScrobbleWorker: true})
-	t.Cleanup(manager.Close)
-	t.Cleanup(autoMatching.Wait) // before the database goes; t.Context() has cancelled them
+	svc := wireServices(t, pool, st, fake, mb, staticDir)
+	Register(e, pool, st, proxy, svc)
 
 	server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if addr := r.Header.Get(testRemoteAddrHeader); addr != "" {
@@ -97,7 +89,26 @@ func newServerClient(t *testing.T, pool *pgxpool.Pool, proxy config.ProxyAuth, s
 	}))
 	server.Start()
 
-	return &testClient{t: t, server: server, http: newHTTPClient(), hub: hub, st: st, db: pool, fake: fake, mb: mb}
+	return &testClient{t: t, server: server, http: newHTTPClient(), hub: svc.Hub, st: st, db: pool, fake: fake, mb: mb}
+}
+
+// wireServices is main's wiring without the scrobble worker: routes tests assert the queue as the
+// requests leave it.
+func wireServices(t *testing.T, pool *pgxpool.Pool, st *settings.Store, fake *providertest.Provider,
+	mb *mbtest.Server, staticDir string) Services {
+	t.Helper()
+	svc := NewServices(t.Context(), pool, st, providers.NewRegistry(fake), covers.New(t.TempDir()),
+		mangabaka.NewLibrary(mb.URL, mb.Client(), mb.Limiter()), staticDir)
+	if err := svc.Run(); err != nil {
+		t.Fatalf("load tasks: %v", err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = svc.Manager.Close(ctx)
+	})
+	t.Cleanup(autoMatching.Wait) // before the database goes; t.Context() has cancelled them
+	return svc
 }
 
 func newHTTPClient() *http.Client {

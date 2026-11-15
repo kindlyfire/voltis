@@ -4,9 +4,15 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
+	"os/signal"
+	"sync"
+	"syscall"
+	"time"
 
 	"voltis/cmd"
 	"voltis/config"
@@ -33,7 +39,7 @@ var devCommands []*cli.Command
 func main() {
 	slog.SetDefault(slog.New(tint.NewHandler(os.Stderr, nil)))
 
-	app := &cli.Command{
+	root := &cli.Command{
 		Name:  "voltis",
 		Usage: "Voltis media server",
 		Commands: []*cli.Command{
@@ -258,14 +264,11 @@ func main() {
 		},
 	}
 
-	if err := app.Run(context.Background(), os.Args); err != nil {
+	if err := root.Run(context.Background(), os.Args); err != nil {
 		slog.Error(err.Error())
 		os.Exit(1)
 	}
 }
-
-// newProviders lists the metadata providers, in merge order.
-func newProviders() *providers.Registry { return providers.NewRegistry(mangabaka.New()) }
 
 func connectDB(ctx context.Context) *pgxpool.Pool {
 	cfg := config.Load()
@@ -281,36 +284,77 @@ func connectDB(ctx context.Context) *pgxpool.Pool {
 	return pool
 }
 
+// newProviders lists the metadata providers, in merge order.
+func newProviders() *providers.Registry { return providers.NewRegistry(mangabaka.New()) }
+
 func runServer(ctx context.Context) error {
 	pool := connectDB(ctx)
-	defer pool.Close()
-	defer vips.Shutdown()
-
 	cfg := config.Get()
 	if cfg.ProxyAuthErr != nil {
 		return cfg.ProxyAuthErr
 	}
 
-	store, err := settings.New(ctx, pool)
+	// A second signal, once stop has run, kills the process.
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	st, err := settings.New(ctx, pool)
 	if err != nil {
 		return err
 	}
-	store.Listen()
-	defer store.Close()
-
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
 
-	hub := routes.NewHub()
-	reg := newProviders()
-	meta := metadata.NewStore(reg)
-	cov := covers.New(cfg.CacheDir)
-	links := linking.New(pool, meta, reg, cov, hub.LibraryChanged)
-	lib := mangabaka.NewLibrary(cfg.MangaBakaLibraryURL, nil, nil)
-	routes.Register(ctx, e, pool, store, cfg.ProxyAuth, routes.Deps{Hub: hub, Providers: reg, Metadata: meta,
-		Links: links, Covers: cov, Library: lib, StaticDir: cfg.StaticDir})
+	// The workers get their own root, so the signal doesn't stop them before the drain.
+	workCtx, cancelWork := context.WithCancel(context.WithoutCancel(ctx))
+	defer cancelWork()
+	svc := routes.NewServices(workCtx, pool, st, newProviders(), covers.New(cfg.CacheDir),
+		mangabaka.NewLibrary(cfg.MangaBakaLibraryURL, nil, nil), cfg.StaticDir)
+	routes.Register(e, pool, st, cfg.ProxyAuth, svc)
+
+	// Bind first, so a bind failure starts nothing.
+	ln, err := net.Listen("tcp", net.JoinHostPort(cfg.Host, cfg.Port))
+	if err != nil {
+		return err
+	}
+	e.Listener = ln
+	st.Listen()
+	if err := svc.Run(); err != nil {
+		slog.Error("failed to load pending tasks", "err", err)
+	}
+	go svc.Scrobbles.Run(workCtx)
 
 	slog.Info("starting server", "url", "http://"+net.JoinHostPort(cmp.Or(cfg.Host, "localhost"), cfg.Port))
-	return e.Start(net.JoinHostPort(cfg.Host, cfg.Port))
+	serveErrs := make(chan error, 1)
+	go func() {
+		if err := e.Start(""); !errors.Is(err, http.ErrServerClosed) {
+			serveErrs <- err
+		}
+	}()
+
+	var serveErr error
+	select {
+	case <-ctx.Done():
+		stop()
+		slog.Info("shutting down")
+	case serveErr = <-serveErrs:
+	}
+
+	// In-flight requests and running tasks (which persist as Cancelled) share 2 s. The pool and
+	// settings stay open: a stuck request may hold a connection, and closing the pool would block
+	// on it. The process exits anyway.
+	shutCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cancelWork()
+	var httpErr, tasksErr error
+	var wg sync.WaitGroup
+	wg.Go(func() { httpErr = e.Shutdown(shutCtx) })
+	wg.Go(func() { tasksErr = svc.Manager.Close(shutCtx) })
+	wg.Wait()
+	if err := errors.Join(httpErr, tasksErr); err != nil {
+		return errors.Join(serveErr, fmt.Errorf("shutdown: %w", err))
+	}
+	vips.Shutdown()
+	return serveErr
 }

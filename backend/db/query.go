@@ -2,9 +2,7 @@ package db
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
-	"strings"
 
 	"voltis/models"
 
@@ -111,6 +109,22 @@ func LockUserData(ctx context.Context, tx pgx.Tx, userID, libraryID string) erro
 	return err
 }
 
+// LockContentUserData takes LockUserData for the libraries holding the content, in sorted order so
+// that concurrent batches cannot deadlock.
+func LockContentUserData(ctx context.Context, tx pgx.Tx, userID string, contentIDs ...string) error {
+	libs, err := SelectScalars[string](ctx, tx,
+		"SELECT DISTINCT library_id FROM content WHERE id = ANY($1) ORDER BY library_id", contentIDs)
+	if err != nil {
+		return err
+	}
+	for _, lib := range libs {
+		if err := LockUserData(ctx, tx, userID, lib); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // IsDuplicate reports a unique violation.
 func IsDuplicate(err error) bool {
 	pgErr, ok := errors.AsType[*pgconn.PgError](err)
@@ -142,9 +156,6 @@ func AttachIdentity(ctx context.Context, tx pgx.Tx, provider, issuer, subject, u
 	`, models.MakeIdentityID(), provider, issuer, subject, userID, email)
 	return err
 }
-
-// ServerRevision is a fresh user_to_content revision token for a write outside the readers.
-func ServerRevision() string { return "srv:" + strings.ToLower(rand.Text()) }
 
 // MergeUserToContentSQL merges the user rows at source URIs into the same users' rows at their
 // destinations in library $1, then deletes those sources; sources without a destination row stay.
