@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- New Voltis logo
+- Keep the scroll position when switching from the Info tab to the Contents tab
+
 ## [1.0.0-beta.4] - 2026-11-05
 
 - Display only the most important metadata on the content info page, and show 
