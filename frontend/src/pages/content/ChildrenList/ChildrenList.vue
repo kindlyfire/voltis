@@ -3,17 +3,15 @@
         v-if="tabs.length"
         :id="CONTENT_TABS_ID"
         class="flex scroll-mt-[calc(var(--layout-top)+1rem)] flex-col gap-2"
-        :aria-labelledby="showTabs ? undefined : 'children-heading'"
-        :aria-label="showTabs ? 'Contents' : undefined"
+        aria-label="Contents"
     >
-        <h2 v-if="!showTabs" id="children-heading" class="font-display text-[30px] font-semibold">
-            {{ tabs[0]!.label }}
-        </h2>
-        <!-- Always wrapped, so the grid isn't remounted when the tabs appear. -->
-        <ATabs v-model="tab" :options="showTabs ? tabs : []" label="Contents" shared>
+        <ATabs v-model="tab" :options="tabs" label="Contents" shared>
             <ContentInfo v-if="tab === 'info'" :details="details" class="pt-4" />
-            <!-- Hidden, not unmounted, on Info: the grid keeps its selection. -->
-            <div v-if="isSeries || isBook" v-show="tab !== 'info'">
+            <!-- Hidden, not unmounted, on Info, to keep the selection. Not `v-show`: a zero-width grid collapses the page when shown. -->
+            <div
+                v-if="isSeries || isBook"
+                :class="tab === 'info' && 'invisible h-0 overflow-hidden'"
+            >
                 <ContentGrid
                     v-if="isSeries"
                     :params="{
@@ -25,7 +23,7 @@
                     :parent="content"
                     to-read-route
                 />
-                <BookChaptersList v-else :content="content" />
+                <BookChaptersList v-else :content="content" class="pt-4" />
             </div>
         </ATabs>
     </section>
@@ -81,7 +79,6 @@ const tabs = computed(() => {
     if (details.value.length) list.push({ label: 'Info', value: 'info' })
     return list
 })
-const showTabs = computed(() => tabs.value.length > 1)
 const tab = computed({
     get: () => tabs.value.find(t => t.value === query.section.value)?.value ?? tabs.value[0]?.value,
     set: (v: Section | 'info' | undefined) => (query.section.value = v ?? 'contents'),

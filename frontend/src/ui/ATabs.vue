@@ -4,7 +4,7 @@
         :model-value="modelValue ?? undefined"
         @update:model-value="select"
     >
-        <TabsList v-if="!shared || items.length" class="a-tabs__list" :aria-label="label">
+        <TabsList class="a-tabs__list" :aria-label="label">
             <!-- As a child, so the shared panel's aria-controls wins over Reka's. -->
             <TabsTrigger
                 v-for="option in items"
@@ -25,14 +25,12 @@
             </TabsTrigger>
             <TabsIndicator class="a-tabs__indicator" />
         </TabsList>
-        <!-- Without tabs, the same element stays (so the slot isn't remounted), minus the panel role. -->
         <TabsContent
             v-if="shared"
             :id="panelId"
             :value="modelValue ?? ''"
             force-mount
             class="a-tabs__panel"
-            v-bind="items.length ? {} : notAPanel"
         >
             <slot />
         </TabsContent>
@@ -73,7 +71,7 @@ import { normalizeOptions, type Options, type OptionValue } from './options'
  * column parent, like the drawer's body).
  *
  * `shared` instead renders the default slot in a single panel that follows the selection and
- * scrolls with the page, for one view filtered by tab. Without options it shows no tab bar.
+ * scrolls with the page, for one view filtered by tab.
  */
 const props = defineProps<{
     modelValue: V | null | undefined
@@ -85,7 +83,6 @@ const props = defineProps<{
 
 // Reka keys a panel's id by its value, which the shared panel changes.
 const panelId = useId()
-const notAPanel = { role: undefined, 'aria-labelledby': undefined, tabindex: undefined }
 
 const emit = defineEmits<{ 'update:modelValue': [value: V] }>()
 

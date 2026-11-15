@@ -63,25 +63,23 @@ describe('ATabs', () => {
         expect(wrapper.vm.panel('b')).toBe(panels[1]!.element)
     })
 
-    it('shares one panel that follows the selection, and keeps it when tabs appear', async () => {
+    it('shares one panel that follows the selection', async () => {
         const wrapper = mount(ATabs, {
-            props: { modelValue: 'a', options: [], label: 'Sections', shared: true },
+            props: {
+                modelValue: 'a',
+                options: [
+                    { value: 'a', label: 'Alpha' },
+                    { value: 'b', label: 'Beta' },
+                ],
+                label: 'Sections',
+                shared: true,
+            },
             slots: { default: '<p id="body">Body</p>' },
             attachTo: document.body,
         })
         const body = wrapper.find('#body').element
-        expect(wrapper.find('[role=tablist]').exists()).toBe(false)
-        expect(wrapper.find('[role=tabpanel]').exists()).toBe(false)
-
-        await wrapper.setProps({
-            options: [
-                { value: 'a', label: 'Alpha' },
-                { value: 'b', label: 'Beta' },
-            ],
-        })
         const panels = wrapper.findAll('[role=tabpanel]')
         expect(panels).toHaveLength(1)
-        expect(wrapper.find('#body').element).toBe(body)
         const [tabA, tabB] = wrapper.findAll('[role=tab]')
         expect(panels[0]!.attributes('aria-labelledby')).toBe(tabA!.attributes('id'))
 
