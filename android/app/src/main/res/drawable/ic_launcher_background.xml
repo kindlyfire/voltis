@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Rust ground with burst rays. Generated from brand/; the icon's 100-unit box maps to the 72dp visible area. -->
+<!-- Dark ground with burst spikes. Generated from brand/; the icon's 100-unit box maps to the 72dp visible area. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
     <path
-        android:fillColor="#FFA84100"
+        android:fillColor="#FF2A1A0E"
         android:pathData="M0,0h108v108h-108z" />
     <path
-        android:fillColor="#FF8D3000"
-        android:pathData="M79.70,57.36L111.31,60.45L109.61,69.27ZM77.72,64.46L107.17,76.33L103.06,84.32ZM73.81,70.72L98.73,90.41L92.53,96.91ZM68.29,75.62L86.66,101.53L78.88,106.03ZM61.62,78.78L71.94,108.81L63.22,110.93ZM54.33,79.92L55.77,111.64L46.80,111.22ZM47.02,78.96L39.46,109.81L30.97,106.88ZM40.27,75.98L24.33,103.45L17.01,98.24ZM34.63,71.22L11.60,93.09L6.04,86.03ZM30.56,65.07L2.30,79.56L-1.04,71.22ZM28.40,58.02L-2.81,63.96L-3.66,55.02ZM28.30,50.64L-3.31,47.55L-1.61,38.73ZM30.28,43.54L0.83,31.67L4.94,23.68ZM34.19,37.27L9.27,17.59L15.47,11.09ZM39.71,32.38L21.34,6.47L29.12,1.97ZM46.38,29.22L36.06,-0.81L44.78,-2.93ZM53.67,28.08L52.23,-3.64L61.20,-3.22ZM60.98,29.04L68.54,-1.81L77.03,1.12ZM67.73,32.02L83.67,4.55L90.99,9.76ZM73.37,36.78L96.40,14.91L101.96,21.97ZM77.44,42.93L105.70,28.44L109.04,36.78ZM79.60,49.98L110.81,44.04L111.66,52.98Z" />
+        android:fillColor="#FFF7A885"
+        android:pathData="M83.55,59.68L111.18,46.50L104.32,82.17ZM78.03,79.66L104.67,81.54L78.15,106.37ZM57.71,83.71L78.80,106.06L42.75,110.56ZM38.60,81.91L43.47,110.70L11.65,93.15ZM25.63,67.30L12.15,93.68L-3.27,60.78ZM24.45,48.32L-3.18,61.50L3.68,25.83ZM29.97,28.34L3.33,26.46L29.85,1.63ZM50.29,24.29L29.20,1.94L65.25,-2.56ZM69.40,26.09L64.53,-2.70L96.35,14.85ZM82.37,40.70L95.85,14.32L111.27,47.22Z" />
 </vector>
