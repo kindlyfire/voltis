@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0-beta.5] - 2026-11-15
+
 - New Voltis logo
 - Keep the scroll position when switching from the Info tab to the Contents tab
 
