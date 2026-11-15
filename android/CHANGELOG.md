@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0-beta.4] - 2026-11-15
+
 - New app icon
 
 ## [1.0.0-beta.3] - 2026-10-18
