@@ -8,7 +8,8 @@
 # Rerunning with the same version after a failure resumes: when the tag already points at HEAD,
 # the edits and commit are skipped and only the missing pushes, uploads and releases are done.
 #
-# Needs git, curl, jq, perl, a logged-in `gh`, GITEA_TOKEN (repository write scope), and for
+# Needs git, curl, jq, perl, a logged-in `gh`, GITEA_TOKEN (repository write scope, in the
+# environment or the gitignored scripts/.env), and for
 # server releases docker with `docker login ghcr.io`. GIT_REMOTE, GITEA_REPO, GITHUB_REPO and
 # IMAGE can be overridden to test against throwaway repositories; GIT_REMOTE must point at
 # GITEA_REPO. GitHub gets the push directly rather than waiting for the Gitea push mirror.
@@ -50,6 +51,11 @@ case $kind in
 esac
 
 cd "$(git rev-parse --show-toplevel)"
+if [[ -f scripts/.env ]]; then
+    set -a
+    . scripts/.env
+    set +a
+fi
 
 # Changelog section of $version, without its heading and surrounding blank lines
 changelog_notes() {
